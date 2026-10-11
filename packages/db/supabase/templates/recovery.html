@@ -1,0 +1,11 @@
+<!-- Daybell auth email (recovery). The link goes to our /auth/confirm with a token_hash, so it works in any browser or
+     device (not only the one that asked). RedirectTo is our own /auth/confirm?next=...&region=... URL. -->
+<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#14231c">
+  <h1 style="font-size:22px;margin:0 0 12px">Reset your password</h1>
+  <p style="font-size:15px;line-height:22px;margin:0 0 24px;color:#5b6660">Tap the button to choose a new password. If you didn't ask for this, you can ignore this email.</p>
+  <p style="margin:0 0 24px">
+    <a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery"
+       style="display:inline-block;background:#0e7a4f;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Choose a new password</a>
+  </p>
+  <p style="font-size:12px;line-height:16px;margin:0;color:#5b6660">This link works once and expires in 1 hour.</p>
+</div>

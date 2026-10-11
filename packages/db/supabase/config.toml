@@ -1,15 +1,50 @@
 # Supabase CLI settings for local development and CI (D7). Hosted projects are configured in the dashboard.
 project_id = "daybell"
 
+[api]
+enabled = true
+port = 54321
+
 [db]
 port = 54322
 major_version = 17
 
-[api]
-enabled = false
-
 [studio]
 enabled = false
 
+[inbucket]
+# Local email inbox (Mailpit) so tests can open confirmation and invite emails.
+enabled = true
+port = 54324
+
 [auth]
 enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000/**", "http://localhost:3000/**"]
+minimum_password_length = 12
+
+[auth.email]
+enable_signup = true
+# Same as hosted projects: people must confirm their email before signing in.
+enable_confirmations = true
+double_confirm_changes = true
+# Changing a password needs a recent sign-in (or the emailed link), so a stolen session can't lock someone out.
+secure_password_change = true
+
+[auth.rate_limit]
+# Generous locally so the end-to-end tests aren't throttled.
+email_sent = 100
+
+# Email links carry a token_hash to our /auth/confirm so they work on any device (ADR 0005).
+# Hosted projects: paste the same HTML into Authentication > Emails > Templates (see packages/db/README.md).
+[auth.email.template.confirmation]
+subject = "Confirm your email"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.magic_link]
+subject = "Your Daybell link"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.recovery]
+subject = "Reset your password"
+content_path = "./supabase/templates/recovery.html"

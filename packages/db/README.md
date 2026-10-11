@@ -29,3 +29,10 @@ first deploy. Until then the database refuses every studio (fail closed):
 ```sql
 insert into app.config (key, value) values ('data_region', 'ca');  -- 'us' for the US project
 ```
+
+## Email templates (hosted projects)
+
+Auth emails must link to our `/auth/confirm` with a `token_hash`, so links work on any device. For each project, in
+**Authentication → Emails → Templates**, paste the HTML from `supabase/templates/` into **Confirm signup**
+(`confirmation.html`), **Magic Link** (`magic_link.html`) and **Reset Password** (`recovery.html`), with the subjects in
+`supabase/config.toml`.
