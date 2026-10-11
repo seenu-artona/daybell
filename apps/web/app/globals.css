@@ -1,0 +1,13 @@
+/* Temporary styles until the design system package lands (Phase 0, step 2). */
+:root {
+  --ink: #14231c;
+  --canvas: #f6f5f1;
+  --muted: #5b6660;
+}
+html,
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: system-ui, sans-serif;
+}
