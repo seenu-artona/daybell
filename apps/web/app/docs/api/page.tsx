@@ -1,4 +1,4 @@
-import { ROUTES, type RouteSpec } from "@daybell/api";
+import { ROUTE_GROUPS, ROUTES, type RouteSpec } from "@daybell/api";
 import { Badge, Card } from "@daybell/ui";
 import type { Metadata } from "next";
 import { useTranslations } from "next-intl";
@@ -10,8 +10,13 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t("metaTitle") };
 }
 
-const METHOD_TONE = { GET: "selling", POST: "money", PUT: "warning", DELETE: "danger" } as const;
-const GROUPS = ["Account", "Team", "Studio"] as const;
+const METHOD_TONE = {
+  GET: "selling",
+  POST: "money",
+  PUT: "warning",
+  PATCH: "warning",
+  DELETE: "danger",
+} as const;
 
 interface JsonSchema {
   type?: string | string[];
@@ -39,8 +44,11 @@ function resolve(s: JsonSchema, defs: Record<string, JsonSchema>): JsonSchema {
   return s;
 }
 
-function toSchema(schema: z.ZodType): { root: JsonSchema; defs: Record<string, JsonSchema> } {
-  const raw = z.toJSONSchema(schema, { unrepresentable: "any" }) as JsonSchema;
+function toSchema(
+  schema: z.ZodType,
+  io: "input" | "output" = "output",
+): { root: JsonSchema; defs: Record<string, JsonSchema> } {
+  const raw = z.toJSONSchema(schema, { unrepresentable: "any", io }) as JsonSchema;
   const defs = raw.$defs ?? {};
   return { root: resolve(raw, defs), defs };
 }
@@ -122,6 +130,7 @@ function Fields({
 
 function Route({ route }: { route: RouteSpec }) {
   const t = useTranslations("apiDocs");
+  const query = route.query ? toSchema(route.query, "input") : null;
   const body = route.body ? toSchema(route.body) : null;
   const response = route.success.schema ? toSchema(route.success.schema) : null;
   return (
@@ -133,6 +142,12 @@ function Route({ route }: { route: RouteSpec }) {
       </div>
       <p className="m-0 font-semibold">{route.summary}</p>
       {route.description ? <p className="m-0 text-muted">{route.description}</p> : null}
+      {query ? (
+        <div>
+          <p className="m-0 mb-1 text-label">{t("query")}</p>
+          <Fields schema={query.root} defs={query.defs} />
+        </div>
+      ) : null}
       {body ? (
         <div>
           <p className="m-0 mb-1 text-label">{t("body")}</p>
@@ -167,7 +182,7 @@ export default function ApiDocsPage() {
           {t("openapi")}
         </a>
       </header>
-      {GROUPS.map((group) => (
+      {ROUTE_GROUPS.map((group) => (
         <section key={group} className="flex flex-col gap-3">
           <h2 className="m-0 text-h2">{t(`groups.${group}`)}</h2>
           {ROUTES.filter((r) => r.group === group).map((r) => (

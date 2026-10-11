@@ -33,4 +33,23 @@ describe("API description", () => {
     const del = doc.paths["/studio/invites/{id}"]?.delete as { parameters: { name: string }[] };
     expect(del.parameters[0]?.name).toBe("id");
   });
+
+  it("documents list query parameters as optional", () => {
+    const list = doc.paths["/jobs"]?.get as {
+      parameters: { name: string; in: string; required: boolean }[];
+    };
+    expect(list.parameters.map((p) => `${p.in}:${p.name}:${p.required}`)).toEqual([
+      "query:limit:false",
+      "query:cursor:false",
+    ]);
+    const orgs = doc.paths["/organizations"]?.get as { parameters: { name: string }[] };
+    expect(orgs.parameters.map((p) => p.name)).toContain("q");
+  });
+
+  it("describes job and organization writes", () => {
+    expect(doc.paths["/jobs/{id}"]).toHaveProperty("patch");
+    expect(doc.paths["/organizations/{id}"]).toHaveProperty("patch");
+    expect(doc.components.schemas).toHaveProperty("Job");
+    expect(doc.tags.map((t) => t.name)).toEqual(expect.arrayContaining(["Jobs", "Contacts"]));
+  });
 });

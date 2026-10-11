@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const { assertSameOrigin } = await import("./api");
+const { assertSameOrigin, filterValue, likePattern, parseQuery } = await import("./api");
+const { page } = await import("./jobs");
 
 const url = "https://daybell.vercel.app/api/v1/studio/invites/abc";
 const req = (method: string, headers: Record<string, string>, body?: string) =>
@@ -51,5 +52,32 @@ describe("assertSameOrigin (CSRF guard)", () => {
         req("POST", { "content-type": "text/plain", "content-length": "5" }, "x=1&y"),
       ),
     ).toThrow();
+  });
+});
+
+describe("list helpers", () => {
+  it("quotes PostgREST filter values so names can't add conditions", () => {
+    expect(filterValue('St. Mary\'s, "North" (K-8)')).toBe('"St. Mary\'s, \\"North\\" (K-8)"');
+    expect(filterValue("a\\b")).toBe('"a\\\\b"');
+  });
+
+  it("escapes LIKE wildcards in searches", () => {
+    expect(likePattern("50%_off")).toBe("%50\\%\\_off%");
+  });
+
+  it("reads query parameters and reports problems as fields", async () => {
+    const { listQuery } = await import("@daybell/api");
+    expect(parseQuery(new Request("https://x.test/api/v1/jobs?limit=5"), listQuery)).toEqual({
+      limit: 5,
+    });
+    expect(() =>
+      parseQuery(new Request("https://x.test/api/v1/jobs?limit=500"), listQuery),
+    ).toThrow();
+  });
+
+  it("pages with a cursor only when there is more", () => {
+    const rows = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(page(rows, 2)).toEqual({ items: [{ id: "a" }, { id: "b" }], nextCursor: "b" });
+    expect(page(rows, 3)).toEqual({ items: rows, nextCursor: null });
   });
 });

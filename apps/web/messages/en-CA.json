@@ -131,7 +131,17 @@
     "slug": "Use 3–40 letters, numbers or dashes, starting and ending with a letter or number.",
     "slugTaken": "That web address is taken. Try another.",
     "studioName": "Enter your studio's name.",
-    "inviteToken": "This invite link isn't valid."
+    "inviteToken": "This invite link isn't valid.",
+    "organizationName": "Enter the organization's name.",
+    "tooLong": "That's too long. Please shorten it.",
+    "regionCode": "Use the 2-letter code, like OR or ON.",
+    "quebec": "Daybell isn't available in Quebec yet, so Quebec addresses can't be added.",
+    "jobName": "Give the job a name.",
+    "organization": "Choose an organization from your list.",
+    "organizationRequired": "Choose or add the organization this job is for.",
+    "pictureDay": "Enter a real date.",
+    "nothingToChange": "Change something before saving.",
+    "cursor": "That page link isn't valid."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -246,6 +256,16 @@
         "created": "{actor} invited someone as {role}",
         "accepted": "An invite was accepted ({role})",
         "withdrawn": "{actor} withdrew an invite"
+      },
+      "aJob": "a job",
+      "anOrganization": "an organization",
+      "job": {
+        "created": "{actor} created the job {name}",
+        "updated": "{actor} updated the job {name}"
+      },
+      "organization": {
+        "created": "{actor} added the organization {name}",
+        "updated": "{actor} updated the organization {name}"
       }
     },
     "nav": {
@@ -328,14 +348,179 @@
       "needsYou": "Needs you",
       "nothingNeeded": "Nothing needs you right now.",
       "jobsSelling": "Jobs selling now",
-      "noJobs": "No jobs are selling yet. Jobs arrive in an upcoming phase.",
+      "noJobs": "No jobs are selling yet.",
       "recently": "Recently",
       "actions": {
         "invite": "Invite"
       },
       "checking": "Checking…"
     },
-    "signOutFailed": "We couldn't sign you out. Check your connection and try again."
+    "signOutFailed": "We couldn't sign you out. Check your connection and try again.",
+    "dialog": {
+      "close": "Close"
+    },
+    "jobs": {
+      "title": "Jobs",
+      "intro": "Schools, teams and sessions you photograph.",
+      "new": "New job",
+      "loading": "Loading jobs…",
+      "emptyTitle": "No jobs yet",
+      "emptyBody": "A job is a school, team or session you photograph. Parents order their photos from it.",
+      "emptyCta": "Create your first job",
+      "emptyReadOnly": "Owners and admins create jobs.",
+      "columns": {
+        "name": "Job",
+        "organization": "Organization",
+        "type": "Type",
+        "pictureDay": "Picture day",
+        "status": "Status"
+      },
+      "none": "–",
+      "notSet": "Not set",
+      "loadMore": "Show more",
+      "types": {
+        "school": "School",
+        "preschool": "Preschool",
+        "sports": "Sports",
+        "dance": "Dance",
+        "seniors": "Seniors",
+        "mini_session": "Mini session"
+      },
+      "typeHelp": {
+        "school": "Classes at a school",
+        "preschool": "Daycares and preschools",
+        "sports": "Teams in a league or club",
+        "dance": "Classes at a dance studio",
+        "seniors": "Senior portraits",
+        "mini_session": "Short themed sessions"
+      },
+      "statuses": {
+        "draft": "Draft",
+        "selling": "Selling",
+        "closed": "Closed"
+      },
+      "wizard": {
+        "title": "New job",
+        "stepOf": "Step {step} of {total}",
+        "steps": {
+          "type": "What are you photographing?",
+          "organization": "Who is it for?",
+          "details": "Name and picture day"
+        },
+        "back": "Back",
+        "next": "Next",
+        "skip": "Skip — no organization",
+        "create": "Create job",
+        "creating": "Creating…",
+        "chooseType": "Choose a type to continue.",
+        "chooseOrganization": "Choose an organization or add a new one to continue.",
+        "search": "Search your organizations",
+        "noMatches": "No organizations match.",
+        "noOrganizations": "You haven't added any organizations yet. Add the first one below.",
+        "addNew": "Add a new organization",
+        "useExisting": "Choose from my list",
+        "optional": "Optional for this type of job.",
+        "name": "Job name",
+        "nameHelp": "Parents see this in your shop, e.g. Lincoln Elementary · Fall 2026.",
+        "pictureDay": "Picture day",
+        "pictureDayHelp": "Optional. You can add it later.",
+        "summaryOrganization": "For {name}",
+        "summaryNew": "New organization: {name}"
+      },
+      "detail": {
+        "back": "All jobs",
+        "loading": "Loading the job…",
+        "edit": "Edit job",
+        "editTitle": "Edit job",
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel",
+        "saved": "Saved.",
+        "organization": "Organization",
+        "type": "Type",
+        "pictureDay": "Picture day",
+        "noOrganization": "No organization",
+        "progressLabel": "Job progress",
+        "stages": {
+          "pictureDay": "Picture day",
+          "tagged": "Tagged",
+          "shopLive": "Shop live",
+          "shipped": "Shipped"
+        },
+        "upcoming": "Upcoming",
+        "roster": "Roster",
+        "rosterBody": "{group, select, class {Classes} team {Teams} other {Groups}} and children arrive here in an upcoming step.",
+        "photos": "Photos",
+        "photosBody": "Uploading and tagging photos arrive in an upcoming step.",
+        "comingSoon": "Coming soon",
+        "notFound": "We couldn't find that job."
+      }
+    },
+    "contacts": {
+      "title": "Contacts",
+      "tabsLabel": "Contact types",
+      "tabs": {
+        "parents": "Parents",
+        "children": "Children",
+        "organizations": "Organizations"
+      },
+      "soon": "Soon",
+      "organizations": {
+        "intro": "Schools, daycares, clubs and leagues you photograph for.",
+        "add": "Add organization",
+        "loading": "Loading organizations…",
+        "empty": "No organizations yet. Add one here, or while creating a job.",
+        "columns": {
+          "name": "Name",
+          "kind": "Kind",
+          "city": "City",
+          "actions": "Actions"
+        },
+        "edit": "Edit",
+        "editLabel": "Edit {name}",
+        "loadMore": "Show more"
+      },
+      "kinds": {
+        "school": "School",
+        "daycare": "Daycare",
+        "club": "Club",
+        "league": "League",
+        "dance_studio": "Dance studio",
+        "other": "Other"
+      },
+      "form": {
+        "addTitle": "Add organization",
+        "editTitle": "Edit organization",
+        "name": "Name",
+        "kind": "Kind",
+        "notes": "Notes",
+        "notesHelp": "For your team only. Don't add children's details here.",
+        "addressLine1": "Address",
+        "addressLine2": "Address line 2",
+        "city": "City",
+        "country": "Country",
+        "countries": {
+          "US": "United States",
+          "CA": "Canada"
+        },
+        "optional": "Optional",
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel"
+      },
+      "address": {
+        "us": {
+          "region": "State",
+          "regionHelp": "2-letter code, e.g. OR",
+          "postalCode": "ZIP code"
+        },
+        "ca": {
+          "region": "Province",
+          "regionHelp": "2-letter code, e.g. ON. Quebec isn't available yet.",
+          "postalCode": "Postal code"
+        }
+      }
+    }
   },
   "invite": {
     "title": "You've been invited",
@@ -363,7 +548,9 @@
     "groups": {
       "Account": "Account",
       "Team": "Team",
-      "Studio": "Studio"
+      "Studio": "Studio",
+      "Jobs": "Jobs",
+      "Contacts": "Contacts"
     },
     "access": {
       "public": "Anyone",
@@ -371,6 +558,7 @@
       "owner-admin": "Owners and admins",
       "owner": "Owners"
     },
-    "englishOnly": "Endpoint descriptions are in English, for developers."
+    "englishOnly": "Endpoint descriptions are in English, for developers.",
+    "query": "Query parameters"
   }
 }

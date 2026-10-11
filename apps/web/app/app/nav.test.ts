@@ -8,6 +8,8 @@ describe("sectionForPath", () => {
     expect(sectionForPath("/app/")).toBe("home");
     expect(sectionForPath("/app/settings")).toBe("settings");
     expect(sectionForPath("/app/orders/123")).toBe("orders");
+    expect(sectionForPath("/app/jobs/new")).toBe("jobs");
+    expect(sectionForPath("/app/contacts/organizations")).toBe("contacts");
   });
 
   it("highlights nothing for pages outside the menu", () => {
@@ -17,6 +19,11 @@ describe("sectionForPath", () => {
 
   it("lists every unbuilt section as soon", () => {
     expect(SOON_SECTIONS).toEqual(SECTIONS.filter((s) => !s.built).map((s) => s.key));
+  });
+
+  it("has jobs and contacts built (Phase 1 step 1)", () => {
+    expect(SOON_SECTIONS).not.toContain("jobs");
+    expect(SOON_SECTIONS).not.toContain("contacts");
   });
 });
 

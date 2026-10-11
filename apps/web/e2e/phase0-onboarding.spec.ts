@@ -1,12 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { PASSWORD, VERIFY_LINK } from "./helpers";
 import { linkFromEmail } from "./mail";
 
 // Phase 0 "Done when" (steps 1, 2, 5): sign up a studio, confirm the email, invite staff, staff joins with a role,
 // and a second studio sees nothing of the first. Unique emails per run and per device project.
 const run = `${Date.now()}`;
-// Our email templates link to /auth/confirm with a token_hash, so links work in any tab, browser or device.
-const VERIFY_LINK = /https?:\/\/[^\s"'<>]+\/auth\/confirm\?[^\s"'<>]*token_hash=[^\s"'<>]*/;
-const PASSWORD = "correct horse battery staple";
 
 test("owner signs up, invites a photographer, and studios stay separate", async ({
   page: firstTab,

@@ -89,6 +89,29 @@ export async function requireUser(supabase: {
   return data.user;
 }
 
+/** Reads ?query parameters with a schema; problems come back as field errors like a body would. */
+export function parseQuery<S extends z.ZodType>(request: Request, schema: S): z.infer<S> {
+  const raw = Object.fromEntries(new URL(request.url).searchParams);
+  const result = schema.safeParse(raw);
+  if (!result.success)
+    throw new ApiError(
+      "invalid_input",
+      "Please check the query parameters.",
+      fieldErrors(result.error),
+    );
+  return result.data;
+}
+
+/** Quotes a value for a PostgREST `or=(...)` filter, so commas, dots, brackets and quotes in it stay literal. */
+export function filterValue(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+/** Escapes LIKE wildcards so a search for "50%" finds "50%", not everything. */
+export function likePattern(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
 /** Throws the matching ApiError when a Supabase call failed. */
 export function check<T>(result: {
   data: T;
