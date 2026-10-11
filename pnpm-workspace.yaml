@@ -1,3 +1,10 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Dependencies must be at least two weeks old (CLAUDE.md): 20,160 minutes. @swc/core's platform builds come in through
+# next-intl's own pinned version, which can be newer; they are excluded by name only.
+minimumReleaseAge: 20160
+minimumReleaseAgeExclude:
+  - "@swc/core"
+  - "@swc/core-*"
