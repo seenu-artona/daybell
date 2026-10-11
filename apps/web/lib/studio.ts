@@ -1,6 +1,7 @@
 import "server-only";
 import { ApiError, type MeResponse, type StudioRole, type StudioSummary } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
+import { canEditRoster } from "@daybell/core";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { check, requireUser } from "./api";
 import { supabaseForSession } from "./supabase/server";
@@ -76,4 +77,10 @@ export async function studioScope(): Promise<{ supabase: SupabaseClient; studio:
 export function assertCanManage(studio: StudioSummary): void {
   if (studio.role !== "owner" && studio.role !== "admin")
     throw new ApiError("forbidden", "Owners and admins only.");
+}
+
+/** Owners, admins and photographers edit the roster; staff only read (Seenu, Oct 11 2026). The database enforces it too. */
+export function assertCanEditRoster(studio: StudioSummary): void {
+  if (!canEditRoster(studio.role))
+    throw new ApiError("forbidden", "Owners, admins and photographers only.");
 }

@@ -12,4 +12,16 @@ describe("activityType", () => {
     expect(activityType("job_category.created")).toBeNull();
     expect(activityType("made.up")).toBeNull();
   });
+
+  it("shows one line per roster import, not each child or class (Seenu, Oct 11 2026)", () => {
+    expect(activityType("roster.imported")).toBe("roster.imported");
+    for (const hidden of [
+      "child.created",
+      "child.updated",
+      "child.deleted",
+      "job_group.created",
+      "job_group.updated",
+    ])
+      expect(activityType(hidden)).toBeNull();
+  });
 });

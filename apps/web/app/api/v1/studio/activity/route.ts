@@ -37,8 +37,9 @@ export const GET = handle(async () => {
       rows.filter((e) => e.type.startsWith(prefix) && e.subject_id).map((e) => e.subject_id),
     ),
   ];
+  // Roster imports point at their job (counts only in the event, D96).
   const [jobIds, clientIds] = [
-    subjectsOf("job."),
+    [...subjectsOf("job."), ...subjectsOf("roster.")],
     [...subjectsOf("client."), ...subjectsOf("organization.")],
   ];
   const [jobs, clients] = await Promise.all([
