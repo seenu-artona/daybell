@@ -47,9 +47,15 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   });
   const main = page.getByRole("main");
   const row = (name: string) => main.getByRole("row").filter({ hasText: name });
-  const heading = (group: string) =>
-    main.getByRole("button", { name: new RegExp(`^${group} \\d`) });
-  const group = (name: string) => main.getByRole("rowgroup").filter({ has: heading(name) });
+  // A class heading's toggle is named "<class> <n> child(ren)", e.g. "4B 1 child".
+  const toggleName = (group: string) => new RegExp(`^${group} \\d`);
+  const heading = (group: string) => main.getByRole("button", { name: toggleName(group) });
+  // A filter's `has` locator is matched inside each <tbody>, so it must not start from `main` (no main inside a
+  // tbody); it starts from the page.
+  const group = (name: string) =>
+    main
+      .getByRole("rowgroup")
+      .filter({ has: page.getByRole("button", { name: toggleName(name) }) });
 
   // 1. A school job, created through the API; its People section starts empty.
   const created = await page.request.post("/api/v1/jobs", {

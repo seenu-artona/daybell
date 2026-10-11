@@ -1,3 +1,6 @@
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { isSoonTab, JOB_TABS, tabForPath, tabHref } from "./tabs";
 
@@ -42,5 +45,15 @@ describe("job tabs", () => {
       expect(isSoonTab(tab)).toBe(true);
     for (const tab of ["", "people", "import", "overview", "nope"])
       expect(isSoonTab(tab)).toBe(false);
+  });
+
+  it("each have their own route folder, with no catch-all, so an unknown tab is a real 404", () => {
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    for (const { segment } of JOB_TABS)
+      expect(existsSync(join(here, segment, "page.tsx")), `page for "${segment}"`).toBe(true);
+    const dynamic = readdirSync(here, { withFileTypes: true }).filter(
+      (e) => e.isDirectory() && e.name.startsWith("["),
+    );
+    expect(dynamic.map((e) => e.name)).toEqual([]);
   });
 });
