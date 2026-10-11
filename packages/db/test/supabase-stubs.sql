@@ -2,7 +2,7 @@
 -- against plain Postgres when Docker is unavailable. CI runs them against the real Supabase stack instead.
 create schema if not exists extensions;
 create extension if not exists pgtap with schema extensions;
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 do $$ begin create role anon nologin; exception when duplicate_object then null; end $$;
 do $$ begin create role authenticated nologin; exception when duplicate_object then null; end $$;

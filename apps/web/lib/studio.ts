@@ -1,0 +1,51 @@
+import "server-only";
+import type { MeResponse, StudioRole, StudioSummary } from "@daybell/api";
+import type { DataRegion } from "@daybell/config";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { check } from "./api";
+
+/**
+ * After the email is confirmed, create the studio the person asked for at sign-up (saved on their account then).
+ * Safe to call repeatedly: it does nothing once they belong to a studio.
+ */
+export async function ensureStudio(supabase: SupabaseClient, user: User): Promise<void> {
+  const name = user.user_metadata?.studio_name;
+  const slug = user.user_metadata?.studio_slug;
+  if (typeof name !== "string" || typeof slug !== "string") return;
+  const { data } = await supabase
+    .from("studio_members")
+    .select("studio_id")
+    .eq("user_id", user.id)
+    .limit(1);
+  if (data && data.length > 0) return;
+  check(await supabase.rpc("create_studio", { p_name: name, p_slug: slug }));
+}
+
+export async function currentStudio(
+  supabase: SupabaseClient,
+  user: User,
+  region: DataRegion,
+): Promise<StudioSummary | null> {
+  const rows = check(
+    await supabase
+      .from("studio_members")
+      .select("role, studios (id, name, slug)")
+      .eq("user_id", user.id)
+      .order("created_at")
+      .limit(1),
+  ) as unknown as {
+    role: StudioRole;
+    studios: { id: string; name: string; slug: string } | null;
+  }[];
+  const row = rows[0];
+  if (!row?.studios) return null;
+  return { ...row.studios, region, role: row.role };
+}
+
+export async function me(
+  supabase: SupabaseClient,
+  user: User,
+  region: DataRegion,
+): Promise<MeResponse> {
+  return { email: user.email ?? "", studio: await currentStudio(supabase, user, region) };
+}

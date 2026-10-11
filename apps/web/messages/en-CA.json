@@ -121,5 +121,125 @@
       "addToCart": "Add to cart · {amount}",
       "emailPlaceholder": "you@example.com"
     }
+  },
+  "validation": {
+    "email": "Enter a valid email address.",
+    "passwordShort": "Use at least 12 characters. A short sentence works well.",
+    "passwordLong": "Use at most 128 characters.",
+    "passwordRequired": "Enter your password.",
+    "passwordWeak": "Choose a stronger password — this one is too common or too simple.",
+    "slug": "Use 3–40 letters, numbers or dashes, starting and ending with a letter or number.",
+    "slugTaken": "That web address is taken. Try another.",
+    "studioName": "Enter your studio's name.",
+    "inviteToken": "This invite link isn't valid."
+  },
+  "errors": {
+    "network": "We couldn't reach Daybell. Check your connection and try again.",
+    "invalid_input": "Please check the highlighted fields.",
+    "not_signed_in": "Please sign in.",
+    "forbidden": "You don't have permission to do that.",
+    "not_found": "We couldn't find that.",
+    "conflict": "That already exists.",
+    "region_unavailable": "That region isn't available yet.",
+    "invalid_credentials": "That email and password don't match.",
+    "email_not_confirmed": "Please confirm your email first — check your inbox.",
+    "rate_limited": "Too many tries. Wait a minute and try again.",
+    "internal": "Something went wrong on our side. Please try again."
+  },
+  "auth": {
+    "brand": "Daybell",
+    "regions": {
+      "us": "United States",
+      "ca": "Canada"
+    },
+    "regionLabel": "Where your studio's data lives",
+    "regionHelp": "This can't be changed later.",
+    "regionFixed": "Your studio's data will be stored in {region}.",
+    "signUp": {
+      "title": "Start your studio",
+      "intro": "Everything GotPhoto does. 3% of what you sell, nothing if nothing sells.",
+      "studioName": "Studio name",
+      "studioSlug": "Studio web address",
+      "studioSlugHelp": "Parents see this in links, e.g. {example}.",
+      "email": "Your email",
+      "password": "Password",
+      "passwordHelp": "At least 12 characters. A short sentence is easiest to remember.",
+      "submit": "Create my studio",
+      "haveAccount": "Already have an account?",
+      "signInLink": "Sign in",
+      "joinTitle": "Join your team on Daybell",
+      "joinIntro": "Create your account to accept the invite.",
+      "joinSubmit": "Create account"
+    },
+    "checkEmail": {
+      "title": "Check your inbox",
+      "body": "We sent a link to confirm your email. Open it on this device to finish setting up.",
+      "resetBody": "If that email has a Daybell account, we sent a link to set a new password.",
+      "back": "Back to sign in"
+    },
+    "signIn": {
+      "title": "Welcome back",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Sign in",
+      "forgot": "Forgot password?",
+      "noAccount": "New to Daybell?",
+      "signUpLink": "Start your studio",
+      "linkExpired": "That link has expired or was already used. Sign in, or request a new one."
+    },
+    "forgot": {
+      "title": "Reset your password",
+      "intro": "Enter your email and we'll send you a link.",
+      "email": "Email",
+      "submit": "Send reset link"
+    },
+    "reset": {
+      "title": "Choose a new password",
+      "password": "New password",
+      "submit": "Save password",
+      "done": "Password saved. Taking you to your studio…"
+    }
+  },
+  "app": {
+    "loading": "Loading your studio…",
+    "signOut": "Sign out",
+    "welcome": "Welcome to {studio}",
+    "welcomeBody": "This is your studio's home. Jobs, photos and sales arrive in the next phases.",
+    "sales": "Sales this season",
+    "salesDelta": "Your first sale is coming",
+    "noStudio": "You're signed in but not part of a studio yet. Ask your studio owner for an invite.",
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "photographer": "Photographer",
+      "staff": "Staff"
+    },
+    "team": {
+      "title": "Team",
+      "email": "Email",
+      "role": "Role",
+      "you": "You",
+      "inviteTitle": "Invite someone",
+      "inviteEmail": "Their email",
+      "inviteRole": "Role",
+      "inviteSubmit": "Create invite",
+      "inviteCreated": "Invite created. Send them this link — it works once, for {email}, for 7 days.",
+      "copy": "Copy link",
+      "copied": "Copied",
+      "pending": "Waiting to join",
+      "expires": "Expires {date}",
+      "withdraw": "Withdraw",
+      "onlyOwners": "Only owners can invite people."
+    }
+  },
+  "invite": {
+    "title": "You've been invited",
+    "body": "Join your studio's team on Daybell.",
+    "accept": "Join the team",
+    "signedOut": "Sign in or create an account with the email the invite was sent to.",
+    "signIn": "Sign in",
+    "create": "Create account",
+    "joined": "You're in! Taking you to your studio…",
+    "invalid": "This invite link isn't valid for your account. It may have expired, been used, or been sent to a different email."
   }
 }

@@ -1,15 +1,34 @@
 # Supabase CLI settings for local development and CI (D7). Hosted projects are configured in the dashboard.
 project_id = "daybell"
 
+[api]
+enabled = true
+port = 54321
+
 [db]
 port = 54322
 major_version = 17
 
-[api]
-enabled = false
-
 [studio]
 enabled = false
 
+[inbucket]
+# Local email inbox (Mailpit) so tests can open confirmation and invite emails.
+enabled = true
+port = 54324
+
 [auth]
 enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000/**", "http://localhost:3000/**"]
+minimum_password_length = 12
+
+[auth.email]
+enable_signup = true
+# Same as hosted projects: people must confirm their email before signing in.
+enable_confirmations = true
+double_confirm_changes = true
+
+[auth.rate_limit]
+# Generous locally so the end-to-end tests aren't throttled.
+email_sent = 100
