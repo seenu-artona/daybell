@@ -89,7 +89,7 @@ describe("components", () => {
           studioInitials="NP"
           studioColor="navy"
           cartLabel="Cart, 0 items"
-          footer="Powered by Daybell"
+          footer="Secure checkout"
         >
           <CodeInput
             value="LINC"

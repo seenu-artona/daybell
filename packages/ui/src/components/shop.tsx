@@ -30,7 +30,7 @@ export interface ShopFrameProps {
 
 /**
  * The parent shop is fully studio-branded: one layout, the studio's logo and colour.
- * Daybell appears only in the footer.
+ * No Daybell logo or "Powered by" anywhere parents see (D62).
  */
 export function ShopFrame({
   studioName,
