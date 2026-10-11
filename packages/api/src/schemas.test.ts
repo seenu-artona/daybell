@@ -1,17 +1,23 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { JOB_STATUSES, JOB_TYPES } from "@daybell/core";
+import { ACCESS_CODE_ALPHABET, JOB_STATUSES, JOB_TYPES } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import { fromDatabaseError } from "./errors";
 import {
+  childInput,
+  childPatch,
   clientInput,
   clientPatch,
   fieldErrors,
+  groupInput,
   inviteInput,
   jobInput,
   jobPatch,
   listQuery,
   passwordUpdateInput,
+  rosterImportInput,
+  rosterQuery,
+  rosterRow,
   signUpInput,
   suggestSlug,
 } from "./schemas";
@@ -212,5 +218,132 @@ describe("job lists match the database", () => {
   it("dropped the client kind and the client-required rule", () => {
     expect(forward).toContain("drop column kind");
     expect(forward).toContain("drop constraint jobs_organization_required");
+  });
+});
+
+describe("children", () => {
+  const ok = { firstName: "  Maya  Rose ", lastName: " Johnson " };
+
+  it("trim names and collapse inner spaces; first and last name are required", () => {
+    expect(childInput.parse(ok)).toMatchObject({ firstName: "Maya Rose", lastName: "Johnson" });
+    const result = childInput.safeParse({ firstName: "  ", lastName: "" });
+    expect(result.success).toBe(false);
+    if (!result.success)
+      expect(fieldErrors(result.error)).toMatchObject({
+        firstName: "validation.firstName",
+        lastName: "validation.lastName",
+      });
+  });
+
+  it("lower-case and check the parent email", () => {
+    expect(childInput.parse({ ...ok, parentEmail: " Pat@Example.COM " }).parentEmail).toBe(
+      "pat@example.com",
+    );
+    const bad = childInput.safeParse({ ...ok, parentEmail: "pat at example" });
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(fieldErrors(bad.error).parentEmail).toBe("validation.email");
+  });
+
+  it("limit names to 60, student IDs to 40 and grades to 20 characters", () => {
+    expect(childInput.safeParse({ ...ok, firstName: "x".repeat(60) }).success).toBe(true);
+    expect(childInput.safeParse({ ...ok, firstName: "x".repeat(61) }).success).toBe(false);
+    expect(childInput.safeParse({ ...ok, lastName: "x".repeat(61) }).success).toBe(false);
+    expect(childInput.safeParse({ ...ok, studentId: "x".repeat(40) }).success).toBe(true);
+    const id = childInput.safeParse({ ...ok, studentId: "x".repeat(41) });
+    expect(id.success).toBe(false);
+    if (!id.success) expect(fieldErrors(id.error).studentId).toBe("validation.studentId");
+    const grade = childInput.safeParse({ ...ok, grade: "x".repeat(21) });
+    expect(grade.success).toBe(false);
+    if (!grade.success) expect(fieldErrors(grade.error).grade).toBe("validation.grade");
+    expect(groupInput.safeParse({ name: "x".repeat(61) }).success).toBe(false);
+    expect(groupInput.parse({ name: " Room   4B " }).name).toBe("Room 4B");
+  });
+
+  it("patches need a known field and can never touch codes or the school tag", () => {
+    expect(childPatch.safeParse({}).success).toBe(false);
+    expect(childPatch.safeParse({ accessCode: "K7QM4XPA" }).success).toBe(false);
+    expect(childPatch.safeParse({ schoolProvided: false }).success).toBe(false);
+    expect(childPatch.safeParse({ jobId: "x" }).success).toBe(false);
+    expect(childPatch.parse({ grade: null })).toEqual({ grade: null });
+  });
+});
+
+describe("roster import", () => {
+  const row = { firstName: "Maya", lastName: "Johnson" };
+
+  it("takes 1 to 5,000 rows", () => {
+    const none = rosterImportInput.safeParse({ rows: [] });
+    expect(none.success).toBe(false);
+    if (!none.success) expect(fieldErrors(none.error).rows).toBe("validation.rosterEmpty");
+    const many = rosterImportInput.safeParse({ rows: Array(5001).fill(row) });
+    expect(many.success).toBe(false);
+    if (!many.success) expect(fieldErrors(many.error).rows).toBe("validation.rosterTooLarge");
+    expect(rosterImportInput.parse({ rows: Array(5000).fill(row) }).dryRun).toBe(false);
+  });
+
+  it("names the bad row and field", () => {
+    const rows = [row, row, row, { ...row, parentEmail: "nope" }];
+    const result = rosterImportInput.safeParse({ rows, dryRun: true });
+    expect(result.success).toBe(false);
+    if (!result.success)
+      expect(fieldErrors(result.error)["rows.3.parentEmail"]).toBe("validation.email");
+  });
+
+  it("allows unmapped opt-outs (null) and blank classes", () => {
+    expect(
+      rosterRow.parse({ ...row, group: null, doNotPhotograph: null, doNotPublish: true }),
+    ).toMatchObject({ group: null, doNotPhotograph: null, doNotPublish: true });
+  });
+
+  it("lists pages of up to 500, filtered by class or by no class", () => {
+    expect(rosterQuery.parse({})).toEqual({ limit: 200 });
+    expect(rosterQuery.safeParse({ limit: "501" }).success).toBe(false);
+    expect(rosterQuery.parse({ groupId: "none" }).groupId).toBe("none");
+    expect(rosterQuery.safeParse({ groupId: "4B" }).success).toBe(false);
+  });
+});
+
+describe("roster limits match the database", () => {
+  const sql = readFileSync(
+    join(__dirname, "../../db/supabase/migrations/20261011070000_roster.sql"),
+    "utf8",
+  );
+  const bound = (column: string) =>
+    Number(sql.match(new RegExp(`char_length\\(${column}\\) between 1 and (\\d+)`))?.[1]);
+  const accepts = (schema: { safeParse: (v: unknown) => { success: boolean } }, value: unknown) =>
+    schema.safeParse(value).success;
+  const base = { firstName: "A", lastName: "B" };
+
+  it("has the same length limits as the check constraints", () => {
+    const limits = {
+      first_name: bound("first_name"),
+      last_name: bound("last_name"),
+      student_id: bound("student_id"),
+      grade: bound("grade"),
+      name: bound("name"),
+    };
+    expect(limits).toEqual({ first_name: 60, last_name: 60, student_id: 40, grade: 20, name: 60 });
+    expect(accepts(childInput, { ...base, firstName: "x".repeat(limits.first_name + 1) })).toBe(
+      false,
+    );
+    expect(accepts(childInput, { ...base, lastName: "x".repeat(limits.last_name + 1) })).toBe(
+      false,
+    );
+    expect(accepts(childInput, { ...base, studentId: "x".repeat(limits.student_id + 1) })).toBe(
+      false,
+    );
+    expect(accepts(childInput, { ...base, grade: "x".repeat(limits.grade + 1) })).toBe(false);
+    expect(accepts(groupInput, { name: "x".repeat(limits.name + 1) })).toBe(false);
+  });
+
+  it("uses the same duplicate rule and a global code index", () => {
+    expect(sql).toContain("regexp_replace(student_id, '\\s', '', 'g')");
+    expect(sql).toContain("constraint children_access_code_hash_key unique (access_code_hash)");
+  });
+
+  it("stores hashes and encrypted copies, never codes from the alphabet", () => {
+    expect(sql).toContain("access_code_hash ~ '^[0-9a-f]{64}$'");
+    expect(sql).toContain("access_code_ciphertext ~ '^v1\\.[A-Za-z0-9_-]{48}$'");
+    expect(sql).not.toContain(ACCESS_CODE_ALPHABET);
   });
 });

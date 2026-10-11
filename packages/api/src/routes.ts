@@ -2,9 +2,13 @@ import { z } from "zod";
 import { API_ERROR_CODES, type ApiErrorCode, STATUS_FOR } from "./errors";
 import {
   acceptInviteInput,
+  childInput,
+  childPatch,
   clientInput,
   clientListQuery,
   clientPatch,
+  groupInput,
+  groupPatch,
   inviteInput,
   jobInput,
   jobPatch,
@@ -12,20 +16,27 @@ import {
   listQuery,
   passwordResetRequestInput,
   passwordUpdateInput,
+  rosterImportInput,
+  rosterQuery,
   signInInput,
   signUpInput,
 } from "./schemas";
 import {
   activityResponse,
   checkEmailResponse,
+  childResponse,
+  childrenResponse,
   clientResponse,
   clientsResponse,
+  groupResponse,
+  groupsResponse,
   inviteCreatedResponse,
   invitesResponse,
   jobResponse,
   jobsResponse,
   meResponse,
   nextJobNumberResponse,
+  rosterImportResponse,
   teamResponse,
 } from "./types";
 
@@ -33,9 +44,9 @@ import {
  * Every /api/v1 endpoint, described once (D92). The docs page and openapi.json are generated from this list, and a test
  * fails if a route file exists that isn't listed here (or the other way round).
  */
-export type Access = "public" | "signed-in" | "owner-admin" | "owner";
+export type Access = "public" | "signed-in" | "owner-admin" | "owner" | "roster-editor";
 
-export const ROUTE_GROUPS = ["Account", "Team", "Studio", "Jobs", "Contacts"] as const;
+export const ROUTE_GROUPS = ["Account", "Team", "Studio", "Jobs", "Roster", "Contacts"] as const;
 
 export interface RouteSpec {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -239,6 +250,97 @@ export const ROUTES: RouteSpec[] = [
     body: jobPatch,
     success: { status: 200, schema: jobResponse, description: "The changed job." },
     errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}/children",
+    group: "Roster",
+    summary: "A job's roster",
+    description:
+      "Children sorted by last and first name, in pages (keyset pagination), with duplicate flags over the whole job.",
+    access: "signed-in",
+    query: rosterQuery,
+    success: { status: 200, schema: childrenResponse, description: "A page of children." },
+    errors: ["invalid_input", "not_signed_in", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/children",
+    group: "Roster",
+    summary: "Add a child",
+    description: "Generates the child's access code. The class (optional) must belong to the job.",
+    access: "roster-editor",
+    body: childInput,
+    success: { status: 201, schema: childResponse, description: "Child added." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "PATCH",
+    path: "/children/{id}",
+    group: "Roster",
+    summary: "Change a child",
+    description: "Send only the fields to change. The access code never changes.",
+    access: "roster-editor",
+    body: childPatch,
+    success: { status: 200, schema: childResponse, description: "The changed child." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "DELETE",
+    path: "/children/{id}",
+    group: "Roster",
+    summary: "Remove a child",
+    description: "Deletes the child and their access code. Only while the job is a draft.",
+    access: "roster-editor",
+    success: { status: 204, description: "Removed." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}/groups",
+    group: "Roster",
+    summary: "A job's classes, teams or groups",
+    description: "Sorted by name, numbers in order (Room 2 before Room 10).",
+    access: "signed-in",
+    success: { status: 200, schema: groupsResponse, description: "The job's groups." },
+    errors: ["not_signed_in", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/groups",
+    group: "Roster",
+    summary: "Add a class, team or group",
+    description: "Names are unique per job, ignoring case.",
+    access: "roster-editor",
+    body: groupInput,
+    success: { status: 201, schema: groupResponse, description: "Added." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "PATCH",
+    path: "/groups/{id}",
+    group: "Roster",
+    summary: "Rename a class, team or group",
+    access: "roster-editor",
+    body: groupPatch,
+    success: { status: 200, schema: groupResponse, description: "Renamed." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/children/import",
+    group: "Roster",
+    summary: "Import a roster file's rows",
+    description:
+      "Send the confirmed rows of a CSV or Excel file (the file itself is never uploaded). A row whose student ID matches exactly one child updates that child: names are replaced, blank cells keep their values, and opt-outs can be turned on but never off. Other rows are added with new access codes. Duplicates are flagged, not merged. All rows are saved together or not at all. With dryRun, nothing is saved.",
+    access: "roster-editor",
+    body: rosterImportInput,
+    success: {
+      status: 200,
+      schema: rosterImportResponse,
+      description: "What was (or would be) added and updated.",
+    },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "conflict"],
   },
   {
     method: "GET",

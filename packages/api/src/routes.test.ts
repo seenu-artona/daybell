@@ -56,4 +56,29 @@ describe("API description", () => {
     expect(doc.components.schemas).toHaveProperty("Job");
     expect(doc.tags.map((t) => t.name)).toEqual(expect.arrayContaining(["Jobs", "Contacts"]));
   });
+
+  it("describes the roster", () => {
+    type Op = { "x-access": string; parameters?: { name: string; in: string }[] };
+    const op = (path: string, method: string) =>
+      (doc.paths[path] as Record<string, Op> | undefined)?.[method];
+    for (const [path, method] of [
+      ["/jobs/{id}/children", "get"],
+      ["/jobs/{id}/children", "post"],
+      ["/children/{id}", "patch"],
+      ["/children/{id}", "delete"],
+      ["/jobs/{id}/groups", "get"],
+      ["/jobs/{id}/groups", "post"],
+      ["/groups/{id}", "patch"],
+      ["/jobs/{id}/children/import", "post"],
+    ] as const) {
+      const route = op(path, method);
+      expect(route, `${method} ${path}`).toBeDefined();
+      expect(route?.parameters?.[0]).toMatchObject({ name: "id", in: "path" });
+      expect(route?.["x-access"]).toBe(method === "get" ? "signed-in" : "roster-editor");
+    }
+    expect(doc.components.schemas).toHaveProperty("Child");
+    expect(doc.components.schemas).toHaveProperty("Group");
+    expect(JSON.stringify(doc.components.schemas.Child)).not.toContain("accessCodeHash");
+    expect(doc.tags.map((t) => t.name)).toContain("Roster");
+  });
 });
