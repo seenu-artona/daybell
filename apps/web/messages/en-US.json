@@ -227,6 +227,26 @@
       "expires": "Expires {date}",
       "withdraw": "Withdraw",
       "onlyOwners": "Only owners can invite people."
+    },
+    "activity": {
+      "title": "Activity",
+      "empty": "Nothing yet.",
+      "someone": "Someone",
+      "aTeammate": "a teammate",
+      "studio": {
+        "created": "{actor} created the studio",
+        "updated": "{actor} updated the studio details"
+      },
+      "member": {
+        "joined": "{subject} joined as {role}",
+        "role_changed": "{actor} made {subject} {role}",
+        "removed": "{actor} removed {subject}"
+      },
+      "invite": {
+        "created": "{actor} invited someone as {role}",
+        "accepted": "An invite was accepted ({role})",
+        "withdrawn": "{actor} withdrew an invite"
+      }
     }
   },
   "invite": {
