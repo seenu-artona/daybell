@@ -55,8 +55,22 @@ create trigger config_guard_immutable
 before update or delete on app.config
 for each row execute function app.guard_config_immutable();
 
-create function app.guard_studio_region() returns trigger
+create function app.guard_config_truncate() returns trigger
 language plpgsql
+set search_path = ''
+as $$
+begin
+  raise exception 'app.config cannot be truncated' using errcode = 'check_violation';
+end;
+$$;
+
+create trigger config_guard_truncate
+before truncate on app.config
+for each statement execute function app.guard_config_truncate();
+
+-- SECURITY DEFINER: the guard must read app.config whoever writes the studio (including the server's service role).
+create function app.guard_studio_region() returns trigger
+language plpgsql security definer
 set search_path = ''
 as $$
 declare
@@ -65,7 +79,11 @@ begin
   if tg_op = 'UPDATE' and new.data_region <> old.data_region then
     raise exception 'A studio cannot change data region' using errcode = 'check_violation';
   end if;
-  if db_region is not null and new.data_region::text <> db_region then
+  -- Fail closed: a database that has not recorded its region accepts no studios at all.
+  if db_region is null then
+    raise exception 'This database has no data region recorded in app.config' using errcode = 'check_violation';
+  end if;
+  if new.data_region::text <> db_region then
     raise exception 'Studio region % does not match this database (%)', new.data_region, db_region
       using errcode = 'check_violation';
   end if;
@@ -102,12 +120,15 @@ revoke all on function app.is_member(uuid), app.has_role(uuid, public.studio_rol
 grant execute on function app.is_member(uuid), app.has_role(uuid, public.studio_role[]) to authenticated;
 
 -- Never leave a studio without an owner.
+-- SECURITY DEFINER so it sees every owner regardless of the caller's RLS view. Locking the studio row serialises
+-- concurrent changes, so two owners demoting each other at the same moment cannot leave the studio ownerless.
 create function app.guard_last_owner() returns trigger
-language plpgsql
+language plpgsql security definer
 set search_path = ''
 as $$
 begin
   if old.role = 'owner' and (tg_op = 'DELETE' or new.role <> 'owner') then
+    perform 1 from public.studios s where s.id = old.studio_id for update;
     if not exists (
       select 1 from public.studio_members m
       where m.studio_id = old.studio_id and m.role = 'owner' and m.user_id <> old.user_id
@@ -149,5 +170,9 @@ create policy "owners change roles" on public.studio_members
 create policy "owners remove members" on public.studio_members
   for delete to authenticated using (app.has_role(studio_id, '{owner}'));
 
--- Logged-out visitors get nothing from these tables.
+revoke all on function app.guard_studio_region(), app.guard_last_owner(), app.guard_config_immutable(),
+  app.guard_config_truncate() from public;
+
+-- Logged-out visitors get nothing from these tables. Signed-in people can never truncate (TRUNCATE ignores RLS).
 revoke all on public.studios, public.studio_members from anon;
+revoke truncate, references, trigger on public.studios, public.studio_members from authenticated;

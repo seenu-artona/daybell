@@ -1,7 +1,8 @@
 name: Deploy database (staging)
 
 # Applies migrations to both staging databases when they change on main (D113: one database per region).
-# Secrets (set by Seenu in GitHub > Settings > Secrets and variables > Actions):
+# Secrets live in the GitHub Environment "staging" (Settings > Environments), limited to the main branch so no
+# other branch or workflow can read them:
 #   STAGING_DB_URL_US, STAGING_DB_URL_CA  - each project's Postgres connection string (session pooler)
 on:
   push:
@@ -18,6 +19,8 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
+    environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -29,8 +32,8 @@ jobs:
           - region: ca
             secret: STAGING_DB_URL_CA
     steps:
-      - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
         with:
           version: 2.118.0
       - name: Apply migrations

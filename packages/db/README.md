@@ -21,4 +21,5 @@ other region cannot be written to it and the region can never change.
 ## Deploying
 
 `.github/workflows/db-deploy.yml` applies migrations to both staging projects when migrations change on `main`. It needs
-the `STAGING_DB_URL_US` and `STAGING_DB_URL_CA` secrets in GitHub.
+the `STAGING_DB_URL_US` and `STAGING_DB_URL_CA` secrets in the GitHub Environment `staging`, restricted to `main`.
+Until the region is recorded, a database refuses every studio (fail closed).

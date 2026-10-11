@@ -1,9 +1,10 @@
 -- Cross-studio leak tests (D96). Two studios, four people; nobody may see or touch the other studio.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(16);
+select plan(19);
 
--- Setup as the database owner.
+-- Setup as the database owner. This test database is a US database.
+insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
   ('11111111-1111-4111-8111-111111111111', 'owner-a@example.test'),
   ('22222222-2222-4222-8222-222222222222', 'owner-b@example.test'),
@@ -75,15 +76,27 @@ select is(
   'staff', 'staff could not promote themselves'
 );
 
+-- The server (service role) creates studios at sign-up.
+set local role service_role;
+select lives_ok(
+  $$ insert into public.studios (name, slug, data_region) values ('New Studio', 'new-studio', 'us') $$,
+  'the server can create a studio in its own region'
+);
+
 -- Region guard (D113), as the database owner.
-insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
+reset role;
 select throws_ok(
-  $$ insert into public.studios (name, slug, data_region) values ('Wrong region', 'wrong-region', 'us') $$,
-  '23514', null, 'a US studio cannot be written to the Canadian database'
+  $$ insert into public.studios (name, slug, data_region) values ('Wrong region', 'wrong-region', 'ca') $$,
+  '23514', null, 'a Canadian studio cannot be written to the US database'
 );
 select throws_ok(
-  $$ update app.config set value = 'us' where key = 'data_region' $$,
+  $$ update app.config set value = 'ca' where key = 'data_region' $$,
   '23514', null, 'a database region can never be changed'
+);
+select throws_ok($$ truncate app.config $$, '23514', null, 'the region record cannot be truncated');
+select throws_ok(
+  $$ delete from app.config where key = 'data_region' $$,
+  '23514', null, 'the region record cannot be deleted'
 );
 
 select * from finish();
