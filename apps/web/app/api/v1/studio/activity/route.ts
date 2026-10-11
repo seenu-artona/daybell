@@ -1,6 +1,6 @@
 import { type ActivityItem, ApiError, type StudioRole } from "@daybell/api";
 import { NextResponse } from "next/server";
-import { activityType } from "@/lib/activity";
+import { activityType, STORED_ACTIVITY_TYPES } from "@/lib/activity";
 import { check, handle, requireUser } from "@/lib/api";
 import { currentStudio } from "@/lib/studio";
 import { supabaseForSession } from "@/lib/supabase/server";
@@ -22,6 +22,8 @@ export const GET = handle(async () => {
       .from("events")
       .select("id, type, actor_id, subject_id, data, occurred_at")
       .eq("studio_id", studio.id)
+      // Hidden types are filtered here, before the limit, so a big import can't empty the log.
+      .in("type", [...STORED_ACTIVITY_TYPES])
       .order("id", { ascending: false })
       .limit(50),
     supabase.rpc("studio_team", { p_studio_id: studio.id }),

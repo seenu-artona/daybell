@@ -7,7 +7,7 @@ import { Pencil, Plus, Upload, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
 import { Dialog, SelectField } from "../../dialog";
 import { ChildForm, GroupForm } from "./child-form";
@@ -44,18 +44,25 @@ export function RosterSection({ job, canEdit }: { job: Job; canEdit: boolean }) 
   const [status, setStatus] = useState("");
   const [editing, setEditing] = useState<Child | "new" | null>(null);
   const [renaming, setRenaming] = useState(false);
+  // A new filter keeps the current table (and the focused filter) on screen while the list loads.
+  const [listLoading, setListLoading] = useState(false);
+  const latest = useRef(0);
 
+  /** Loads a page of the list; resolves to false when a newer request replaced this one. */
   const load = useCallback(
-    async (nextFilter: Filter, cursor: string | null) => {
+    async (nextFilter: Filter, cursor: string | null): Promise<boolean> => {
+      const request = ++latest.current;
       const [list, groupList, whole] = await Promise.all([
         api<ChildrenResponse>(childrenPath(job.id, nextFilter, cursor)),
         cursor ? null : api<GroupsResponse>(`/jobs/${job.id}/groups`),
         // The header always counts the whole roster, whatever the filter.
         nextFilter && !cursor ? api<ChildrenResponse>(childrenPath(job.id, "", null, 1)) : null,
       ]);
+      // A newer request (e.g. another filter chosen meanwhile) wins.
+      if (request !== latest.current) return false;
       if (!list.ok || (groupList && !groupList.ok) || (whole && !whole.ok)) {
         setFailed(true);
-        return;
+        return true;
       }
       setFailed(false);
       setChildren((prev) =>
@@ -65,6 +72,7 @@ export function RosterSection({ job, canEdit }: { job: Job; canEdit: boolean }) 
       if (groupList?.ok) setGroups(groupList.data.groups);
       const counts = whole?.ok ? whole.data : nextFilter ? null : list.data;
       if (counts) setSummary({ total: counts.total, duplicates: counts.duplicates });
+      return true;
     },
     [job.id],
   );
@@ -176,8 +184,10 @@ export function RosterSection({ job, canEdit }: { job: Job; canEdit: boolean }) 
                 value={filter}
                 onChange={(value) => {
                   setFilter(value);
-                  setChildren(null);
-                  void load(value, null);
+                  setListLoading(true);
+                  void load(value, null).then((current) => {
+                    if (current) setListLoading(false);
+                  });
                 }}
                 options={[
                   { value: "", label: t("filterAll", { group: word }) },
@@ -194,7 +204,8 @@ export function RosterSection({ job, canEdit }: { job: Job; canEdit: boolean }) 
             ) : null}
           </div>
 
-          <Table>
+          {listLoading ? <p className="m-0 text-sm text-muted">{t("loading")}</p> : null}
+          <Table aria-busy={listLoading} className={listLoading ? "opacity-60" : undefined}>
             <thead>
               <TableRow>
                 <TableHead>{t("columns.name")}</TableHead>
@@ -219,9 +230,13 @@ export function RosterSection({ job, canEdit }: { job: Job; canEdit: boolean }) 
                     <TableCell>{c.group?.name ?? t("noGroup", { group: word })}</TableCell>
                     <TableCell>{c.studentId ?? ""}</TableCell>
                     <TableCell>{c.grade ?? ""}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono font-semibold tracking-wider">
-                      {c.accessCode}
-                    </TableCell>
+                    {c.accessCode ? (
+                      <TableCell className="whitespace-nowrap font-mono font-semibold tracking-wider">
+                        {c.accessCode}
+                      </TableCell>
+                    ) : (
+                      <TableCell className="text-muted">{t("codeUnavailable")}</TableCell>
+                    )}
                     <TableCell>
                       <span className="flex flex-wrap gap-1.5">{flags(c)}</span>
                     </TableCell>
