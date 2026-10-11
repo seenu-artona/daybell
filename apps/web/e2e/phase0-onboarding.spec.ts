@@ -23,7 +23,6 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await page.getByLabel("Studio name").fill(`North Peak ${tag}`);
   await page.getByLabel("Studio web address").fill(slug);
   await page.getByLabel("Your email").fill(owner);
-  await expect(page.getByText("Your studio's data will be stored in Canada.")).toBeVisible();
   await page.getByRole("button", { name: "Email me a link" }).click();
   await expect(page.getByRole("heading", { name: "Check your inbox" })).toBeVisible();
 

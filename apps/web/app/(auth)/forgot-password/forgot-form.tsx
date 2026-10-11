@@ -47,7 +47,7 @@ export function ForgotForm({ regions }: { regions: DataRegion[] }) {
         error={text.field(fields.email)}
         required
       />
-      <RegionField regions={regions} value={region} onChange={setRegion} showFixedNote={false} />
+      <RegionField regions={regions} value={region} onChange={setRegion} />
       <Button type="submit" block disabled={busy}>
         {t("submit")}
       </Button>

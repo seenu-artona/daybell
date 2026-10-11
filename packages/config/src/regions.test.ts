@@ -21,6 +21,18 @@ describe("regions", () => {
     expect(availableRegions(both).map((r) => r.region)).toEqual(["us", "ca"]);
   });
 
+  it("tolerates a pasted endpoint URL", () => {
+    const pasted = {
+      ...canadaOnly,
+      ca: { url: "https://ca.example.supabase.co/rest/v1/", key: " k " },
+    };
+    expect(regionDatabase("ca", pasted)).toEqual({
+      region: "ca",
+      url: "https://ca.example.supabase.co",
+      publishableKey: "k",
+    });
+  });
+
   it("recognises only known regions", () => {
     expect(isDataRegion("ca")).toBe(true);
     expect(isDataRegion("qc")).toBe(false);
