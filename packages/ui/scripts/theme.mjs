@@ -32,6 +32,7 @@ export function buildThemeCss(tokens) {
     "  /* Parent shop slot (D112): ShopFrame overrides these with the studio's brand colour. */",
     "  --color-studio: var(--color-primary);",
     "  --color-on-studio: var(--color-on-primary);",
+    "  --color-studio-ring: var(--color-primary);",
     "}",
     "",
     "@keyframes daybell-pop {",

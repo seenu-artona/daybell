@@ -10,8 +10,11 @@ import {
   Celebration,
   CodeInput,
   clampPercent,
+  cn,
+  contrastRatio,
   Field,
   JobProgress,
+  MIN_UI_CONTRAST,
   MoneyStat,
   OptionCard,
   PhotoTile,
@@ -23,6 +26,7 @@ import {
   TableHead,
   TableRow,
   Toast,
+  uiColorOn,
 } from "./index";
 
 async function expectNoA11yViolations(container: HTMLElement) {
@@ -66,7 +70,11 @@ describe("components", () => {
         </Table>
         <MoneyStat label="Sales this season" cents={4826000} currency="USD" animate={false} />
         <JobProgress title="Lincoln" percent={68} label="Sales goal" />
-        <Celebration title="You're live!" body="Parents can order now." />
+        <Celebration
+          title="You're live!"
+          announcement="You're live!"
+          body="Parents can order now."
+        />
         <Banner tone="danger" title="Card declined">
           Ask the parent to try another card.
         </Banner>
@@ -130,6 +138,51 @@ describe("components", () => {
     );
     const root = container.firstElementChild as HTMLElement;
     expect(root.style.getPropertyValue("--color-on-studio")).toBe("#ffffff");
+  });
+
+  it("keeps type sizes when a colour class follows (tailwind-merge)", () => {
+    expect(cn("text-caption text-muted")).toBe("text-caption text-muted");
+    expect(cn("text-body text-h1")).toBe("text-h1");
+  });
+
+  it("never crashes the shop on a bad studio colour", () => {
+    const { container } = render(
+      <ShopFrame studioName="NP" studioInitials="NP" studioColor="red;" cartLabel="Cart" footer="f">
+        x
+      </ShopFrame>,
+    );
+    expect((container.firstElementChild as HTMLElement).getAttribute("style")).toBeNull();
+  });
+
+  it("darkens a light studio colour for focus rings until it reaches 3:1", () => {
+    const ring = uiColorOn("#f2b33d");
+    expect(contrastRatio(ring, "#ffffff")).toBeGreaterThanOrEqual(MIN_UI_CONTRAST);
+    expect(uiColorOn("#4338ca")).toBe("#4338ca");
+  });
+
+  it("fills access-code boxes without gaps", () => {
+    let value = "LI";
+    const { rerender } = render(
+      <CodeInput
+        value={value}
+        onChange={(v) => {
+          value = v;
+        }}
+        label="Code"
+        charLabel={(n) => `Character ${n}`}
+      />,
+    );
+    const box5 = screen.getByLabelText("Character 5");
+    box5.focus();
+    expect(document.activeElement).toBe(screen.getByLabelText("Character 3"));
+    rerender(
+      <CodeInput
+        value={value}
+        onChange={() => {}}
+        label="Code"
+        charLabel={(n) => `Character ${n}`}
+      />,
+    );
   });
 
   it("buttons default to type=button so they never submit a form by accident", () => {

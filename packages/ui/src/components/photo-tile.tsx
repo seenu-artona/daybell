@@ -9,8 +9,14 @@ export interface PhotoTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonElem
   image: ReactNode;
   tag?: ReactNode;
   selected?: boolean;
-  /** Parent shop: studio watermark text plus save/drag blocking. Deters casual copying only. */
+  /**
+   * Parent shop: studio watermark text plus save/drag blocking. This only deters casual copying.
+   * In the shop, `image` must always be the server-made, watermarked, low-resolution preview,
+   * never the original file (ADR 0003).
+   */
   watermark?: string;
+  /** "radio" for pick-one groups (wrap them in role="radiogroup"); "toggle" for multi-select. */
+  mode?: "toggle" | "radio";
 }
 
 /** Portrait 4:5 tile used in culling, tagging and the parent shop. Selecting it toggles `selected`. */
@@ -34,8 +40,8 @@ export function PhotoTile({
       className={cn(
         "group relative block aspect-[4/5] w-full overflow-hidden rounded-lg bg-subtle p-0 text-left shadow-sm",
         "transition-[box-shadow,transform] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0",
-        "focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-studio",
-        selected && "outline-3 -outline-offset-3 outline-studio",
+        "focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-studio-ring",
+        selected && "outline-3 -outline-offset-3 outline-studio-ring",
         watermark && "select-none [-webkit-touch-callout:none]",
         className,
       )}
@@ -61,7 +67,7 @@ export function PhotoTile({
       <span
         className={cn(
           "absolute top-2 right-2 grid size-6 place-items-center rounded-full border-2 border-line-strong bg-surface text-on-studio",
-          selected && "border-studio bg-studio",
+          selected && "border-studio-ring bg-studio",
         )}
         aria-hidden="true"
       >

@@ -40,12 +40,18 @@
   --text-body: 14px;
   --text-body--line-height: 22px;
   --text-body--font-weight: 400;
+  --text-title-sm: 15px;
+  --text-title-sm--line-height: 20px;
+  --text-title-sm--font-weight: 700;
   --text-label: 13px;
   --text-label--line-height: 18px;
   --text-label--font-weight: 600;
   --text-caption: 12px;
   --text-caption--line-height: 16px;
   --text-caption--font-weight: 500;
+  --text-micro: 11px;
+  --text-micro--line-height: 18px;
+  --text-micro--font-weight: 700;
   --text-money-xl: 40px;
   --text-money-xl--line-height: 44px;
   --text-money-xl--font-weight: 800;
@@ -67,6 +73,7 @@
   /* Parent shop slot (D112): ShopFrame overrides these with the studio's brand colour. */
   --color-studio: var(--color-primary);
   --color-on-studio: var(--color-on-primary);
+  --color-studio-ring: var(--color-primary);
 }
 
 @keyframes daybell-pop {

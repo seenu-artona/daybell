@@ -15,3 +15,11 @@ Tests check every text/background token pair meets 4.5:1 and run axe on all comp
 
 The font is self-hosted (Fontsource) rather than loaded from Google, so parents' browsers make no third-party
 requests (children's privacy). Words use next-intl with en-US and en-CA message files.
+
+**Studio colours.** Any colour a studio picks is normalised (invalid values fall back to the default, never
+crash), text on it is chosen by contrast, and a darker "ring" version is derived for focus rings and selected
+borders so it reaches 3:1 against white (WCAG 1.4.11).
+
+**Photo protection.** `PhotoTile`'s watermark and save-blocking only deter casual copying; anyone can read an
+image URL from the page. So in the parent shop the image passed in must always be the server-made,
+watermarked, low-resolution preview. Originals are only ever delivered after purchase.

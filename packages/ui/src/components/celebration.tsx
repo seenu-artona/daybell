@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { prefersReducedMotion } from "../lib/motion";
 
@@ -9,6 +9,8 @@ export interface CelebrationProps {
   title: ReactNode;
   body?: ReactNode;
   action?: ReactNode;
+  /** Plain words read out by screen readers when the celebration fires, e.g. "You're live!". */
+  announcement: string;
   /** Change this number to fire the confetti again. */
   burst?: number;
   className?: string;
@@ -22,9 +24,26 @@ const PALETTE_VARS = ["--color-lime", "--color-primary", "--color-ink", "--color
  * Medium confetti for real wins: job live, first order, batch shipped, season end, money milestones.
  * Fire once per event. Reduced motion skips the confetti and the pop.
  */
-export function Celebration({ icon, title, body, action, burst = 0, className }: CelebrationProps) {
+export function Celebration({
+  icon,
+  title,
+  body,
+  action,
+  announcement,
+  burst = 0,
+  className,
+}: CelebrationProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [spoken, setSpoken] = useState("");
+
+  // A live region must exist empty before its text arrives, or screen readers skip it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `burst` is the re-fire signal.
+  useEffect(() => {
+    setSpoken("");
+    const id = window.setTimeout(() => setSpoken(announcement), 100);
+    return () => window.clearTimeout(id);
+  }, [announcement, burst]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `burst` is the re-fire signal.
   useEffect(() => {
@@ -74,28 +93,32 @@ export function Celebration({ icon, title, body, action, burst = 0, className }:
   }, [burst]);
 
   return (
-    <div
-      key={burst}
-      ref={boxRef}
-      role="status"
-      className={cn(
-        "relative max-w-95 overflow-hidden rounded-lg bg-surface px-6 py-8 text-center shadow-lg",
-        "motion-safe:animate-[daybell-pop_420ms_var(--ease-bounce)]",
-        className,
-      )}
-    >
-      <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" aria-hidden="true" />
-      {icon ? (
-        <div
-          className="mx-auto mb-3 grid size-14 place-items-center rounded-full bg-lime text-2xl"
+    <div className={cn("max-w-95", className)}>
+      <p role="status" className="sr-only">
+        {spoken}
+      </p>
+      <div
+        key={burst}
+        ref={boxRef}
+        className="relative overflow-hidden rounded-lg bg-surface px-6 py-8 text-center shadow-lg motion-safe:animate-[daybell-pop_420ms_var(--ease-bounce)]"
+      >
+        <canvas
+          ref={canvasRef}
+          className="pointer-events-none absolute inset-0"
           aria-hidden="true"
-        >
-          {icon}
-        </div>
-      ) : null}
-      <p className="m-0 text-h2">{title}</p>
-      {body ? <p className="mt-1.5 mb-6 text-muted">{body}</p> : null}
-      {action}
+        />
+        {icon ? (
+          <div
+            className="mx-auto mb-3 grid size-14 place-items-center rounded-full bg-lime text-2xl"
+            aria-hidden="true"
+          >
+            {icon}
+          </div>
+        ) : null}
+        <p className="m-0 text-h2">{title}</p>
+        {body ? <p className="mt-1.5 mb-6 text-muted">{body}</p> : null}
+        {action}
+      </div>
     </div>
   );
 }

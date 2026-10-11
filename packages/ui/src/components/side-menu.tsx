@@ -64,7 +64,7 @@ export function SideMenuItem<T extends ElementType = "a">({
       ) : null}
       <span className="flex-1">{children}</span>
       {count ? (
-        <span className="rounded-full bg-lime px-[7px] text-[11px] leading-[18px] font-bold text-ink">
+        <span className="rounded-full bg-lime px-[7px] text-micro text-ink">
           <span aria-hidden="true">{count}</span>
           <span className="sr-only">{countLabel ?? count}</span>
         </span>

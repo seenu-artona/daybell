@@ -11,4 +11,11 @@ export { CodeInput, OptionCard, ShopFrame } from "./components/shop";
 export { SideMenu, SideMenuItem } from "./components/side-menu";
 export { Table, TableCell, TableHead, TableRow } from "./components/table";
 export { cn } from "./lib/cn";
-export { contrastRatio, MIN_TEXT_CONTRAST, readableTextOn } from "./lib/contrast";
+export {
+  contrastRatio,
+  MIN_TEXT_CONTRAST,
+  MIN_UI_CONTRAST,
+  normalizeHex,
+  readableTextOn,
+  uiColorOn,
+} from "./lib/contrast";

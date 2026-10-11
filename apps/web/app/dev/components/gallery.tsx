@@ -37,6 +37,9 @@ import {
 import { useTranslations } from "next-intl";
 import { type ReactNode, useState } from "react";
 
+/** Sample studio setting for the demo shop; real studios set their own colour. */
+const DEMO_STUDIO_COLOR = "#4338ca";
+
 const usd = (cents: number) => formatMoney(money(cents, "USD"));
 const usdWhole = (cents: number) => formatMoney(money(cents, "USD"), "en-US", { whole: true });
 
@@ -216,6 +219,7 @@ export function Gallery() {
             burst={burst}
             icon="🎉"
             title={t("celebrate.title")}
+            announcement={t("celebrate.title")}
             body={t("celebrate.body")}
             action={<Button onClick={() => setBurst((b) => b + 1)}>{t("celebrate.again")}</Button>}
           />
@@ -243,12 +247,17 @@ export function Gallery() {
       </Section>
 
       <Section title={t("sections.photos")}>
-        <div className="grid max-w-140 grid-cols-2 gap-3 sm:grid-cols-4">
+        <div
+          role="radiogroup"
+          aria-label={t("photos.group")}
+          className="grid max-w-140 grid-cols-2 gap-3 sm:grid-cols-4"
+        >
           {[1, 2, 3, 4].map((n) => (
             <PhotoTile
               key={n}
               image={<Portrait n={n} alt={t("photos.alt", { n })} />}
               tag={t("photos.tag", { n })}
+              mode="radio"
               selected={pose === n}
               onClick={() => setPose(n)}
             />
@@ -261,7 +270,7 @@ export function Gallery() {
           <ShopFrame
             studioName={t("shop.studio")}
             studioInitials={t("shop.initials")}
-            studioColor="#4338ca"
+            studioColor={DEMO_STUDIO_COLOR}
             cartLabel={t("shop.cart", { count: 0 })}
             footer={t("shop.footer")}
           >
@@ -277,11 +286,11 @@ export function Gallery() {
               className="mt-4"
               type="email"
               label={t("shop.email")}
-              placeholder="you@example.com"
+              placeholder={t("shop.emailPlaceholder")}
             />
             <Button
               block
-              className="mt-4 bg-studio text-on-studio hover:bg-studio hover:brightness-95"
+              className="mt-4 bg-studio text-on-studio hover:bg-studio hover:brightness-95 focus-visible:outline-studio-ring"
             >
               {t("shop.seePhotos")}
             </Button>
@@ -290,18 +299,23 @@ export function Gallery() {
           <ShopFrame
             studioName={t("shop.studio")}
             studioInitials={t("shop.initials")}
-            studioColor="#4338ca"
+            studioColor={DEMO_STUDIO_COLOR}
             cartCount={2}
             cartLabel={t("shop.cart", { count: 2 })}
             footer={t("shop.footer")}
           >
-            <div className="grid grid-cols-2 gap-2.5">
+            <div
+              role="radiogroup"
+              aria-label={t("photos.group")}
+              className="grid grid-cols-2 gap-2.5"
+            >
               {[1, 2, 3, 4].map((n) => (
                 <PhotoTile
                   key={n}
                   image={<Portrait n={n} alt={t("photos.alt", { n })} />}
                   tag={t("photos.tag", { n })}
                   watermark={t("shop.watermark")}
+                  mode="radio"
                   selected={pose === n}
                   onClick={() => setPose(n)}
                 />
@@ -312,7 +326,7 @@ export function Gallery() {
           <ShopFrame
             studioName={t("shop.studio")}
             studioInitials={t("shop.initials")}
-            studioColor="#4338ca"
+            studioColor={DEMO_STUDIO_COLOR}
             cartCount={2}
             cartLabel={t("shop.cart", { count: 2 })}
             footer={t("shop.footer")}
@@ -335,7 +349,7 @@ export function Gallery() {
             </div>
             <Button
               block
-              className="mt-4 bg-studio text-on-studio hover:bg-studio hover:brightness-95"
+              className="mt-4 bg-studio text-on-studio hover:bg-studio hover:brightness-95 focus-visible:outline-studio-ring"
             >
               {t("shop.addToCart", { amount: usdWhole(prices[pkg] ?? 0) })}
             </Button>

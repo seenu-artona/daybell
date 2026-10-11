@@ -15,7 +15,7 @@ export const buttonVariants = cva(
       },
       size: {
         md: "min-h-11 px-[18px] text-sm",
-        sm: "min-h-8 rounded-sm px-3 text-[13px]",
+        sm: "min-h-8 rounded-sm px-3 text-label",
       },
       block: { true: "w-full", false: "" },
     },

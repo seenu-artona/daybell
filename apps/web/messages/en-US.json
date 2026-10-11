@@ -95,7 +95,8 @@
     },
     "photos": {
       "alt": "Sample portrait {n}",
-      "tag": "Pose {n}"
+      "tag": "Pose {n}",
+      "group": "Choose a pose"
     },
     "shop": {
       "studio": "North Peak Photo",
@@ -117,7 +118,8 @@
       "digital": "Digital only",
       "digitalDesc": "Full-res download, print release",
       "popular": "Most popular",
-      "addToCart": "Add to cart · {amount}"
+      "addToCart": "Add to cart · {amount}",
+      "emailPlaceholder": "you@example.com"
     }
   }
 }
