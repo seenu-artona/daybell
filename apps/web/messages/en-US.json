@@ -259,5 +259,15 @@
     "joined": "You're in! Taking you to your studio…",
     "invalid": "This invite link isn't valid for your account. It may have expired, been used, or been sent to a different email.",
     "missing": "Open your invite link again — the one your studio sent you — to continue."
+  },
+  "apiDocs": {
+    "title": "Daybell API",
+    "intro": "Every Daybell screen uses this same API. Today it signs in with the session cookie; API keys for integrations come later.",
+    "openapi": "Download openapi.json",
+    "body": "Request body (JSON)",
+    "success": "{status} response",
+    "errors": "Possible errors",
+    "errorsTitle": "Errors",
+    "errorsBody": "Every error has the same shape: a stable code, a plain message, and for form problems a message key per field."
   }
 }
