@@ -1,8 +1,8 @@
 import { SOON_SECTIONS } from "../nav";
 import { ComingSoon } from "./coming-soon";
 
-// Sections still being built (D128), plus the parent-shop preview behind "View my shop".
-const ALLOWED = new Set([...SOON_SECTIONS, "shop"]);
+// Sections still being built (D128), plus the parent-shop preview ("View my shop") and Help.
+const ALLOWED = new Set([...SOON_SECTIONS, "shop", "help"]);
 
 export function generateStaticParams() {
   return [...ALLOWED].map((section) => ({ section }));

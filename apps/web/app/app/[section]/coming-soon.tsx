@@ -7,7 +7,12 @@ import { useTranslations } from "next-intl";
 
 export function ComingSoon({ section }: { section: string }) {
   const t = useTranslations("app");
-  const name = section === "shop" ? t("top.viewShop") : t(`nav.${section as "jobs"}`);
+  const name =
+    section === "shop"
+      ? t("top.viewShop")
+      : section === "help"
+        ? t("nav.help")
+        : t(`nav.${section as "jobs"}`);
   return (
     <Card className="flex flex-col items-center gap-3 py-12 text-center">
       <span

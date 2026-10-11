@@ -36,17 +36,30 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Save and continue" }).click();
   await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByRole("heading", { name: `Welcome to North Peak ${tag}` })).toBeVisible();
-  await expect(page.getByText("Get ready to sell")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+  await expect(page.getByText(`North Peak ${tag}`).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Needs you" })).toBeVisible();
+  const phone = info.project.name === "phone";
 
-  // Every section is in the menu; unbuilt ones say "Soon" (D126, D128). On phones the menu is behind a button.
-  if (info.project.name === "phone") await page.getByRole("button", { name: "Open menu" }).click();
-  const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: /Contacts/ })).toBeVisible();
-  await nav.getByRole("link", { name: /Orders/ }).click();
+  // Every section is reachable; unbuilt ones say "Soon" (D126, D128). Phones use bottom tabs plus a "More" sheet.
+  if (phone) {
+    await page.getByRole("button", { name: "More" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "More" }).getByRole("link", { name: /Contacts/ }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+  } else {
+    await expect(
+      page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /Contacts/ }),
+    ).toBeVisible();
+  }
+  await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: /Orders/ })
+    .click();
   await expect(page.getByRole("heading", { name: "Orders is coming soon" })).toBeVisible();
 
-  // 3. From the checklist, goes to Settings and invites a photographer.
+  // 3. From "Needs you", goes to Settings and invites a photographer.
   await page.goto("/app");
   await page.getByRole("link", { name: /Invite your team/ }).click();
   await expect(page).toHaveURL(/\/app\/settings$/);
@@ -69,7 +82,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
 
   // Home now shows the team step done, and the activity log has all three changes (event log, D96).
   await page.goto("/app");
-  await expect(page.getByText(/^2 of \d+ done$/)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Invite your team/ })).toHaveCount(0);
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
 
@@ -96,9 +109,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(staffTab).toHaveURL(/\/invite$/);
   await staffTab.getByRole("button", { name: "Join the team" }).click();
   await expect(staffTab).toHaveURL(/\/app$/);
-  await expect(
-    staffTab.getByRole("heading", { name: `Welcome to North Peak ${tag}` }),
-  ).toBeVisible();
+  await expect(staffTab.getByText(`North Peak ${tag}`).first()).toBeVisible();
   // Photographers see the team but cannot invite.
   await staffTab.goto("/app/settings");
   await expect(staffTab.getByText("Only owners can invite people.")).toBeVisible();
@@ -139,8 +150,8 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   });
   expect(forged.status()).toBe(403);
 
-  // Owner signs out (account menu), then back in with their password.
-  await page.getByRole("button", { name: "Account" }).click();
+  // Owner signs out (account menu on desktop, "More" on phones), then back in with their password.
+  await page.getByRole("button", { name: phone ? "More" : "Account" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/sign-in/);
   await page.getByLabel("Email").fill(owner);

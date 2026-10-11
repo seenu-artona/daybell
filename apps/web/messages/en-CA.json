@@ -229,7 +229,7 @@
       "onlyOwners": "Only owners can invite people."
     },
     "activity": {
-      "title": "Activity",
+      "title": "Recently",
       "empty": "Nothing yet.",
       "someone": "Someone",
       "aTeammate": "a teammate",
@@ -262,7 +262,9 @@
       "soon": "Soon",
       "openMenu": "Open menu",
       "closeMenu": "Close menu",
-      "menu": "Menu"
+      "menu": "Menu",
+      "more": "More",
+      "help": "Help"
     },
     "top": {
       "search": "Search",
@@ -278,7 +280,9 @@
       "close": "Close",
       "searchShortcutMac": "⌘K",
       "searchShortcutOther": "Ctrl K",
-      "searchResults": "{count, plural, =0 {No matches} one {# result} other {# results}}"
+      "searchResults": "{count, plural, =0 {No matches} one {# result} other {# results}}",
+      "searchPlaceholderLong": "Search jobs, contacts, orders",
+      "newCount": "{count, plural, =0 {Notifications} one {# new} other {# new}}"
     },
     "soon": {
       "title": "{section} is coming soon",
@@ -306,6 +310,29 @@
     "settings": {
       "title": "Settings",
       "teamIntro": "Who works at your studio and what they can do."
+    },
+    "home": {
+      "title": "Home",
+      "range": "Date range",
+      "ranges": {
+        "week": "This week",
+        "month": "This month",
+        "season": "This season"
+      },
+      "sales": "Sales",
+      "orders": "Orders",
+      "familiesOrdered": "Families ordered",
+      "averageOrder": "Average order",
+      "noData": "No sales yet",
+      "dash": "–",
+      "needsYou": "Needs you",
+      "nothingNeeded": "Nothing needs you right now.",
+      "jobsSelling": "Jobs selling now",
+      "noJobs": "No jobs are selling yet. Jobs arrive in an upcoming phase.",
+      "recently": "Recently",
+      "actions": {
+        "invite": "Invite"
+      }
     }
   },
   "invite": {

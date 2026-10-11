@@ -1,70 +1,92 @@
 "use client";
 
 import type { MeResponse } from "@daybell/api";
-import { Banner, Button, SideMenu, SideMenuItem } from "@daybell/ui";
-import { Bell, CircleHelp, ExternalLink, Menu, UserRound, X } from "lucide-react";
+import { Banner, Button } from "@daybell/ui";
+import { Bell, CircleHelp, Ellipsis, ExternalLink, LogOut, Search, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
-import { CommandPalette } from "./command-palette";
+import { CommandPalette, type PaletteHandle } from "./command-palette";
 import { StudioContext, type StudioContextValue } from "./me-context";
-import { SECTIONS, sectionForPath } from "./nav";
+import { SECTIONS, type SectionKey, sectionForPath } from "./nav";
 import { Popover } from "./popover";
 
-function Brand() {
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("") || "D";
+
+function StudioMark({ name }: { name: string }) {
   return (
-    <>
-      <span
-        className="grid size-7 place-items-center rounded-[8px] bg-lime text-sm text-ink"
-        aria-hidden="true"
-      >
-        D
-      </span>
-      Daybell
-    </>
+    <span
+      className="grid size-9 shrink-0 place-items-center rounded-[10px] bg-ink text-sm font-extrabold text-white"
+      aria-hidden="true"
+    >
+      {initials(name)}
+    </span>
   );
 }
 
-function Nav({ onNavigate }: { onNavigate?: () => void }) {
+/** One menu row. Labels always visible (people 30–60 find labelled menus faster than icon-only ones). */
+function NavLink({
+  section,
+  current,
+  onNavigate,
+}: {
+  section: (typeof SECTIONS)[number];
+  current: SectionKey | null;
+  onNavigate?: () => void;
+}) {
   const t = useTranslations("app.nav");
-  const current = sectionForPath(usePathname());
+  const active = current === section.key;
   return (
-    <SideMenu label={t("label")} brand={<Brand />} className="h-full w-full rounded-none">
-      {SECTIONS.map((s) => (
-        <SideMenuItem
-          key={s.key}
-          as={Link}
-          href={s.href}
-          icon={<s.icon />}
-          current={current === s.key}
-          {...(s.built ? {} : { tag: t("soon") })}
-          {...(onNavigate ? { onClick: onNavigate } : {})}
-        >
-          {t(s.key)}
-        </SideMenuItem>
-      ))}
-    </SideMenu>
+    <Link
+      href={section.href}
+      aria-current={active ? "page" : undefined}
+      {...(onNavigate ? { onClick: onNavigate } : {})}
+      className={`flex min-h-12 items-center gap-3 rounded-[10px] px-3 text-body-lg no-underline focus-visible:outline-2 focus-visible:outline-primary ${
+        active
+          ? "bg-primary-soft font-bold text-primary-hover"
+          : "font-medium text-ink hover:bg-subtle"
+      }`}
+    >
+      <section.icon
+        className={`size-5 shrink-0 ${active ? "" : "text-muted"}`}
+        aria-hidden="true"
+      />
+      <span className="flex-1">{t(section.key)}</span>
+      {section.built ? null : <span className="text-caption text-muted">{t("soon")}</span>}
+    </Link>
   );
 }
 
-/** The studio app frame: side menu, top bar, and the signed-in studio for every page (D126–D129). */
+/**
+ * The studio app frame (D126–D130), modelled on Shopify's admin: a top bar with the studio on the left, a wide search
+ * in the centre and shop/notifications/account on the right; a light, always-labelled sidebar on desktop; and a
+ * labelled bottom tab bar with a "More" sheet on phones.
+ */
 export function AppShell({ children }: { children: ReactNode }) {
   const t = useTranslations("app");
   const text = useApiText();
   const router = useRouter();
-  const drawer = useRef<HTMLDialogElement>(null);
+  const current = sectionForPath(usePathname());
+  const palette = useRef<PaletteHandle>(null);
+  const moreSheet = useRef<HTMLDialogElement>(null);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
 
-  // The drawer is for small screens; if the window grows past the desktop breakpoint, close it so the page stays usable.
+  // The "More" sheet is for phones; if the window grows to desktop width, close it so the page stays usable.
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 1024px)");
     const onChange = () => {
-      if (desktop.matches) drawer.current?.close();
+      if (desktop.matches) moreSheet.current?.close();
     };
     desktop.addEventListener("change", onChange);
     return () => desktop.removeEventListener("change", onChange);
@@ -85,98 +107,195 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const studio = me?.studio;
+  const studioName = studio?.name ?? "Daybell";
   const value: StudioContextValue | null =
     me && studio
       ? { me: { ...me, studio }, version, changed: () => setVersion((v) => v + 1) }
       : null;
+  const closeMore = () => moreSheet.current?.close();
+
+  const notifications = (
+    <Popover label={t("top.notifications")} icon={<Bell />}>
+      {() => (
+        <>
+          <p className="m-0 mb-1 font-semibold">{t("top.notifications")}</p>
+          <p className="m-0 text-muted">{t("top.notificationsEmpty")}</p>
+        </>
+      )}
+    </Popover>
+  );
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[232px_1fr]">
-      <aside className="hidden lg:sticky lg:top-0 lg:block lg:h-dvh">
-        <Nav />
-      </aside>
-
-      <dialog
-        ref={drawer}
-        aria-label={t("nav.menu")}
-        className="m-0 h-dvh max-h-dvh w-[264px] bg-ink p-0 backdrop:bg-ink/50 lg:hidden"
-      >
+    <div className="min-h-dvh bg-canvas text-body-lg">
+      {/* Top bar (desktop and tablet) */}
+      <header className="sticky top-0 z-20 hidden h-16 items-center border-b border-line bg-surface px-4 lg:grid lg:grid-cols-[232px_1fr_auto] lg:gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <StudioMark name={studioName} />
+          <div className="min-w-0">
+            <p className="m-0 truncate text-[15px] leading-5 font-bold">{studioName}</p>
+            {studio ? (
+              <p className="m-0 text-caption text-muted">{t(`roles.${studio.role}`)}</p>
+            ) : null}
+          </div>
+        </div>
         <button
           type="button"
-          onClick={() => drawer.current?.close()}
-          aria-label={t("nav.closeMenu")}
-          className="absolute top-3 right-3 z-10 grid size-11 place-items-center rounded-md text-white/80 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-lime"
+          onClick={() => palette.current?.open()}
+          aria-keyshortcuts="Meta+K Control+K"
+          className="mx-auto flex h-11 w-full max-w-[600px] items-center gap-3 rounded-[10px] border border-line bg-canvas px-4 text-muted hover:border-line-strong focus-visible:outline-2 focus-visible:outline-primary"
         >
-          <X className="size-5" aria-hidden="true" />
+          <Search className="size-5" aria-hidden="true" />
+          <span className="flex-1 text-left">{t("top.searchPlaceholderLong")}</span>
+          <kbd className="rounded-sm border border-line px-1.5 text-caption" aria-hidden="true">
+            ⌘K
+          </kbd>
         </button>
-        <Nav onNavigate={() => drawer.current?.close()} />
-      </dialog>
-
-      <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-20 flex items-center gap-1 border-b border-line bg-surface px-2 py-2 sm:gap-2 sm:px-4">
-          <button
-            type="button"
-            onClick={() => drawer.current?.showModal()}
-            aria-label={t("nav.openMenu")}
-            className="grid size-11 place-items-center rounded-md hover:bg-subtle focus-visible:outline-2 focus-visible:outline-primary lg:hidden"
+        <div className="flex items-center gap-2">
+          <Button asChild variant="secondary" size="sm" className="min-h-11 px-4 text-sm">
+            <Link href="/app/shop">
+              <ExternalLink aria-hidden="true" />
+              {t("top.viewShop")}
+            </Link>
+          </Button>
+          {notifications}
+          <Popover
+            label={t("top.account")}
+            icon={
+              <span className="grid size-9 place-items-center rounded-full border border-line bg-subtle text-sm font-bold">
+                {initials(me?.email ?? "")}
+              </span>
+            }
           >
-            <Menu className="size-5" aria-hidden="true" />
-          </button>
-          <span className="truncate font-bold lg:hidden">{studio?.name ?? "Daybell"}</span>
-          <div className="ml-auto flex items-center gap-1 sm:gap-2">
-            <CommandPalette />
-            <Popover label={t("top.help")} icon={<CircleHelp />}>
-              {() => <p className="m-0 text-muted">{t("top.helpBody")}</p>}
-            </Popover>
-            <Popover label={t("top.notifications")} icon={<Bell />}>
-              {() => (
-                <>
-                  <p className="m-0 mb-1 font-semibold">{t("top.notifications")}</p>
-                  <p className="m-0 text-muted">{t("top.notificationsEmpty")}</p>
-                </>
-              )}
-            </Popover>
-            <Button asChild variant="secondary" size="sm" className="hidden sm:inline-flex">
-              <Link href="/app/shop">
-                <ExternalLink aria-hidden="true" />
-                {t("top.viewShop")}
-              </Link>
-            </Button>
-            <Popover label={t("top.account")} icon={<UserRound />}>
-              {(close) => (
-                <div className="flex flex-col gap-3">
-                  <div>
-                    <p className="m-0 text-caption text-muted">{t("top.signedInAs")}</p>
-                    <p className="m-0 font-semibold break-all">{me?.email}</p>
-                    {studio ? (
-                      <p className="m-0 text-caption text-muted">
-                        {studio.name} · {t(`roles.${studio.role}`)}
-                      </p>
-                    ) : null}
-                  </div>
-                  <Link
-                    href="/app/shop"
-                    onClick={close}
-                    className="font-semibold text-primary sm:hidden"
-                  >
-                    {t("top.viewShop")}
-                  </Link>
-                  <Button variant="secondary" size="sm" onClick={signOut}>
-                    {t("signOut")}
-                  </Button>
+            {() => (
+              <div className="flex flex-col gap-3">
+                <div>
+                  <p className="m-0 text-caption text-muted">{t("top.signedInAs")}</p>
+                  <p className="m-0 font-semibold break-all">{me?.email}</p>
                 </div>
-              )}
-            </Popover>
-          </div>
-        </header>
+                <Button variant="secondary" onClick={signOut}>
+                  <LogOut aria-hidden="true" />
+                  {t("signOut")}
+                </Button>
+              </div>
+            )}
+          </Popover>
+        </div>
+      </header>
 
-        <main className="mx-auto flex w-full max-w-[1040px] flex-col gap-6 px-4 py-6 sm:py-8">
+      {/* Phone header */}
+      <header className="sticky top-0 z-20 flex h-15 items-center gap-3 border-b border-line bg-surface px-4 lg:hidden">
+        <StudioMark name={studioName} />
+        <span className="flex-1 truncate font-bold">{studioName}</span>
+        {notifications}
+      </header>
+
+      <div className="lg:grid lg:grid-cols-[248px_1fr]">
+        {/* Sidebar (desktop) */}
+        <aside className="hidden border-r border-line lg:sticky lg:top-16 lg:flex lg:h-[calc(100dvh-4rem)] lg:flex-col lg:p-3">
+          <nav aria-label={t("nav.label")} className="flex flex-1 flex-col gap-1">
+            {SECTIONS.filter((s) => s.key !== "settings").map((s) => (
+              <NavLink key={s.key} section={s} current={current} />
+            ))}
+            <div className="mt-auto flex flex-col gap-1 border-t border-line pt-3">
+              <Link
+                href="/app/help"
+                className="flex min-h-12 items-center gap-3 rounded-[10px] px-3 font-medium text-ink no-underline hover:bg-subtle focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                <CircleHelp className="size-5 text-muted" aria-hidden="true" />
+                {t("nav.help")}
+              </Link>
+              <NavLink
+                section={SECTIONS[SECTIONS.length - 1] as (typeof SECTIONS)[number]}
+                current={current}
+              />
+            </div>
+          </nav>
+        </aside>
+
+        <main className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 px-4 pt-6 pb-28 sm:px-8 lg:px-12 lg:pt-10 lg:pb-12">
           {failed ? <Banner tone="danger" title={text.error("internal")} /> : null}
           {!me && !failed ? <p className="text-muted">{t("loading")}</p> : null}
           {me && !studio ? <Banner tone="info" title={t("noStudio")} /> : null}
           {value ? <StudioContext.Provider value={value}>{children}</StudioContext.Provider> : null}
         </main>
       </div>
+
+      {/* Phone tab bar */}
+      <nav
+        aria-label={t("nav.label")}
+        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-line bg-surface pb-[max(env(safe-area-inset-bottom),8px)] lg:hidden"
+      >
+        {SECTIONS.filter((s) => s.tab).map((s) => (
+          <Link
+            key={s.key}
+            href={s.href}
+            aria-current={current === s.key ? "page" : undefined}
+            className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold no-underline ${current === s.key ? "text-primary" : "text-muted"}`}
+          >
+            <s.icon className="size-6" aria-hidden="true" />
+            {t(`nav.${s.key}`)}
+          </Link>
+        ))}
+        <button
+          type="button"
+          onClick={() => palette.current?.open()}
+          className="flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold text-muted"
+        >
+          <Search className="size-6" aria-hidden="true" />
+          {t("top.search")}
+        </button>
+        <button
+          type="button"
+          onClick={() => moreSheet.current?.showModal()}
+          aria-haspopup="dialog"
+          className="flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold text-muted"
+        >
+          <Ellipsis className="size-6" aria-hidden="true" />
+          {t("nav.more")}
+        </button>
+      </nav>
+
+      {/* Phone "More" sheet */}
+      <dialog
+        ref={moreSheet}
+        aria-label={t("nav.more")}
+        className="mx-0 mt-auto mb-0 max-h-[85dvh] w-full max-w-none rounded-t-2xl bg-surface p-0 backdrop:bg-ink/40 lg:hidden"
+      >
+        <div className="flex items-center justify-between border-b border-line px-4 py-2">
+          <p className="m-0 font-bold">{t("nav.more")}</p>
+          <button
+            type="button"
+            onClick={closeMore}
+            aria-label={t("top.close")}
+            className="grid size-11 place-items-center rounded-md hover:bg-subtle"
+          >
+            <X className="size-5" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="flex flex-col gap-1 p-3">
+          {SECTIONS.filter((s) => !s.tab).map((s) => (
+            <NavLink key={s.key} section={s} current={current} onNavigate={closeMore} />
+          ))}
+          <Link
+            href="/app/shop"
+            onClick={closeMore}
+            className="flex min-h-12 items-center gap-3 rounded-[10px] px-3 font-medium text-ink no-underline hover:bg-subtle"
+          >
+            <ExternalLink className="size-5 text-muted" aria-hidden="true" />
+            {t("top.viewShop")}
+          </Link>
+          <button
+            type="button"
+            onClick={signOut}
+            className="flex min-h-12 items-center gap-3 rounded-[10px] px-3 text-left font-medium text-ink hover:bg-subtle"
+          >
+            <LogOut className="size-5 text-muted" aria-hidden="true" />
+            {t("signOut")}
+          </button>
+        </div>
+      </dialog>
+
+      <CommandPalette ref={palette} />
     </div>
   );
 }

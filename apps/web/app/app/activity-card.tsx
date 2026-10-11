@@ -1,7 +1,6 @@
 "use client";
 
 import type { ActivityItem } from "@daybell/api";
-import { Card, CardTitle } from "@daybell/ui";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client-api";
@@ -22,16 +21,16 @@ export function ActivityCard({ refreshKey }: { refreshKey: number }) {
 
   if (!items) return null;
   return (
-    <Card className="flex flex-col gap-3">
-      <CardTitle>{t("title")}</CardTitle>
+    <section className="overflow-hidden rounded-2xl border border-line bg-surface">
+      <h2 className="m-0 px-5 pt-4 pb-3 text-[15px] leading-5 font-bold">{t("title")}</h2>
       {items.length === 0 ? (
-        <p className="m-0 text-muted">{t("empty")}</p>
+        <p className="m-0 border-t border-line px-5 py-4 text-muted">{t("empty")}</p>
       ) : (
-        <ol className="m-0 flex list-none flex-col gap-2 p-0">
+        <ol className="m-0 flex list-none flex-col border-t border-line px-5 py-2">
           {items.map((item) => (
             <li
               key={item.id}
-              className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line pb-2 last:border-b-0"
+              className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-sm"
             >
               <span>
                 {t(item.type, {
@@ -47,6 +46,6 @@ export function ActivityCard({ refreshKey }: { refreshKey: number }) {
           ))}
         </ol>
       )}
-    </Card>
+    </section>
   );
 }
