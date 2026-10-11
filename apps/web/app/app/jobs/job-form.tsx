@@ -25,7 +25,9 @@ const OPTION = "flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 
 
 /**
  * The client picker as one field (D133): an ARIA 1.2 combobox with a listbox. The list opens on focus or typing;
- * arrow keys move, Enter picks, Escape closes the list (and only the list). "Add new client" is always the last
+ * arrow keys move, Enter picks the active option, Escape closes the list (and only the list). It opens on click, typing
+ * or ArrowDown, not on focus alone, so it stays shut when focus returns from the client dialog. Nothing is active until
+ * the arrow keys or pointer choose, so Enter alone submits the form. "Add new client" is always the last
  * option, so with no clients yet it is the only one.
  */
 function ClientCombobox({
@@ -47,7 +49,8 @@ function ClientCombobox({
   const [text, setText] = useState(value?.name ?? "");
   const [typed, setTyped] = useState(false);
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  // -1: no option is active, so Enter submits the form instead of picking something nobody chose.
+  const [active, setActive] = useState(-1);
   const [results, setResults] = useState<Client[]>([]);
   // Only the newest search may fill the list; slower, older answers are dropped.
   const latest = useRef(0);
@@ -58,6 +61,13 @@ function ClientCombobox({
   }, [value]);
 
   const query = typed ? text.trim() : "";
+  // A new query makes the old results stale: drop them, so Enter can't pick one during the pause before searching.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the query changes.
+  useEffect(() => {
+    setResults([]);
+    setActive(-1);
+  }, [query]);
+
   useEffect(() => {
     if (!open) return;
     const timer = setTimeout(async () => {
@@ -67,7 +77,7 @@ function ClientCombobox({
       );
       if (res.ok && seq === latest.current) {
         setResults(res.data.clients);
-        setActive(0);
+        setActive(-1);
       }
     }, 200);
     return () => clearTimeout(timer);
@@ -77,9 +87,16 @@ function ClientCombobox({
   const count = results.length + 1;
   const addIndex = results.length;
 
+  // Keep the active option in sight as the arrow keys move through a long list.
+  useEffect(() => {
+    if (active >= 0)
+      document.getElementById(`${id}-opt-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active, id]);
+
   function close() {
     setOpen(false);
     setTyped(false);
+    setActive(-1);
     // Clearing the field removes the client; anything else half-typed goes back to the chosen name.
     if (!text.trim()) onChange(null);
     else setText(value?.name ?? "");
@@ -109,7 +126,7 @@ function ClientCombobox({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (open) setActive((a) => Math.max(a - 1, 0));
-    } else if (e.key === "Enter" && open) {
+    } else if (e.key === "Enter" && open && active >= 0) {
       e.preventDefault();
       pick(active);
     } else if (e.key === "Escape" && open) {
@@ -133,7 +150,7 @@ function ClientCombobox({
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={open ? `${id}-opt-${active}` : undefined}
+          aria-activedescendant={open && active >= 0 ? `${id}-opt-${active}` : undefined}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
           autoComplete="off"
@@ -144,7 +161,6 @@ function ClientCombobox({
             setTyped(true);
             setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
           onBlur={() => {
             if (open) close();
@@ -160,7 +176,7 @@ function ClientCombobox({
       <ul
         id={listId}
         role="listbox"
-        aria-label={t("client")}
+        aria-label={t("clientOptions")}
         hidden={!open}
         className="absolute inset-x-0 top-full z-20 m-0 mt-1 max-h-64 list-none overflow-y-auto rounded-md border border-line bg-surface p-1 shadow-md"
       >
@@ -282,6 +298,8 @@ export function JobForm({
       const { internalNumber: _taken, ...rest } = res.fields;
       showErrors(rest);
       await suggest(true);
+      // The number lives under "More options": open it so the fresh number is seen.
+      setMoreOpen(true);
       if (Object.keys(rest).length === 0)
         setProblem(text.field("validation.internalNumberTaken") ?? "");
       return;

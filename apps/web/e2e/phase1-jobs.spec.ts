@@ -67,8 +67,10 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await dialog.getByLabel("Picture day").fill("2026-10-14");
   await dialog.getByLabel("Job type").selectOption("school");
   let combobox = dialog.getByRole("combobox", { name: "Client (optional)" });
+  // The combobox's own listbox, not the Job type <select> options.
+  let clientList = dialog.getByRole("listbox", { name: "Clients" });
   await combobox.fill("Lincoln");
-  await dialog.getByRole("option", { name: new RegExp(client) }).click();
+  await clientList.getByRole("option", { name: new RegExp(client) }).click();
   await expect(combobox).toHaveValue(client);
   await dialog.getByLabel(/^Subjects expected/).fill("120");
   await dialog.getByRole("button", { name: "Create job", exact: true }).click();
@@ -99,22 +101,25 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await dialog.getByLabel("Picture day").fill("2027-04-02");
   await dialog.getByLabel("Job type").selectOption("sports");
   combobox = dialog.getByRole("combobox", { name: "Client (optional)" });
+  clientList = dialog.getByRole("listbox", { name: "Clients" });
   await combobox.fill(newClient);
   // No client matches yet, so the list holds only "Add new client".
-  await expect(dialog.getByRole("option")).toHaveCount(1);
+  await expect(clientList.getByRole("option")).toHaveCount(1);
   // Escape closes the list, not the dialog.
   await combobox.press("Escape");
   await expect(combobox).toHaveAttribute("aria-expanded", "false");
   await expect(dialog).toBeVisible();
   await combobox.fill(newClient);
-  await dialog.getByRole("option", { name: "Add new client" }).click();
+  await clientList.getByRole("option", { name: "Add new client" }).click();
   const nested = page.getByRole("dialog", { name: "Add client" });
   await expect(nested.getByLabel("Client name", { exact: true })).toHaveValue(newClient);
   await page.keyboard.press("Escape");
   await expect(nested).toBeHidden();
   await expect(dialog).toBeVisible();
+  // Focus coming back from the client dialog doesn't reopen the list.
+  await expect(combobox).toHaveAttribute("aria-expanded", "false");
   await combobox.click();
-  await dialog.getByRole("option", { name: "Add new client" }).click();
+  await clientList.getByRole("option", { name: "Add new client" }).click();
   await nested.getByLabel("Client name", { exact: true }).fill(newClient);
   await fillClient(nested, null, "ON");
   await nested.getByRole("button", { name: "Add client", exact: true }).click();

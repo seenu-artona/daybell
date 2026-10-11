@@ -413,7 +413,8 @@
         "cancel": "Cancel",
         "create": "Create job",
         "save": "Save changes",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "clientOptions": "Clients"
       },
       "detail": {
         "back": "All jobs",

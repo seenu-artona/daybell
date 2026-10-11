@@ -22,7 +22,9 @@ them. The `/job-categories` endpoint, its types and the job's `category` field a
 - **Layout:** two columns on desktop and one on phones. Long text is full width; short pairs sit side by side. Rows are
   `gap-5` apart, section titles use the `text-title-sm` token, and there are no extra borders or boxes.
 - **A picker is one field:** an ARIA 1.2 combobox (`role=combobox` with a listbox, `aria-activedescendant`, arrow keys,
-  Enter to pick, Escape to close the list only). The list opens on focus or typing. "Add new client" is always the last
+  Enter to pick, Escape to close the list only). The list opens on click, typing or ArrowDown (not on focus
+  alone, so it stays shut when focus returns from a dialog). No option is active until chosen with the arrow keys or
+  pointer, so Enter alone submits the form. "Add new client" is always the last
   option, and with no clients it is the only one. It opens the client form on top, prefilled with what was typed, and
   selects the new client.
 - **Buttons name the action:** "Create job" and "Add client" when creating, "Save changes" when editing, with Cancel
