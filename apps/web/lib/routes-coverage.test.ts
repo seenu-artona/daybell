@@ -12,7 +12,7 @@ function routeFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) return routeFiles(full);
-    return name === "route.ts" ? [full] : [];
+    return /^route\.(ts|tsx|js|mjs)$/.test(name) ? [full] : [];
   });
 }
 

@@ -268,6 +268,21 @@
     "success": "{status} response",
     "errors": "Possible errors",
     "errorsTitle": "Errors",
-    "errorsBody": "Every error has the same shape: a stable code, a plain message, and for form problems a message key per field."
+    "errorsBody": "Every error has the same shape: a stable code, a plain message, and for form problems a message key per field.",
+    "metaTitle": "Daybell API",
+    "option": "Option {n}",
+    "arrayOf": "list of",
+    "groups": {
+      "Account": "Account",
+      "Team": "Team",
+      "Studio": "Studio"
+    },
+    "access": {
+      "public": "Anyone",
+      "signed-in": "Signed in",
+      "owner-admin": "Owners and admins",
+      "owner": "Owners"
+    },
+    "englishOnly": "Endpoint descriptions are in English, for developers."
   }
 }

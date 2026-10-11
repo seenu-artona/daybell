@@ -9,4 +9,6 @@ From that list we generate `/api/v1/openapi.json` (OpenAPI 3.1, for integrations
 `/docs/api` reference page. A test walks `app/api/v1` and fails if a route exists without a description or the other
 way round, so the docs can't drift from the code.
 
+Endpoint summaries are English (developer audience); page labels come from the locale files.
+
 Rejected: hand-written docs (drift), a heavy third-party docs viewer (extra dependency for a small page).

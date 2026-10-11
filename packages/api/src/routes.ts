@@ -47,7 +47,7 @@ export const ROUTES: RouteSpec[] = [
     access: "public",
     body: z.union([signUpInput, joinSignUpInput]),
     success: { status: 201, schema: checkEmailResponse, description: "Email sent." },
-    errors: ["invalid_input", "conflict", "region_unavailable", "rate_limited"],
+    errors: ["invalid_input", "conflict", "region_unavailable", "rate_limited", "internal"],
   },
   {
     method: "POST",
@@ -92,7 +92,7 @@ export const ROUTES: RouteSpec[] = [
     access: "signed-in",
     body: passwordUpdateInput,
     success: { status: 204, description: "Password saved." },
-    errors: ["invalid_input", "not_signed_in"],
+    errors: ["invalid_input", "not_signed_in", "internal"],
   },
   {
     method: "GET",
@@ -174,13 +174,6 @@ export const ROUTES: RouteSpec[] = [
   },
 ];
 
-export const ACCESS_LABEL: Record<Access, string> = {
-  public: "Anyone",
-  "signed-in": "Signed in",
-  "owner-admin": "Owners and admins",
-  owner: "Owners",
-};
-
 const errorBody = {
   type: "object",
   required: ["error"],
@@ -201,12 +194,27 @@ const errorBody = {
   },
 };
 
-const json = (schema: z.ZodType) =>
-  z.toJSONSchema(schema, { target: "openapi-3.0", unrepresentable: "any" });
+type Json = Record<string, unknown>;
+
+/**
+ * JSON Schema (2020-12, which OpenAPI 3.1 uses) for a zod schema. Named shapes (`.meta({ id })`) are moved into
+ * `components.schemas` and referenced from there, so every `$ref` in openapi.json resolves.
+ */
+function json(schema: z.ZodType, components: Record<string, Json>): Json {
+  const out = z.toJSONSchema(schema, { unrepresentable: "any" }) as Json;
+  delete out.$schema;
+  const defs = (out.$defs ?? {}) as Record<string, Json>;
+  delete out.$defs;
+  const fix = (v: Json): Json =>
+    JSON.parse(JSON.stringify(v).replaceAll('"#/$defs/', '"#/components/schemas/')) as Json;
+  for (const [name, def] of Object.entries(defs)) components[name] = fix(def);
+  return fix(out);
+}
 
 /** OpenAPI 3.1 description of /api/v1. Served at /api/v1/openapi.json. */
 export function buildOpenApi(serverUrl: string) {
   const paths: Record<string, Record<string, unknown>> = {};
+  const components: Record<string, Json> = {};
   for (const r of ROUTES) {
     const params = [...r.path.matchAll(/\{(\w+)\}/g)].map((m) => ({
       name: m[1],
@@ -218,7 +226,7 @@ export function buildOpenApi(serverUrl: string) {
       [r.success.status]: {
         description: r.success.description,
         ...(r.success.schema
-          ? { content: { "application/json": { schema: json(r.success.schema) } } }
+          ? { content: { "application/json": { schema: json(r.success.schema, components) } } }
           : {}),
       },
     };
@@ -240,7 +248,7 @@ export function buildOpenApi(serverUrl: string) {
         ? {
             requestBody: {
               required: true,
-              content: { "application/json": { schema: json(r.body) } },
+              content: { "application/json": { schema: json(r.body, components) } },
             },
           }
         : {}),
@@ -258,5 +266,6 @@ export function buildOpenApi(serverUrl: string) {
     servers: [{ url: `${serverUrl}/api/v1` }],
     tags: [{ name: "Account" }, { name: "Team" }, { name: "Studio" }],
     paths,
+    components: { schemas: components },
   };
 }

@@ -19,6 +19,16 @@ describe("API description", () => {
     expect(Object.keys(signUp.responses)).toEqual(expect.arrayContaining(["201", "400", "409"]));
   });
 
+  it("every $ref resolves inside the document, and nullable fields are nullable", () => {
+    const text = JSON.stringify(doc);
+    for (const [, name] of text.matchAll(/"\$ref":"#\/components\/schemas\/(\w+)"/g)) {
+      expect(doc.components.schemas).toHaveProperty(name as string);
+    }
+    expect(text).not.toContain("#/definitions/");
+    expect(text).not.toContain("#/$defs/");
+    expect(JSON.stringify(doc.components.schemas.Me)).toContain('"null"');
+  });
+
   it("documents path parameters", () => {
     const del = doc.paths["/studio/invites/{id}"]?.delete as { parameters: { name: string }[] };
     expect(del.parameters[0]?.name).toBe("id");
