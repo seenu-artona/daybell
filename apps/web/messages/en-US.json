@@ -297,29 +297,17 @@
       "reports": "Reports",
       "settings": "Settings",
       "soon": "Soon",
-      "openMenu": "Open menu",
-      "closeMenu": "Close menu",
-      "menu": "Menu",
-      "more": "More",
-      "help": "Help"
+      "help": "Help",
+      "collapse": "Collapse menu",
+      "expand": "Expand menu"
     },
     "top": {
-      "search": "Search",
-      "searchPlaceholder": "Jump to…",
-      "searchEmpty": "No matches.",
-      "help": "Help",
-      "helpBody": "Guides and the help assistant arrive soon. For now, email your Daybell contact.",
       "notifications": "Notifications",
-      "notificationsEmpty": "You're all caught up. New orders and reminders will show here.",
       "viewShop": "View my shop",
       "account": "Account",
       "signedInAs": "Signed in as",
-      "close": "Close",
-      "searchShortcutMac": "⌘K",
-      "searchShortcutOther": "Ctrl K",
       "searchResults": "{count, plural, =0 {No matches} one {# result} other {# results}}",
-      "searchPlaceholderLong": "Search jobs, contacts, orders",
-      "newCount": "{count, plural, =0 {Notifications} one {# new} other {# new}}"
+      "notificationsNone": "No notifications yet."
     },
     "soon": {
       "title": "{section} is coming soon",
@@ -502,7 +490,10 @@
         "saving": "Saving…",
         "cancel": "Cancel",
         "notesPlaceholder": "Only your studio sees this",
-        "add": "Add client"
+        "add": "Add client",
+        "viewTitle": "Client",
+        "close": "Close",
+        "readOnlyNote": "Owners and admins change clients."
       },
       "address": {
         "us": {
@@ -672,6 +663,17 @@
         "staffOnly": "Owners, admins and photographers manage the roster.",
         "changed": "The roster changed while you were checking. The rows were checked again."
       }
+    },
+    "brand": "Daybell",
+    "search": {
+      "label": "Search jobs and clients",
+      "placeholder": "Search",
+      "resultsLabel": "Search results",
+      "jobs": "Jobs",
+      "clients": "Clients",
+      "jobMeta": "{number} · {status}",
+      "loading": "Searching…",
+      "empty": "No jobs or clients match."
     }
   },
   "invite": {

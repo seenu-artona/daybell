@@ -21,6 +21,25 @@ describe("sectionForPath", () => {
     expect(SOON_SECTIONS).toEqual(SECTIONS.filter((s) => !s.built).map((s) => s.key));
   });
 
+  it("lists the D126 sections in menu order, Settings last", () => {
+    expect(SECTIONS.map((s) => s.key)).toEqual([
+      "home",
+      "jobs",
+      "orders",
+      "products",
+      "contacts",
+      "marketing",
+      "money",
+      "reports",
+      "settings",
+    ]);
+  });
+
+  it("highlights Jobs on every job page section (D137)", () => {
+    expect(sectionForPath("/app/jobs/0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e/people")).toBe("jobs");
+    expect(sectionForPath("/app/jobs/0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e/import")).toBe("jobs");
+  });
+
   it("has jobs and contacts built (Phase 1 step 1)", () => {
     expect(SOON_SECTIONS).not.toContain("jobs");
     expect(SOON_SECTIONS).not.toContain("contacts");

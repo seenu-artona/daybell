@@ -76,10 +76,13 @@ const PAIR = "grid gap-5 sm:grid-cols-2";
 export function ClientForm({
   client,
   initialName = "",
+  readOnly = false,
   onCancel,
   onSaved,
 }: {
   client: Client | null;
+  /** Show an existing client without saving (people who aren't owners or admins, D138 Q2). */
+  readOnly?: boolean;
   /** For a new client: the name typed in the job form's client field, if any. */
   initialName?: string;
   onCancel: () => void;
@@ -104,12 +107,14 @@ export function ClientForm({
     value: draft[key],
     onChange: (e: { target: { value: string } }) => setDraft({ ...draft, [key]: e.target.value }),
     error: text.field(errors[key]),
+    readOnly,
   });
 
   async function save(e: FormEvent) {
     // A form inside the job form's dialog: never submit the outer form too.
     e.preventDefault();
     e.stopPropagation();
+    if (readOnly) return;
     setBusy(true);
     setErrors({});
     setProblem(null);
@@ -169,6 +174,7 @@ export function ClientForm({
             onChange={(v) => setDraft({ ...draft, country: v as Country })}
             options={COUNTRIES.map((c) => ({ value: c, label: t(`form.countries.${c}`) }))}
             error={text.field(errors.country)}
+            disabled={readOnly}
           />
         </div>
       </fieldset>
@@ -209,14 +215,17 @@ export function ClientForm({
         placeholder={t("form.notesPlaceholder")}
         {...input("notes")}
       />
+      {readOnly ? <p className="m-0 text-caption text-muted">{t("form.readOnlyNote")}</p> : null}
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
         <Button variant="secondary" onClick={onCancel}>
-          {t("form.cancel")}
+          {readOnly ? t("form.close") : t("form.cancel")}
         </Button>
-        <Button type="submit" disabled={busy}>
-          {busy ? t("form.saving") : client ? t("form.save") : t("form.add")}
-        </Button>
+        {readOnly ? null : (
+          <Button type="submit" disabled={busy}>
+            {busy ? t("form.saving") : client ? t("form.save") : t("form.add")}
+          </Button>
+        )}
       </div>
     </form>
   );

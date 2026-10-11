@@ -1,8 +1,12 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { AppShell } from "./app-shell";
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
+
+// Desktop only (D136; ADR 0013): a phone lays the page out 1280px wide and scales it to fit, so it shows the same
+// screen. Never set maximumScale or userScalable: people must be able to zoom (WCAG 1.4.4).
+export const viewport: Viewport = { width: 1280 };
 
 export default function StudioAppLayout({ children }: { children: ReactNode }) {
   return <AppShell>{children}</AppShell>;

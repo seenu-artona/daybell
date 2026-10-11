@@ -4,19 +4,34 @@ import type { Client, ClientsResponse } from "@daybell/api";
 import { Badge, Banner, Button, Table, TableCell, TableHead, TableRow } from "@daybell/ui";
 import { Plus } from "lucide-react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { Dialog } from "../../dialog";
 import { useStudio } from "../../me-context";
+import { PageFrame } from "../../page-frame";
 import { ClientForm } from "../client-form";
 
 const TAB =
   "inline-flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-semibold no-underline";
 
-/** Contacts › Clients. Clients are added here ahead of time, or from the job form. Parents and Children come later. */
-export default function ClientsPage() {
+/**
+ * Contacts › Clients. Clients are added here ahead of time, or from the job form. Parents and Children come later.
+ * ?client=<id> (from the menu search, D138 Q2) opens that client in the dialog: editable for owners and admins,
+ * read-only for everyone else. Only an id goes in the URL.
+ */
+export default function ClientsPageRoute() {
+  // useSearchParams needs a Suspense boundary; the page loads its data in the browser anyway.
+  return (
+    <Suspense>
+      <ClientsPage />
+    </Suspense>
+  );
+}
+
+function ClientsPage() {
   const t = useTranslations("app.contacts");
   const text = useApiText();
   const { me } = useStudio();
@@ -41,8 +56,25 @@ export default function ClientsPage() {
     void load(null);
   }, []);
 
+  // A client opened from the menu search: show it, then clean the URL so the same result can be opened again.
+  const requested = useSearchParams().get("client");
+  const router = useRouter();
+  useEffect(() => {
+    if (!requested) return;
+    let current = true;
+    api<{ client: Client }>(`/clients/${encodeURIComponent(requested)}`).then((res) => {
+      if (!current) return;
+      if (res.ok) setEditing(res.data.client);
+      else setProblem(text.error(res.code));
+      router.replace("/app/contacts/clients", { scroll: false });
+    });
+    return () => {
+      current = false;
+    };
+  }, [requested, router, text]);
+
   return (
-    <>
+    <PageFrame>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="m-0 text-h1">{t("title")}</h1>
         {canManage ? (
@@ -127,11 +159,18 @@ export default function ClientsPage() {
       <Dialog
         open={editing !== null}
         onClose={() => setEditing(null)}
-        title={editing === "new" ? t("form.addTitle") : t("form.editTitle")}
+        title={
+          editing === "new"
+            ? t("form.addTitle")
+            : canManage
+              ? t("form.editTitle")
+              : t("form.viewTitle")
+        }
       >
         {editing ? (
           <ClientForm
             client={editing === "new" ? null : editing}
+            readOnly={!canManage}
             onCancel={() => setEditing(null)}
             onSaved={() => {
               setEditing(null);
@@ -140,6 +179,6 @@ export default function ClientsPage() {
           />
         ) : null}
       </Dialog>
-    </>
+    </PageFrame>
   );
 }
