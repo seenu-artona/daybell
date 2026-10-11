@@ -5,11 +5,15 @@
   "description": "Shared settings: environment variable schema and constants.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "server-only": "0.0.1"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
