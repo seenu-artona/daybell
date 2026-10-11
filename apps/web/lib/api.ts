@@ -18,9 +18,19 @@ export function assertSameOrigin(request: Request): void {
   if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
     throw new ApiError("forbidden", "Cross-site requests are not allowed.");
   }
+  // The Origin must be this site: our configured address, or the host the browser actually addressed.
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin && origin !== siteUrl()) {
-    throw new ApiError("forbidden", "Cross-site requests are not allowed.");
+  if (origin) {
+    const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+    let originHost: string | null = null;
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      originHost = null;
+    }
+    if (origin !== siteUrl() && originHost !== host) {
+      throw new ApiError("forbidden", "Cross-site requests are not allowed.");
+    }
   }
   const type = request.headers.get("content-type") ?? "";
   const hasBody = request.headers.get("content-length") !== "0" && request.body !== null;

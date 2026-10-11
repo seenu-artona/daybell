@@ -19,7 +19,7 @@ port = 54324
 
 [auth]
 enabled = true
-site_url = "http://127.0.0.1:3000"
+site_url = "http://localhost:3000"
 additional_redirect_urls = ["http://127.0.0.1:3000/**", "http://localhost:3000/**"]
 minimum_password_length = 12
 
