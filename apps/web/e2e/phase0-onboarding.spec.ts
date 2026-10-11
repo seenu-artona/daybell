@@ -43,11 +43,21 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await page.getByLabel("Their email").fill(photographer);
   await page.getByLabel("Role").selectOption("photographer");
   await page.getByRole("button", { name: "Create invite" }).click();
-  const inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
+  let inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
   expect(inviteLink).toMatch(/\/invite#[0-9a-f]{64}$/);
   await expect(page.getByText("Waiting to join")).toBeVisible();
   // The activity log records it (event log, D96).
   await expect(page.getByText(`${owner} invited someone as photographer`)).toBeVisible();
+
+  // Withdrawing an invite works and is logged; then invite again for the photographer to use.
+  await page.getByRole("button", { name: "Withdraw" }).click();
+  await expect(page.getByText("Waiting to join")).toHaveCount(0);
+  await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
+  await page.getByLabel("Their email").fill(photographer);
+  await page.getByLabel("Role").selectOption("photographer");
+  await page.getByRole("button", { name: "Create invite" }).click();
+  await expect(page.getByText("Waiting to join")).toBeVisible();
+  inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
 
   // 4. The photographer, in a fresh browser, creates an account from the invite and joins.
   const staff = await (await browser.newContext()).newPage();
