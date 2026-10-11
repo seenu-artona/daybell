@@ -94,6 +94,17 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   const codeCell = maya.getByRole("cell").nth(4);
   await expect(codeCell).toHaveText(CA_CODE);
   const mayaCode = ((await codeCell.textContent()) ?? "").trim();
+  // The roster table scrolls inside its own box; nothing in it may widen the page (D72). When the sr-only actions
+  // header escaped the box, the phone's layout viewport grew past the screen and taps landed on the wrong element.
+  if (info.project.use.isMobile) {
+    const widths = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth,
+      layout: window.innerWidth,
+      screen: document.documentElement.clientWidth,
+    }));
+    expect(widths.page).toBeLessThanOrEqual(widths.screen);
+    expect(widths.layout).toBe(widths.screen);
+  }
 
   // 3. Edit her grade in the same form, which shows her code.
   await maya.getByRole("button", { name: "Edit Maya Johnson" }).click();
