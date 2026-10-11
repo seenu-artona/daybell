@@ -2,7 +2,7 @@
 -- seeded categories, and events without personal data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(47);
+select plan(51);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -222,6 +222,24 @@ select results_eq(
          || ' / ' || (select name from public.jobs where id = (select id from ids where k = 'job'))
          || ' / ' || (select name from public.job_categories where id = (select id from ids where k = 'fall')) $$,
   array['Lincoln Elementary / Lincoln Fall Picture Day / Fall'], 'photographers and staff could not edit anything');
+-- Job numbers past five digits keep counting (bigint), stay unique, and can be used.
+select lives_ok($$
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Big', 'seniors', '2026-10-01', 'JOB999999999',
+          (select id from ids where k = 'fall')) $$,
+  'a nine-digit job number is accepted');
+select is(public.next_job_number('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 'JOB1000000000',
+  'the next number after JOB999999999 is JOB1000000000');
+select lives_ok($$
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Bigger', 'seniors', '2026-10-01',
+          public.next_job_number('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), (select id from ids where k = 'fall')) $$,
+  'a job can be created with that next number');
+select throws_ok($$
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Twin', 'seniors', '2026-10-01', 'JOB1000000000',
+          (select id from ids where k = 'fall')) $$,
+  '23505', null, 'and it stays unique');
 select lives_ok($$ delete from public.studios where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' $$,
   'a studio can still be deleted with its jobs, clients and categories');
 

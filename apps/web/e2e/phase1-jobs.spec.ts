@@ -42,7 +42,8 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   // 1. Contacts opens on Clients. Add a client; Quebec is refused (D131).
   await page.goto("/app/contacts");
   await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
-  await expect(main.getByText("Children", { exact: true })).toBeVisible();
+  // The tab reads "Children" followed by a "Soon" badge.
+  await expect(main.getByText(/^Children/)).toBeVisible();
   await main.getByRole("button", { name: "Add client", exact: true }).click();
   const addClient = page.getByRole("dialog", { name: "Add new client" });
   await fillClient(addClient, client, "QC");

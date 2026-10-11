@@ -405,7 +405,6 @@
         "nameHelp": "Parents see this in your shop, e.g. Lincoln Elementary · Fall 2026.",
         "pictureDay": "Date of picture day",
         "client": "Client",
-        "optional": "Optional",
         "clientSearch": "Search your clients",
         "clientNone": "No client",
         "clientSelected": "Selected client: {name}",
@@ -498,8 +497,7 @@
         "phone": "Phone",
         "email": "Email",
         "notes": "Additional notes",
-        "notesHelp": "Only visible to you.",
-        "optional": "Optional",
+        "notesHelp": "Only your studio sees this. Parents and schools never do.",
         "save": "Save client",
         "saving": "Saving…",
         "cancel": "Cancel"
@@ -516,7 +514,8 @@
           "postalCode": "Postal code"
         }
       }
-    }
+    },
+    "optionalLabel": "{label} (optional)"
   },
   "invite": {
     "title": "You've been invited",

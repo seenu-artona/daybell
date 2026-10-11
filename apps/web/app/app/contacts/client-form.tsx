@@ -64,7 +64,7 @@ function body(draft: ClientDraft) {
   };
 }
 
-const LEGEND = "mb-2 p-0 text-[15px] font-bold";
+const LEGEND = "mb-2 p-0 text-title-sm font-bold";
 
 /**
  * Add or edit a client (GotPhoto "Add new client"): name, address, contact person and private notes. Used in
@@ -88,7 +88,8 @@ export function ClientForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const optional = ` (${t("form.optional")})`;
+  const ta = useTranslations("app");
+  const optional = (label: string) => ta("optionalLabel", { label });
 
   const input = (key: TextKey) => ({
     name: key,
@@ -125,28 +126,28 @@ export function ClientForm({
       <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
         <legend className={LEGEND}>{t("form.address")}</legend>
         <Field
-          label={`${t("form.addressLine1")}${optional}`}
+          label={optional(t("form.addressLine1"))}
           autoComplete="address-line1"
           {...input("addressLine1")}
         />
         <Field
-          label={`${t("form.addressLine2")}${optional}`}
+          label={optional(t("form.addressLine2"))}
           autoComplete="address-line2"
           {...input("addressLine2")}
         />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
-            label={`${t(`address.${region}.postalCode`)}${optional}`}
+            label={optional(t(`address.${region}.postalCode`))}
             autoComplete="postal-code"
             {...input("postalCode")}
           />
           <Field
-            label={`${t("form.city")}${optional}`}
+            label={optional(t("form.city"))}
             autoComplete="address-level2"
             {...input("city")}
           />
           <Field
-            label={`${t(`address.${region}.region`)}${optional}`}
+            label={optional(t(`address.${region}.region`))}
             help={t(`address.${region}.regionHelp`)}
             autoComplete="address-level1"
             maxLength={2}
@@ -166,24 +167,24 @@ export function ClientForm({
         <legend className={LEGEND}>{t("form.contact")}</legend>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
-            label={`${t("form.firstName")}${optional}`}
+            label={optional(t("form.firstName"))}
             autoComplete="off"
             {...input("contactFirstName")}
           />
           <Field
-            label={`${t("form.lastName")}${optional}`}
+            label={optional(t("form.lastName"))}
             autoComplete="off"
             {...input("contactLastName")}
           />
           <Field
-            label={`${t("form.phone")}${optional}`}
+            label={optional(t("form.phone"))}
             type="tel"
             maxLength={30}
             autoComplete="off"
             {...input("contactPhone")}
           />
           <Field
-            label={`${t("form.email")}${optional}`}
+            label={optional(t("form.email"))}
             type="email"
             autoComplete="off"
             {...input("contactEmail")}
@@ -192,7 +193,7 @@ export function ClientForm({
       </fieldset>
 
       <TextAreaField
-        label={`${t("form.notes")}${optional}`}
+        label={optional(t("form.notes"))}
         help={t("form.notesHelp")}
         {...input("notes")}
       />

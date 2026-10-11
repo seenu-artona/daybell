@@ -241,7 +241,7 @@ set search_path = ''
 as $$
   select 'JOB' || lpad(n::text, greatest(5, char_length(n::text)), '0')
   from (
-    select coalesce(max(substring(upper(j.internal_number) from '^JOB0*(\d{1,9})$')::bigint), 0) + 1 as n
+    select coalesce(max(substring(upper(j.internal_number) from '^JOB0*(\d{1,18})$')::bigint), 0) + 1::bigint as n
     from public.jobs j
     where j.studio_id = p_studio_id
   ) s;

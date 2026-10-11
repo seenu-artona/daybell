@@ -11,7 +11,7 @@ import { JOB_TYPES, type JobType } from "@daybell/core";
 import { Banner, Button, Field } from "@daybell/ui";
 import { Check, Plus, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { ClientForm } from "../contacts/client-form";
@@ -35,7 +35,11 @@ function ClientPicker({
   error?: string | undefined;
 }) {
   const t = useTranslations("app.jobs.form");
+  const ta = useTranslations("app");
   const listId = useId();
+  const errorId = useId();
+  // Only the newest search may fill the list; slower, older answers are dropped.
+  const latest = useRef(0);
   const [picking, setPicking] = useState(value === null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Client[] | null>(null);
@@ -44,10 +48,11 @@ function ClientPicker({
     if (!picking) return;
     const timer = setTimeout(async () => {
       const q = query.trim();
+      const seq = ++latest.current;
       const res = await api<ClientsResponse>(
         `/clients?limit=20${q ? `&q=${encodeURIComponent(q)}` : ""}`,
       );
-      if (res.ok) setResults(res.data.clients);
+      if (res.ok && seq === latest.current) setResults(res.data.clients);
     }, 250);
     return () => clearTimeout(timer);
   }, [query, picking]);
@@ -60,7 +65,7 @@ function ClientPicker({
   return (
     <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
       <legend className="mb-1.5 p-0 text-label text-ink">
-        {t("client")} ({t("optional")})
+        {ta("optionalLabel", { label: t("client") })}
       </legend>
       {value && !picking ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-line-strong px-3 py-2">
@@ -91,6 +96,7 @@ function ClientPicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-controls={listId}
+              aria-describedby={error ? errorId : undefined}
               className="[&_input]:pl-9"
             />
           </div>
@@ -123,7 +129,11 @@ function ClientPicker({
           </div>
         </>
       )}
-      {error ? <span className="text-caption text-danger">{error}</span> : null}
+      {error ? (
+        <span id={errorId} className="text-caption text-danger">
+          {error}
+        </span>
+      ) : null}
       <Button variant="secondary" className="self-start" onClick={onAddNew}>
         <Plus aria-hidden="true" />
         {t("addClient")}
@@ -146,6 +156,7 @@ export function JobForm({
   onSaved: (job: Job) => void;
 }) {
   const t = useTranslations("app.jobs");
+  const ta = useTranslations("app");
   const tc = useTranslations("app.contacts");
   const text = useApiText();
   const [name, setName] = useState(job?.name ?? "");
@@ -160,17 +171,24 @@ export function JobForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The number the server suggested. Left unchanged, it isn't sent, so the server picks the next free one itself
+  // (and retries if another job takes it at the same moment).
+  const [suggested, setSuggested] = useState<string | null>(null);
   const isNew = job === null;
+
+  const suggest = useCallback(async (replace: boolean) => {
+    const res = await api<{ internalNumber: string }>("/jobs/next-number");
+    if (!res.ok) return;
+    setSuggested(res.data.internalNumber);
+    setInternalNumber((current) => (replace || !current ? res.data.internalNumber : current));
+  }, []);
 
   useEffect(() => {
     api<JobCategoriesResponse>("/job-categories").then((res) => {
       if (res.ok) setCategories(res.data.categories);
     });
-    if (isNew)
-      api<{ internalNumber: string }>("/jobs/next-number").then((res) => {
-        if (res.ok) setInternalNumber((current) => current || res.data.internalNumber);
-      });
-  }, [isNew]);
+    if (isNew) void suggest(false);
+  }, [isNew, suggest]);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -182,11 +200,12 @@ export function JobForm({
       return;
     }
     setBusy(true);
+    const usesSuggestion = isNew && suggested !== null && internalNumber.trim() === suggested;
     const body = {
       name,
       pictureDay,
       clientId: client?.id ?? null,
-      internalNumber,
+      ...(usesSuggestion ? {} : { internalNumber }),
       type,
       categoryId,
       subjectsExpected: count ? Number(count) : null,
@@ -197,6 +216,15 @@ export function JobForm({
     });
     setBusy(false);
     if (res.ok) return onSaved(res.data.job);
+    if (usesSuggestion && res.fields.internalNumber === "validation.internalNumberTaken") {
+      // Others took the suggested numbers first: offer a fresh one and let the person save again.
+      const { internalNumber: _taken, ...rest } = res.fields;
+      setErrors(rest);
+      await suggest(true);
+      if (Object.keys(rest).length === 0)
+        setProblem(text.field("validation.internalNumberTaken") ?? "");
+      return;
+    }
     setErrors(res.fields);
     if (Object.keys(res.fields).length === 0) setProblem(text.error(res.code));
   }
@@ -262,7 +290,7 @@ export function JobForm({
           />
         </div>
         <Field
-          label={`${t("form.subjects")} (${t("form.optional")})`}
+          label={ta("optionalLabel", { label: t("form.subjects") })}
           help={t("form.subjectsHelp")}
           type="number"
           inputMode="numeric"

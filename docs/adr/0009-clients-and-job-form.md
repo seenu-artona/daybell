@@ -11,10 +11,13 @@ a merged migration, add a new one.
 
 **Organizations become clients.** `organizations` is renamed to `clients` with its constraints, index, policies, grants and
 trigger, and `jobs.organization_id` becomes `client_id` (still a composite studio FK, ADR 0008). The `kind` column and
-its enum are dropped; the job type says what kind of shoot it is. Clients gain an optional contact person (first
-name, last name, phone up to 30 characters, email) next to the address and notes ("Only visible to you"). The address
+its enum are dropped; the job type says what kind of shoot it is. **This loses data:** every existing client's kind
+(school, daycare, club, league, dance studio, other) is deleted by the migration and can't be recovered from the
+database. This is a known, accepted loss (Seenu, Oct 11 2026). Clients gain an optional contact person (first
+name, last name, phone up to 30 characters, email) next to the address and notes. The address
 and contact person are personal data: events carry field names only, and nothing about them goes in logs or URLs
-(the list cursor is an id; `?q=` searches client names only). The Quebec rules stay. The school-portal option comes with
+(the list cursor is an id; `?q=` searches client names only). Everyone on the studio's team sees each client's contact person, address and
+notes (Seenu, Oct 11 2026), so reads stay open to all members, as for jobs. Parents and schools never see them. The Quebec rules stay. The school-portal option comes with
 the portal in Phase 7.
 
 **Old events stay as written.** Events are immutable, so `organization.created/updated` rows remain. The activity log
