@@ -54,7 +54,10 @@ export const POST = handle(async (request: Request) => {
   });
   if (error?.status === 429)
     throw new ApiError("rate_limited", "Too many attempts. Please wait a minute.");
-  if (error) throw new ApiError("internal", "We couldn't send the email. Please try again.");
+  if (error) {
+    console.error("auth_otp_error", error.code ?? "unknown", error.status ?? 0);
+    throw new ApiError("internal", "We couldn't send the email. Please try again.");
+  }
 
   (await cookies()).set(REGION_COOKIE, region, REGION_COOKIE_OPTIONS);
   return NextResponse.json({ status: "check_email" }, { status: 201 });

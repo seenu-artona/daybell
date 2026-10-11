@@ -48,7 +48,7 @@ export function SignUpForm({ regions, joining }: { regions: DataRegion[]; joinin
     <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
       <div>
         <h1 className="m-0 text-h2">{joining ? t("joinTitle") : t("title")}</h1>
-        <p className="mt-1 mb-0 text-muted">{joining ? t("joinIntro") : t("intro")}</p>
+        {joining ? <p className="mt-1 mb-0 text-muted">{t("joinIntro")}</p> : null}
       </div>
       {formError ? <Banner tone="danger" title={formError} /> : null}
       {joining ? null : (

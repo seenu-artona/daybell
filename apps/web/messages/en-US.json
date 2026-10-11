@@ -157,7 +157,6 @@
     "regionFixed": "Your studio's data will be stored in {region}.",
     "signUp": {
       "title": "Start your studio",
-      "intro": "Everything GotPhoto does. 3% of what you sell, nothing if nothing sells. We'll email you a link to get started.",
       "studioName": "Studio name",
       "studioSlug": "Studio web address",
       "studioSlugHelp": "Parents see this in links, e.g. {example}.",
