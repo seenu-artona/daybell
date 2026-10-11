@@ -1,0 +1,125 @@
+{
+  "meta": {
+    "title": "Daybell",
+    "description": "School and volume photography software."
+  },
+  "home": {
+    "title": "Daybell",
+    "status": "Foundations in progress.",
+    "componentsLink": "See the design system components"
+  },
+  "gallery": {
+    "title": "Design system",
+    "intro": "Every Daybell component, built from the design system tokens. This page is for review only.",
+    "sections": {
+      "basics": "Basics",
+      "layout": "Layout",
+      "money": "Money & wins",
+      "feedback": "Feedback",
+      "photos": "Photos",
+      "shop": "Parent shop"
+    },
+    "buttons": {
+      "publish": "Publish job",
+      "preview": "Preview shop",
+      "addPhotos": "Add photos",
+      "delete": "Delete job",
+      "small": "Small",
+      "disabled": "Disabled"
+    },
+    "fields": {
+      "jobName": "Job name",
+      "jobNameValue": "Lincoln Elementary · Fall 2026",
+      "jobNameHelp": "Parents see this on the shop.",
+      "code": "Access code",
+      "codeError": "Codes need 6 characters. Try LINC26."
+    },
+    "badges": {
+      "draft": "Draft",
+      "selling": "Selling",
+      "paidOut": "Paid out",
+      "closing": "Closes in 3 days",
+      "failed": "Payment failed"
+    },
+    "jobs": {
+      "lincoln": "Lincoln Elementary",
+      "lincolnMeta": "Picture day Oct 14 · 412 kids",
+      "westview": "Westview Soccer",
+      "westviewMeta": "Shoot Oct 19 · 6 teams"
+    },
+    "table": {
+      "order": "Order",
+      "parent": "Parent",
+      "status": "Status",
+      "total": "Total",
+      "paid": "Paid",
+      "atLab": "At lab",
+      "shipped": "Shipped"
+    },
+    "menu": {
+      "label": "Main",
+      "home": "Home",
+      "jobs": "Jobs",
+      "orders": "Orders",
+      "ordersCount": "{count} new orders",
+      "products": "Products",
+      "money": "Money",
+      "schools": "Schools",
+      "settings": "Settings"
+    },
+    "money": {
+      "season": "Sales this season",
+      "week": "▲ {amount} this week",
+      "payout": "Next payout · Fri",
+      "ordersToday": "Orders today",
+      "progressLabel": "Sales goal",
+      "toGoal": "{percent}% to goal",
+      "ofGoal": "{sold} of {goal}",
+      "families": "{ordered} of {total} families ordered"
+    },
+    "celebrate": {
+      "title": "You're live!",
+      "body": "Lincoln Elementary is open. Parents can start ordering now.",
+      "again": "Celebrate again"
+    },
+    "banners": {
+      "tipTitle": "Tip",
+      "tip": "Add a retake day so families who missed picture day can still order.",
+      "closingTitle": "Closing soon",
+      "closing": "Lincoln Elementary closes for orders in 3 days.",
+      "declinedTitle": "Card declined",
+      "declined": "Ask the parent to try another card.",
+      "shippedTitle": "Batch shipped",
+      "shipped": "148 orders are on their way to the school.",
+      "toast": "New order · {amount} from Jamie O."
+    },
+    "photos": {
+      "alt": "Sample portrait {n}",
+      "tag": "Pose {n}",
+      "group": "Choose a pose"
+    },
+    "shop": {
+      "studio": "North Peak Photo",
+      "initials": "NP",
+      "watermark": "NORTH PEAK",
+      "cart": "Cart, {count} items",
+      "footer": "Secure checkout",
+      "accessTitle": "Lincoln Elementary photos are here",
+      "accessSub": "Enter the code from your picture day flyer.",
+      "codeLabel": "Access code",
+      "codeChar": "Character {n}",
+      "email": "Email for your receipt",
+      "seePhotos": "See my photos",
+      "choose": "Choose a package",
+      "basic": "Basic",
+      "basicDesc": "1 × 8x10, 2 × 5x7",
+      "family": "Family",
+      "familyDesc": "1 × 8x10, 4 × 5x7, 8 wallets + digital",
+      "digital": "Digital only",
+      "digitalDesc": "Full-res download, print release",
+      "popular": "Most popular",
+      "addToCart": "Add to cart · {amount}",
+      "emailPlaceholder": "you@example.com"
+    }
+  }
+}

@@ -1,0 +1,88 @@
+/* GENERATED from tokens.json by scripts/build-theme.mjs. Do not edit by hand. */
+@theme {
+  --color-ink: #14231c;
+  --color-primary: #0e7a4f;
+  --color-primary-hover: #0b6542;
+  --color-primary-soft: #e3f1ea;
+  --color-lime: #b8f05a;
+  --color-lime-soft: #eefad6;
+  --color-canvas: #f6f5f1;
+  --color-surface: #ffffff;
+  --color-line: #e4e2dc;
+  --color-line-strong: #c9c6be;
+  --color-muted: #5b6660;
+  --color-subtle: #efede7;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-warning: #f2b33d;
+  --color-warning-text: #8a5a00;
+  --color-warning-soft: #fff5df;
+  --color-info: #1d5faf;
+  --color-info-soft: #e7f0fb;
+  --color-on-primary: #ffffff;
+  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --text-display: 48px;
+  --text-display--line-height: 56px;
+  --text-display--font-weight: 800;
+  --text-h1: 32px;
+  --text-h1--line-height: 40px;
+  --text-h1--font-weight: 700;
+  --text-h2: 24px;
+  --text-h2--line-height: 32px;
+  --text-h2--font-weight: 700;
+  --text-h3: 18px;
+  --text-h3--line-height: 26px;
+  --text-h3--font-weight: 600;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 24px;
+  --text-body-lg--font-weight: 400;
+  --text-body: 14px;
+  --text-body--line-height: 22px;
+  --text-body--font-weight: 400;
+  --text-title-sm: 15px;
+  --text-title-sm--line-height: 20px;
+  --text-title-sm--font-weight: 700;
+  --text-label: 13px;
+  --text-label--line-height: 18px;
+  --text-label--font-weight: 600;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-caption--font-weight: 500;
+  --text-micro: 11px;
+  --text-micro--line-height: 18px;
+  --text-micro--font-weight: 700;
+  --text-money-xl: 40px;
+  --text-money-xl--line-height: 44px;
+  --text-money-xl--font-weight: 800;
+  --text-stat: 24px;
+  --text-stat--line-height: 28px;
+  --text-stat--font-weight: 700;
+  --text-code: 13px;
+  --text-code--line-height: 20px;
+  --text-code--font-weight: 400;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+  --shadow-sm: 0 1px 2px rgba(20,35,28,0.06);
+  --shadow-md: 0 6px 20px rgba(20,35,28,0.10);
+  --shadow-lg: 0 16px 40px rgba(20,35,28,0.16);
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Parent shop slot: charcoal by default (D116); ShopFrame overrides with the studio's colour (D117). */
+  --color-studio: #1c1c1e;
+  --color-on-studio: #ffffff;
+  --color-studio-ring: #1c1c1e;
+}
+
+@keyframes daybell-pop {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+:root {
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-celebrate: 1600ms;
+}

@@ -1,13 +1,17 @@
-/* Temporary styles until the design system package lands (Phase 0, step 2). */
-:root {
-  --ink: #14231c;
-  --canvas: #f6f5f1;
-  --muted: #5b6660;
-}
-html,
-body {
-  margin: 0;
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: system-ui, sans-serif;
+@import "tailwindcss";
+@import "@daybell/ui/theme.css";
+@source "../../../packages/ui/src";
+
+@layer base {
+  html {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    margin: 0;
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
 }

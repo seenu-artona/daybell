@@ -1,16 +1,22 @@
-import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import "@fontsource-variable/plus-jakarta-sans";
 import "./globals.css";
+import type { Metadata } from "next";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getTranslations } from "next-intl/server";
+import type { ReactNode } from "react";
 
-export const metadata: Metadata = {
-  title: "Daybell",
-  description: "School and volume photography software.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("meta");
+  return { title: t("title"), description: t("description") };
+}
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const locale = await getLocale();
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang={locale}>
+      <body>
+        <NextIntlClientProvider>{children}</NextIntlClientProvider>
+      </body>
     </html>
   );
 }
