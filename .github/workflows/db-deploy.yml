@@ -1,0 +1,51 @@
+name: Deploy database (staging)
+
+# Applies migrations to both staging databases when they change on main (D113: one database per region).
+# Secrets (set by Seenu in GitHub > Settings > Secrets and variables > Actions):
+#   STAGING_DB_URL_US, STAGING_DB_URL_CA  - each project's Postgres connection string (session pooler)
+on:
+  push:
+    branches: [main]
+    paths: ["packages/db/supabase/migrations/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - region: us
+            secret: STAGING_DB_URL_US
+          - region: ca
+            secret: STAGING_DB_URL_CA
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.118.0
+      - name: Apply migrations
+        env:
+          DB_URL: ${{ secrets[matrix.secret] }}
+        run: supabase db push --workdir packages/db --db-url "$DB_URL"
+      - name: Record this database's region (first deploy only; never changes)
+        env:
+          DB_URL: ${{ secrets[matrix.secret] }}
+        run: >
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c
+          "insert into app.config (key, value) values ('data_region', '${{ matrix.region }}') on conflict (key) do nothing;"
+      - name: Check the region recorded matches
+        env:
+          DB_URL: ${{ secrets[matrix.secret] }}
+        run: |
+          got=$(psql "$DB_URL" -tAc "select value from app.config where key = 'data_region'")
+          test "$got" = "${{ matrix.region }}" || { echo "Region mismatch: database says '$got'"; exit 1; }

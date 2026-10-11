@@ -1,0 +1,15 @@
+# Supabase CLI settings for local development and CI (D7). Hosted projects are configured in the dashboard.
+project_id = "daybell"
+
+[db]
+port = 54322
+major_version = 17
+
+[api]
+enabled = false
+
+[studio]
+enabled = false
+
+[auth]
+enabled = true

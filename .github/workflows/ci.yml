@@ -28,3 +28,15 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  database:
+    # Row-level security and cross-studio leak tests against the real Supabase Postgres (D96, D113).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.118.0
+      - run: supabase db start --workdir packages/db
+      - run: supabase test db --workdir packages/db
