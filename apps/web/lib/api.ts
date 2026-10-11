@@ -33,7 +33,9 @@ export function assertSameOrigin(request: Request): void {
     }
   }
   const type = request.headers.get("content-type") ?? "";
-  const hasBody = request.headers.get("content-length") !== "0" && request.body !== null;
+  // A body exists only if the client declared one (length > 0 or chunked). Bodiless DELETE/POST need no JSON type.
+  const length = Number(request.headers.get("content-length") ?? "0");
+  const hasBody = length > 0 || request.headers.has("transfer-encoding");
   if (hasBody && !type.toLowerCase().startsWith("application/json")) {
     throw new ApiError("invalid_input", "Send JSON with Content-Type: application/json.");
   }
