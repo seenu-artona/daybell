@@ -14,6 +14,10 @@ import { StudioContext, type StudioContextValue } from "./me-context";
 import { SECTIONS, type SectionKey, sectionForPath } from "./nav";
 import { Popover } from "./popover";
 
+const FOCUS = " focus-visible:outline-2 focus-visible:outline-primary";
+const SHEET_ROW = `flex min-h-12 items-center gap-3 rounded-[10px] px-3 font-medium text-ink no-underline hover:bg-subtle${FOCUS}`;
+const SETTINGS = SECTIONS.find((s) => s.key === "settings");
+
 const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -75,12 +79,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   const t = useTranslations("app");
   const text = useApiText();
   const router = useRouter();
-  const current = sectionForPath(usePathname());
   const palette = useRef<PaletteHandle>(null);
   const moreSheet = useRef<HTMLDialogElement>(null);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
+  const [isMac, setIsMac] = useState(true);
+  const [signOutFailed, setSignOutFailed] = useState(false);
+  const pathname = usePathname();
+  const current = sectionForPath(pathname);
+
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent));
+  }, []);
 
   // The "More" sheet is for phones; if the window grows to desktop width, close it so the page stays usable.
   useEffect(() => {
@@ -101,7 +112,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [router]);
 
   async function signOut() {
-    await api("/auth/sign-out", { method: "POST" });
+    setSignOutFailed(false);
+    const res = await api("/auth/sign-out", { method: "POST" });
+    // If the session could not be ended, stay put and say so; never pretend the user is signed out.
+    if (!res.ok) {
+      moreSheet.current?.close();
+      setSignOutFailed(true);
+      return;
+    }
     router.replace("/sign-in");
     router.refresh();
   }
@@ -112,6 +130,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     me && studio
       ? { me: { ...me, studio }, version, changed: () => setVersion((v) => v + 1) }
       : null;
+  const onHelp = pathname.replace(/\/+$/, "") === "/app/help";
   const closeMore = () => moreSheet.current?.close();
 
   const notifications = (
@@ -147,7 +166,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Search className="size-5" aria-hidden="true" />
           <span className="flex-1 text-left">{t("top.searchPlaceholderLong")}</span>
           <kbd className="rounded-sm border border-line px-1.5 text-caption" aria-hidden="true">
-            ⌘K
+            {isMac ? t("top.searchShortcutMac") : t("top.searchShortcutOther")}
           </kbd>
         </button>
         <div className="flex items-center gap-2">
@@ -199,20 +218,19 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="mt-auto flex flex-col gap-1 border-t border-line pt-3">
               <Link
                 href="/app/help"
-                className="flex min-h-12 items-center gap-3 rounded-[10px] px-3 font-medium text-ink no-underline hover:bg-subtle focus-visible:outline-2 focus-visible:outline-primary"
+                aria-current={onHelp ? "page" : undefined}
+                className={`flex min-h-12 items-center gap-3 rounded-[10px] px-3 no-underline focus-visible:outline-2 focus-visible:outline-primary ${onHelp ? "bg-primary-soft font-bold text-primary-hover" : "font-medium text-ink hover:bg-subtle"}`}
               >
                 <CircleHelp className="size-5 text-muted" aria-hidden="true" />
                 {t("nav.help")}
               </Link>
-              <NavLink
-                section={SECTIONS[SECTIONS.length - 1] as (typeof SECTIONS)[number]}
-                current={current}
-              />
+              {SETTINGS ? <NavLink section={SETTINGS} current={current} /> : null}
             </div>
           </nav>
         </aside>
 
         <main className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 px-4 pt-6 pb-28 sm:px-8 lg:px-12 lg:pt-10 lg:pb-12">
+          {signOutFailed ? <Banner tone="danger" title={t("signOutFailed")} /> : null}
           {failed ? <Banner tone="danger" title={text.error("internal")} /> : null}
           {!me && !failed ? <p className="text-muted">{t("loading")}</p> : null}
           {me && !studio ? <Banner tone="info" title={t("noStudio")} /> : null}
@@ -230,7 +248,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             key={s.key}
             href={s.href}
             aria-current={current === s.key ? "page" : undefined}
-            className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold no-underline ${current === s.key ? "text-primary" : "text-muted"}`}
+            className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption no-underline${FOCUS} ${current === s.key ? "font-bold text-primary before:absolute before:inset-x-4 before:top-0 before:h-[3px] before:rounded-b-full before:bg-primary" : "font-semibold text-muted"}`}
           >
             <s.icon className="size-6" aria-hidden="true" />
             {t(`nav.${s.key}`)}
@@ -239,7 +257,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <button
           type="button"
           onClick={() => palette.current?.open()}
-          className="flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold text-muted"
+          className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold text-muted${FOCUS}`}
         >
           <Search className="size-6" aria-hidden="true" />
           {t("top.search")}
@@ -248,7 +266,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           type="button"
           onClick={() => moreSheet.current?.showModal()}
           aria-haspopup="dialog"
-          className="flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold text-muted"
+          className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-caption font-semibold text-muted${FOCUS}`}
         >
           <Ellipsis className="size-6" aria-hidden="true" />
           {t("nav.more")}
@@ -267,7 +285,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             onClick={closeMore}
             aria-label={t("top.close")}
-            className="grid size-11 place-items-center rounded-md hover:bg-subtle"
+            className={`grid size-11 place-items-center rounded-md hover:bg-subtle${FOCUS}`}
           >
             <X className="size-5" aria-hidden="true" />
           </button>
@@ -276,19 +294,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           {SECTIONS.filter((s) => !s.tab).map((s) => (
             <NavLink key={s.key} section={s} current={current} onNavigate={closeMore} />
           ))}
-          <Link
-            href="/app/shop"
-            onClick={closeMore}
-            className="flex min-h-12 items-center gap-3 rounded-[10px] px-3 font-medium text-ink no-underline hover:bg-subtle"
-          >
+          <Link href="/app/help" onClick={closeMore} className={SHEET_ROW}>
+            <CircleHelp className="size-5 text-muted" aria-hidden="true" />
+            {t("nav.help")}
+          </Link>
+          <Link href="/app/shop" onClick={closeMore} className={SHEET_ROW}>
             <ExternalLink className="size-5 text-muted" aria-hidden="true" />
             {t("top.viewShop")}
           </Link>
-          <button
-            type="button"
-            onClick={signOut}
-            className="flex min-h-12 items-center gap-3 rounded-[10px] px-3 text-left font-medium text-ink hover:bg-subtle"
-          >
+          <button type="button" onClick={signOut} className={`${SHEET_ROW} text-left`}>
             <LogOut className="size-5 text-muted" aria-hidden="true" />
             {t("signOut")}
           </button>

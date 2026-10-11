@@ -99,7 +99,7 @@ export default function HomePage() {
           <select
             value={range}
             onChange={(e) => setRange(e.target.value as (typeof RANGES)[number])}
-            className="min-h-11 appearance-none rounded-[10px] border border-line bg-surface py-0 pr-10 pl-4 text-sm font-semibold"
+            className="min-h-11 appearance-none rounded-[10px] border border-line bg-surface py-0 pr-10 pl-4 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-primary"
           >
             {RANGES.map((r) => (
               <option key={r} value={r}>
@@ -143,7 +143,9 @@ export default function HomePage() {
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
         <Panel title={th("needsYou")}>
-          {steps.length === 0 ? (
+          {hasTeam === null ? (
+            <p className="m-0 border-t border-line px-5 py-4 text-muted">{th("checking")}</p>
+          ) : steps.length === 0 ? (
             <p className="m-0 border-t border-line px-5 py-4 text-muted">{th("nothingNeeded")}</p>
           ) : (
             <ul className="m-0 list-none p-0">
@@ -171,7 +173,7 @@ export default function HomePage() {
                     ) : step.href ? (
                       <Link
                         href={step.href}
-                        className="inline-flex min-h-11 items-center px-2 font-semibold text-primary no-underline hover:underline"
+                        className="inline-flex min-h-11 items-center px-2 font-semibold text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
                       >
                         {th("actions.invite")}
                         <span className="sr-only"> — {t(`checklist.${step.key}`)}</span>

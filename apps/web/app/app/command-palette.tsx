@@ -64,7 +64,7 @@ export function CommandPalette({ ref }: { ref: Ref<PaletteHandle> }) {
       aria-label={t("top.search")}
       className="m-auto mt-[12vh] w-[min(600px,calc(100vw-32px))] rounded-lg border border-line bg-surface p-0 shadow-lg backdrop:bg-ink/40"
     >
-      <div className="flex items-center gap-2 border-b border-line px-4">
+      <div className="flex items-center gap-2 border-b border-line px-4 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-primary">
         <Search className="size-5 text-muted" aria-hidden="true" />
         <input
           value={query}

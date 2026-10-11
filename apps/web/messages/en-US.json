@@ -332,8 +332,10 @@
       "recently": "Recently",
       "actions": {
         "invite": "Invite"
-      }
-    }
+      },
+      "checking": "Checking…"
+    },
+    "signOutFailed": "We couldn't sign you out. Check your connection and try again."
   },
   "invite": {
     "title": "You've been invited",

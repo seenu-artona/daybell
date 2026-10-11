@@ -37,7 +37,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await page.getByRole("button", { name: "Save and continue" }).click();
   await expect(page).toHaveURL(/\/app$/);
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
-  await expect(page.getByText(`North Peak ${tag}`).first()).toBeVisible();
+  await expect(page.getByText(`North Peak ${tag}`).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs you" })).toBeVisible();
   const phone = info.project.name === "phone";
 
@@ -82,6 +82,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
 
   // Home now shows the team step done, and the activity log has all three changes (event log, D96).
   await page.goto("/app");
+  await expect(page.getByText("Brand your shop")).toBeVisible();
   await expect(page.getByRole("link", { name: /Invite your team/ })).toHaveCount(0);
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
