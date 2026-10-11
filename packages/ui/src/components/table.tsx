@@ -1,10 +1,14 @@
 import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { cn } from "../lib/cn";
 
-/** Scrolls sideways on small screens instead of squashing columns. */
+/**
+ * Scrolls sideways on small screens instead of squashing columns. The wrapper is `relative` so absolutely positioned
+ * content inside (e.g. `sr-only` header text) is clipped by it too; otherwise that text escapes the scroll box, widens
+ * the whole page and phones zoom the layout out (D72).
+ */
 export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+    <div className="relative overflow-x-auto rounded-lg border border-line bg-surface">
       <table className={cn("w-full border-collapse text-sm", className)} {...props} />
     </div>
   );

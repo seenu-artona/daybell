@@ -66,7 +66,20 @@ jobs:
           . /tmp/sb.env
           echo "NEXT_PUBLIC_SUPABASE_URL_CA=$API_URL" >> "$GITHUB_ENV"
           echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY_CA=${PUBLISHABLE_KEY:-$ANON_KEY}" >> "$GITHUB_ENV"
+          # Server-only code writes (ADR 0011): the local stack's service role key, printed by `supabase status`. Masked,
+          # and never committed.
+          secret_key="${SERVICE_ROLE_KEY:-$SECRET_KEY}"
+          test -n "$secret_key"
+          echo "::add-mask::$secret_key"
+          echo "SUPABASE_SECRET_KEY_CA=$secret_key" >> "$GITHUB_ENV"
           echo "SITE_URL=http://localhost:3000" >> "$GITHUB_ENV"
+          # Access code keys (ADR 0011): fresh random keys for each run's throwaway database, never committed.
+          hmac_key="$(openssl rand -base64 32)"
+          encryption_key="$(openssl rand -base64 32)"
+          echo "::add-mask::$hmac_key"
+          echo "::add-mask::$encryption_key"
+          echo "ACCESS_CODE_HMAC_KEY=$hmac_key" >> "$GITHUB_ENV"
+          echo "ACCESS_CODE_ENCRYPTION_KEY=$encryption_key" >> "$GITHUB_ENV"
       # Build through Turborepo exactly as Vercel does, so undeclared settings fail here, not in previews.
       - run: pnpm turbo run build --filter=@daybell/web
       - run: pnpm --filter @daybell/web exec playwright install --with-deps chromium

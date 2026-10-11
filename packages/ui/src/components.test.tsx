@@ -185,4 +185,20 @@ describe("components", () => {
     render(<Button>Save</Button>);
     expect(screen.getByRole("button", { name: "Save" }).getAttribute("type")).toBe("button");
   });
+
+  it("table scroll box contains absolutely positioned content such as sr-only text", () => {
+    // jsdom has no layout, so check the class that makes the scroll box the containing block (D72).
+    render(
+      <Table>
+        <tbody>
+          <TableRow>
+            <TableCell>#10234</TableCell>
+          </TableRow>
+        </tbody>
+      </Table>,
+    );
+    const box = screen.getByRole("table").parentElement;
+    expect(box?.className).toMatch(/\brelative\b/);
+    expect(box?.className).toMatch(/\boverflow-x-auto\b/);
+  });
 });

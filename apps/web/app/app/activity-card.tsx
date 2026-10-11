@@ -3,6 +3,7 @@
 import type { ActivityItem } from "@daybell/api";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { unnamedSubject } from "@/lib/activity";
 import { api } from "@/lib/client-api";
 
 /** The studio's activity log (owners and admins). Reads the event log (D96). */
@@ -37,8 +38,7 @@ export function ActivityCard({ refreshKey }: { refreshKey: number }) {
                   actor: item.actorEmail ?? t("someone"),
                   subject: item.subjectEmail ?? t("aTeammate"),
                   role: item.role ? tr(item.role).toLowerCase() : "",
-                  name:
-                    item.subjectName ?? (item.type.startsWith("job.") ? t("aJob") : t("aClient")),
+                  name: item.subjectName ?? t(unnamedSubject(item.type)),
                 })}
               </span>
               <time className="text-caption text-muted" dateTime={item.occurredAt}>

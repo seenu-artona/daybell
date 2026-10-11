@@ -56,6 +56,7 @@ export const ACTIVITY_TYPES = [
   "client.updated",
   "job.created",
   "job.updated",
+  "roster.imported",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -70,7 +71,7 @@ export const activityItem = z
       .meta({ description: "Who it was about, for member events." }),
     role: studioRole.nullable(),
     subjectName: z.string().nullable().meta({
-      description: "The job's or client's current name, for job and client events.",
+      description: "The job's or client's current name, for job, client and roster events.",
     }),
     occurredAt: z.iso.datetime({ offset: true }),
   })
@@ -149,3 +150,76 @@ export const nextJobNumberResponse = z.object({
 export const clientsResponse = z.object({ clients: z.array(client), nextCursor });
 export type ClientsResponse = z.infer<typeof clientsResponse>;
 export const clientResponse = z.object({ client });
+
+// ── Roster (Phase 1 step 2, ADR 0011) ─────────────────────────────────────────────────────────────────────────────
+export const group = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    childCount: z.number().int().meta({ description: "Children in it." }),
+  })
+  .meta({ id: "Group", description: "A class, team or group of children in a job." });
+export type Group = z.infer<typeof group>;
+
+export const child = z
+  .object({
+    id: z.uuid(),
+    jobId: z.uuid(),
+    group: z.object({ id: z.uuid(), name: z.string() }).nullable(),
+    firstName: z.string(),
+    lastName: z.string(),
+    studentId: z.string().nullable(),
+    grade: z.string().nullable(),
+    parentEmail: z.string().nullable(),
+    doNotPhotograph: z.boolean(),
+    doNotPublish: z.boolean(),
+    schoolProvided: z
+      .boolean()
+      .meta({ description: "Roster data from the school; never used for marketing." }),
+    accessCode: z.string().nullable().meta({
+      description:
+        "8 characters shown as K7QM-4XPA, or null if the stored copy can't be read. Never put it in URLs or logs.",
+    }),
+    duplicate: z.boolean().meta({
+      description:
+        "Another child in the job has the same student ID, or (without IDs) the same name in the same class.",
+    }),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({
+    id: "Child",
+    description: "A child on a job's roster. Names, emails and codes are personal data.",
+  });
+export type Child = z.infer<typeof child>;
+
+export const childrenResponse = z.object({
+  children: z.array(child),
+  nextCursor,
+  total: z.number().int().meta({ description: "Children matching the filter." }),
+  duplicates: z.number().int().meta({ description: "Of those, how many are flagged duplicates." }),
+});
+export type ChildrenResponse = z.infer<typeof childrenResponse>;
+export const childResponse = z.object({ child });
+export const groupsResponse = z.object({ groups: z.array(group) });
+export type GroupsResponse = z.infer<typeof groupsResponse>;
+export const groupResponse = z.object({ group });
+
+export const rosterImportResponse = z
+  .object({
+    dryRun: z.boolean(),
+    added: z.number().int(),
+    updated: z.number().int(),
+    groupsAdded: z.number().int(),
+    duplicates: z.number().int().meta({ description: "Rows flagged as duplicates." }),
+    rows: z
+      .array(
+        z.object({
+          action: z.enum(["add", "update"]),
+          duplicate: z.boolean(),
+        }),
+      )
+      .meta({ description: "One per request row, in the same order." }),
+  })
+  .meta({ id: "RosterImport" });
+export type RosterImportResponse = z.infer<typeof rosterImportResponse>;

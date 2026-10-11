@@ -1,0 +1,97 @@
+import { childInput, rosterQuery } from "@daybell/api";
+import { NextResponse } from "next/server";
+import { accessCodeCryptoKeys, newAccessCode } from "@/lib/access-codes";
+import { check, handle, parseBody, parseQuery } from "@/lib/api";
+import { page } from "@/lib/jobs";
+import {
+  addChildWithRetries,
+  assertGroupInJob,
+  CHILD_COLUMNS,
+  type ChildRow,
+  childColumns,
+  isDuplicate,
+  loadRoster,
+  loadRosterJob,
+  pathId,
+  toChild,
+} from "@/lib/roster";
+import { assertCanEditRoster, studioScope } from "@/lib/studio";
+import { codeWriteRpc } from "@/lib/supabase/service";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+/**
+ * GET /api/v1/jobs/:id/children — the roster, by last and first name, in pages. Read through the list_children RPC so
+ * names never appear in a URL; the cursor and filter are IDs (D96).
+ */
+export const GET = handle(async (request: Request, ctx: Ctx) => {
+  const jobId = await pathId(ctx, "Job not found.");
+  const { limit, cursor, groupId } = parseQuery(request, rosterQuery);
+  const { supabase, studio } = await studioScope();
+  await loadRosterJob(supabase, studio.id, jobId);
+  const list = check(
+    await supabase.rpc("list_children", {
+      p_job_id: jobId,
+      p_group_id: groupId && groupId !== "none" ? groupId : null,
+      p_after: cursor ?? null,
+      p_limit: limit + 1,
+      p_no_group: groupId === "none",
+    }),
+  ) as { children: ChildRow[]; total: number; duplicates: number };
+  const { items, nextCursor } = page(list.children, limit);
+  const keys = await accessCodeCryptoKeys();
+  const children = await Promise.all(items.map((row) => toChild(row, keys)));
+  return NextResponse.json({
+    children,
+    nextCursor,
+    total: list.total,
+    duplicates: list.duplicates,
+  });
+});
+
+/**
+ * POST /api/v1/jobs/:id/children — owners, admins and photographers add a child. The server generates the access code
+ * (CSPRNG), stores its hash and an encrypted copy through add_child (server-only, ADR 0011), and tries a new code if one
+ * were ever taken.
+ */
+export const POST = handle(async (request: Request, ctx: Ctx) => {
+  const jobId = await pathId(ctx, "Job not found.");
+  // Who and what role first: nobody else gets as far as reading the body (S4).
+  const { supabase, studio, userId } = await studioScope();
+  assertCanEditRoster(studio);
+  const input = await parseBody(request, childInput);
+  await loadRosterJob(supabase, studio.id, jobId);
+  const group = await assertGroupInJob(supabase, studio.id, jobId, input.groupId);
+  const keys = await accessCodeCryptoKeys();
+  let id = "";
+  check(
+    await addChildWithRetries(async () => {
+      id = crypto.randomUUID();
+      const code = await newAccessCode(studio.region, id, keys);
+      return codeWriteRpc(studio.region, "add_child", userId, {
+        p_job_id: jobId,
+        p_child: {
+          id,
+          ...childColumns(input),
+          access_code_hash: code.hash,
+          access_code_ciphertext: code.ciphertext,
+        },
+      });
+    }),
+  );
+  // Read back as the signed-in person, through row-level security.
+  const row = check(
+    await supabase
+      .from("children")
+      .select(CHILD_COLUMNS)
+      .eq("studio_id", studio.id)
+      .eq("id", id)
+      .single(),
+  ) as ChildRow;
+  const roster = await loadRoster(supabase, studio.id, jobId);
+  const child = await toChild(
+    { ...row, group_name: group?.name ?? null, duplicate: isDuplicate(roster.children, id) },
+    keys,
+  );
+  return NextResponse.json({ child }, { status: 201 });
+});

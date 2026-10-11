@@ -140,3 +140,42 @@ export function TextAreaField({
     </div>
   );
 }
+
+/** A native checkbox with its label as the 44px click target (D91). The only text under it is its error. */
+export function CheckboxField({
+  label,
+  checked,
+  onChange,
+  error,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  error?: string | undefined;
+}) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1">
+      <label
+        htmlFor={id}
+        className="flex min-h-11 cursor-pointer items-center gap-3 self-start text-sm text-ink"
+      >
+        <input
+          id={id}
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}-note` : undefined}
+          className="size-5 shrink-0 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        />
+        {label}
+      </label>
+      {error ? (
+        <span id={`${id}-note`} className="text-caption text-danger">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
