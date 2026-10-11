@@ -1,21 +1,30 @@
 "use client";
 
+import { IconButton } from "@daybell/ui";
 import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
 /**
- * The D137 side panel (about 340px, white, border on the left): the selected item, or a section's own side content.
- * Closable with × to give the main area the full width. When `focusKey` changes (a new item was opened by the
- * person), focus moves to the panel's heading; the page returns focus to the opener when it closes.
+ * The D140 floating panel: the selected item, in a 400px white card that floats over the right side of the section's
+ * table, as tall as its content (never taller than the window; it scrolls inside). JobSection places it; it stays
+ * in view while the table scrolls. Not modal: a non-modal `aside` named by its heading, and the table stays usable.
+ * When `focusKey` changes (the person opened a new item), focus moves to the heading; × or Escape (with focus inside
+ * the panel) closes it, and the page returns focus to the opener.
  */
-export function SidePanel({
+export function FloatingPanel({
   title,
+  meta,
+  lead,
   onClose,
   focusKey,
   children,
 }: {
   title: ReactNode;
+  /** A short line under the title. */
+  meta?: ReactNode;
+  /** Before the title, e.g. an initials avatar (decorative). */
+  lead?: ReactNode;
   onClose: () => void;
   /** Change it to move focus to the heading; null leaves focus where it is (e.g. on first load). */
   focusKey?: string | null;
@@ -32,27 +41,33 @@ export function SidePanel({
   return (
     <aside
       aria-labelledby={headingId}
-      className="sticky top-0 flex max-h-dvh w-[340px] shrink-0 flex-col self-start overflow-y-auto border-l border-line bg-surface"
+      onKeyDown={(e) => {
+        // A menu inside the panel handles its own Escape first (it stops the event).
+        if (e.key === "Escape" && !e.defaultPrevented) {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+      className="pointer-events-auto sticky top-4 flex max-h-[calc(100dvh-2rem)] w-full flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-lg"
     >
-      <div className="flex items-start gap-2 px-5 pt-3">
-        <h2
-          id={headingId}
-          ref={heading}
-          tabIndex={-1}
-          className="m-0 min-w-0 flex-1 pt-2.5 text-h3 break-words focus-visible:outline-2 focus-visible:outline-primary"
-        >
-          {title}
-        </h2>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t("closeDetails")}
-          className="grid size-11 shrink-0 place-items-center rounded-md text-muted hover:bg-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
-        >
-          <X className="size-5" aria-hidden="true" />
-        </button>
+      <div className="flex items-center gap-3">
+        {lead}
+        <div className="min-w-0 flex-1">
+          <h2
+            id={headingId}
+            ref={heading}
+            tabIndex={-1}
+            className="m-0 text-h3 font-bold break-words focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            {title}
+          </h2>
+          {meta ? <p className="m-0 text-label text-muted">{meta}</p> : null}
+        </div>
+        <IconButton tone="canvas" label={t("closeDetails")} onClick={onClose}>
+          <X aria-hidden="true" />
+        </IconButton>
       </div>
-      <div className="flex flex-col gap-5 px-5 pt-2 pb-6">{children}</div>
+      {children}
     </aside>
   );
 }

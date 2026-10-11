@@ -1,7 +1,7 @@
 "use client";
 
-import { Button } from "@daybell/ui";
-import { ArrowLeft, ChevronDown, Pencil } from "lucide-react";
+import { Button, IconButton, iconButtonVariants } from "@daybell/ui";
+import { ArrowLeft, Ellipsis, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -14,9 +14,10 @@ import { useJob } from "./job-context";
 import { SellChecklist } from "./sell-checklist";
 
 /**
- * The job header (D137): back to Jobs, the job's name and status (not clickable), its details, "More actions" and
- * the page's one green button, "Start selling", while the job is a draft. Selling itself arrives in step 8; for now
- * the button lists what is still missing and is never disabled.
+ * The job's title row (D137, D140), on the canvas with no white block: a round back button, the job's name and status
+ * (not clickable) with its details under the name, then a round More (⋯) and the page's one green button, "Start
+ * selling", while the job is a draft. Selling itself arrives in step 8; for now the button lists what is still
+ * missing and is never disabled.
  */
 export function JobHeader() {
   const t = useTranslations("app.job");
@@ -36,59 +37,53 @@ export function JobHeader() {
   ].filter(Boolean);
 
   return (
-    <header className="border-b border-line bg-surface px-6 pt-3">
-      <div className="flex items-start gap-3">
-        <Link
-          href="/app/jobs"
-          aria-label={tj("detail.back")}
-          className="-ml-2 grid size-11 shrink-0 place-items-center rounded-md text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-primary"
-        >
-          <ArrowLeft className="size-5" aria-hidden="true" />
+    <header className="flex items-center gap-3">
+      <IconButton asChild label={tj("detail.back")}>
+        <Link href="/app/jobs">
+          <ArrowLeft aria-hidden="true" />
         </Link>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="m-0 text-h2 break-words">{job.name}</h1>
-            <StatusBadge status={job.status} />
-          </div>
-          <p className="m-0 text-sm text-muted">{details.join(" · ")}</p>
-          {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
-          <p role="status" className="m-0 min-h-5 text-caption text-muted">
-            {saved ? tj("detail.saved") : ""}
-          </p>
+      </IconButton>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <h1 className="m-0 text-h2 break-words">{job.name}</h1>
+          <StatusBadge status={job.status} />
         </div>
-        {canManage ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <Popover
-              trigger={
-                <>
-                  {t("moreActions")}
-                  <ChevronDown aria-hidden="true" />
-                </>
-              }
-              triggerClassName="border border-line-strong bg-surface px-[18px] text-sm font-semibold [&_svg]:size-4"
-              panelClassName="w-56"
-            >
-              {(close) => (
-                <button
-                  type="button"
-                  className={MENU_ROW}
-                  onClick={() => {
-                    close();
-                    setSaved(false);
-                    setEditing(true);
-                  }}
-                >
-                  <Pencil aria-hidden="true" />
-                  {tj("detail.edit")}
-                </button>
-              )}
-            </Popover>
-            {job.status === "draft" ? (
-              <Button onClick={() => setSelling(true)}>{t("startSelling")}</Button>
-            ) : null}
-          </div>
-        ) : null}
+        <p className="m-0 text-label text-muted">{details.join(" · ")}</p>
+        {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
+        <p role="status" className="m-0 text-caption text-muted">
+          {saved ? tj("detail.saved") : ""}
+        </p>
       </div>
+      {canManage ? (
+        <div className="flex shrink-0 items-center gap-2">
+          <Popover
+            label={t("moreActions")}
+            trigger={<Ellipsis aria-hidden="true" />}
+            triggerClassName={iconButtonVariants()}
+            panelClassName="w-56"
+          >
+            {(close) => (
+              <button
+                type="button"
+                className={MENU_ROW}
+                onClick={() => {
+                  close();
+                  setSaved(false);
+                  setEditing(true);
+                }}
+              >
+                <Pencil aria-hidden="true" />
+                {tj("detail.edit")}
+              </button>
+            )}
+          </Popover>
+          {job.status === "draft" ? (
+            <Button shape="pill" onClick={() => setSelling(true)}>
+              {t("startSelling")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <Dialog open={editing} onClose={() => setEditing(false)} title={tj("form.editTitle")}>
         <JobForm

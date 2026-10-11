@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 
 /**
  * A section still being built (D128). "page" is a whole page with its own h1 and a way back to Home; "section" sits in
- * a job's main area under the job's h1 (D138), so it has an h2 and no back link.
+ * a job's main area under the job's h1 (D138), so it has an h2 and no back link, in a white sheet card (D140).
  */
 export function ComingSoon({
   name,
@@ -20,7 +20,10 @@ export function ComingSoon({
   const t = useTranslations("app.soon");
   const Heading = variant === "page" ? "h1" : "h2";
   return (
-    <Card className="flex flex-col items-center gap-3 py-12 text-center">
+    <Card
+      variant={variant === "section" ? "sheet" : "default"}
+      className="flex flex-col items-center gap-3 py-12 text-center"
+    >
       <span
         className="grid size-14 place-items-center rounded-full bg-lime-soft"
         aria-hidden="true"

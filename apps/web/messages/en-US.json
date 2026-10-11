@@ -14,6 +14,7 @@
     "sections": {
       "basics": "Basics",
       "layout": "Layout",
+      "jobPage": "Job page (D140)",
       "money": "Money & wins",
       "feedback": "Feedback",
       "photos": "Photos",
@@ -120,6 +121,20 @@
       "popular": "Most popular",
       "addToCart": "Add to cart · {amount}",
       "emailPlaceholder": "you@example.com"
+    },
+    "jobPage": {
+      "back": "All jobs",
+      "more": "More actions",
+      "startSelling": "Start selling",
+      "import": "Import roster",
+      "filter": "Filter",
+      "todosTitle": "Set up: to-dos",
+      "progress": "2 of 3 done",
+      "jobCreated": "Job created",
+      "rosterAdded": "Roster added",
+      "printQrCards": "Print QR cards",
+      "done": "Done",
+      "soon": "Soon"
     }
   },
   "validation": {
@@ -653,8 +668,6 @@
       "sellIntro": "Selling opens in an upcoming step. Before you can sell, finish these:",
       "close": "Close",
       "closeDetails": "Close details",
-      "showChecklist": "Show checklist",
-      "showThem": "Show them",
       "tabs": {
         "label": "Job sections",
         "overview": "Overview",
@@ -666,44 +679,63 @@
         "settings": "Settings",
         "peopleCount": "{count, plural, one {# child} other {# children}}"
       },
-      "journey": {
-        "label": "Job journey",
-        "stageDone": "{stage} (done)",
-        "stages": {
+      "hero": {
+        "countdown": "{days, plural, =0 {Picture day is today} =1 {Picture day is tomorrow} other {Picture day in # days}}",
+        "ago": "{days, plural, one {Picture day was # day ago} other {Picture day was # days ago}}",
+        "closed": "This job is closed",
+        "step": "Step {step} of {steps} · {milestone} · {done} of {total} done",
+        "allDone": "All {steps} steps done"
+      },
+      "timeline": {
+        "title": "Job timeline",
+        "note": "The shop opens after photos are in",
+        "done": "Done",
+        "now": "Now",
+        "nowProgress": "Now · {done} of {total} done",
+        "milestones": {
           "setUp": "Set up",
           "pictureDay": "Picture day",
-          "reviewPhotos": "Review photos",
+          "photosIn": "Photos in",
           "selling": "Selling",
-          "fulfilment": "Fulfilment",
-          "closed": "Closed"
+          "fulfilment": "Fulfilment"
+        },
+        "hints": {
+          "photosIn": "Soon · Upload and tag",
+          "selling": "Soon · Price list and payouts",
+          "fulfilment": "Soon · Orders close, then ship"
         }
       },
-      "nextStep": {
-        "label": "Next step",
-        "comingSoon": "Coming soon",
-        "addRoster": {
-          "title": "Add your roster",
-          "body": "Import the class list from a CSV or Excel file, or add children one by one. Each child gets an access code for their parents.",
-          "action": "Go to People"
+      "todos": {
+        "title": "{milestone}: to-dos",
+        "progress": "{done} of {total} done",
+        "done": "Done",
+        "todo": "To do",
+        "soon": "Soon",
+        "addRoster": "Add roster",
+        "items": {
+          "jobCreated": "Job created",
+          "rosterAdded": "Roster added",
+          "printQrCards": "Print QR cards",
+          "uploadPhotos": "Upload photos",
+          "tagPhotos": "Tag photos",
+          "choosePriceList": "Choose a price list",
+          "connectPayouts": "Connect payouts",
+          "startSelling": "Start selling",
+          "sendToLab": "Send orders to the lab"
         },
-        "getReady": {
-          "title": "Get ready for picture day",
-          "body": "Picture day is {date}. Check the roster before then."
-        },
-        "uploadPhotos": {
-          "title": "Upload photos",
-          "body": "Uploading and tagging photos arrive in an upcoming step."
+        "notes": {
+          "jobCreated": "Created {date}",
+          "rosterAdded": "{children, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
+          "rosterMissing": "Import a CSV or Excel file, or add children one by one.",
+          "duplicates": "{count, plural, one {# possible duplicate} other {# possible duplicates}}",
+          "printQrCards": "Hand out before picture day",
+          "uploadPhotos": "After picture day",
+          "tagPhotos": "Match photos to children",
+          "choosePriceList": "What parents can buy",
+          "connectPayouts": "Where your sales are paid",
+          "startSelling": "Open the shop to parents",
+          "sendToLab": "Print and ship orders"
         }
-      },
-      "stats": {
-        "label": "Numbers",
-        "children": "Children",
-        "ofExpected": "of {count} expected",
-        "groups": "{group, select, class {Classes} team {Teams} other {Groups}}",
-        "duplicates": "Possible duplicates",
-        "pictureDay": "Picture day",
-        "countdown": "{days, plural, =0 {Today} =1 {Tomorrow} other {In # days}}",
-        "daysAgo": "{days, plural, one {# day ago} other {# days ago}}"
       },
       "checklist": {
         "title": "Before you can sell",
@@ -721,6 +753,9 @@
     },
     "people": {
       "searchLabel": "Search children",
+      "heading": "{count, plural, one {# child} other {# children}}",
+      "subline": "{groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · {count, plural, one {# possible duplicate} other {# possible duplicates}}",
+      "sublineNoDuplicates": "{groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · no duplicates",
       "filter": "Filter",
       "anyGroup": "{group, select, class {Any class} team {Any team} other {Any group}}",
       "grade": "Grade",

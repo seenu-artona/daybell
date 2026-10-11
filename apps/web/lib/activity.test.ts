@@ -1,6 +1,7 @@
 import { ACTIVITY_TYPES } from "@daybell/api";
 import { describe, expect, it } from "vitest";
 import {
+  activityChip,
   activityType,
   JOB_ACTIVITY_TYPES,
   STORED_ACTIVITY_TYPES,
@@ -59,5 +60,19 @@ describe("JOB_ACTIVITY_TYPES", () => {
       "roster.imported",
     ]);
     for (const type of JOB_ACTIVITY_TYPES) expect(STORED_ACTIVITY_TYPES).toContain(type);
+  });
+});
+
+describe("activityChip", () => {
+  it("gives every activity type a chip", () => {
+    for (const type of ACTIVITY_TYPES) expect(activityChip(type).tone).toBeTruthy();
+  });
+
+  it("tells a job's own events apart: created, edited, roster imported", () => {
+    expect(activityChip("job.created")).toEqual({ tone: "primary", icon: "created" });
+    expect(activityChip("job.updated")).toEqual({ tone: "warning", icon: "edited" });
+    expect(activityChip("roster.imported")).toEqual({ tone: "info", icon: "imported" });
+    expect(activityChip("member.joined").icon).toBe("team");
+    expect(activityChip("studio.updated").icon).toBe("studio");
   });
 });

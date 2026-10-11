@@ -16,8 +16,9 @@ import { JobHeader } from "./job-header";
 import { JobTabs } from "./job-tabs";
 
 /**
- * Every job section's frame (D137): header and tabs, then the section. Loads the job and its roster numbers once;
- * the layout stays mounted while people move between sections, so switching tabs never loads the job again.
+ * Every job section's frame (D137, D140): the title row and the pill tabs on the grey canvas, then the section.
+ * Loads the job and its roster numbers once; the layout stays mounted while people move between sections, so
+ * switching tabs never loads the job again.
  */
 export function JobShell({ children }: { children: ReactNode }) {
   const tj = useTranslations("app.jobs.detail");
@@ -89,7 +90,7 @@ export function JobShell({ children }: { children: ReactNode }) {
 
   return (
     <JobContext.Provider value={value}>
-      <div className="flex min-h-dvh flex-col">
+      <div className="flex min-h-dvh flex-col gap-4 px-7 pt-5 pb-12">
         <JobHeader />
         <JobTabs />
         {children}

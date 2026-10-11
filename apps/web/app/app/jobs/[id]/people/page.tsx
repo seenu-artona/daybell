@@ -12,14 +12,13 @@ import {
   ROSTER_VIEW_MAX,
 } from "@daybell/core";
 import { Banner, Button } from "@daybell/ui";
-import { Plus, Upload } from "lucide-react";
+import { Check, Plus, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "../../../dialog";
 import { ChildForm, GroupForm } from "../child-form";
-import { HIT_44 } from "../hit-area";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
 import { RemoveChildDialog } from "../remove-child-dialog";
@@ -39,9 +38,10 @@ export default function PeoplePageRoute() {
 }
 
 /**
- * A job's People (D137, D138; Phase 1 step 2's roster moved here): search, filters and grouping over the whole
- * roster, a flat list grouped by class, and the selected child in the side panel (?child=<id>, an id only). Add and
- * edit keep the existing child form dialog (D133); Import stays its own page.
+ * A job's People (D137, D138, D140; Phase 1 step 2's roster moved here): "N children" with a green subline, search,
+ * filters and grouping over the whole roster, a flat list with a Class column in a white card (Group: Class brings
+ * the class headings back), and the selected child in the floating panel (?child=<id>, an id only). Add and edit
+ * keep the existing child form dialog (D133); Import stays its own page.
  */
 function PeoplePage() {
   const t = useTranslations("app.people");
@@ -53,7 +53,7 @@ function PeoplePage() {
   const roster = useRoster(job.id);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<PeopleFilter[]>([]);
-  const [groupBy, setGroupBy] = useState<GroupBy>("group");
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [status, setStatus] = useState("");
   const [editing, setEditing] = useState<Child | "new" | null>(null);
@@ -124,46 +124,90 @@ function PeoplePage() {
   const duplicates = summary?.duplicates ?? 0;
   const showingDuplicates = filters.some((f) => f.kind === "duplicates");
 
+  const classes = roster.groups.length;
+  const subline =
+    duplicates > 0 ? (
+      t("subline", { groups: classes, group: word, count: duplicates })
+    ) : (
+      <>
+        {t("sublineNoDuplicates", { groups: classes, group: word })}
+        <Check className="size-4" aria-hidden="true" />
+      </>
+    );
+
   return (
     <JobSection
-      bar={
-        empty ? null : (
-          <PeopleToolbar
-            query={query}
-            onQuery={setQuery}
-            filters={filters}
-            onFilters={setFilters}
-            groupBy={groupBy}
-            onGroupBy={setGroupBy}
-            groups={roster.groups}
-            grades={grades}
-            word={word}
-          />
-        )
-      }
-      barEnd={
-        canEdit ? (
-          <>
-            <Button asChild variant="secondary" size="sm" className={HIT_44}>
-              <Link href={`/app/jobs/${job.id}/import`}>
-                <Upload aria-hidden="true" />
-                {tr("import")}
-              </Link>
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className={HIT_44}
-              onClick={() => setEditing("new")}
-            >
-              <Plus aria-hidden="true" />
-              {tr("add")}
-            </Button>
-          </>
-        ) : null
+      title={roster.rows && !empty ? t("heading", { count: roster.total }) : null}
+      subline={roster.rows && !empty ? subline : null}
+      toolbar={
+        <>
+          {empty || !roster.rows ? null : (
+            <PeopleToolbar
+              query={query}
+              onQuery={setQuery}
+              filters={filters}
+              onFilters={setFilters}
+              groupBy={groupBy}
+              onGroupBy={setGroupBy}
+              groups={roster.groups}
+              grades={grades}
+              word={word}
+            />
+          )}
+          {canEdit ? (
+            <>
+              <Button asChild variant="white" shape="pill">
+                <Link href={`/app/jobs/${job.id}/import`}>
+                  <Upload aria-hidden="true" />
+                  {tr("import")}
+                </Link>
+              </Button>
+              <Button variant="white" shape="pill" onClick={() => setEditing("new")}>
+                <Plus aria-hidden="true" />
+                {tr("add")}
+              </Button>
+            </>
+          ) : null}
+        </>
       }
       below={
-        <FilterChips filters={filters} onFilters={setFilters} groups={roster.groups} word={word} />
+        <>
+          <FilterChips
+            filters={filters}
+            onFilters={setFilters}
+            groups={roster.groups}
+            word={word}
+          />
+          {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3); while empty it
+          takes no room (the negative margin cancels the column gap). */}
+          <p role="status" className="m-0 text-sm text-muted empty:-mb-4">
+            {status}
+          </p>
+          {duplicates > 0 && !showingDuplicates && !empty ? (
+            <Banner
+              tone="warning"
+              className="py-1"
+              title={
+                <span className="flex items-center gap-2 font-semibold">
+                  {/* Its own element, so the count reads (and is found) apart from the button. */}
+                  <span>{t("duplicatesNotice", { count: duplicates })}</span>
+                  <span aria-hidden="true">·</span>
+                  <button
+                    type="button"
+                    onClick={() => setFilters((f) => addFilter(f, { kind: "duplicates" }))}
+                    className="min-h-11 font-bold underline focus-visible:outline-2 focus-visible:outline-primary"
+                  >
+                    {t("showThem")}
+                  </button>
+                </span>
+              }
+            />
+          ) : null}
+          {roster.total > ROSTER_VIEW_MAX ? (
+            <Banner tone="info" title={t("overCap", { max: ROSTER_VIEW_MAX })} />
+          ) : null}
+          {roster.failed ? <Banner tone="danger" title={tr("loadFailed")} /> : null}
+        </>
       }
       panel={
         selected ? (
@@ -181,88 +225,44 @@ function PeoplePage() {
         ) : null
       }
     >
-      <div className="flex flex-col">
-        {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
-        <p role="status" className="m-0 px-6 text-sm text-muted [&:not(:empty)]:pt-3">
-          {status}
-        </p>
-        {duplicates > 0 && !showingDuplicates && !empty ? (
-          <div className="px-6 pt-3">
-            <Banner
-              tone="warning"
-              className="py-2"
-              title={
-                <span className="flex items-center gap-2 font-semibold">
-                  {/* Its own element, so the count reads (and is found) apart from the button. */}
-                  <span>{t("duplicatesNotice", { count: duplicates })}</span>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    onClick={() => setFilters((f) => addFilter(f, { kind: "duplicates" }))}
-                    className={`${HIT_44} font-bold underline focus-visible:outline-2 focus-visible:outline-primary`}
-                  >
-                    {t("showThem")}
-                  </button>
-                </span>
-              }
-            />
-          </div>
-        ) : null}
-        {roster.total > ROSTER_VIEW_MAX ? (
-          <div className="px-6 pt-3">
-            <Banner tone="info" title={t("overCap", { max: ROSTER_VIEW_MAX })} />
-          </div>
-        ) : null}
-        {roster.failed ? (
-          <div className="px-6 pt-3">
-            <Banner tone="danger" title={tr("loadFailed")} />
-          </div>
-        ) : null}
-        {!roster.rows && !roster.failed ? (
-          <p className="m-0 px-6 py-4 text-muted">{tr("loading")}</p>
-        ) : null}
+      {!roster.rows && !roster.failed ? <p className="m-0 text-muted">{tr("loading")}</p> : null}
 
-        {empty ? (
-          <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
-            <h2 className="m-0 text-h3">{tr("emptyTitle")}</h2>
-            <p className="m-0 max-w-120 text-muted">{tr("emptyBody", { group: word })}</p>
-            {canEdit ? null : <p className="m-0 text-caption text-muted">{tr("emptyReadOnly")}</p>}
-          </div>
-        ) : null}
+      {empty ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl bg-surface px-6 py-16 text-center">
+          <h2 className="m-0 text-h3">{tr("emptyTitle")}</h2>
+          <p className="m-0 max-w-120 text-muted">{tr("emptyBody", { group: word })}</p>
+          {canEdit ? null : <p className="m-0 text-caption text-muted">{tr("emptyReadOnly")}</p>}
+        </div>
+      ) : null}
 
-        {roster.rows && !empty ? (
-          <>
-            <div className="mt-3">
-              <PeopleList
-                sections={sections}
-                grouped={groupBy === "group"}
-                collapsed={collapsed}
-                onToggle={(key) =>
-                  setCollapsed((current) => {
-                    const next = new Set(current);
-                    if (next.has(key)) next.delete(key);
-                    else next.add(key);
-                    return next;
-                  })
-                }
-                selectedId={selected?.id ?? null}
-                childHref={childHref}
-                onOpen={open}
-                onLinkOpen={opened}
-                onRename={canEdit ? setRenaming : null}
-                word={word}
-                busy={roster.loadingMore}
-              />
-            </div>
-            {visible.length === 0 && searching ? (
-              <p className="m-0 px-6 py-4 text-muted">{t("noMatches")}</p>
-            ) : null}
-            {roster.loadingMore ? (
-              <p className="m-0 px-6 py-3 text-sm text-muted">{t("loadingMore")}</p>
-            ) : null}
-          </>
-        ) : null}
-      </div>
+      {roster.rows && !empty ? (
+        <div className="flex flex-col gap-3">
+          <PeopleList
+            sections={sections}
+            grouped={groupBy === "group"}
+            collapsed={collapsed}
+            onToggle={(key) =>
+              setCollapsed((current) => {
+                const next = new Set(current);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              })
+            }
+            selectedId={selected?.id ?? null}
+            childHref={childHref}
+            onOpen={open}
+            onLinkOpen={opened}
+            onRename={canEdit ? setRenaming : null}
+            word={word}
+            busy={roster.loadingMore}
+          />
+          {visible.length === 0 && searching ? (
+            <p className="m-0 text-muted">{t("noMatches")}</p>
+          ) : null}
+          {roster.loadingMore ? <p className="m-0 text-sm text-muted">{t("loadingMore")}</p> : null}
+        </div>
+      ) : null}
 
       <Dialog
         open={editing !== null}

@@ -45,8 +45,8 @@ interface CheckedRow {
 }
 
 const PAGE = 100;
-/** The import is a full page in the job's main area (white, padded). */
-const PAGE_FRAME = "flex flex-1 flex-col gap-6 bg-surface px-6 pt-4 pb-12";
+/** The import is a full page in the job's main area: one white sheet card on the canvas (D140). */
+const PAGE_FRAME = "flex flex-col gap-6 rounded-xl bg-surface px-7 pt-4 pb-10";
 
 /**
  * Import a roster from CSV or Excel (Phase 1 step 2, D23, F13; ADR 0011). The file is read in this browser and never

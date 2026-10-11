@@ -8,22 +8,25 @@ import {
   type PeopleFilterKind,
   removeFilter,
 } from "@daybell/core";
-import { ChevronDown, Plus, Search, X } from "lucide-react";
+import { iconButtonVariants } from "@daybell/ui";
+import { ListFilter, Rows3, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
 import { CheckboxField, SelectField } from "../../../dialog";
 import { Popover } from "../../../popover";
-import { HIT_44 } from "../hit-area";
 
 export type GroupBy = "group" | "none";
 
-const BAR_CONTROL = `${HIT_44} flex h-8 items-center gap-1.5 rounded-sm px-3 text-label font-semibold text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-primary [&_svg]:size-4 [&_svg]:shrink-0`;
+/** A round tool with a dot when it is in use; the dot is decorative (the chips and the label say so in words). */
+const ACTIVE_DOT =
+  "relative after:absolute after:top-2 after:right-2 after:size-2 after:rounded-full after:bg-primary after:content-['']";
 
 const FLAG_FILTERS = ["doNotPhotograph", "doNotPublish", "duplicates", "noGroup"] as const;
 
 /**
- * The left side of People's section bar (D138): search, "+ Filter" and "Group: Class". Filters are native controls
- * in popovers. The search text and filters stay in this browser: they are never sent or put in the URL.
+ * People's tools (D138, D140): a visible search box and two round 44px icon buttons, Filter and Group (named
+ * "Group: None" or "Group: Class"). Filters are native controls in popovers. The search text and filters stay in
+ * this browser: they are never sent or put in the URL.
  */
 export function PeopleToolbar({
   query,
@@ -57,9 +60,7 @@ export function PeopleToolbar({
 
   return (
     <>
-      <label
-        className={`${HIT_44} flex h-8 w-60 items-center gap-2 rounded-sm border border-line-strong bg-surface px-2.5 text-muted focus-within:outline-2 focus-within:outline-primary`}
-      >
+      <label className="flex h-11 w-60 items-center gap-2 rounded-full bg-surface px-4 text-muted focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary">
         <Search className="size-4 shrink-0" aria-hidden="true" />
         <span className="sr-only">{t("searchLabel")}</span>
         <input
@@ -74,14 +75,9 @@ export function PeopleToolbar({
       </label>
 
       <Popover
-        placement="below-start"
-        trigger={
-          <>
-            <Plus aria-hidden="true" />
-            {t("filter")}
-          </>
-        }
-        triggerClassName={`${BAR_CONTROL} min-h-0 min-w-0 border border-dashed border-line-strong`}
+        label={t("filter")}
+        trigger={<ListFilter aria-hidden="true" />}
+        triggerClassName={`${iconButtonVariants()} ${filters.length > 0 ? ACTIVE_DOT : ""}`}
         panelClassName="flex w-72 flex-col gap-3 p-4"
       >
         {() => (
@@ -132,16 +128,11 @@ export function PeopleToolbar({
       </Popover>
 
       <Popover
-        placement="below-start"
-        trigger={
-          <>
-            {t("groupBy", {
-              by: groupBy === "group" ? tr("filter", { group: word }) : t("groupNone"),
-            })}
-            <ChevronDown aria-hidden="true" />
-          </>
-        }
-        triggerClassName={`${BAR_CONTROL} min-h-0 min-w-0`}
+        label={t("groupBy", {
+          by: groupBy === "group" ? tr("filter", { group: word }) : t("groupNone"),
+        })}
+        trigger={<Rows3 aria-hidden="true" />}
+        triggerClassName={`${iconButtonVariants()} ${groupBy === "group" ? ACTIVE_DOT : ""}`}
         panelClassName="w-56 p-3"
       >
         {() => (
@@ -170,7 +161,7 @@ export function PeopleToolbar({
   );
 }
 
-/** The active filters as removable chips, under the section bar. */
+/** The active filters as removable chips, under People's heading row. */
 export function FilterChips({
   filters,
   onFilters,
@@ -203,7 +194,7 @@ export function FilterChips({
   return (
     <ul
       aria-label={t("activeFilters")}
-      className="m-0 flex list-none flex-wrap items-center gap-2 border-b border-line px-6 py-2"
+      className="m-0 flex list-none flex-wrap items-center gap-2 p-0"
     >
       {filters.map((f) => (
         <li key={f.kind}>
@@ -211,7 +202,7 @@ export function FilterChips({
             type="button"
             aria-label={t("removeFilter", { filter: label(f) })}
             onClick={() => onFilters(removeFilter(filters, f.kind))}
-            className={`${HIT_44} flex h-8 items-center gap-1.5 rounded-full bg-primary-soft px-3 text-label font-semibold text-primary-hover hover:bg-primary-soft/70 focus-visible:outline-2 focus-visible:outline-primary`}
+            className="flex h-11 items-center gap-1.5 rounded-full bg-primary-soft px-4 text-label font-semibold text-primary-hover hover:bg-primary-soft/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             {label(f)}
             <X className="size-3.5" aria-hidden="true" />
