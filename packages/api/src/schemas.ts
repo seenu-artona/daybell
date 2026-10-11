@@ -227,13 +227,38 @@ export const clientListQuery = listQuery.extend({
 
 const collapseSpaces = (value: string) => value.replace(/\s+/g, " ").trim();
 
+// Control characters (C0 and DEL) and lone UTF-16 surrogates are never real roster text; they come from broken files
+// and break printing, exports and search. Checked after trimming and collapsing, so tabs and line breaks inside names
+// have already become spaces; in other roster text they are refused too.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point.
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Text without control characters or lone surrogates (String.isWellFormed, which ES2022 lacks). */
+function isCleanText(value: string): boolean {
+  return !CONTROL_CHARACTERS.test(value) && !LONE_SURROGATE.test(value);
+}
+
 /** A name: trimmed, inner runs of whitespace collapsed to one space, 1 to `max` characters. */
 const rosterName = (error: string, max = 60) =>
-  z.string({ error }).trim().overwrite(collapseSpaces).min(1, { error }).max(max, { error });
+  z
+    .string({ error })
+    .trim()
+    .overwrite(collapseSpaces)
+    .min(1, { error })
+    .max(max, { error })
+    .refine(isCleanText, { error });
 
 /** Optional roster text: send null (not "") to leave it blank. */
 const rosterText = (error: string, max: number) =>
-  z.string({ error }).trim().min(1, { error }).max(max, { error }).nullable().optional();
+  z
+    .string({ error })
+    .trim()
+    .min(1, { error })
+    .max(max, { error })
+    .refine(isCleanText, { error })
+    .nullable()
+    .optional();
 
 const parentEmail = z
   .string()

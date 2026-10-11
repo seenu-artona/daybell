@@ -183,7 +183,7 @@ export default function ImportRosterPage() {
       const result = rosterRow.safeParse(draft);
       const firstError = result.success ? null : Object.values(fieldErrors(result.error))[0];
       return {
-        line: i + 2,
+        line: table.lines[i] ?? i + 2,
         draft,
         valid: result.success ? result.data : null,
         reason: result.success ? null : (tv.field(firstError ?? undefined) ?? null),

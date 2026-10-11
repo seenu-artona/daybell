@@ -259,6 +259,30 @@ describe("children", () => {
     expect(groupInput.parse({ name: " Room   4B " }).name).toBe("Room 4B");
   });
 
+  it("refuse control characters and lone surrogates; tabs and line breaks in names become spaces", () => {
+    expect(childInput.parse({ ...ok, firstName: "Maya\tRose\r\nAnn" }).firstName).toBe(
+      "Maya Rose Ann",
+    );
+    expect(childInput.parse({ ...ok, lastName: "Zoë 😀" }).lastName).toBe("Zoë 😀");
+    const bad: [string, Record<string, unknown>][] = [
+      ["firstName", { firstName: "Ma\u0000ya" }],
+      ["lastName", { lastName: "John\u0007son" }],
+      ["lastName", { lastName: "John\u007Fson" }],
+      ["firstName", { firstName: "Maya\uD800" }],
+      ["firstName", { firstName: "\uDC00Maya" }],
+      ["studentId", { studentId: "S-\u001B1" }],
+      ["studentId", { studentId: "S-1\t2" }],
+      ["grade", { grade: "4\uDBFF" }],
+    ];
+    for (const [field, patch] of bad) {
+      const result = childInput.safeParse({ ...ok, ...patch });
+      expect(result.success, JSON.stringify(patch)).toBe(false);
+      if (!result.success) expect(Object.keys(fieldErrors(result.error))).toEqual([field]);
+    }
+    expect(groupInput.safeParse({ name: "Room\u00004B" }).success).toBe(false);
+    expect(rosterRow.safeParse({ ...ok, group: "4B\uD83D" }).success).toBe(false);
+  });
+
   it("patches need a known field and can never touch codes or the school tag", () => {
     expect(childPatch.safeParse({}).success).toBe(false);
     expect(childPatch.safeParse({ accessCode: "K7QM4XPA" }).success).toBe(false);
