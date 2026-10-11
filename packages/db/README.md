@@ -8,7 +8,7 @@ Database schema, row-level security and migrations for Daybell (D7, D96, D113).
 ## Regions
 
 There is one Supabase project per region: `daybell-staging-us` and `daybell-staging-ca` (production later). The same
-migrations run on both. On first deploy each database records its region in `app.config`; after that, a studio from the
+migrations run on both. Each database records its region once in `app.config` (see Deploying); after that, a studio from the
 other region cannot be written to it and the region can never change.
 
 ## Running the tests
@@ -20,6 +20,12 @@ other region cannot be written to it and the region can never change.
 
 ## Deploying
 
-`.github/workflows/db-deploy.yml` applies migrations to both staging projects when migrations change on `main`. It needs
-the `STAGING_DB_URL_US` and `STAGING_DB_URL_CA` secrets in the GitHub Environment `staging`, restricted to `main`.
-Until the region is recorded, a database refuses every studio (fail closed).
+Each Supabase project uses Supabase's GitHub integration (working directory `packages/db`, production branch `main`,
+"Deploy to production" on). Merging migrations to `main` applies them; no database password is stored in GitHub (D123).
+
+**Once per new project** (e.g. when the US project is added, D122), record its region in the Supabase SQL editor after the
+first deploy. Until then the database refuses every studio (fail closed):
+
+```sql
+insert into app.config (key, value) values ('data_region', 'ca');  -- 'us' for the US project
+```

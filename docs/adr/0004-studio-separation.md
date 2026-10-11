@@ -16,3 +16,7 @@ tables at all.
 **One database per region.** US and Canadian studios live in separate Supabase projects (US East and Canada Central). The
 same migrations run on both. Each database records its region once in `app.config`; a trigger refuses any studio whose
 region doesn't match, refuses every studio until the region is recorded (fail closed), and the region can never change.
+
+**Deploying (D123).** Migrations reach each Supabase project through Supabase's GitHub integration on merge to `main`,
+so no database credentials live in GitHub. Staging starts with Canada only; the US project is added later by creating it,
+connecting the integration and recording its region (D122).
