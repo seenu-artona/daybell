@@ -6,7 +6,10 @@ const { ensureStudio } = await import("./studio");
 type RpcResult = { data: unknown; error: { code: string } | null };
 
 function fakeSupabase(memberRows: unknown[], rpcResults: RpcResult[]) {
-  const rpc = vi.fn(async () => rpcResults.shift() ?? { data: null, error: null });
+  const rpc = vi.fn(
+    async (_fn: string, _args: Record<string, unknown>) =>
+      rpcResults.shift() ?? { data: null, error: null },
+  );
   const chain = { select: () => chain, eq: () => chain, limit: async () => ({ data: memberRows }) };
   return { supabase: { from: () => chain, rpc } as never, rpc };
 }

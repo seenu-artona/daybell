@@ -42,9 +42,9 @@ export function AcceptInvite() {
   const t = useTranslations("invite");
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
-  const [state, setState] = useState<"loading" | "signed-out" | "ready" | "joined" | "invalid">(
-    "loading",
-  );
+  const [state, setState] = useState<
+    "loading" | "signed-out" | "ready" | "joined" | "invalid" | "missing"
+  >("loading");
 
   useEffect(() => {
     const found = takeToken();
