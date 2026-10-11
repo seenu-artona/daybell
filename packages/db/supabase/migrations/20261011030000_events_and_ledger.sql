@@ -8,7 +8,8 @@ create table public.events (
   id bigint generated always as identity primary key,
   studio_id uuid not null references public.studios (id) on delete cascade,
   type text not null check (type ~ '^[a-z_]+\.[a-z_]+$'),
-  actor_id uuid references auth.users (id) on delete set null,
+  -- No foreign key: deleting a person (privacy erasure) must never be blocked by the immutable log.
+  actor_id uuid,
   subject_id uuid,
   data jsonb not null default '{}'::jsonb check (jsonb_typeof(data) = 'object'),
   occurred_at timestamptz not null default now(),
@@ -51,6 +52,23 @@ end;
 $$;
 create trigger events_immutable before update on public.events
 for each row execute function app.guard_event_immutable();
+
+-- Events are removed only when their studio is deleted (the cascade runs after the studio row is gone).
+create function app.guard_event_delete() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'TRUNCATE' or exists (select 1 from public.studios s where s.id = old.studio_id) then
+    raise exception 'Events cannot be deleted' using errcode = 'check_violation';
+  end if;
+  return old;
+end;
+$$;
+create trigger events_no_delete before delete on public.events
+for each row execute function app.guard_event_delete();
+create trigger events_no_truncate before truncate on public.events
+for each statement execute function app.guard_event_delete();
 
 -- Triggers that record what happened.
 create function app.on_studio_change() returns trigger
@@ -109,12 +127,14 @@ $$;
 create trigger studio_invites_events after insert or update or delete on public.studio_invites
 for each row execute function app.on_invite_change();
 
-revoke all on function app.guard_event_immutable(), app.on_studio_change(), app.on_member_change(),
+revoke all on function app.guard_event_immutable(), app.guard_event_delete(), app.on_studio_change(), app.on_member_change(),
   app.on_invite_change() from public;
 
 -- ── Money ledger ──────────────────────────────────────────────────────────────────────────────────────────────────
--- Double-entry: every money movement is one transaction of two or more lines in whole cents that sum to zero, in one
--- currency. Phase 3 (payments) writes here; nothing writes yet. Balances are always sums of lines, never stored totals.
+-- Double-entry: every money movement is one transaction of two or more lines in whole cents that sum to zero, in the
+-- studio's currency. Phase 3 (payments) writes here; nothing writes yet. Balances are always sums of lines.
+-- Retention (D125): ledger lines hold no personal data and are kept 7 years after a studio closes, so a studio with
+-- money records is closed (soft) rather than deleted; everything else about it is erased.
 create type public.ledger_account as enum (
   'parent_payments',   -- money parents paid (via Stripe)
   'studio_payable',    -- owed to the studio
@@ -132,7 +152,6 @@ create table public.ledger_entries (
   account public.ledger_account not null,
   amount_cents bigint not null check (amount_cents <> 0),
   currency char(3) not null check (currency in ('USD', 'CAD')),
-  memo text check (char_length(memo) <= 200),
   occurred_at timestamptz not null default now()
 );
 create index ledger_entries_txn_idx on public.ledger_entries (transaction_id);
@@ -159,20 +178,25 @@ for each row execute function app.guard_ledger_append_only();
 create trigger ledger_no_truncate before truncate on public.ledger_entries
 for each statement execute function app.guard_ledger_append_only();
 
--- Checked at commit, so a transaction's lines can be inserted one by one.
+-- Checked at commit, so a transaction's lines can be inserted one by one. SECURITY DEFINER so the check always sees
+-- every line, whoever writes. All lines of a transaction must be written in one database transaction (same xmin), so a
+-- closed money transaction can never be extended later. Currency must match the studio's region (US → USD, CA → CAD).
 create function app.check_ledger_transaction() returns trigger
-language plpgsql
+language plpgsql security definer
 set search_path = ''
 as $$
 declare
   v record;
 begin
-  select count(*) as lines, sum(amount_cents) as total, count(distinct currency) as currencies,
-         count(distinct studio_id) as studios
-    into v from public.ledger_entries where transaction_id = new.transaction_id;
-  if v.lines < 2 or v.total <> 0 or v.currencies <> 1 or v.studios <> 1 then
-    raise exception 'Ledger transaction % must have 2+ lines in one currency and studio, summing to zero', new.transaction_id
-      using errcode = 'check_violation';
+  select count(*) as lines, sum(e.amount_cents) as total, count(distinct e.currency) as currencies,
+         count(distinct e.studio_id) as studios, count(distinct e.xmin::text) as writes,
+         bool_and(e.currency = case s.data_region when 'us' then 'USD' else 'CAD' end) as currency_ok
+    into v
+    from public.ledger_entries e join public.studios s on s.id = e.studio_id
+   where e.transaction_id = new.transaction_id;
+  if v.lines < 2 or v.total <> 0 or v.currencies <> 1 or v.studios <> 1 or v.writes <> 1 or not v.currency_ok then
+    raise exception 'Ledger transaction % must be 2+ lines, written together, in one studio and its currency, summing to zero',
+      new.transaction_id using errcode = 'check_violation';
   end if;
   return null;
 end;

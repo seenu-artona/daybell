@@ -1,7 +1,7 @@
 -- Event log and money ledger (D96).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(16);
+select plan(22);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email, email_confirmed_at) values
@@ -82,6 +82,29 @@ select set_config('request.jwt.claims', '{"sub":"33333333-3333-4333-8333-3333333
 select is((select count(*) from public.ledger_entries), 0::bigint, 'another studio cannot see the ledger');
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-4111-8111-111111111111"}', true) is not null as signed_in;
 select is((select sum(amount_cents) from public.ledger_entries), 0::numeric, 'the owner sees a ledger that balances');
+
+reset role;
+select throws_ok($$
+  insert into public.ledger_entries (studio_id, transaction_id, account, amount_cents, currency)
+  select (select a from t), transaction_id, x.account::public.ledger_account, x.amount, 'CAD'
+  from (select distinct transaction_id from public.ledger_entries limit 1) txn,
+       (values ('parent_payments', -100), ('studio_payable', 100)) as x(account, amount);
+  set constraints all immediate;
+$$, '23514', null, 'a recorded money transaction can never be extended later');
+
+select throws_ok($$
+  insert into public.ledger_entries (studio_id, transaction_id, account, amount_cents, currency) values
+    ((select a from t), '77777777-7777-4777-8777-777777777777', 'parent_payments', -1000, 'USD'),
+    ((select a from t), '77777777-7777-4777-8777-777777777777', 'studio_payable', 1000, 'USD');
+  set constraints all immediate;
+$$, '23514', null, 'a Canadian studio''s money is always in CAD');
+
+select throws_ok($$ delete from public.events $$, '23514', null, 'events cannot be deleted');
+select throws_ok($$ truncate public.events $$, '23514', null, 'events cannot be truncated');
+select lives_ok($$ delete from auth.users where id = '22222222-2222-4222-8222-222222222222' $$,
+  'a person can still be erased even though the log mentions them');
+select lives_ok($$ delete from public.studios where id = (select b from t) $$,
+  'a studio with no money records can be deleted, with its events');
 
 select * from finish();
 rollback;
