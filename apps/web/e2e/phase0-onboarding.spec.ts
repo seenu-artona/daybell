@@ -110,7 +110,9 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(staffTab).toHaveURL(/\/invite$/);
   await staffTab.getByRole("button", { name: "Join the team" }).click();
   await expect(staffTab).toHaveURL(/\/app$/);
-  await expect(staffTab.getByText(`North Peak ${tag}`).first()).toBeVisible();
+  await expect(
+    staffTab.getByText(`North Peak ${tag}`).filter({ visible: true }).first(),
+  ).toBeVisible();
   // Photographers see the team but cannot invite.
   await staffTab.goto("/app/settings");
   await expect(staffTab.getByText("Only owners can invite people.")).toBeVisible();
