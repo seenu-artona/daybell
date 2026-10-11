@@ -2,10 +2,13 @@ import { jobInput, listQuery } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { check, filterValue, handle, parseBody, parseQuery } from "@/lib/api";
 import {
-  assertOrganizationInStudio,
+  assertJobReferences,
+  isNumberTaken,
   JOB_COLUMNS,
   type JobRow,
   jobColumns,
+  NUMBER_TAKEN,
+  nextJobNumber,
   page,
   toJob,
 } from "@/lib/jobs";
@@ -41,18 +44,27 @@ export const GET = handle(async (request: Request) => {
   return NextResponse.json({ jobs: items.map(toJob), nextCursor });
 });
 
-/** POST /api/v1/jobs — owners and admins create a job. New jobs are drafts. */
+/**
+ * POST /api/v1/jobs — owners and admins create a job. New jobs are drafts. Without an internal number the next free
+ * one is used; if someone else takes it at the same moment, the next one is tried.
+ */
 export const POST = handle(async (request: Request) => {
   const input = await parseBody(request, jobInput);
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
-  await assertOrganizationInStudio(supabase, studio.id, input.organizationId);
-  const row = check(
-    await supabase
+  await assertJobReferences(supabase, studio.id, input);
+  for (let attempt = 0; ; attempt++) {
+    const internalNumber = input.internalNumber ?? (await nextJobNumber(supabase, studio.id));
+    const result = await supabase
       .from("jobs")
-      .insert({ studio_id: studio.id, ...jobColumns(input) })
+      .insert({ studio_id: studio.id, ...jobColumns({ ...input, internalNumber }) })
       .select(JOB_COLUMNS)
-      .single(),
-  ) as unknown as JobRow;
-  return NextResponse.json({ job: toJob(row) }, { status: 201 });
+      .single();
+    if (isNumberTaken(result.error)) {
+      if (input.internalNumber || attempt >= 2) throw NUMBER_TAKEN;
+      continue;
+    }
+    const row = check(result) as unknown as JobRow;
+    return NextResponse.json({ job: toJob(row) }, { status: 201 });
+  }
 });

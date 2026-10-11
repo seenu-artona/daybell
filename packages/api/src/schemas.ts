@@ -1,5 +1,5 @@
 import { DATA_REGIONS } from "@daybell/config";
-import { JOB_TYPES, ORGANIZATION_KINDS, organizationRequired } from "@daybell/core";
+import { JOB_TYPES } from "@daybell/core";
 import { z } from "zod";
 
 /**
@@ -66,7 +66,7 @@ export type InviteInput = z.infer<typeof inviteInput>;
 
 export const acceptInviteInput = z.object({ token: inviteToken });
 
-// ── Organizations and jobs (Phase 1 step 1, ADR 0008) ─────────────────────────────────────────────────────────────
+// ── Clients and jobs (Phase 1 step 1, ADR 0008 and 0009) ──────────────────────────────────────────────────────────
 
 export const COUNTRIES = ["US", "CA"] as const;
 
@@ -80,16 +80,24 @@ const optionalText = (max: number) =>
     .nullable()
     .optional();
 
-const organizationFields = {
+/** GotPhoto-style "Add new client": name, address, contact person, notes. Contact person is personal data. */
+const clientFields = {
   name: z
     .string()
     .trim()
-    .min(1, { error: "validation.organizationName" })
+    .min(1, { error: "validation.clientName" })
     .max(120, { error: "validation.tooLong" }),
-  kind: z.enum(ORGANIZATION_KINDS, { error: "validation.invalid" }),
-  notes: optionalText(2000),
-  addressLine1: optionalText(200),
-  addressLine2: optionalText(200),
+  addressLine1: optionalText(200).meta({ description: "Street address." }),
+  addressLine2: optionalText(200).meta({ description: "Apartment, suite, etc." }),
+  postalCode: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(1, { error: "validation.invalid" })
+    .max(10, { error: "validation.tooLong" })
+    .nullable()
+    .optional()
+    .meta({ description: "ZIP or postal code." }),
   city: optionalText(120),
   region: z
     .string()
@@ -99,15 +107,19 @@ const organizationFields = {
     .nullable()
     .optional()
     .meta({ description: "Two-letter state or province code, e.g. OR or ON." }),
-  postalCode: z
+  country: z.enum(COUNTRIES, { error: "validation.invalid" }).nullable().optional(),
+  contactFirstName: optionalText(60),
+  contactLastName: optionalText(60),
+  contactPhone: optionalText(30).meta({ description: "Free text, up to 30 characters." }),
+  contactEmail: z
     .string()
     .trim()
-    .toUpperCase()
-    .min(1)
-    .max(10, { error: "validation.tooLong" })
+    .toLowerCase()
+    .max(254)
+    .pipe(z.email({ error: "validation.email" }))
     .nullable()
     .optional(),
-  country: z.enum(COUNTRIES, { error: "validation.invalid" }).nullable().optional(),
+  notes: optionalText(2000).meta({ description: "Only visible to the studio." }),
 };
 
 /**
@@ -128,45 +140,59 @@ export function isQuebec(address: Parameters<typeof quebecField>[0]): boolean {
   return quebecField(address) !== null;
 }
 
-export const organizationInput = z.object(organizationFields).superRefine((value, ctx) => {
+export const clientInput = z.object(clientFields).superRefine((value, ctx) => {
   const field = quebecField(value);
   if (field) ctx.addIssue({ code: "custom", path: [field], message: "validation.quebec" });
 });
-export type OrganizationInput = z.infer<typeof organizationInput>;
+export type ClientInput = z.infer<typeof clientInput>;
 
-/** Change some fields of an organization. The merged result must still pass organizationInput. */
-export const organizationPatch = z
-  .strictObject(z.object(organizationFields).partial().shape, { error: "validation.unknownField" })
+/** Change some fields of a client. The merged result must still pass clientInput. */
+export const clientPatch = z
+  .strictObject(z.object(clientFields).partial().shape, { error: "validation.unknownField" })
   .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
-export type OrganizationPatch = z.infer<typeof organizationPatch>;
+export type ClientPatch = z.infer<typeof clientPatch>;
 
+/** GotPhoto-style "Create Photo Job". A client is optional for every job type (Seenu, Oct 11 2026). */
 const jobFields = {
   name: z
     .string()
     .trim()
     .min(1, { error: "validation.jobName" })
-    .max(120, { error: "validation.tooLong" }),
-  type: z.enum(JOB_TYPES, { error: "validation.invalid" }),
-  organizationId: z
-    .uuid({ error: "validation.organization" })
-    .nullable()
-    .optional()
-    .meta({ description: "Required for school, preschool, sports and dance jobs." }),
+    .max(120, { error: "validation.tooLong" })
+    .meta({ description: "Parents see this." }),
   pictureDay: z.iso
     .date({ error: "validation.pictureDay" })
+    .meta({ description: "The shoot date, YYYY-MM-DD." }),
+  clientId: z
+    .uuid({ error: "validation.client" })
     .nullable()
     .optional()
-    .meta({ description: "The shoot date, YYYY-MM-DD. Optional." }),
+    .meta({ description: "One of the studio's clients. Optional." }),
+  internalNumber: z
+    .string()
+    .trim()
+    .min(1, { error: "validation.internalNumber" })
+    .max(30, { error: "validation.internalNumber" })
+    .optional()
+    .meta({
+      description:
+        "Only the studio sees it; unique per studio. Left out, the next JOBnnnnn number is used.",
+    }),
+  type: z.enum(JOB_TYPES, { error: "validation.invalid" }),
+  categoryId: z
+    .uuid({ error: "validation.category" })
+    .meta({ description: "One of the studio's job categories." }),
+  subjectsExpected: z
+    .number({ error: "validation.subjectsExpected" })
+    .int({ error: "validation.subjectsExpected" })
+    .min(1, { error: "validation.subjectsExpected" })
+    .max(100000, { error: "validation.subjectsExpected" })
+    .nullable()
+    .optional()
+    .meta({ description: "How many people are expected to be photographed, e.g. 120." }),
 };
 
-export const jobInput = z.object(jobFields).superRefine((value, ctx) => {
-  if (organizationRequired(value.type) && !value.organizationId)
-    ctx.addIssue({
-      code: "custom",
-      path: ["organizationId"],
-      message: "validation.organizationRequired",
-    });
-});
+export const jobInput = z.object(jobFields);
 export type JobInput = z.infer<typeof jobInput>;
 
 /** Change some fields of a job. A job's status is not changed here (step 8). */
@@ -189,13 +215,13 @@ export const listQuery = z.object({
     .optional()
     .meta({ description: "The nextCursor from the previous page." }),
 });
-export const organizationListQuery = listQuery.extend({
+export const clientListQuery = listQuery.extend({
   q: z
     .string()
     .trim()
     .max(120)
     .optional()
-    .meta({ description: "Only organizations whose name contains this." }),
+    .meta({ description: "Only clients whose name contains this." }),
 });
 
 /** Turns zod issues into `{ field: messageKey }` for forms. */

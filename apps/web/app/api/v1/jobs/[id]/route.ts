@@ -4,10 +4,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { check, handle, parseBody } from "@/lib/api";
 import {
-  assertOrganizationInStudio,
+  assertJobReferences,
+  isNumberTaken,
   JOB_COLUMNS,
   type JobRow,
   jobColumns,
+  NUMBER_TAKEN,
   toJob,
   validJob,
 } from "@/lib/jobs";
@@ -48,25 +50,30 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
   const current = await loadJob(supabase, studio.id, id);
-  // The job as it will be, checked as a whole (e.g. a school job still needs its organization).
+  // The job as it will be, checked as a whole.
   const next = validJob({
     name: current.name,
-    type: current.type,
-    organizationId: current.organization?.id ?? null,
     pictureDay: current.picture_day,
+    clientId: current.client?.id ?? null,
+    internalNumber: current.internal_number,
+    type: current.type,
+    categoryId: current.category.id,
+    subjectsExpected: current.subjects_expected,
     ...patch,
   });
-  if (patch.organizationId !== undefined)
-    await assertOrganizationInStudio(supabase, studio.id, next.organizationId);
-  const row = check(
-    await supabase
-      .from("jobs")
-      .update(jobColumns(next, Object.keys(patch) as (keyof JobInput)[]))
-      .eq("studio_id", studio.id)
-      .eq("id", id)
-      .select(JOB_COLUMNS)
-      .maybeSingle(),
-  ) as unknown as JobRow | null;
+  await assertJobReferences(supabase, studio.id, {
+    clientId: patch.clientId,
+    categoryId: patch.categoryId,
+  });
+  const result = await supabase
+    .from("jobs")
+    .update(jobColumns(next, Object.keys(patch) as (keyof JobInput)[]))
+    .eq("studio_id", studio.id)
+    .eq("id", id)
+    .select(JOB_COLUMNS)
+    .maybeSingle();
+  if (isNumberTaken(result.error)) throw NUMBER_TAKEN;
+  const row = check(result) as unknown as JobRow | null;
   if (!row) throw new ApiError("not_found", "Job not found.");
   return NextResponse.json({ job: toJob(row) });
 });

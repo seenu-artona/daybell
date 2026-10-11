@@ -1,45 +1,51 @@
 import "server-only";
 import {
   ApiError,
+  type Client,
+  type ClientInput,
+  clientInput,
   fieldErrors,
   type Job,
   type JobInput,
   jobInput,
-  type Organization,
-  type OrganizationInput,
-  organizationInput,
 } from "@daybell/api";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
 
-/** Columns the API reads, with the job's organization embedded through the composite studio FK (ADR 0008). */
+/** Columns the API reads; client and category are embedded through the composite studio FKs (ADR 0008). */
 export const JOB_COLUMNS =
-  "id, name, type, status, picture_day, created_at, updated_at, organization:organizations (id, name, city)";
-export const ORGANIZATION_COLUMNS =
-  "id, name, kind, notes, address_line1, address_line2, city, region_code, postal_code, country, created_at, updated_at";
+  "id, name, type, status, picture_day, internal_number, subjects_expected, created_at, updated_at, client:clients (id, name, city), category:job_categories (id, name)";
+export const CLIENT_COLUMNS =
+  "id, name, address_line1, address_line2, postal_code, city, region_code, country, contact_first_name, contact_last_name, contact_phone, contact_email, notes, created_at, updated_at";
 
 export interface JobRow {
   id: string;
   name: string;
   type: Job["type"];
   status: Job["status"];
-  picture_day: string | null;
+  picture_day: string;
+  internal_number: string;
+  subjects_expected: number | null;
   created_at: string;
   updated_at: string;
-  organization: { id: string; name: string; city: string | null } | null;
+  client: { id: string; name: string; city: string | null } | null;
+  category: { id: string; name: string };
 }
 
-export interface OrganizationRow {
+export interface ClientRow {
   id: string;
   name: string;
-  kind: Organization["kind"];
-  notes: string | null;
   address_line1: string | null;
   address_line2: string | null;
+  postal_code: string | null;
   city: string | null;
   region_code: string | null;
-  postal_code: string | null;
-  country: Organization["country"];
+  country: Client["country"];
+  contact_first_name: string | null;
+  contact_last_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -51,54 +57,66 @@ export function toJob(row: JobRow): Job {
     type: row.type,
     status: row.status,
     pictureDay: row.picture_day,
-    organization: row.organization,
+    client: row.client,
+    internalNumber: row.internal_number,
+    category: row.category,
+    subjectsExpected: row.subjects_expected,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-export function toOrganization(row: OrganizationRow): Organization {
+export function toClient(row: ClientRow): Client {
   return {
     id: row.id,
     name: row.name,
-    kind: row.kind,
-    notes: row.notes,
     addressLine1: row.address_line1,
     addressLine2: row.address_line2,
+    postalCode: row.postal_code,
     city: row.city,
     region: row.region_code,
-    postalCode: row.postal_code,
     country: row.country,
+    contactFirstName: row.contact_first_name,
+    contactLastName: row.contact_last_name,
+    contactPhone: row.contact_phone,
+    contactEmail: row.contact_email,
+    notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-const ORGANIZATION_COLUMN_FOR: Record<keyof OrganizationInput, keyof OrganizationRow> = {
+const CLIENT_COLUMN_FOR: Record<keyof ClientInput, keyof ClientRow> = {
   name: "name",
-  kind: "kind",
-  notes: "notes",
   addressLine1: "address_line1",
   addressLine2: "address_line2",
+  postalCode: "postal_code",
   city: "city",
   region: "region_code",
-  postalCode: "postal_code",
   country: "country",
+  contactFirstName: "contact_first_name",
+  contactLastName: "contact_last_name",
+  contactPhone: "contact_phone",
+  contactEmail: "contact_email",
+  notes: "notes",
 };
 
 const JOB_COLUMN_FOR: Record<keyof JobInput, string> = {
   name: "name",
-  type: "type",
-  organizationId: "organization_id",
   pictureDay: "picture_day",
+  clientId: "client_id",
+  internalNumber: "internal_number",
+  type: "type",
+  categoryId: "category_id",
+  subjectsExpected: "subjects_expected",
 };
 
 /** Database columns for the given API fields (only those present), from an already validated input. */
-export function organizationColumns(
-  input: OrganizationInput,
-  keys: (keyof OrganizationInput)[] = Object.keys(input) as (keyof OrganizationInput)[],
+export function clientColumns(
+  input: ClientInput,
+  keys: (keyof ClientInput)[] = Object.keys(input) as (keyof ClientInput)[],
 ): Record<string, unknown> {
-  return Object.fromEntries(keys.map((k) => [ORGANIZATION_COLUMN_FOR[k], input[k] ?? null]));
+  return Object.fromEntries(keys.map((k) => [CLIENT_COLUMN_FOR[k], input[k] ?? null]));
 }
 
 export function jobColumns(
@@ -108,9 +126,9 @@ export function jobColumns(
   return Object.fromEntries(keys.map((k) => [JOB_COLUMN_FOR[k], input[k] ?? null]));
 }
 
-/** Validates a whole organization (e.g. an existing one with a patch applied). */
-export function validOrganization(value: unknown): OrganizationInput {
-  const result = organizationInput.safeParse(value);
+function valid<T>(
+  result: { success: true; data: T } | { success: false; error: Parameters<typeof fieldErrors>[0] },
+): T {
   if (!result.success)
     throw new ApiError(
       "invalid_input",
@@ -120,38 +138,55 @@ export function validOrganization(value: unknown): OrganizationInput {
   return result.data;
 }
 
-/** Validates a whole job, including the rule that some job types need an organization. */
+/** Validates a whole client (e.g. an existing one with a patch applied). */
+export function validClient(value: unknown): ClientInput {
+  return valid(clientInput.safeParse(value));
+}
+
+/** Validates a whole job (e.g. an existing one with a patch applied). */
 export function validJob(value: unknown): JobInput {
-  const result = jobInput.safeParse(value);
-  if (!result.success)
-    throw new ApiError(
-      "invalid_input",
-      "Please check the highlighted fields.",
-      fieldErrors(result.error),
-    );
-  return result.data;
+  return valid(jobInput.safeParse(value));
 }
 
-/** The organization must exist in this studio (the composite FK enforces it too; this gives a field error). */
-export async function assertOrganizationInStudio(
+/**
+ * The client and category must exist in this studio. The composite FKs enforce it too; checking first gives a
+ * field error instead of a generic one.
+ */
+export async function assertJobReferences(
   supabase: SupabaseClient,
   studioId: string,
-  organizationId: string | null | undefined,
+  refs: { clientId?: string | null | undefined; categoryId?: string | undefined },
 ): Promise<void> {
-  if (!organizationId) return;
-  const rows = check(
-    await supabase
-      .from("organizations")
-      .select("id")
-      .eq("studio_id", studioId)
-      .eq("id", organizationId)
-      .limit(1),
-  );
-  if (!rows || rows.length === 0)
-    throw new ApiError("invalid_input", "Please check the highlighted fields.", {
-      organizationId: "validation.organization",
-    });
+  const exists = async (table: string, id: string) => {
+    const rows = check(
+      await supabase.from(table).select("id").eq("studio_id", studioId).eq("id", id).limit(1),
+    );
+    return Boolean(rows && rows.length > 0);
+  };
+  const fields: Record<string, string> = {};
+  if (refs.clientId && !(await exists("clients", refs.clientId)))
+    fields.clientId = "validation.client";
+  if (refs.categoryId && !(await exists("job_categories", refs.categoryId)))
+    fields.categoryId = "validation.category";
+  if (Object.keys(fields).length > 0)
+    throw new ApiError("invalid_input", "Please check the highlighted fields.", fields);
 }
+
+/** The studio's next free JOBnnnnn number (database function, RLS-scoped). */
+export async function nextJobNumber(supabase: SupabaseClient, studioId: string): Promise<string> {
+  return check(await supabase.rpc("next_job_number", { p_studio_id: studioId })) as string;
+}
+
+/** A unique-number clash becomes a field error on internalNumber; other errors are mapped as usual. */
+export function isNumberTaken(error: { code?: string; message?: string } | null): boolean {
+  return (
+    error?.code === "23505" && (error.message ?? "").includes("jobs_studio_internal_number_key")
+  );
+}
+
+export const NUMBER_TAKEN = new ApiError("invalid_input", "Please check the highlighted fields.", {
+  internalNumber: "validation.internalNumberTaken",
+});
 
 /** Of `limit + 1` rows, the page to return and the cursor for the next one. */
 export function page<T extends { id: string }>(

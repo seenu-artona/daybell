@@ -132,18 +132,21 @@
     "slugTaken": "That web address is taken. Try another.",
     "studioName": "Enter your studio's name.",
     "inviteToken": "This invite link isn't valid.",
-    "organizationName": "Enter the organization's name.",
     "tooLong": "That's too long. Please shorten it.",
     "regionCode": "Use the 2-letter code, like OR or ON.",
     "quebec": "Daybell isn't available in Quebec yet, so Quebec addresses can't be added.",
     "jobName": "Give the job a name.",
-    "organization": "Choose an organization from your list.",
-    "organizationRequired": "Choose or add the organization this job is for.",
-    "pictureDay": "Enter a real date.",
+    "pictureDay": "Enter the date of picture day.",
     "nothingToChange": "Change something before saving.",
     "cursor": "That page link isn't valid.",
     "invalid": "Please check this field.",
-    "unknownField": "Something unexpected was sent. Please reload the page and try again."
+    "unknownField": "Something unexpected was sent. Please reload the page and try again.",
+    "clientName": "Enter the client's name.",
+    "client": "Choose a client from your list.",
+    "internalNumber": "Use 1–30 characters.",
+    "internalNumberTaken": "Another job already uses this number. Try the next one.",
+    "category": "Choose a job category.",
+    "subjectsExpected": "Enter a whole number from 1 to 100,000."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -260,14 +263,14 @@
         "withdrawn": "{actor} withdrew an invite"
       },
       "aJob": "a job",
-      "anOrganization": "an organization",
       "job": {
         "created": "{actor} created the job {name}",
         "updated": "{actor} updated the job {name}"
       },
-      "organization": {
-        "created": "{actor} added the organization {name}",
-        "updated": "{actor} updated the organization {name}"
+      "aClient": "a client",
+      "client": {
+        "created": "{actor} added the client {name}",
+        "updated": "{actor} updated the client {name}"
       }
     },
     "nav": {
@@ -373,13 +376,14 @@
       "emptyReadOnly": "Owners and admins create jobs.",
       "columns": {
         "name": "Job",
-        "organization": "Organization",
-        "type": "Type",
+        "number": "Job number",
+        "client": "Client",
+        "category": "Category",
         "pictureDay": "Picture day",
+        "subjects": "Subjects",
         "status": "Status"
       },
       "none": "–",
-      "notSet": "Not set",
       "loadMore": "Show more",
       "types": {
         "school": "School",
@@ -389,60 +393,51 @@
         "seniors": "Seniors",
         "mini_session": "Mini session"
       },
-      "typeHelp": {
-        "school": "Classes at a school",
-        "preschool": "Daycares and preschools",
-        "sports": "Teams in a league or club",
-        "dance": "Classes at a dance studio",
-        "seniors": "Senior portraits",
-        "mini_session": "Short themed sessions"
-      },
       "statuses": {
         "draft": "Draft",
         "selling": "Selling",
         "closed": "Closed"
       },
-      "wizard": {
-        "title": "New job",
-        "stepOf": "Step {step} of {total}",
-        "steps": {
-          "type": "What are you photographing?",
-          "organization": "Who is it for?",
-          "details": "Name and picture day"
-        },
-        "back": "Back",
-        "next": "Next",
-        "skip": "Skip — no organization",
-        "create": "Create job",
-        "creating": "Creating…",
-        "chooseType": "Choose a type to continue.",
-        "chooseOrganization": "Choose an organization or add a new one to continue.",
-        "search": "Search your organizations",
-        "noMatches": "No organizations match.",
-        "noOrganizations": "You haven't added any organizations yet. Add the first one below.",
-        "addNew": "Add a new organization",
-        "useExisting": "Choose from my list",
-        "optional": "Optional for this type of job.",
+      "form": {
+        "createTitle": "Create photo job",
+        "editTitle": "Edit job",
         "name": "Job name",
         "nameHelp": "Parents see this in your shop, e.g. Lincoln Elementary · Fall 2026.",
-        "pictureDay": "Picture day",
-        "pictureDayHelp": "Optional. You can add it later.",
-        "summaryOrganization": "For {name}",
-        "summaryNew": "New organization: {name}"
+        "pictureDay": "Date of picture day",
+        "client": "Client",
+        "clientSearch": "Search your clients",
+        "clientNone": "No client",
+        "clientSelected": "Selected client: {name}",
+        "clientChange": "Change client",
+        "clientRemove": "Remove client",
+        "clientNoMatches": "No clients match.",
+        "clientEmpty": "You haven't added any clients yet.",
+        "addClient": "Add new client",
+        "internalNumber": "Internal job number",
+        "internalNumberHelp": "Only your studio sees this.",
+        "type": "Job type",
+        "category": "Job category",
+        "categoryChoose": "Choose a category",
+        "subjects": "Subjects expected",
+        "subjectsHelp": "About how many people you'll photograph, e.g. 120.",
+        "cancel": "Cancel",
+        "save": "Save job",
+        "saving": "Saving…",
+        "loading": "Loading…"
       },
       "detail": {
         "back": "All jobs",
         "loading": "Loading the job…",
         "edit": "Edit job",
-        "editTitle": "Edit job",
-        "save": "Save",
-        "saving": "Saving…",
-        "cancel": "Cancel",
         "saved": "Saved.",
-        "organization": "Organization",
+        "client": "Client",
+        "noClient": "No client",
+        "number": "Internal job number",
+        "category": "Category",
         "type": "Type",
         "pictureDay": "Picture day",
-        "noOrganization": "No organization",
+        "subjects": "Subjects expected",
+        "notSet": "Not set",
         "progressLabel": "Job progress",
         "stages": {
           "pictureDay": "Picture day",
@@ -456,9 +451,7 @@
         "photos": "Photos",
         "photosBody": "Uploading and tagging photos arrive in an upcoming step.",
         "comingSoon": "Coming soon",
-        "notFound": "We couldn't find that job.",
-        "noOrganizationsYet": "This type of job needs an organization, and you haven't added one yet.",
-        "addOrganization": "Add an organization"
+        "notFound": "We couldn't find that job."
       }
     },
     "contacts": {
@@ -467,17 +460,17 @@
       "tabs": {
         "parents": "Parents",
         "children": "Children",
-        "organizations": "Organizations"
+        "clients": "Clients"
       },
       "soon": "Soon",
-      "organizations": {
-        "intro": "Schools, daycares, clubs and leagues you photograph for.",
-        "add": "Add organization",
-        "loading": "Loading organizations…",
-        "empty": "No organizations yet. Add one here, or while creating a job.",
+      "clients": {
+        "intro": "Schools, daycares, teams and families you photograph for.",
+        "add": "Add client",
+        "loading": "Loading clients…",
+        "empty": "No clients yet. Add your first one to use it in jobs.",
         "columns": {
           "name": "Name",
-          "kind": "Kind",
+          "contact": "Contact person",
           "city": "City",
           "actions": "Actions"
         },
@@ -485,31 +478,27 @@
         "editLabel": "Edit {name}",
         "loadMore": "Show more"
       },
-      "kinds": {
-        "school": "School",
-        "daycare": "Daycare",
-        "club": "Club",
-        "league": "League",
-        "dance_studio": "Dance studio",
-        "other": "Other"
-      },
       "form": {
-        "addTitle": "Add organization",
-        "editTitle": "Edit organization",
-        "name": "Name",
-        "kind": "Kind",
-        "notes": "Notes",
-        "notesHelp": "For your team only. Don't add children's details here.",
-        "addressLine1": "Address",
-        "addressLine2": "Address line 2",
+        "addTitle": "Add new client",
+        "editTitle": "Edit client",
+        "name": "Client name",
+        "address": "Address",
+        "addressLine1": "Street address",
+        "addressLine2": "Apartment, suite, etc.",
         "city": "City",
         "country": "Country",
         "countries": {
           "US": "United States",
           "CA": "Canada"
         },
-        "optional": "Optional",
-        "save": "Save",
+        "contact": "Contact person",
+        "firstName": "First name",
+        "lastName": "Last name",
+        "phone": "Phone",
+        "email": "Email",
+        "notes": "Additional notes",
+        "notesHelp": "Only your studio sees this. Parents and schools never do.",
+        "save": "Save client",
         "saving": "Saving…",
         "cancel": "Cancel"
       },
@@ -525,7 +514,8 @@
           "postalCode": "Postal code"
         }
       }
-    }
+    },
+    "optionalLabel": "{label} (optional)"
   },
   "invite": {
     "title": "You've been invited",

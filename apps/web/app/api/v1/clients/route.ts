@@ -1,22 +1,16 @@
-import { organizationInput, organizationListQuery } from "@daybell/api";
+import { clientInput, clientListQuery } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { check, filterValue, handle, likePattern, parseBody, parseQuery } from "@/lib/api";
-import {
-  ORGANIZATION_COLUMNS,
-  type OrganizationRow,
-  organizationColumns,
-  page,
-  toOrganization,
-} from "@/lib/jobs";
+import { CLIENT_COLUMNS, type ClientRow, clientColumns, page, toClient } from "@/lib/jobs";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
-/** GET /api/v1/organizations — the studio's organizations by name, in pages; ?q= filters by name. */
+/** GET /api/v1/clients — the studio's clients by name, in pages; ?q= filters by name. */
 export const GET = handle(async (request: Request) => {
-  const { limit, cursor, q } = parseQuery(request, organizationListQuery);
+  const { limit, cursor, q } = parseQuery(request, clientListQuery);
   const { supabase, studio } = await studioScope();
   let query = supabase
-    .from("organizations")
-    .select(ORGANIZATION_COLUMNS)
+    .from("clients")
+    .select(CLIENT_COLUMNS)
     .eq("studio_id", studio.id)
     .order("name", { ascending: true })
     .order("id", { ascending: true })
@@ -26,32 +20,32 @@ export const GET = handle(async (request: Request) => {
     // Keyset pagination by (name, id). The cursor is an id, so names never travel in URLs or logs.
     const anchor = check(
       await supabase
-        .from("organizations")
+        .from("clients")
         .select("name")
         .eq("studio_id", studio.id)
         .eq("id", cursor)
         .maybeSingle(),
     ) as { name: string } | null;
-    if (!anchor) return NextResponse.json({ organizations: [], nextCursor: null });
+    if (!anchor) return NextResponse.json({ clients: [], nextCursor: null });
     const name = filterValue(anchor.name);
     query = query.or(`name.gt.${name},and(name.eq.${name},id.gt.${cursor})`);
   }
-  const rows = (check(await query) ?? []) as OrganizationRow[];
+  const rows = (check(await query) ?? []) as ClientRow[];
   const { items, nextCursor } = page(rows, limit);
-  return NextResponse.json({ organizations: items.map(toOrganization), nextCursor });
+  return NextResponse.json({ clients: items.map(toClient), nextCursor });
 });
 
-/** POST /api/v1/organizations — owners and admins add a school, daycare, club or league. */
+/** POST /api/v1/clients — owners and admins add a client. */
 export const POST = handle(async (request: Request) => {
-  const input = await parseBody(request, organizationInput);
+  const input = await parseBody(request, clientInput);
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
   const row = check(
     await supabase
-      .from("organizations")
-      .insert({ studio_id: studio.id, ...organizationColumns(input) })
-      .select(ORGANIZATION_COLUMNS)
+      .from("clients")
+      .insert({ studio_id: studio.id, ...clientColumns(input) })
+      .select(CLIENT_COLUMNS)
       .single(),
-  ) as OrganizationRow;
-  return NextResponse.json({ organization: toOrganization(row) }, { status: 201 });
+  ) as ClientRow;
+  return NextResponse.json({ client: toClient(row) }, { status: 201 });
 });

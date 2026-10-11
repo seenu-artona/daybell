@@ -1,14 +1,13 @@
-import { ACTIVITY_TYPES, type ActivityItem, ApiError, type StudioRole } from "@daybell/api";
+import { type ActivityItem, ApiError, type StudioRole } from "@daybell/api";
 import { NextResponse } from "next/server";
+import { activityType } from "@/lib/activity";
 import { check, handle, requireUser } from "@/lib/api";
 import { currentStudio } from "@/lib/studio";
 import { supabaseForSession } from "@/lib/supabase/server";
 
-const KNOWN = new Set<string>(ACTIVITY_TYPES);
-
 /**
  * GET /api/v1/studio/activity — the latest 50 things that happened in the studio (owners and admins, D96).
- * Names (people, jobs, organizations) are resolved when read, never stored in events.
+ * Names (people, jobs, clients) are resolved when read, never stored in events.
  */
 export const GET = handle(async () => {
   const { region, supabase } = await supabaseForSession();
@@ -31,39 +30,38 @@ export const GET = handle(async () => {
   const emails = new Map(
     ((check(team) ?? []) as { user_id: string; email: string }[]).map((m) => [m.user_id, m.email]),
   );
-  // Events hold IDs only; job and organization names are looked up now, so they are always current.
+  // Events hold IDs only; job and client names are looked up now, so they are always current.
+  // Events written before organizations became clients (ADR 0009) are shown as client events.
   const subjectsOf = (prefix: string) => [
     ...new Set(
       rows.filter((e) => e.type.startsWith(prefix) && e.subject_id).map((e) => e.subject_id),
     ),
   ];
-  const [jobIds, organizationIds] = [subjectsOf("job."), subjectsOf("organization.")];
-  const [jobs, organizations] = await Promise.all([
+  const [jobIds, clientIds] = [
+    subjectsOf("job."),
+    [...subjectsOf("client."), ...subjectsOf("organization.")],
+  ];
+  const [jobs, clients] = await Promise.all([
     jobIds.length
       ? supabase.from("jobs").select("id, name").eq("studio_id", studio.id).in("id", jobIds)
       : null,
-    organizationIds.length
-      ? supabase
-          .from("organizations")
-          .select("id, name")
-          .eq("studio_id", studio.id)
-          .in("id", organizationIds)
+    clientIds.length
+      ? supabase.from("clients").select("id, name").eq("studio_id", studio.id).in("id", clientIds)
       : null,
   ]);
   const names = new Map<string, string>(
-    [
-      ...(jobs ? (check(jobs) ?? []) : []),
-      ...(organizations ? (check(organizations) ?? []) : []),
-    ].map((r: { id: string; name: string }) => [r.id, r.name]),
+    [...(jobs ? (check(jobs) ?? []) : []), ...(clients ? (check(clients) ?? []) : [])].map(
+      (r: { id: string; name: string }) => [r.id, r.name],
+    ),
   );
 
   const activity: ActivityItem[] = rows
-    .filter((e) => KNOWN.has(e.type))
+    .filter((e) => activityType(e.type) !== null)
     .map((e) => {
       const data = (e.data ?? {}) as { role?: StudioRole; to?: StudioRole };
       return {
         id: e.id,
-        type: e.type as ActivityItem["type"],
+        type: activityType(e.type) as ActivityItem["type"],
         actorEmail: e.actor_id ? (emails.get(e.actor_id) ?? null) : null,
         subjectEmail:
           e.subject_id && e.type.startsWith("member.") ? (emails.get(e.subject_id) ?? null) : null,

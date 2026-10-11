@@ -1,15 +1,35 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
-// Phase 1 step 1 "Jobs and organizations": an owner creates a job with a new organization through the wizard, sees it
-// in Jobs as a draft, opens it, finds the organization under Contacts, and sees it in the activity log.
+// Phase 1 step 1 "Jobs and clients" (ADR 0008, 0009): an owner adds a client in Contacts, creates a job in the
+// one-form dialog picking that client, then creates a second job adding a new client from inside the job dialog.
 // The CI database is Canadian (D122), so address labels read Province / Postal code.
 const run = `${Date.now()}`;
 
-test("owner creates a job with a new organization", async ({ page: firstTab }, info) => {
+/** Fills the client form inside `dialog`. */
+async function fillClient(dialog: Locator, name: string, province: string) {
+  await dialog.getByLabel("Client name", { exact: true }).fill(name);
+  await dialog.getByLabel(/^City/).fill("Toronto");
+  await dialog.getByLabel(/^Province/).fill(province);
+  await dialog.getByLabel(/^First name/).fill("Pat");
+  await dialog.getByLabel(/^Email/).fill("pat@example.test");
+}
+
+/** The job dialog, opened from Jobs. */
+async function openJobDialog(page: Page, button: string): Promise<Locator> {
+  await page.getByRole("main").getByRole("button", { name: button, exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Create photo job" });
+  await expect(dialog.getByLabel("Internal job number")).toHaveValue(/^JOB\d{5}$/);
+  return dialog;
+}
+
+test("owner adds a client, then creates jobs in the job dialog", async ({
+  page: firstTab,
+}, info) => {
   const tag = `${info.project.name}-${run}`;
   const owner = `jobs-owner-${tag}@example.test`;
-  const organization = `Lincoln Elementary ${tag}`;
+  const client = `Lincoln Elementary ${tag}`;
+  const newClient = `Westview Soccer ${tag}`;
   const job = `Lincoln Fall ${tag}`;
   const page = await signUpOwner(firstTab, {
     studio: `Jobs Studio ${tag}`,
@@ -19,79 +39,113 @@ test("owner creates a job with a new organization", async ({ page: firstTab }, i
   // The phone header and the desktop top bar both exist; look inside the page's main area only.
   const main = page.getByRole("main");
 
-  // Jobs is built now: an empty list invites the first job.
+  // 1. Contacts opens on Clients. Add a client; Quebec is refused (D131).
+  await page.goto("/app/contacts");
+  await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
+  // The tab reads "Children" followed by a "Soon" badge.
+  await expect(main.getByText(/^Children/)).toBeVisible();
+  await main.getByRole("button", { name: "Add client", exact: true }).click();
+  const addClient = page.getByRole("dialog", { name: "Add new client" });
+  await fillClient(addClient, client, "QC");
+  await expect(addClient.getByLabel("Country")).toHaveValue("CA");
+  await addClient.getByRole("button", { name: "Save client" }).click();
+  await expect(addClient.getByText("Daybell isn't available in Quebec yet")).toBeVisible();
+  await addClient.getByLabel(/^Province/).fill("ON");
+  await addClient.getByRole("button", { name: "Save client" }).click();
+  await expect(addClient).toBeHidden();
+  await expect(main.getByRole("cell", { name: client, exact: true })).toBeVisible();
+
+  // 2. Jobs is empty; create the first job in the dialog, picking the client.
   await page.goto("/app/jobs");
   await expect(main.getByRole("heading", { name: "No jobs yet" })).toBeVisible();
-  await main.getByRole("link", { name: "Create your first job" }).click();
-  await expect(page).toHaveURL(/\/app\/jobs\/new$/);
-
-  // 1. Type.
-  await expect(main.getByRole("heading", { name: "What are you photographing?" })).toBeVisible();
-  await main.getByText("Classes at a school").click();
-  await main.getByRole("button", { name: "Next" }).click();
-
-  // 2. Organization: none yet, so the new-organization form shows. Quebec is refused (D131).
-  await expect(main.getByRole("heading", { name: "Who is it for?" })).toBeVisible();
-  await main.getByLabel("Name", { exact: true }).fill(organization);
-  await expect(main.getByLabel("Kind")).toHaveValue("school");
-  await main.getByLabel(/^City/).fill("Toronto");
-  await main.getByLabel(/^Province/).fill("QC");
-  await expect(main.getByLabel("Country")).toHaveValue("CA");
-  await main.getByRole("button", { name: "Next" }).click();
-  await expect(main.getByText("Daybell isn't available in Quebec yet")).toBeVisible();
-  await main.getByLabel(/^Province/).fill("ON");
-  await main.getByLabel(/^Postal code/).fill("M5V 2T6");
-  await main.getByRole("button", { name: "Next" }).click();
-
-  // 3. Name and picture day.
-  await expect(main.getByRole("heading", { name: "Name and picture day" })).toBeVisible();
-  await main.getByLabel("Job name").fill(job);
-  await main.getByLabel("Picture day").fill("2026-10-14");
-  await main.getByRole("button", { name: "Create job" }).click();
+  let dialog = await openJobDialog(page, "Create your first job");
+  await expect(dialog.getByLabel("Internal job number")).toHaveValue("JOB00001");
+  await dialog.getByLabel("Job name").fill(job);
+  await dialog.getByLabel("Date of picture day").fill("2026-10-14");
+  await dialog.getByLabel("Search your clients").fill("Lincoln");
+  await dialog.getByRole("button", { name: new RegExp(client) }).click();
+  await expect(dialog.getByText(`Selected client: ${client}`)).toBeAttached();
+  await dialog.getByLabel("Job type").selectOption("school");
+  await dialog.getByLabel("Job category").selectOption({ label: "Fall" });
+  await dialog.getByLabel(/^Subjects expected/).fill("120");
+  await dialog.getByRole("button", { name: "Save job" }).click();
 
   // The job page: details, the D75 progress steps, and sections still to come.
   await expect(page).toHaveURL(/\/app\/jobs\/[0-9a-f-]{36}$/);
   await expect(main.getByRole("heading", { name: job, level: 1 })).toBeVisible();
   await expect(main.getByText("Draft", { exact: true })).toBeVisible();
-  await expect(main.getByText(`${organization} · Toronto`)).toBeVisible();
-  await expect(main.getByRole("heading", { name: "Job progress" })).toBeVisible();
+  await expect(main.getByText(`${client} · Toronto`, { exact: true })).toBeVisible();
+  await expect(main.getByText("JOB00001", { exact: true })).toBeVisible();
+  await expect(main.getByText("Fall", { exact: true })).toBeVisible();
+  await expect(main.getByText("120", { exact: true })).toBeVisible();
   for (const stage of ["Picture day", "Tagged", "Shop live", "Shipped"]) {
     await expect(main.getByRole("listitem").filter({ hasText: stage })).toContainText("Upcoming");
   }
-  await expect(main.getByRole("heading", { name: "Roster" })).toBeVisible();
 
-  // Editing the job changes its name.
+  // Editing uses the same form.
   await main.getByRole("button", { name: "Edit job" }).click();
-  const dialog = page.getByRole("dialog", { name: "Edit job" });
-  await dialog.getByLabel("Job name").fill(`${job} (edited)`);
-  await dialog.getByRole("button", { name: "Save" }).click();
+  const edit = page.getByRole("dialog", { name: "Edit job" });
+  await edit.getByLabel("Job name").fill(`${job} (edited)`);
+  await edit.getByRole("button", { name: "Save job" }).click();
   await expect(main.getByRole("heading", { name: `${job} (edited)`, level: 1 })).toBeVisible();
 
-  // The Jobs list shows it as a draft.
+  // 3. A second job adds a new client from inside the job dialog; Escape closes only the client dialog.
   await page.goto("/app/jobs");
-  const row = main.getByRole("row").filter({ hasText: `${job} (edited)` });
-  await expect(row).toContainText(organization);
-  await expect(row).toContainText("Draft");
+  dialog = await openJobDialog(page, "New job");
+  await expect(dialog.getByLabel("Internal job number")).toHaveValue("JOB00002");
+  await dialog.getByLabel("Job name").fill(`Westview Spring ${tag}`);
+  await dialog.getByLabel("Date of picture day").fill("2027-04-02");
+  await dialog.getByRole("button", { name: "Add new client" }).click();
+  const nested = page.getByRole("dialog", { name: "Add new client" });
+  await expect(nested).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(nested).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Add new client" }).click();
+  await fillClient(nested, newClient, "ON");
+  await nested.getByRole("button", { name: "Save client" }).click();
+  await expect(nested).toBeHidden();
+  await expect(dialog.getByText(`Selected client: ${newClient}`)).toBeAttached();
+  await dialog.getByLabel("Job type").selectOption("sports");
+  await dialog.getByLabel("Job category").selectOption({ label: "Spring" });
+  await dialog.getByRole("button", { name: "Save job" }).click();
+  await expect(
+    main.getByRole("heading", { name: `Westview Spring ${tag}`, level: 1 }),
+  ).toBeVisible();
 
-  // Contacts opens on Organizations, which lists the new organization.
-  await page.goto("/app/contacts");
-  await expect(page).toHaveURL(/\/app\/contacts\/organizations$/);
-  await expect(main.getByRole("cell", { name: organization, exact: true })).toBeVisible();
-  await expect(main.getByText("Children")).toBeVisible();
+  // The Jobs list shows both as drafts with their numbers.
+  await page.goto("/app/jobs");
+  const first = main.getByRole("row").filter({ hasText: `${job} (edited)` });
+  await expect(first).toContainText(client);
+  await expect(first).toContainText("JOB00001");
+  await expect(first).toContainText("Draft");
+  await expect(main.getByRole("row").filter({ hasText: newClient })).toContainText("JOB00002");
 
-  // The activity log names the job and organization by looking them up, never from the event (D96).
+  // Home's "Create job" link opens the same dialog.
+  await page.goto("/app/jobs?new=1");
+  await expect(page.getByRole("dialog", { name: "Create photo job" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // The activity log names jobs and clients by looking them up, never from the event (D96).
   await page.goto("/app");
   await expect(main.getByText(`${owner} created the job ${job} (edited)`)).toBeVisible();
-  await expect(main.getByText(`${owner} added the organization ${organization}`)).toBeVisible();
+  await expect(main.getByText(`${owner} added the client ${client}`)).toBeVisible();
 
-  // The API refuses changing a job's status directly and Quebec addresses.
+  // The API refuses changing a job's status directly, Quebec clients, and duplicate job numbers.
   const jobs = await (await page.request.get("/api/v1/jobs")).json();
   const id = jobs.jobs[0].id as string;
   const status = await page.request.patch(`/api/v1/jobs/${id}`, { data: { status: "selling" } });
   expect(status.status()).toBe(400);
-  const quebec = await page.request.post("/api/v1/organizations", {
-    data: { name: "École", kind: "school", region: "QC", country: "CA" },
+  const quebec = await page.request.post("/api/v1/clients", {
+    data: { name: "École", region: "QC", country: "CA" },
   });
   expect(quebec.status()).toBe(400);
   expect((await quebec.json()).error.fields.region).toBe("validation.quebec");
+  const duplicate = await page.request.patch(`/api/v1/jobs/${id}`, {
+    data: { internalNumber: "job00001" },
+  });
+  expect(duplicate.status()).toBe(400);
+  expect((await duplicate.json()).error.fields.internalNumber).toBe(
+    "validation.internalNumberTaken",
+  );
 });
