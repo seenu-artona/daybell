@@ -598,6 +598,7 @@
       },
       "importPage": {
         "title": "Import roster",
+        "desktopOnly": "Open this on a computer to import a roster.",
         "back": "Back to job",
         "stepsLabel": "Import steps",
         "steps": {

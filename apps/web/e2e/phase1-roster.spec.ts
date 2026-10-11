@@ -4,8 +4,10 @@ import { signUpOwner } from "./helpers";
 
 // Phase 1 step 2 "Roster" (D23; ADR 0011): an owner adds a child by hand (adding a class from the combobox's last
 // option), edits them, imports a CSV (an update by student ID, duplicates flagged, a bad row left out) and an Excel
-// file, renames a class, removes a child, and the API refuses what it should. Adding and importing write codes through
-// the server-only path (the app's SUPABASE_SECRET_KEY_CA, which CI takes from the local Supabase stack).
+// file, renames a class, removes a child, and the API refuses what it should. Roster import is desktop-only (D134;
+// ADR 0012): on a phone the test adds, edits and removes children by hand and checks the import page shows a notice.
+// Adding and importing write codes through the server-only path (the app's SUPABASE_SECRET_KEY_CA, which CI takes
+// from the local Supabase stack).
 // The CI database is Canadian (D122), so every access code starts with a symbol from the Canadian set.
 //
 // e2e/fixtures/roster.xlsx (2 KB) was made once with Python's zipfile: one sheet "Roster" with the header
@@ -117,98 +119,126 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   await expect(rosterStatus).toHaveText("Saved.");
   await expect(maya.getByRole("cell").nth(3)).toHaveText("5");
 
-  // 4. Import a CSV: columns are guessed, rows checked on the server, then imported together.
-  await roster.getByRole("link", { name: "Import roster" }).click();
-  await expect(main.getByRole("heading", { name: "Import roster", level: 1 })).toBeVisible();
-  await main.getByLabel("Roster file (CSV or Excel)").setInputFiles({
-    name: "roster.csv",
-    mimeType: "text/csv",
-    buffer: Buffer.from(CSV),
-  });
-  await expect(main.getByLabel("Import “Student First Name” as")).toHaveValue("firstName");
-  await expect(main.getByLabel("Import “Homeroom” as")).toHaveValue("group");
-  await expect(main.getByLabel("Import “Student #” as")).toHaveValue("studentId");
-  await expect(main.getByLabel("Import “Photo Opt Out” as")).toHaveValue("doNotPhotograph");
-  await main.getByRole("button", { name: "Check rows" }).click();
-  await expect(
-    main.getByText(
-      "4 will be added · 1 updated · 1 new class · 4 duplicates · 1 row can't be imported",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await expect(main.getByRole("row").filter({ hasText: "Maya Johnson-Lee" })).toContainText(
-    "Update",
-  );
-  await expect(main.getByRole("row").filter({ hasText: "Ava Patel" })).toContainText("Duplicate");
-  await expect(main.getByRole("row").filter({ hasText: "Ava Patel" })).toContainText(
-    "Do not photograph",
-  );
-  const emma = main.getByRole("row").filter({ hasText: "Emma Brooks" });
-  await expect(emma).toContainText("Can't import");
-  // Row numbers match the file, blank lines included.
-  await expect(emma.getByRole("cell").first()).toHaveText("8");
-  await main.getByText("Duplicates", { exact: true }).click();
-  await expect(main.getByRole("row").filter({ hasText: "Emma Brooks" })).toHaveCount(0);
-  await main.getByRole("button", { name: "Import 5 children" }).click();
+  const desktop = !info.project.use.isMobile;
+  if (!desktop) {
+    // 3b. On a phone, "Import roster" leads to the desktop-only notice and a way back (D134).
+    await roster.getByRole("link", { name: "Import roster" }).click();
+    await expect(main.getByRole("heading", { name: "Import roster", level: 1 })).toBeVisible();
+    await expect(
+      main.getByText("Open this on a computer to import a roster.", { exact: true }),
+    ).toBeVisible();
+    await expect(main.getByLabel("Roster file (CSV or Excel)")).toBeHidden();
+    await main.getByRole("link", { name: "Back to job" }).click();
+    await expect(maya).toBeVisible();
+  }
 
-  await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}$`));
-  await expect(rosterStatus).toHaveText("Roster imported: 4 added, 1 updated.");
-  const mayaAfter = roster.getByRole("row").filter({ hasText: "Maya Johnson-Lee" });
-  await expect(mayaAfter.getByRole("cell").nth(1)).toHaveText("4C");
-  // Updated by student ID: same child, same code; the blank grade cell kept her grade.
-  await expect(mayaAfter.getByRole("cell").nth(4)).toHaveText(mayaCode);
-  await expect(mayaAfter.getByRole("cell").nth(3)).toHaveText("5");
-  await expect(roster.getByText("4 duplicates", { exact: true })).toBeVisible();
+  if (desktop) {
+    // 4. Import a CSV: columns are guessed, rows checked on the server, then imported together.
+    await roster.getByRole("link", { name: "Import roster" }).click();
+    await expect(main.getByRole("heading", { name: "Import roster", level: 1 })).toBeVisible();
+    await main.getByLabel("Roster file (CSV or Excel)").setInputFiles({
+      name: "roster.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(CSV),
+    });
+    await expect(main.getByLabel("Import “Student First Name” as")).toHaveValue("firstName");
+    await expect(main.getByLabel("Import “Homeroom” as")).toHaveValue("group");
+    await expect(main.getByLabel("Import “Student #” as")).toHaveValue("studentId");
+    await expect(main.getByLabel("Import “Photo Opt Out” as")).toHaveValue("doNotPhotograph");
+    await main.getByRole("button", { name: "Check rows" }).click();
+    await expect(
+      main.getByText(
+        "4 will be added · 1 updated · 1 new class · 4 duplicates · 1 row can't be imported",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(main.getByRole("row").filter({ hasText: "Maya Johnson-Lee" })).toContainText(
+      "Update",
+    );
+    await expect(main.getByRole("row").filter({ hasText: "Ava Patel" })).toContainText("Duplicate");
+    await expect(main.getByRole("row").filter({ hasText: "Ava Patel" })).toContainText(
+      "Do not photograph",
+    );
+    const emma = main.getByRole("row").filter({ hasText: "Emma Brooks" });
+    await expect(emma).toContainText("Can't import");
+    // Row numbers match the file, blank lines included.
+    await expect(emma.getByRole("cell").first()).toHaveText("8");
+    await main.getByText("Duplicates", { exact: true }).click();
+    await expect(main.getByRole("row").filter({ hasText: "Emma Brooks" })).toHaveCount(0);
+    await main.getByRole("button", { name: "Import 5 children" }).click();
 
-  // 5. Import an Excel file.
-  await roster.getByRole("link", { name: "Import roster" }).click();
-  await main.getByLabel("Roster file (CSV or Excel)").setInputFiles(XLSX);
-  await expect(main.getByLabel("Import “Student ID” as")).toHaveValue("studentId");
-  await main.getByRole("button", { name: "Check rows" }).click();
-  await expect(
-    main.getByText(
-      "5 will be added · 0 updated · 1 new class · 0 duplicates · 0 rows can't be imported",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await main.getByRole("button", { name: "Import 5 children" }).click();
-  await expect(rosterStatus).toHaveText("Roster imported: 5 added, 0 updated.");
-  await expect(roster.getByRole("cell", { name: "Olivia Brown", exact: true })).toBeVisible();
-  await expect(roster.getByRole("cell", { name: "Sophia Wilson", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}$`));
+    await expect(rosterStatus).toHaveText("Roster imported: 4 added, 1 updated.");
+    const mayaAfter = roster.getByRole("row").filter({ hasText: "Maya Johnson-Lee" });
+    await expect(mayaAfter.getByRole("cell").nth(1)).toHaveText("4C");
+    // Updated by student ID: same child, same code; the blank grade cell kept her grade.
+    await expect(mayaAfter.getByRole("cell").nth(4)).toHaveText(mayaCode);
+    await expect(mayaAfter.getByRole("cell").nth(3)).toHaveText("5");
+    await expect(roster.getByText("4 duplicates", { exact: true })).toBeVisible();
 
-  // 6. Filter to one class and rename it. The filter stays on screen and keeps focus while the list loads.
-  const filter = roster.getByLabel("Class", { exact: true });
-  await filter.focus();
-  await filter.selectOption({ label: "4C" });
-  await expect(roster.getByRole("cell", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
-  await expect(roster.getByRole("cell", { name: "Olivia Brown", exact: true })).toBeVisible();
-  await expect(filter).toBeFocused();
-  await roster.getByRole("button", { name: "Rename class" }).click();
-  const rename = page.getByRole("dialog", { name: "Rename class" });
-  await rename.getByLabel("Name", { exact: true }).fill("Room 4C");
-  await rename.getByRole("button", { name: "Save changes" }).click();
-  await expect(rename).toBeHidden();
-  await expect(filter.locator("option:checked")).toHaveText("Room 4C");
+    // 5. Import an Excel file.
+    await roster.getByRole("link", { name: "Import roster" }).click();
+    await main.getByLabel("Roster file (CSV or Excel)").setInputFiles(XLSX);
+    await expect(main.getByLabel("Import “Student ID” as")).toHaveValue("studentId");
+    await main.getByRole("button", { name: "Check rows" }).click();
+    await expect(
+      main.getByText(
+        "5 will be added · 0 updated · 1 new class · 0 duplicates · 0 rows can't be imported",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await main.getByRole("button", { name: "Import 5 children" }).click();
+    await expect(rosterStatus).toHaveText("Roster imported: 5 added, 0 updated.");
+    await expect(roster.getByRole("cell", { name: "Olivia Brown", exact: true })).toBeVisible();
+    await expect(roster.getByRole("cell", { name: "Sophia Wilson", exact: true })).toBeVisible();
 
-  // 7. Remove a child while the job is a draft.
-  await filter.selectOption({ label: "All classes" });
-  await roster.getByRole("button", { name: "Edit Noah Garcia" }).click();
-  const editNoah = page.getByRole("dialog", { name: "Edit child" });
-  await editNoah.getByRole("button", { name: "Remove child", exact: true }).click();
+    // 6. Filter to one class and rename it. The filter stays on screen and keeps focus while the list loads.
+    const filter = roster.getByLabel("Class", { exact: true });
+    await filter.focus();
+    await filter.selectOption({ label: "4C" });
+    await expect(roster.getByRole("cell", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
+    await expect(roster.getByRole("cell", { name: "Olivia Brown", exact: true })).toBeVisible();
+    await expect(filter).toBeFocused();
+    await roster.getByRole("button", { name: "Rename class" }).click();
+    const rename = page.getByRole("dialog", { name: "Rename class" });
+    await rename.getByLabel("Name", { exact: true }).fill("Room 4C");
+    await rename.getByRole("button", { name: "Save changes" }).click();
+    await expect(rename).toBeHidden();
+    await expect(filter.locator("option:checked")).toHaveText("Room 4C");
+
+    await filter.selectOption({ label: "All classes" });
+  }
+
+  // 7. Remove a child while the job is a draft: one the CSV added on desktop, one added by hand on a phone.
+  let removed = "Noah Garcia";
+  if (!desktop) {
+    removed = "Liam Chen";
+    await roster.getByRole("button", { name: "Add child", exact: true }).click();
+    await add.getByLabel("First name", { exact: true }).fill("Liam");
+    await add.getByLabel("Last name", { exact: true }).fill("Chen");
+    await add.getByRole("button", { name: "Add child", exact: true }).click();
+    await expect(add).toBeHidden();
+    await expect(rosterStatus).toHaveText("Saved.");
+  }
+  await roster.getByRole("button", { name: `Edit ${removed}` }).click();
+  const editRemoved = page.getByRole("dialog", { name: "Edit child" });
+  await editRemoved.getByRole("button", { name: "Remove child", exact: true }).click();
   const confirm = page.getByRole("dialog", { name: "Remove child?" });
   await expect(confirm).toContainText(
-    "Noah Garcia and their access code will be deleted. This can't be undone.",
+    `${removed} and their access code will be deleted. This can't be undone.`,
   );
   await confirm.getByRole("button", { name: "Remove child", exact: true }).click();
-  await expect(editNoah).toBeHidden();
+  await expect(editRemoved).toBeHidden();
   await expect(rosterStatus).toHaveText("Child removed.");
-  await expect(roster.getByRole("cell", { name: "Noah Garcia", exact: true })).toHaveCount(0);
+  await expect(roster.getByRole("cell", { name: removed, exact: true })).toHaveCount(0);
 
   // 8. The activity log shows one line per import, naming the job by looking it up (D96).
-  await page.goto("/app");
-  await expect(
-    main.getByText(`${owner} imported a roster into ${jobName}`, { exact: true }).first(),
-  ).toBeVisible();
+  if (desktop) {
+    await page.goto("/app");
+    await expect(
+      main.getByText(`${owner} imported a roster into ${jobName}`, { exact: true }).first(),
+    ).toBeVisible();
+  }
 
   // 9. The API refuses bad input, never exposes code hashes, and takes 5,000 rows at most.
   const empty = await page.request.post(`/api/v1/jobs/${jobId}/children`, {
@@ -227,7 +257,8 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   expect(listText).not.toContain("access_code_hash");
   expect(listText).not.toContain("ciphertext");
   const children = JSON.parse(listText).children as { id: string; accessCode: string | null }[];
-  expect(children).toHaveLength(9);
+  // Desktop: 1 by hand + 4 from the CSV + 5 from Excel - 1 removed. Phone: Maya.
+  expect(children).toHaveLength(desktop ? 9 : 1);
   for (const c of children) expect(c.accessCode).toMatch(CA_CODE);
   const codeChange = await page.request.patch(`/api/v1/children/${children[0]?.id}`, {
     data: { accessCode: "K7QM-4XPA" },
@@ -247,7 +278,7 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   expect((await tooMany.json()).error.fields.rows).toBe("validation.rosterTooLarge");
 
   // A full-size import (performance smoke test), into its own job, once.
-  if (info.project.name === "desktop") {
+  if (desktop) {
     const big = await page.request.post("/api/v1/jobs", {
       data: { name: `Load ${tag}`, type: "school", pictureDay: "2026-10-14" },
     });
