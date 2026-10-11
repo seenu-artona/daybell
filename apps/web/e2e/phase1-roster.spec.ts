@@ -2,11 +2,12 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
-// Phase 1 step 2 "Roster" (D23; ADR 0011), in the job's People section since step 2b (D137, D138; ADR 0013): an owner
-// adds a child by hand (adding a class from the combobox's last option), opens and edits them in the side panel,
-// imports a CSV (an update by student ID, duplicates flagged, a bad row left out) and an Excel file, searches,
-// filters and groups the list, renames a class from its heading, removes children from the panel and from the
-// form, and the API refuses what it should. Desktop only (D136). The 5,000-row import is in phase1-roster-load.
+// Phase 1 step 2 "Roster" (D23; ADR 0011), in the job's People section since step 2b (D137, D138; ADR 0013) and
+// restyled in step 2c (D140; ADR 0014): an owner adds a child by hand (adding a class from the combobox's last
+// option), opens and edits them in the floating panel, imports a CSV (an update by student ID, duplicates flagged, a
+// bad row left out) and an Excel file, searches, filters and groups the list (flat with a Class column by default),
+// renames a class from its heading, removes children from the panel and from the form, and the API refuses what it
+// should. Desktop only (D136). The 5,000-row import is in phase1-roster-load.
 // Adding and importing write codes through the server-only path (the app's SUPABASE_SECRET_KEY_CA, which CI takes
 // from the local Supabase stack).
 // The CI database is Canadian (D122), so every access code starts with a symbol from the Canadian set.
@@ -47,6 +48,8 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   });
   const main = page.getByRole("main");
   const row = (name: string) => main.getByRole("row").filter({ hasText: name });
+  // Columns: name, class, student ID, grade, access code.
+  const classOf = (name: string) => row(name).getByRole("cell").nth(1);
   // A class heading's toggle is named "<class> <n> child(ren)", e.g. "4B 1 child".
   const toggleName = (group: string) => new RegExp(`^${group} \\d`);
   const heading = (group: string) => main.getByRole("button", { name: toggleName(group) });
@@ -76,7 +79,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await page.waitForTimeout(1_500);
   expect(jobLoads).toBeLessThanOrEqual(2);
 
-  // 2. Add a child by hand from the section bar, adding the class "4B" from the combobox's last option.
+  // 2. Add a child by hand from People's white pill actions, adding the class "4B" from the combobox's last option.
   await main.getByRole("button", { name: "Add child", exact: true }).click();
   const add = page.getByRole("dialog", { name: "Add child" });
   await add.getByLabel("First name", { exact: true }).fill("Maya");
@@ -102,14 +105,16 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(main.getByText("Saved.", { exact: true })).toBeVisible();
   const maya = row("Maya Johnson");
   await expect(maya).toContainText("Do not photograph");
-  await expect(group("4B")).toContainText("Maya Johnson");
+  await expect(classOf("Maya Johnson")).toHaveText("4B");
+  await expect(main.getByRole("heading", { name: "1 child", level: 2 })).toBeVisible();
+  await expect(main.getByText("1 class · no duplicates", { exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "People 1 child", exact: true })).toBeVisible();
   // The access code is always visible to the studio (Seenu #2).
-  const codeCell = maya.getByRole("cell").nth(3);
+  const codeCell = maya.getByRole("cell").nth(4);
   await expect(codeCell).toHaveText(CA_CODE);
   const mayaCode = ((await codeCell.textContent()) ?? "").trim();
 
-  // 3. Open her in the side panel. Only her id goes in the URL; the panel survives a refresh.
+  // 3. Open her in the floating panel. Only her id goes in the URL; the panel survives a refresh.
   await maya.getByRole("link", { name: "Maya Johnson", exact: true }).click();
   await expect(page).toHaveURL(/\?child=[0-9a-f-]{36}$/);
   let panel = page.getByRole("complementary", { name: "Maya Johnson" });
@@ -128,10 +133,23 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await edit.getByRole("button", { name: "Save changes" }).click();
   await expect(edit).toBeHidden();
   await expect(main.getByText("Saved.", { exact: true })).toBeVisible();
-  await expect(maya.getByRole("cell").nth(2)).toHaveText("5");
+  await expect(maya.getByRole("cell").nth(3)).toHaveText("5");
   await panel.getByRole("button", { name: "Close details" }).click();
   await expect(page).toHaveURL(people);
   await expect(panel).toBeHidden();
+  await expect(maya.getByRole("link", { name: "Maya Johnson", exact: true })).toBeFocused();
+  // The panel floats over the table: 400px wide, as tall as its content (shorter than the window). Escape, with focus
+  // inside it, closes it too, and focus returns to her name.
+  await maya.getByRole("link", { name: "Maya Johnson", exact: true }).click();
+  await expect(panel.getByRole("heading", { name: "Maya Johnson", exact: true })).toBeFocused();
+  const panelBox = await panel.boundingBox();
+  expect(panelBox?.width).toBe(400);
+  expect(panelBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(
+    page.viewportSize()?.height ?? 0,
+  );
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(page).toHaveURL(people);
   await expect(maya.getByRole("link", { name: "Maya Johnson", exact: true })).toBeFocused();
 
   // 4. Import a CSV: a full page in the job's frame (no phone notice, D136). Columns are guessed, rows checked on
@@ -172,11 +190,13 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
     main.getByText("Roster imported: 4 added, 1 updated.", { exact: true }),
   ).toBeVisible();
   // Updated by student ID: same child, same code, now in 4C; the blank grade cell kept her grade.
-  await expect(group("4C")).toContainText("Maya Johnson-Lee");
+  await expect(classOf("Maya Johnson-Lee")).toHaveText("4C");
   const mayaAfter = row("Maya Johnson-Lee");
-  await expect(mayaAfter.getByRole("cell").nth(3)).toHaveText(mayaCode);
-  await expect(mayaAfter.getByRole("cell").nth(2)).toHaveText("5");
+  await expect(mayaAfter.getByRole("cell").nth(4)).toHaveText(mayaCode);
+  await expect(mayaAfter.getByRole("cell").nth(3)).toHaveText("5");
   await expect(main.getByText("4 possible duplicates", { exact: true })).toBeVisible();
+  await expect(main.getByRole("heading", { name: "5 children", level: 2 })).toBeVisible();
+  await expect(main.getByText(/ classes · 4 possible duplicates$/)).toBeVisible();
   await expect(main.getByRole("link", { name: "People 5 children", exact: true })).toBeVisible();
 
   // 5. Import an Excel file.
@@ -195,20 +215,19 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
     main.getByText("Roster imported: 5 added, 0 updated.", { exact: true }),
   ).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
-  // The name link is a 44px target (D91): 32px tall plus its invisible hit area above and below.
-  const target = await main
-    .getByRole("link", { name: "Olivia Brown", exact: true })
-    .evaluate((a) => {
-      const after = getComputedStyle(a, "::after");
-      const box = a.getBoundingClientRect();
-      return {
-        height: box.height - parseFloat(after.top) - parseFloat(after.bottom),
-        width: box.width,
-      };
-    });
-  expect(target.height).toBeGreaterThanOrEqual(44);
-  expect(target.width).toBeGreaterThanOrEqual(44);
-  await expect(group("Room 5")).toContainText("Sophia Wilson");
+  // The name link is a 44px target (D91) in a 60px row; the round tools are 44px too.
+  const target = await main.getByRole("link", { name: "Olivia Brown", exact: true }).boundingBox();
+  expect(target?.height).toBeGreaterThanOrEqual(44);
+  expect(target?.width).toBeGreaterThanOrEqual(44);
+  const rowBox = await row("Olivia Brown").boundingBox();
+  expect(Math.round(rowBox?.height ?? 0)).toBeGreaterThanOrEqual(60);
+  expect(rowBox?.height ?? 0).toBeLessThan(62);
+  for (const name of ["Filter", "Group: None"]) {
+    const box = await main.getByRole("button", { name, exact: true }).boundingBox();
+    expect(box?.width).toBe(44);
+    expect(box?.height).toBe(44);
+  }
+  await expect(classOf("Sophia Wilson")).toHaveText("Room 5");
   expect(jobLoads).toBeLessThanOrEqual(2);
 
   // 6. Search, filters (removable chips, combined with AND) and grouping, all in the browser.
@@ -250,10 +269,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await main.getByRole("button", { name: "Remove filter: No class" }).click();
   await main.getByRole("button", { name: "Remove filter: Grade 5" }).click();
 
-  // Group: None shows one plain list; Group: Class brings the headings back. Headings collapse.
-  await main.getByRole("button", { name: "Group: Class" }).click();
-  await main.getByLabel("None", { exact: true }).check();
-  await page.keyboard.press("Escape");
+  // The list is flat by default (no class headings); Group: Class brings the headings back, and they collapse.
   await expect(heading("4C")).toHaveCount(0);
   await main.getByRole("button", { name: "Group: None" }).click();
   await main.getByLabel("Class", { exact: true }).check();
@@ -263,6 +279,14 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(heading("4C")).toHaveAttribute("aria-expanded", "false");
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
   await heading("4C").click();
+  // And back to one flat list.
+  await main.getByRole("button", { name: "Group: Class" }).click();
+  await main.getByLabel("None", { exact: true }).check();
+  await page.keyboard.press("Escape");
+  await expect(heading("4C")).toHaveCount(0);
+  await main.getByRole("button", { name: "Group: None" }).click();
+  await main.getByLabel("Class", { exact: true }).check();
+  await page.keyboard.press("Escape");
 
   // 7. Rename a class from its heading.
   await main.getByRole("button", { name: "Rename class 4C" }).click();
@@ -301,8 +325,8 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   // 9. The job's Overview shows one activity line per import, naming the job by looking it up (D96).
   await main.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(
-    page
-      .getByRole("complementary", { name: "Before you can sell" })
+    main
+      .getByRole("region", { name: "Recent activity" })
       .getByText(`${owner} imported a roster into ${jobName}`, { exact: true })
       .first(),
   ).toBeVisible();

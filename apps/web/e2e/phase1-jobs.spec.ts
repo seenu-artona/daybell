@@ -75,7 +75,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await dialog.getByLabel(/^Subjects expected/).fill("120");
   await dialog.getByRole("button", { name: "Create job", exact: true }).click();
 
-  // The job page (D137): header with name, status and details; Overview with its numbers.
+  // The job page (D137, D140): title row with name, status and details; Overview with the Set up to-dos.
   await expect(page).toHaveURL(/\/app\/jobs\/[0-9a-f-]{36}$/);
   await expect(main.getByRole("heading", { name: job, level: 1 })).toBeVisible();
   await expect(main.getByText("Draft", { exact: true })).toBeVisible();
@@ -86,8 +86,12 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
     "aria-current",
     "page",
   );
-  await expect(main.getByText("of 120 expected", { exact: true })).toBeVisible();
-  await expect(main.getByRole("heading", { name: "Add your roster" })).toBeVisible();
+  await expect(
+    main
+      .getByRole("region", { name: "Set up: to-dos" })
+      .getByRole("listitem")
+      .filter({ hasText: "Roster added" }),
+  ).toContainText("To do");
   // One green button: Start selling (owners and admins, while a draft).
   await expect(main.getByRole("button", { name: "Start selling" })).toBeVisible();
 

@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
-// Phase 1 step 2b "Job page layout" (D136, D137, D138; ADR 0013): the one dark menu (fold, search, notifications,
-// profile), the job header and tabs, Overview's journey, next step, numbers and checklist, the coming-soon tabs, and
-// that search and job activity never cross studios. Desktop only (D136).
+// Phase 1 step 2b "Job page layout" (D136, D137, D138; ADR 0013), restyled in step 2c (D140; ADR 0014): the one dark
+// menu (fold, search, notifications, profile), the job's title row and pill tabs, Overview's hero, job timeline,
+// to-dos and activity, the coming-soon tabs, and that search and job activity never cross studios. Desktop only
+// (D136).
 const run = `${Date.now()}`;
 
 test("job page layout, menu search and studio separation", async ({
@@ -111,29 +112,47 @@ test("job page layout, menu search and studio separation", async ({
   await expect(page.getByText("No notifications yet.", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
 
-  // 5. Overview: header, the journey at Set up, and "Add your roster" leading to People.
+  // 5. Overview (D140): the title row, the hero countdown, the job timeline at Set up, the Set up to-dos and the job's
+  // own activity; "Add roster" leads to People.
   await expect(main.getByRole("heading", { name: jobName, level: 1 })).toBeVisible();
   await expect(
     main.getByText(`School · ${clientName} · May 1, 2030 · ${job.internalNumber}`, { exact: true }),
   ).toBeVisible();
-  const journey = main.getByRole("list", { name: "Job journey" });
-  await expect(journey.getByRole("listitem").filter({ hasText: "Set up" })).toHaveAttribute(
-    "aria-current",
-    "step",
-  );
-  const checklist = page.getByRole("complementary", { name: "Before you can sell" });
-  await expect(checklist.getByRole("listitem").filter({ hasText: "Roster added" })).toContainText(
-    "To do",
-  );
+  // The back and More buttons are round 44px targets (D91).
+  for (const control of [
+    main.getByRole("link", { name: "All jobs", exact: true }),
+    main.getByRole("button", { name: "More actions", exact: true }),
+  ]) {
+    const box = await control.boundingBox();
+    expect(box?.width).toBe(44);
+    expect(box?.height).toBe(44);
+  }
+  await expect(main.getByText(/^Picture day in [\d,]+ days$/)).toBeVisible();
+  await expect(main.getByText("Step 1 of 5 · Set up · 1 of 3 done", { exact: true })).toBeVisible();
+  const timeline = main.getByRole("list", { name: "Job timeline" });
+  const milestone = (name: string) => timeline.getByRole("listitem").filter({ hasText: name });
+  await expect(timeline.getByRole("listitem")).toHaveCount(5);
+  await expect(milestone("Set up")).toHaveAttribute("aria-current", "step");
+  await expect(milestone("Set up")).toContainText("Now · 1 of 3 done");
+  await expect(milestone("Picture day")).toContainText("May 1, 2030");
+  await expect(milestone("Photos in")).toContainText("Soon");
+  await expect(milestone("Fulfilment")).toContainText("Soon");
+  const todos = main.getByRole("region", { name: "Set up: to-dos" });
+  const todo = (name: string) => todos.getByRole("listitem").filter({ hasText: name });
+  await expect(todos.getByText("1 of 3 done", { exact: true })).toBeVisible();
+  await expect(todo("Job created")).toContainText("Done");
+  await expect(todo("Roster added")).toContainText("To do");
+  // QR cards ship in step 3: Soon, with nothing to click.
+  await expect(todo("Print QR cards")).toContainText("Soon");
+  await expect(todo("Print QR cards").getByRole("link")).toHaveCount(0);
+  await expect(todo("Print QR cards").getByRole("button")).toHaveCount(0);
+  // The job's own activity only, not the other job's, beside the to-dos.
+  const recent = main.getByRole("region", { name: "Recent activity" });
+  await expect(recent.getByRole("heading", { name: "Recent activity", level: 2 })).toBeVisible();
   await expect(
-    checklist.getByRole("listitem").filter({ hasText: "Payouts connected" }),
-  ).toContainText("Coming soon");
-  // The job's own activity only, not the other job's, under the panel's own heading.
-  await expect(checklist.getByRole("heading", { name: "Recent activity", level: 3 })).toBeVisible();
-  await expect(
-    checklist.getByText(`${owner} created the job ${jobName}`, { exact: true }),
+    recent.getByText(`${owner} created the job ${jobName}`, { exact: true }),
   ).toBeVisible();
-  await expect(checklist.getByText(otherName)).toHaveCount(0);
+  await expect(recent.getByText(otherName)).toHaveCount(0);
   // Start selling is never disabled; for now it lists what is missing.
   await main.getByRole("button", { name: "Start selling" }).click();
   const sell = page.getByRole("dialog", { name: "Before you can sell" });
@@ -141,11 +160,10 @@ test("job page layout, menu search and studio separation", async ({
     "Coming soon",
   );
   await sell.getByRole("button", { name: "Close" }).last().click();
-  await expect(main.getByRole("heading", { name: "Add your roster" })).toBeVisible();
-  await main.getByRole("link", { name: "Go to People" }).click();
+  await todo("Roster added").getByRole("link", { name: "Add roster", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
 
-  // After adding a child: get ready for picture day, with the date and the numbers.
+  // After adding a child, Roster added is done and says how many.
   await main.getByRole("button", { name: "Add child", exact: true }).click();
   const add = page.getByRole("dialog", { name: "Add child" });
   await add.getByLabel("First name", { exact: true }).fill("Maya");
@@ -153,19 +171,9 @@ test("job page layout, menu search and studio separation", async ({
   await add.getByRole("button", { name: "Add child", exact: true }).click();
   await expect(add).toBeHidden();
   await main.getByRole("link", { name: "Overview", exact: true }).click();
-  await expect(main.getByRole("heading", { name: "Get ready for picture day" })).toBeVisible();
-  await expect(
-    main.getByText("Picture day is May 1, 2030. Check the roster before then."),
-  ).toBeVisible();
-  await expect(main.getByText("of 50 expected", { exact: true })).toBeVisible();
-  await expect(checklist.getByRole("listitem").filter({ hasText: "Roster added" })).toContainText(
-    "Done",
-  );
-  // The panel closes to give the list the full width, and comes back.
-  await checklist.getByRole("button", { name: "Close details" }).click();
-  await expect(checklist).toBeHidden();
-  await main.getByRole("button", { name: "Show checklist" }).click();
-  await expect(checklist).toBeVisible();
+  await expect(todo("Roster added")).toContainText("Done");
+  await expect(todo("Roster added")).toContainText("1 child · 0 classes");
+  await expect(main.getByText("Step 1 of 5 · Set up · 2 of 3 done", { exact: true })).toBeVisible();
 
   // 6. The other tabs show coming soon inside the job's frame; an unknown tab is a 404.
   for (const name of ["Photos", "Shop", "Messages", "Orders", "Settings"]) {

@@ -57,7 +57,7 @@ test(
       main.getByText(`${owner} imported a roster into Small ${tag}`, { exact: true }),
     ).toBeVisible();
 
-    // People loads every page (10 × 500) and draws all 5,000 rows, grouped into 20 classes.
+    // People loads every page (10 × 500) and draws all 5,000 rows; grouped by class, they fall into 20 classes.
     await page.goto(`/app/jobs/${bigJob}/people`);
     await expect(
       main.getByRole("link", { name: "People 5,000 children", exact: true }),
@@ -73,6 +73,9 @@ test(
       timeout: 60_000,
     });
     await expect(main.getByRole("link", { name: "Load Test 4999", exact: true })).toHaveCount(1);
+    await main.getByRole("button", { name: "Group: None", exact: true }).click();
+    await main.getByLabel("Class", { exact: true }).check();
+    await page.keyboard.press("Escape");
     await expect(main.getByRole("button", { name: /^Load \d+ \d+ children$/ })).toHaveCount(20);
     // Search covers the whole roster.
     await main.getByRole("searchbox", { name: "Search children" }).fill("L-4321");
