@@ -29,13 +29,23 @@ describe("sectionForPath", () => {
 
 describe("checklistSteps", () => {
   it("marks the team step done once someone is invited", () => {
-    expect(checklistSteps({ hasTeam: false }).filter((s) => s.done)).toHaveLength(1);
-    expect(checklistSteps({ hasTeam: true }).find((s) => s.key === "team")?.done).toBe(true);
+    expect(checklistSteps({ hasTeam: false, hasJob: false }).filter((s) => s.done)).toHaveLength(1);
+    expect(
+      checklistSteps({ hasTeam: true, hasJob: false }).find((s) => s.key === "team")?.done,
+    ).toBe(true);
+  });
+
+  it("links the job step to the wizard until a job exists", () => {
+    const job = checklistSteps({ hasTeam: false, hasJob: false }).find((s) => s.key === "job");
+    expect(job).toMatchObject({ href: "/app/jobs/new", done: false, soon: false });
+    expect(
+      checklistSteps({ hasTeam: false, hasJob: true }).find((s) => s.key === "job")?.done,
+    ).toBe(true);
   });
 
   it("never marks unbuilt steps done", () => {
     expect(
-      checklistSteps({ hasTeam: true })
+      checklistSteps({ hasTeam: true, hasJob: false })
         .filter((s) => s.soon)
         .every((s) => !s.done),
     ).toBe(true);

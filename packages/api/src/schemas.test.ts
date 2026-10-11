@@ -109,6 +109,23 @@ describe("organizations", () => {
     expect(organizationInput.safeParse({ ...ok, region: "ON", country: "CA" }).success).toBe(true);
   });
 
+  it("refuses Quebec postal codes even without a province (D131)", () => {
+    for (const postalCode of ["H2X 1Y4", "g1r 4p5", "J4K 2T1"]) {
+      const result = organizationInput.safeParse({
+        ...ok,
+        region: null,
+        country: "CA",
+        postalCode,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(fieldErrors(result.error).postalCode).toBe("validation.quebec");
+    }
+    expect(
+      organizationInput.safeParse({ ...ok, region: null, country: "CA", postalCode: "M5V 2T6" })
+        .success,
+    ).toBe(true);
+  });
+
   it("needs a name and a known kind", () => {
     const result = organizationInput.safeParse({ name: "  ", kind: "church" });
     expect(result.success).toBe(false);

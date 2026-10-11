@@ -1,7 +1,7 @@
 -- Jobs and organizations (D96, D131): studio separation, roles, the status lock, Quebec, and events.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(33);
+select plan(34);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -97,6 +97,10 @@ select throws_ok($$
 select throws_ok($$
   update public.organizations set region_code = 'QC' where id = (select id from ids where k = 'org') $$,
   '23514', null, 'an organization cannot be moved to Quebec');
+select throws_ok($$
+  insert into public.organizations (studio_id, name, kind, postal_code, country)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'École Laval', 'school', 'H7N 1A1', 'CA') $$,
+  '23514', null, 'a Quebec postal code is refused even without a province');
 select throws_ok($$
   insert into public.jobs (studio_id, name, type) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'No school', 'school') $$,
   '23514', null, 'school jobs need an organization');

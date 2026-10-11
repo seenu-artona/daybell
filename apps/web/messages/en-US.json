@@ -351,7 +351,8 @@
       "noJobs": "No jobs are selling yet.",
       "recently": "Recently",
       "actions": {
-        "invite": "Invite"
+        "team": "Invite",
+        "job": "Create job"
       },
       "checking": "Checking…"
     },

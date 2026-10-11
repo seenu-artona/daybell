@@ -33,8 +33,11 @@ create table public.organizations (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   -- Quebec is excluded at launch (D131; Seenu, Oct 11 2026). QC is never a US state, so an address with no country
-  -- is treated as Canadian here.
-  constraint organizations_no_quebec check (not (coalesce(country, 'CA') = 'CA' and upper(region_code) = 'QC')),
+  -- is treated as Canadian here. Canadian postal codes starting with G, H or J are all in Quebec.
+  constraint organizations_no_quebec check (
+    not (coalesce(country, 'CA') = 'CA'
+         and (upper(region_code) = 'QC' or upper(left(btrim(postal_code), 1)) in ('G', 'H', 'J')))
+  ),
   -- Lets other tables reference an organization together with its studio (composite studio FKs, ADR 0008).
   constraint organizations_studio_id_id_key unique (studio_id, id)
 );

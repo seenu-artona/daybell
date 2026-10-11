@@ -104,17 +104,28 @@ const organizationFields = {
   country: z.enum(COUNTRIES).nullable().optional(),
 };
 
-/** Quebec is excluded at launch (D131; Seenu, Oct 11 2026). QC is never a US state, so no country means Canada. */
-export function isQuebec(address: {
+/**
+ * Quebec is excluded at launch (D131; Seenu, Oct 11 2026). QC is never a US state, so no country means Canada.
+ * Canadian postal codes starting with G, H or J are all in Quebec, so those are refused even without a province.
+ */
+export function quebecField(address: {
   region?: string | null | undefined;
+  postalCode?: string | null | undefined;
   country?: string | null | undefined;
-}): boolean {
-  return address.region?.toUpperCase() === "QC" && (address.country ?? "CA") === "CA";
+}): "region" | "postalCode" | null {
+  if ((address.country ?? "CA") !== "CA") return null;
+  if (address.region?.trim().toUpperCase() === "QC") return "region";
+  if (/^[GHJ]/i.test(address.postalCode?.trim() ?? "")) return "postalCode";
+  return null;
+}
+
+export function isQuebec(address: Parameters<typeof quebecField>[0]): boolean {
+  return quebecField(address) !== null;
 }
 
 export const organizationInput = z.object(organizationFields).superRefine((value, ctx) => {
-  if (isQuebec(value))
-    ctx.addIssue({ code: "custom", path: ["region"], message: "validation.quebec" });
+  const field = quebecField(value);
+  if (field) ctx.addIssue({ code: "custom", path: [field], message: "validation.quebec" });
 });
 export type OrganizationInput = z.infer<typeof organizationInput>;
 
