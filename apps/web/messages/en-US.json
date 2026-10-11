@@ -154,7 +154,6 @@
     },
     "regionLabel": "Where your studio's data lives",
     "regionHelp": "This can't be changed later.",
-    "regionFixed": "Your studio's data will be stored in {region}.",
     "signUp": {
       "title": "Start your studio",
       "studioName": "Studio name",

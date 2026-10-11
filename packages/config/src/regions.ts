@@ -28,13 +28,23 @@ export function isDataRegion(value: unknown): value is DataRegion {
   return typeof value === "string" && (DATA_REGIONS as readonly string[]).includes(value);
 }
 
+/** "https://x.supabase.co/rest/v1/" -> "https://x.supabase.co": tolerate pasted endpoint URLs and trailing slashes. */
+export function normalizeSupabaseUrl(url: string): string {
+  return url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/(rest|auth)\/v1$/, "");
+}
+
 /** Regions with a configured database, in a stable order. */
 export function availableRegions(
   raw: Record<DataRegion, { url: string | undefined; key: string | undefined }> = RAW,
 ): RegionDatabase[] {
   return DATA_REGIONS.flatMap((region) => {
     const { url, key } = raw[region];
-    return url && key ? [{ region, url, publishableKey: key }] : [];
+    return url && key
+      ? [{ region, url: normalizeSupabaseUrl(url), publishableKey: key.trim() }]
+      : [];
   });
 }
 

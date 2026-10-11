@@ -69,7 +69,7 @@ export function SignInForm({
         error={text.field(fields.password)}
         required
       />
-      <RegionField regions={regions} value={region} onChange={setRegion} showFixedNote={false} />
+      <RegionField regions={regions} value={region} onChange={setRegion} />
       <Button type="submit" block disabled={busy}>
         {t("submit")}
       </Button>

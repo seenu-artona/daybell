@@ -8,23 +8,14 @@ export function RegionField({
   regions,
   value,
   onChange,
-  showFixedNote = true,
 }: {
   regions: DataRegion[];
   value: DataRegion;
   onChange: (r: DataRegion) => void;
-  showFixedNote?: boolean;
 }) {
   const t = useTranslations("auth");
-  // No database set up here: say nothing about where data lives; the form shows the server's error instead.
-  if (regions.length === 0) return null;
-  if (regions.length === 1) {
-    return showFixedNote ? (
-      <p className="m-0 text-caption text-muted">
-        {t("regionFixed", { region: t(`regions.${value}`) })}
-      </p>
-    ) : null;
-  }
+  // Zero or one region: nothing to choose, so show nothing (keeps the form clean).
+  if (regions.length <= 1) return null;
   return (
     <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
       <legend className="mb-1.5 text-label">{t("regionLabel")}</legend>

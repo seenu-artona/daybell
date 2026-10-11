@@ -89,7 +89,7 @@ export function SignUpForm({ regions, joining }: { regions: DataRegion[]; joinin
         error={text.field(fields.email)}
         required
       />
-      <RegionField regions={regions} value={region} onChange={setRegion} showFixedNote={!joining} />
+      <RegionField regions={regions} value={region} onChange={setRegion} />
       <Button type="submit" block disabled={busy}>
         {joining ? t("joinSubmit") : t("submit")}
       </Button>

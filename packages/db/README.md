@@ -36,3 +36,8 @@ Auth emails must link to our `/auth/confirm` with a `token_hash`, so links work 
 **Authentication → Emails → Templates**, paste the HTML from `supabase/templates/` into **Confirm signup**
 (`confirmation.html`), **Magic Link** (`magic_link.html`) and **Reset Password** (`recovery.html`), with the subjects in
 `supabase/config.toml`.
+
+## Writing migrations
+
+End every migration that adds or changes tables or functions with `notify pgrst, 'reload schema';`, so the Data API sees
+them immediately after deploy (otherwise calls can return 404 until it refreshes).
