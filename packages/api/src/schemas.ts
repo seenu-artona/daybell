@@ -179,9 +179,6 @@ const jobFields = {
         "Only the studio sees it; unique per studio. Left out, the next JOBnnnnn number is used.",
     }),
   type: z.enum(JOB_TYPES, { error: "validation.invalid" }),
-  categoryId: z
-    .uuid({ error: "validation.category" })
-    .meta({ description: "One of the studio's job categories." }),
   subjectsExpected: z
     .number({ error: "validation.subjectsExpected" })
     .int({ error: "validation.subjectsExpected" })

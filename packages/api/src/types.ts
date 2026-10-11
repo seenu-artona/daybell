@@ -124,11 +124,6 @@ export const clientRef = z
   .object({ id: z.uuid(), name: z.string(), city: z.string().nullable() })
   .meta({ id: "ClientRef" });
 
-export const jobCategory = z
-  .object({ id: z.uuid(), name: z.string(), position: z.number().int() })
-  .meta({ id: "JobCategory", description: "A studio's job category, e.g. Fall or Graduation." });
-export type JobCategory = z.infer<typeof jobCategory>;
-
 export const job = z
   .object({
     id: z.uuid(),
@@ -138,7 +133,6 @@ export const job = z
     pictureDay: z.iso.date(),
     client: clientRef.nullable(),
     internalNumber: z.string().meta({ description: "Only the studio sees it." }),
-    category: jobCategory.pick({ id: true, name: true }),
     subjectsExpected: z.number().int().nullable(),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
@@ -155,5 +149,3 @@ export const nextJobNumberResponse = z.object({
 export const clientsResponse = z.object({ clients: z.array(client), nextCursor });
 export type ClientsResponse = z.infer<typeof clientsResponse>;
 export const clientResponse = z.object({ client });
-export const jobCategoriesResponse = z.object({ categories: z.array(jobCategory) });
-export type JobCategoriesResponse = z.infer<typeof jobCategoriesResponse>;

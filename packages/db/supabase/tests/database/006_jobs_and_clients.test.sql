@@ -1,8 +1,8 @@
--- Jobs, clients and job categories (D96, D131): studio separation, roles, the status lock, Quebec, numbers,
--- seeded categories, and events without personal data.
+-- Jobs and clients (D96, D131, D133): studio separation, roles, the status lock, Quebec, numbers, and events
+-- without personal data. Job categories were removed (D133).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(51);
+select plan(42);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -22,29 +22,19 @@ insert into public.studio_members (studio_id, user_id, role) values
   ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '44444444-4444-4444-8444-444444444444', 'staff'),
   ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '55555555-5555-4555-8555-555555555555', 'admin');
 
--- Every new studio gets the starter categories, in order, without extra events.
-select results_eq(
-  $$ select name from public.job_categories where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' order by position $$,
-  array['Fall', 'Spring', 'Graduation', 'Sports', 'Dance', 'Yearbook', 'Other'],
-  'new studios start with the seven job categories');
-select is((select count(*) from public.events where type like 'job_category.%'), 0::bigint,
-  'seeding categories writes no events of its own');
+select hasnt_table('public', 'job_categories', 'job categories are gone (D133)');
+select hasnt_column('public', 'jobs', 'category_id', 'jobs have no category (D133)');
 
--- Studio B's client, category and job, written as the database owner.
+-- Studio B's client and job, written as the database owner.
 insert into public.clients (id, studio_id, name, contact_email) values
   ('b0000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Secret School', 'b@example.test');
-insert into public.jobs (id, studio_id, name, type, client_id, picture_day, internal_number, category_id) values
+insert into public.jobs (id, studio_id, name, type, client_id, picture_day, internal_number) values
   ('b0000000-0000-4000-8000-000000000002', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Fall', 'school',
-   'b0000000-0000-4000-8000-000000000001', '2026-10-01', 'JOB00001',
-   (select id from public.job_categories where studio_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' and name = 'Fall'));
+   'b0000000-0000-4000-8000-000000000001', '2026-10-01', 'JOB00001');
 
 -- Ids of rows created below, readable after switching roles.
 create temp table ids (k text primary key, id uuid not null);
 grant all on ids to authenticated;
-insert into ids select 'fall', id from public.job_categories
-  where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and name = 'Fall';
-insert into ids select 'b_cat', id from public.job_categories
-  where studio_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' and name = 'Fall';
 
 -- ── As the owner of studio A ──────────────────────────────────────────────────────────────────────────────────────
 set local role authenticated;
@@ -61,18 +51,17 @@ select lives_ok($$
   'owner A adds a client with a contact person');
 select lives_ok($$
   with r as (
-    insert into public.jobs (studio_id, name, type, client_id, picture_day, internal_number, category_id, subjects_expected)
+    insert into public.jobs (studio_id, name, type, client_id, picture_day, internal_number, subjects_expected)
     values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Lincoln Fall 2026', 'school', (select id from ids where k = 'client'),
-            '2026-10-14', 'JOB00001', (select id from ids where k = 'fall'), 120)
+            '2026-10-14', 'JOB00001', 120)
     returning id)
   insert into ids select 'job', id from r $$,
   'owner A adds a job for it');
 select is((select status::text from public.jobs where id = (select id from ids where k = 'job')), 'draft',
   'new jobs start as drafts');
 select lives_ok($$
-  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
-  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Spring minis', 'school', '2026-04-02', 'JOB00007',
-          (select id from ids where k = 'fall')) $$,
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Spring minis', 'school', '2026-04-02', 'JOB00007') $$,
   'a client is optional for every job type');
 select is(public.next_job_number('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 'JOB00008',
   'the next job number follows the highest one');
@@ -82,44 +71,33 @@ select is(public.next_job_number('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'), 'JOB00
 -- Cross-studio reads and writes.
 select is((select count(*) from public.clients), 1::bigint, 'owner A sees only studio A clients');
 select is((select count(*) from public.jobs), 2::bigint, 'owner A sees only studio A jobs');
-select is((select count(*) from public.job_categories), 7::bigint, 'owner A sees only studio A categories');
 select throws_ok($$
   insert into public.clients (studio_id, name) values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Planted') $$,
   '42501', null, 'owner A cannot add a client to studio B');
 select throws_ok($$
-  insert into public.job_categories (studio_id, name) values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Planted') $$,
-  '42501', null, 'owner A cannot add a category to studio B');
-select throws_ok($$
-  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
-  values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Planted', 'seniors', '2026-10-01', 'X1', (select id from ids where k = 'b_cat')) $$,
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number)
+  values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Planted', 'seniors', '2026-10-01', 'X1') $$,
   '42501', null, 'owner A cannot add a job to studio B');
 update public.clients set name = 'hacked' where id = 'b0000000-0000-4000-8000-000000000001';
 update public.jobs set name = 'hacked' where id = 'b0000000-0000-4000-8000-000000000002';
-update public.job_categories set name = 'hacked' where id = (select id from ids where k = 'b_cat');
 select throws_ok($$
-  insert into public.jobs (studio_id, name, type, client_id, picture_day, internal_number, category_id)
+  insert into public.jobs (studio_id, name, type, client_id, picture_day, internal_number)
   values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Borrowed', 'school', 'b0000000-0000-4000-8000-000000000001',
-          '2026-10-01', 'JOB00100', (select id from ids where k = 'fall')) $$,
+          '2026-10-01', 'JOB00100') $$,
   '23503', null, 'a job cannot use another studio''s client');
-select throws_ok($$
-  update public.jobs set category_id = (select id from ids where k = 'b_cat') where id = (select id from ids where k = 'job') $$,
-  '23503', null, 'a job cannot use another studio''s category');
 
--- Numbers, dates and categories.
+-- Numbers and dates.
 select throws_ok($$
-  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
-  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Twin', 'seniors', '2026-10-01', 'job00001', (select id from ids where k = 'fall')) $$,
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Twin', 'seniors', '2026-10-01', 'job00001') $$,
   '23505', null, 'internal job numbers are unique per studio, ignoring case');
 select throws_ok($$
-  insert into public.jobs (studio_id, name, type, internal_number, category_id)
-  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Undated', 'seniors', 'JOB00200', (select id from ids where k = 'fall')) $$,
+  insert into public.jobs (studio_id, name, type, internal_number)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Undated', 'seniors', 'JOB00200') $$,
   '23502', null, 'a job needs a picture day');
 select throws_ok($$
   update public.jobs set subjects_expected = 0 where id = (select id from ids where k = 'job') $$,
   '23514', null, 'subjects expected is at least 1');
-select throws_ok($$
-  insert into public.job_categories (studio_id, name) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'fall') $$,
-  '23505', null, 'category names are unique per studio, ignoring case');
 
 -- The status lock (step 8 adds the function that changes it) and other fixed columns.
 select throws_ok($$ update public.jobs set status = 'selling' where id = (select id from ids where k = 'job') $$,
@@ -129,7 +107,6 @@ select throws_ok($$
   '42501', null, 'a job cannot move studio');
 select throws_ok($$ delete from public.jobs $$, '42501', null, 'jobs cannot be deleted');
 select throws_ok($$ delete from public.clients $$, '42501', null, 'clients cannot be deleted');
-select throws_ok($$ delete from public.job_categories $$, '42501', null, 'categories cannot be deleted');
 
 -- Quebec (D131) and the contact email.
 select throws_ok($$
@@ -173,75 +150,63 @@ select set_config('request.jwt.claims', '{"sub":"55555555-5555-4555-8555-5555555
 select lives_ok($$
   update public.clients set notes = 'Front office entrance' where id = (select id from ids where k = 'client') $$,
   'admins edit clients');
-select lives_ok($$
-  insert into public.job_categories (studio_id, name, position) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Winter', 8) $$,
-  'admins add categories');
 
 -- ── As a photographer and as staff of studio A: read-only ─────────────────────────────────────────────────────────
 select set_config('request.jwt.claims', '{"sub":"33333333-3333-4333-8333-333333333333"}', true) is not null as signed_in;
 select is((select count(*) from public.jobs), 2::bigint, 'photographers see the studio''s jobs');
 select throws_ok($$
-  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
-  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Mine', 'seniors', '2026-10-01', 'P1', (select id from ids where k = 'fall')) $$,
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Mine', 'seniors', '2026-10-01', 'P1') $$,
   '42501', null, 'photographers cannot add jobs');
 update public.jobs set name = 'photographer edit' where id = (select id from ids where k = 'job');
-update public.job_categories set name = 'photographer edit' where id = (select id from ids where k = 'fall');
 
 select set_config('request.jwt.claims', '{"sub":"44444444-4444-4444-8444-444444444444"}', true) is not null as signed_in;
 select is((select count(*) from public.clients), 1::bigint, 'staff see the studio''s clients');
 select throws_ok($$
   insert into public.clients (studio_id, name) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Mine') $$,
   '42501', null, 'staff cannot add clients');
-select throws_ok($$
-  insert into public.job_categories (studio_id, name) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Mine') $$,
-  '42501', null, 'staff cannot add categories');
 update public.clients set name = 'staff edit' where id = (select id from ids where k = 'client');
 
 -- ── As owner B ────────────────────────────────────────────────────────────────────────────────────────────────────
 select set_config('request.jwt.claims', '{"sub":"22222222-2222-4222-8222-222222222222"}', true) is not null as signed_in;
 select results_eq($$ select name from public.jobs $$, array['B Fall'], 'owner B sees only studio B jobs');
-select is((select count(*) from public.job_categories where name = 'Winter'), 0::bigint,
-  'owner B does not see studio A''s categories');
 
 -- ── As a logged-out visitor ───────────────────────────────────────────────────────────────────────────────────────
 reset role;
 set local role anon;
 select throws_ok($$ select * from public.jobs $$, '42501', null, 'logged-out visitors cannot read jobs');
 select throws_ok($$ select * from public.clients $$, '42501', null, 'logged-out visitors cannot read clients');
-select throws_ok($$ select * from public.job_categories $$, '42501', null, 'logged-out visitors cannot read categories');
 
 -- ── Results of the blocked writes, checked as the database owner ──────────────────────────────────────────────────
 reset role;
 select results_eq(
   $$ select (select name from public.clients where id = 'b0000000-0000-4000-8000-000000000001')
          || ' / ' || (select name from public.jobs where id = 'b0000000-0000-4000-8000-000000000002')
-         || ' / ' || (select name from public.job_categories where id = (select id from ids where k = 'b_cat')) $$,
-  array['B Secret School / B Fall / Fall'], 'owner A could not edit studio B''s client, job or category');
+  $$,
+  array['B Secret School / B Fall'], 'owner A could not edit studio B''s client or job');
 select results_eq(
   $$ select (select name from public.clients where id = (select id from ids where k = 'client'))
          || ' / ' || (select name from public.jobs where id = (select id from ids where k = 'job'))
-         || ' / ' || (select name from public.job_categories where id = (select id from ids where k = 'fall')) $$,
-  array['Lincoln Elementary / Lincoln Fall Picture Day / Fall'], 'photographers and staff could not edit anything');
+  $$,
+  array['Lincoln Elementary / Lincoln Fall Picture Day'], 'photographers and staff could not edit anything');
 -- Job numbers past five digits keep counting (bigint), stay unique, and can be used.
 select lives_ok($$
-  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
-  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Big', 'seniors', '2026-10-01', 'JOB999999999',
-          (select id from ids where k = 'fall')) $$,
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Big', 'seniors', '2026-10-01', 'JOB999999999') $$,
   'a nine-digit job number is accepted');
 select is(public.next_job_number('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 'JOB1000000000',
   'the next number after JOB999999999 is JOB1000000000');
 select lives_ok($$
-  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number)
   values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Bigger', 'seniors', '2026-10-01',
-          public.next_job_number('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), (select id from ids where k = 'fall')) $$,
+          public.next_job_number('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')) $$,
   'a job can be created with that next number');
 select throws_ok($$
-  insert into public.jobs (studio_id, name, type, picture_day, internal_number, category_id)
-  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Twin', 'seniors', '2026-10-01', 'JOB1000000000',
-          (select id from ids where k = 'fall')) $$,
+  insert into public.jobs (studio_id, name, type, picture_day, internal_number)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Twin', 'seniors', '2026-10-01', 'JOB1000000000') $$,
   '23505', null, 'and it stays unique');
 select lives_ok($$ delete from public.studios where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' $$,
-  'a studio can still be deleted with its jobs, clients and categories');
+  'a studio can still be deleted with its jobs and clients');
 
 select * from finish();
 rollback;

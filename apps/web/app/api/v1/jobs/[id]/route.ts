@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { check, handle, parseBody } from "@/lib/api";
 import {
-  assertJobReferences,
+  assertClientInStudio,
   isNumberTaken,
   JOB_COLUMNS,
   type JobRow,
@@ -57,14 +57,10 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
     clientId: current.client?.id ?? null,
     internalNumber: current.internal_number,
     type: current.type,
-    categoryId: current.category.id,
     subjectsExpected: current.subjects_expected,
     ...patch,
   });
-  await assertJobReferences(supabase, studio.id, {
-    clientId: patch.clientId,
-    categoryId: patch.categoryId,
-  });
+  await assertClientInStudio(supabase, studio.id, patch.clientId);
   const result = await supabase
     .from("jobs")
     .update(jobColumns(next, Object.keys(patch) as (keyof JobInput)[]))

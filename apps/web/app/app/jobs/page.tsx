@@ -104,7 +104,6 @@ export default function JobsPage() {
                 <TableHead>{t("columns.name")}</TableHead>
                 <TableHead>{t("columns.number")}</TableHead>
                 <TableHead>{t("columns.client")}</TableHead>
-                <TableHead>{t("columns.category")}</TableHead>
                 <TableHead>{t("columns.pictureDay")}</TableHead>
                 <TableHead numeric>{t("columns.subjects")}</TableHead>
                 <TableHead>{t("columns.status")}</TableHead>
@@ -123,7 +122,6 @@ export default function JobsPage() {
                   </TableCell>
                   <TableCell className="whitespace-nowrap">{job.internalNumber}</TableCell>
                   <TableCell>{job.client?.name ?? t("none")}</TableCell>
-                  <TableCell>{job.category.name}</TableCell>
                   <TableCell className="whitespace-nowrap">{formatDay(job.pictureDay)}</TableCell>
                   <TableCell numeric>{job.subjectsExpected ?? t("none")}</TableCell>
                   <TableCell>

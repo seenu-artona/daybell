@@ -12,9 +12,9 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
 
-/** Columns the API reads; client and category are embedded through the composite studio FKs (ADR 0008). */
+/** Columns the API reads; the client is embedded through the composite studio FK (ADR 0008). */
 export const JOB_COLUMNS =
-  "id, name, type, status, picture_day, internal_number, subjects_expected, created_at, updated_at, client:clients (id, name, city), category:job_categories (id, name)";
+  "id, name, type, status, picture_day, internal_number, subjects_expected, created_at, updated_at, client:clients (id, name, city)";
 export const CLIENT_COLUMNS =
   "id, name, address_line1, address_line2, postal_code, city, region_code, country, contact_first_name, contact_last_name, contact_phone, contact_email, notes, created_at, updated_at";
 
@@ -29,7 +29,6 @@ export interface JobRow {
   created_at: string;
   updated_at: string;
   client: { id: string; name: string; city: string | null } | null;
-  category: { id: string; name: string };
 }
 
 export interface ClientRow {
@@ -59,7 +58,6 @@ export function toJob(row: JobRow): Job {
     pictureDay: row.picture_day,
     client: row.client,
     internalNumber: row.internal_number,
-    category: row.category,
     subjectsExpected: row.subjects_expected,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -107,7 +105,6 @@ const JOB_COLUMN_FOR: Record<keyof JobInput, string> = {
   clientId: "client_id",
   internalNumber: "internal_number",
   type: "type",
-  categoryId: "category_id",
   subjectsExpected: "subjects_expected",
 };
 
@@ -149,27 +146,27 @@ export function validJob(value: unknown): JobInput {
 }
 
 /**
- * The client and category must exist in this studio. The composite FKs enforce it too; checking first gives a
- * field error instead of a generic one.
+ * The client must exist in this studio. The composite FK enforces it too; checking first gives a field error instead
+ * of a generic one.
  */
-export async function assertJobReferences(
+export async function assertClientInStudio(
   supabase: SupabaseClient,
   studioId: string,
-  refs: { clientId?: string | null | undefined; categoryId?: string | undefined },
+  clientId: string | null | undefined,
 ): Promise<void> {
-  const exists = async (table: string, id: string) => {
-    const rows = check(
-      await supabase.from(table).select("id").eq("studio_id", studioId).eq("id", id).limit(1),
-    );
-    return Boolean(rows && rows.length > 0);
-  };
-  const fields: Record<string, string> = {};
-  if (refs.clientId && !(await exists("clients", refs.clientId)))
-    fields.clientId = "validation.client";
-  if (refs.categoryId && !(await exists("job_categories", refs.categoryId)))
-    fields.categoryId = "validation.category";
-  if (Object.keys(fields).length > 0)
-    throw new ApiError("invalid_input", "Please check the highlighted fields.", fields);
+  if (!clientId) return;
+  const rows = check(
+    await supabase
+      .from("clients")
+      .select("id")
+      .eq("studio_id", studioId)
+      .eq("id", clientId)
+      .limit(1),
+  );
+  if (!rows || rows.length === 0)
+    throw new ApiError("invalid_input", "Please check the highlighted fields.", {
+      clientId: "validation.client",
+    });
 }
 
 /** The studio's next free JOBnnnnn number (database function, RLS-scoped). */

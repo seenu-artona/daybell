@@ -145,7 +145,6 @@
     "client": "Choose a client from your list.",
     "internalNumber": "Use 1–30 characters.",
     "internalNumberTaken": "Another job already uses this number. Try the next one.",
-    "category": "Choose a job category.",
     "subjectsExpected": "Enter a whole number from 1 to 100,000."
   },
   "errors": {
@@ -378,7 +377,6 @@
         "name": "Job",
         "number": "Job number",
         "client": "Client",
-        "category": "Category",
         "pictureDay": "Picture day",
         "subjects": "Subjects",
         "status": "Status"
@@ -399,31 +397,24 @@
         "closed": "Closed"
       },
       "form": {
-        "createTitle": "Create photo job",
+        "createTitle": "Create job",
         "editTitle": "Edit job",
         "name": "Job name",
-        "nameHelp": "Parents see this in your shop, e.g. Lincoln Elementary · Fall 2026.",
-        "pictureDay": "Date of picture day",
-        "client": "Client",
-        "clientSearch": "Search your clients",
-        "clientNone": "No client",
-        "clientSelected": "Selected client: {name}",
-        "clientChange": "Change client",
-        "clientRemove": "Remove client",
-        "clientNoMatches": "No clients match.",
-        "clientEmpty": "You haven't added any clients yet.",
-        "addClient": "Add new client",
-        "internalNumber": "Internal job number",
-        "internalNumberHelp": "Only your studio sees this.",
+        "namePlaceholder": "e.g. Lincoln Elementary · Fall 2026",
+        "pictureDay": "Picture day",
         "type": "Job type",
-        "category": "Job category",
-        "categoryChoose": "Choose a category",
+        "client": "Client",
+        "clientPlaceholder": "Search clients…",
+        "addClient": "Add new client",
+        "moreOptions": "More options",
+        "internalNumber": "Internal job number",
         "subjects": "Subjects expected",
-        "subjectsHelp": "About how many people you'll photograph, e.g. 120.",
+        "subjectsPlaceholder": "e.g. 120",
         "cancel": "Cancel",
-        "save": "Save job",
+        "create": "Create job",
+        "save": "Save changes",
         "saving": "Saving…",
-        "loading": "Loading…"
+        "clientOptions": "Clients"
       },
       "detail": {
         "back": "All jobs",
@@ -433,7 +424,6 @@
         "client": "Client",
         "noClient": "No client",
         "number": "Internal job number",
-        "category": "Category",
         "type": "Type",
         "pictureDay": "Picture day",
         "subjects": "Subjects expected",
@@ -479,7 +469,7 @@
         "loadMore": "Show more"
       },
       "form": {
-        "addTitle": "Add new client",
+        "addTitle": "Add client",
         "editTitle": "Edit client",
         "name": "Client name",
         "address": "Address",
@@ -497,21 +487,22 @@
         "phone": "Phone",
         "email": "Email",
         "notes": "Additional notes",
-        "notesHelp": "Only your studio sees this. Parents and schools never do.",
-        "save": "Save client",
+        "save": "Save changes",
         "saving": "Saving…",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "notesPlaceholder": "Only your studio sees this",
+        "add": "Add client"
       },
       "address": {
         "us": {
           "region": "State",
-          "regionHelp": "2-letter code, e.g. OR",
-          "postalCode": "ZIP code"
+          "postalCode": "ZIP code",
+          "regionPlaceholder": "e.g. OR"
         },
         "ca": {
           "region": "Province",
-          "regionHelp": "2-letter code, e.g. ON. Quebec isn't available yet.",
-          "postalCode": "Postal code"
+          "postalCode": "Postal code",
+          "regionPlaceholder": "e.g. ON"
         }
       }
     },
