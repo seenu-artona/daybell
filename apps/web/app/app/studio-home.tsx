@@ -20,6 +20,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { ActivityCard } from "./activity-card";
 
 export function StudioHome() {
   const t = useTranslations("app");
@@ -27,6 +28,7 @@ export function StudioHome() {
   const router = useRouter();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [failed, setFailed] = useState(false);
+  const [activityKey, setActivityKey] = useState(0);
 
   useEffect(() => {
     api<MeResponse>("/me").then((res) => {
@@ -77,7 +79,14 @@ export function StudioHome() {
         animate={false}
         className="max-w-90"
       />
-      <Team myEmail={me.email} role={me.studio.role} />
+      <Team
+        myEmail={me.email}
+        role={me.studio.role}
+        onChange={() => setActivityKey((k) => k + 1)}
+      />
+      {me.studio.role === "owner" || me.studio.role === "admin" ? (
+        <ActivityCard refreshKey={activityKey} />
+      ) : null}
     </Shell>
   );
 }
@@ -111,7 +120,15 @@ function Shell({
   );
 }
 
-function Team({ myEmail, role }: { myEmail: string; role: StudioRole }) {
+function Team({
+  myEmail,
+  role,
+  onChange,
+}: {
+  myEmail: string;
+  role: StudioRole;
+  onChange: () => void;
+}) {
   const t = useTranslations("app");
   const format = useFormatter();
   const text = useApiText();
@@ -152,6 +169,7 @@ function Team({ myEmail, role }: { myEmail: string; role: StudioRole }) {
       setFields({});
       form.reset();
       void load();
+      onChange();
     } else {
       setFields(res.fields);
       if (Object.keys(res.fields).length === 0) setError(text.error(res.code));
@@ -160,8 +178,10 @@ function Team({ myEmail, role }: { myEmail: string; role: StudioRole }) {
 
   async function withdraw(id: string) {
     const res = await api(`/studio/invites/${id}`, { method: "DELETE" });
-    if (res.ok) void load();
-    else setError(text.error(res.code));
+    if (res.ok) {
+      void load();
+      onChange();
+    } else setError(text.error(res.code));
   }
 
   return (

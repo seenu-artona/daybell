@@ -46,6 +46,8 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   const inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
   expect(inviteLink).toMatch(/\/invite#[0-9a-f]{64}$/);
   await expect(page.getByText("Waiting to join")).toBeVisible();
+  // The activity log records it (event log, D96).
+  await expect(page.getByText(`${owner} invited someone as photographer`)).toBeVisible();
 
   // 4. The photographer, in a fresh browser, creates an account from the invite and joins.
   const staff = await (await browser.newContext()).newPage();
