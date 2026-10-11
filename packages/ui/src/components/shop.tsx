@@ -11,17 +11,15 @@ import {
 } from "react";
 import { cn } from "../lib/cn";
 import { normalizeHex, readableTextOn, uiColorOn } from "../lib/contrast";
+import { type StudioColorId, studioColorHex } from "../lib/studio-colors";
 
 export interface ShopFrameProps {
   studioName: string;
   /** Shown when the studio has no logo yet, e.g. "NP". */
   studioInitials: string;
   logo?: ReactNode;
-  /**
-   * The studio's brand colour (hex). Text on it and a ring/border version are derived for contrast
-   * automatically. An invalid value falls back to Daybell's default instead of breaking the shop.
-   */
-  studioColor?: string;
+  /** The studio's chosen shop colour from the curated set (D117). Defaults to charcoal (D116). */
+  studioColor?: StudioColorId;
   cartCount?: number;
   cartLabel: string;
   cartHref?: string;
@@ -46,7 +44,7 @@ export function ShopFrame({
   children,
   className,
 }: ShopFrameProps) {
-  const brand = normalizeHex(studioColor);
+  const brand = normalizeHex(studioColorHex(studioColor));
   const style = brand
     ? ({
         "--color-studio": brand,

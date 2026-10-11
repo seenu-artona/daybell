@@ -19,3 +19,9 @@ export {
   readableTextOn,
   uiColorOn,
 } from "./lib/contrast";
+export {
+  DEFAULT_STUDIO_COLOR,
+  STUDIO_COLORS,
+  type StudioColorId,
+  studioColorHex,
+} from "./lib/studio-colors";

@@ -87,7 +87,7 @@ describe("components", () => {
         <ShopFrame
           studioName="North Peak Photo"
           studioInitials="NP"
-          studioColor="#4338ca"
+          studioColor="navy"
           cartLabel="Cart, 0 items"
           footer="Powered by Daybell"
         >
@@ -126,13 +126,7 @@ describe("components", () => {
 
   it("picks white text on a dark studio colour", () => {
     const { container } = render(
-      <ShopFrame
-        studioName="NP"
-        studioInitials="NP"
-        studioColor="#4338ca"
-        cartLabel="Cart"
-        footer="f"
-      >
+      <ShopFrame studioName="NP" studioInitials="NP" studioColor="navy" cartLabel="Cart" footer="f">
         x
       </ShopFrame>,
     );
@@ -145,13 +139,15 @@ describe("components", () => {
     expect(cn("text-body text-h1")).toBe("text-h1");
   });
 
-  it("never crashes the shop on a bad studio colour", () => {
+  it("falls back to charcoal for an unknown studio colour", () => {
     const { container } = render(
+      // @ts-expect-error simulating a bad value from storage
       <ShopFrame studioName="NP" studioInitials="NP" studioColor="red;" cartLabel="Cart" footer="f">
         x
       </ShopFrame>,
     );
-    expect((container.firstElementChild as HTMLElement).getAttribute("style")).toBeNull();
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.style.getPropertyValue("--color-studio")).toBe("#1c1c1e");
   });
 
   it("darkens a light studio colour for focus rings until it reaches 3:1", () => {

@@ -37,9 +37,6 @@ import {
 import { useTranslations } from "next-intl";
 import { type ReactNode, useState } from "react";
 
-/** Sample studio setting for the demo shop; real studios set their own colour. */
-const DEMO_STUDIO_COLOR = "#4338ca";
-
 const usd = (cents: number) => formatMoney(money(cents, "USD"));
 const usdWhole = (cents: number) => formatMoney(money(cents, "USD"), "en-US", { whole: true });
 
@@ -270,7 +267,7 @@ export function Gallery() {
           <ShopFrame
             studioName={t("shop.studio")}
             studioInitials={t("shop.initials")}
-            studioColor={DEMO_STUDIO_COLOR}
+            studioColor="charcoal"
             cartLabel={t("shop.cart", { count: 0 })}
             footer={t("shop.footer")}
           >
@@ -299,7 +296,7 @@ export function Gallery() {
           <ShopFrame
             studioName={t("shop.studio")}
             studioInitials={t("shop.initials")}
-            studioColor={DEMO_STUDIO_COLOR}
+            studioColor="charcoal"
             cartCount={2}
             cartLabel={t("shop.cart", { count: 2 })}
             footer={t("shop.footer")}
@@ -326,7 +323,7 @@ export function Gallery() {
           <ShopFrame
             studioName={t("shop.studio")}
             studioInitials={t("shop.initials")}
-            studioColor={DEMO_STUDIO_COLOR}
+            studioColor="charcoal"
             cartCount={2}
             cartLabel={t("shop.cart", { count: 2 })}
             footer={t("shop.footer")}

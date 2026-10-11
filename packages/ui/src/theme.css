@@ -70,10 +70,10 @@
   --shadow-lg: 0 16px 40px rgba(20,35,28,0.16);
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
-  /* Parent shop slot (D112): ShopFrame overrides these with the studio's brand colour. */
-  --color-studio: var(--color-primary);
-  --color-on-studio: var(--color-on-primary);
-  --color-studio-ring: var(--color-primary);
+  /* Parent shop slot: charcoal by default (D116); ShopFrame overrides with the studio's colour (D117). */
+  --color-studio: #1c1c1e;
+  --color-on-studio: #ffffff;
+  --color-studio-ring: #1c1c1e;
 }
 
 @keyframes daybell-pop {
