@@ -145,7 +145,16 @@
     "client": "Choose a client from your list.",
     "internalNumber": "Use 1–30 characters.",
     "internalNumberTaken": "Another job already uses this number. Try the next one.",
-    "subjectsExpected": "Enter a whole number from 1 to 100,000."
+    "subjectsExpected": "Enter a whole number from 1 to 100,000.",
+    "firstName": "Enter a first name (up to 60 characters).",
+    "lastName": "Enter a last name (up to 60 characters).",
+    "group": "Choose one of this job's classes, teams or groups.",
+    "groupName": "Enter a name (up to 60 characters).",
+    "groupNameTaken": "This job already has one with that name.",
+    "studentId": "Use up to 40 characters.",
+    "grade": "Use up to 20 characters.",
+    "rosterEmpty": "There are no rows to import.",
+    "rosterTooLarge": "Import up to 5,000 rows at a time."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -270,6 +279,9 @@
       "client": {
         "created": "{actor} added the client {name}",
         "updated": "{actor} updated the client {name}"
+      },
+      "roster": {
+        "imported": "{actor} imported a roster into {name}"
       }
     },
     "nav": {
@@ -436,8 +448,6 @@
           "shipped": "Shipped"
         },
         "upcoming": "Upcoming",
-        "roster": "Roster",
-        "rosterBody": "{group, select, class {Classes} team {Teams} other {Groups}} and children arrive here in an upcoming step.",
         "photos": "Photos",
         "photosBody": "Uploading and tagging photos arrive in an upcoming step.",
         "comingSoon": "Coming soon",
@@ -506,7 +516,160 @@
         }
       }
     },
-    "optionalLabel": "{label} (optional)"
+    "optionalLabel": "{label} (optional)",
+    "roster": {
+      "title": "Roster",
+      "childCount": "{count, plural, one {# child} other {# children}}",
+      "groupCount": "{count, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
+      "duplicateCount": "{count, plural, one {# duplicate} other {# duplicates}}",
+      "add": "Add child",
+      "import": "Import roster",
+      "loading": "Loading the roster…",
+      "emptyTitle": "No children yet",
+      "emptyBody": "Import the {group, select, class {class} team {team} other {group}} list from a CSV or Excel file, or add children one by one. Each child gets an access code for their parents.",
+      "emptyReadOnly": "Owners, admins and photographers manage the roster.",
+      "loadFailed": "The roster couldn't be loaded. Reload the page to try again.",
+      "filter": "{group, select, class {Class} team {Team} other {Group}}",
+      "filterAll": "{group, select, class {All classes} team {All teams} other {All groups}}",
+      "noGroup": "{group, select, class {No class} team {No team} other {No group}}",
+      "renameGroup": "{group, select, class {Rename class} team {Rename team} other {Rename group}}",
+      "columns": {
+        "name": "Name",
+        "group": "{group, select, class {Class} team {Team} other {Group}}",
+        "studentId": "Student ID",
+        "grade": "Grade",
+        "accessCode": "Access code",
+        "flags": "Flags",
+        "actions": "Actions"
+      },
+      "badges": {
+        "duplicate": "Duplicate",
+        "doNotPhotograph": "Do not photograph",
+        "doNotPublish": "Do not publish"
+      },
+      "edit": "Edit {name}",
+      "editShort": "Edit",
+      "loadMore": "Show more",
+      "saved": "Saved.",
+      "removed": "Child removed.",
+      "imported": "Roster imported: {added} added, {updated} updated.",
+      "lockedNote": "Children can be removed only while the job is a draft.",
+      "form": {
+        "addTitle": "Add child",
+        "editTitle": "Edit child",
+        "firstName": "First name",
+        "firstNamePlaceholder": "e.g. Maya",
+        "lastName": "Last name",
+        "lastNamePlaceholder": "e.g. Johnson",
+        "group": "{group, select, class {Class} team {Team} other {Group}}",
+        "groupPlaceholder": "{group, select, class {Search classes…} team {Search teams…} other {Search groups…}}",
+        "groupOptions": "{group, select, class {Classes} team {Teams} other {Groups}}",
+        "addGroup": "{group, select, class {Add new class} team {Add new team} other {Add new group}}",
+        "moreOptions": "More options",
+        "studentId": "Student ID",
+        "studentIdPlaceholder": "e.g. 204517",
+        "grade": "Grade",
+        "gradePlaceholder": "e.g. 4",
+        "parentEmail": "Parent email",
+        "parentEmailPlaceholder": "e.g. parent@example.com",
+        "doNotPhotograph": "Do not photograph",
+        "doNotPublish": "Do not publish",
+        "accessCode": "Access code",
+        "cancel": "Cancel",
+        "create": "Add child",
+        "save": "Save changes",
+        "saving": "Saving…",
+        "remove": "Remove child",
+        "removeTitle": "Remove child?",
+        "removeBody": "{name} and their access code will be deleted. This can't be undone.",
+        "removeConfirm": "Remove child",
+        "removing": "Removing…"
+      },
+      "groupForm": {
+        "addTitle": "{group, select, class {Add class} team {Add team} other {Add group}}",
+        "renameTitle": "{group, select, class {Rename class} team {Rename team} other {Rename group}}",
+        "name": "Name",
+        "namePlaceholder": "{group, select, class {e.g. Room 4B · Ms. Lee} team {e.g. U10 Tigers} other {e.g. Morning session}}",
+        "create": "{group, select, class {Add class} team {Add team} other {Add group}}",
+        "save": "Save changes",
+        "cancel": "Cancel",
+        "saving": "Saving…"
+      },
+      "importPage": {
+        "title": "Import roster",
+        "back": "Back to job",
+        "stepsLabel": "Import steps",
+        "steps": {
+          "file": "Choose file",
+          "columns": "Match columns",
+          "check": "Check and import"
+        },
+        "fileLabel": "Roster file (CSV or Excel)",
+        "fileNote": "The file stays on your device. Only the rows you confirm are saved to Daybell.",
+        "sheet": "Sheet",
+        "reading": "Reading the file…",
+        "tooBig": "That file is over 5 MB. Save it with only the roster columns, or split it.",
+        "tooManyRows": "That file has more than 5,000 rows. Split it into smaller files and import each one.",
+        "unreadable": "We couldn't read that file. Save it as CSV or Excel (.xlsx) and try again.",
+        "empty": "That file has no rows to import.",
+        "columnsIntro": "Check what each column holds. Columns set to “Don't import” are left out.",
+        "column": "Column {n}",
+        "sample": "Examples",
+        "noSample": "Empty",
+        "importAs": "Import “{column}” as",
+        "targets": {
+          "skip": "Don't import",
+          "firstName": "First name",
+          "lastName": "Last name",
+          "group": "{group, select, class {Class} team {Team} other {Group}}",
+          "studentId": "Student ID",
+          "grade": "Grade",
+          "parentEmail": "Parent email",
+          "doNotPhotograph": "Do not photograph",
+          "doNotPublish": "Do not publish"
+        },
+        "needNames": "Choose the columns that hold first and last names.",
+        "usedTwice": "Each kind of information can come from one column only.",
+        "backStep": "Back",
+        "checkRows": "Check rows",
+        "checking": "Checking…",
+        "summary": {
+          "add": "{count} will be added",
+          "update": "{count} updated",
+          "groups": "{count, plural, one {# new {group, select, class {class} team {team} other {group}}} other {# new {group, select, class {classes} team {teams} other {groups}}}}",
+          "duplicates": "{count, plural, one {# duplicate} other {# duplicates}}",
+          "invalid": "{count, plural, one {# row can't be imported} other {# rows can't be imported}}"
+        },
+        "filterLabel": "Show",
+        "filter": {
+          "all": "All rows",
+          "duplicates": "Duplicates",
+          "invalid": "Can't import"
+        },
+        "columns": {
+          "row": "Row",
+          "name": "Name",
+          "group": "{group, select, class {Class} team {Team} other {Group}}",
+          "studentId": "Student ID",
+          "grade": "Grade",
+          "parentEmail": "Parent email",
+          "flags": "Flags",
+          "status": "Status"
+        },
+        "status": {
+          "add": "New",
+          "update": "Update",
+          "invalid": "Can't import"
+        },
+        "noRows": "No rows match.",
+        "importN": "{count, plural, one {Import # child} other {Import # children}}",
+        "importing": "Importing…",
+        "nothingToImport": "No rows can be imported. Go back and check the columns, or fix the file.",
+        "showMore": "Show more rows",
+        "staffOnly": "Owners, admins and photographers manage the roster.",
+        "changed": "The roster changed while you were checking. The rows were checked again."
+      }
+    }
   },
   "invite": {
     "title": "You've been invited",
@@ -536,13 +699,15 @@
       "Team": "Team",
       "Studio": "Studio",
       "Jobs": "Jobs",
+      "Roster": "Roster",
       "Contacts": "Contacts"
     },
     "access": {
       "public": "Anyone",
       "signed-in": "Signed in",
       "owner-admin": "Owners and admins",
-      "owner": "Owners"
+      "owner": "Owners",
+      "roster-editor": "Owners, admins and photographers"
     },
     "englishOnly": "Endpoint descriptions are in English, for developers.",
     "query": "Query parameters"

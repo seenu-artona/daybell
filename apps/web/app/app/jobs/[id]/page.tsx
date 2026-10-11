@@ -1,9 +1,9 @@
 "use client";
 
 import type { Job } from "@daybell/api";
-import { groupLabel } from "@daybell/core";
+import { canEditRoster } from "@daybell/core";
 import { Badge, Banner, Button, Card } from "@daybell/ui";
-import { ArrowLeft, CircleDashed, Images, Pencil, Users } from "lucide-react";
+import { ArrowLeft, CircleDashed, Images, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -14,6 +14,7 @@ import { Dialog } from "../../dialog";
 import { useStudio } from "../../me-context";
 import { JobForm } from "../job-form";
 import { StatusBadge, useFormatDay } from "../status-badge";
+import { RosterSection } from "./roster";
 
 // D75: the steps every job moves through. Nothing has happened yet in step 1, so all are upcoming.
 const STAGES = ["pictureDay", "tagged", "shopLive", "shipped"] as const;
@@ -37,7 +38,7 @@ function Soon({ icon, title, children }: { icon: ReactNode; title: string; child
   );
 }
 
-/** One job (Phase 1 step 1): its details, the D75 progress steps, and the sections later steps fill in. */
+/** One job: its details, the D75 progress steps, the roster (step 2), and the sections later steps fill in. */
 export default function JobPage() {
   const t = useTranslations("app.jobs");
   const td = useTranslations("app.jobs.detail");
@@ -158,14 +159,11 @@ export default function JobPage() {
         </ol>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Soon icon={<Users className="size-5" />} title={td("roster")}>
-          {td("rosterBody", { group: groupLabel(job.type) })}
-        </Soon>
-        <Soon icon={<Images className="size-5" />} title={td("photos")}>
-          {td("photosBody")}
-        </Soon>
-      </div>
+      <RosterSection job={job} canEdit={canEditRoster(me.studio.role)} />
+
+      <Soon icon={<Images className="size-5" />} title={td("photos")}>
+        {td("photosBody")}
+      </Soon>
 
       <Dialog open={editing} onClose={() => setEditing(false)} title={t("form.editTitle")}>
         <JobForm
