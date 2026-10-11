@@ -1,6 +1,11 @@
 import { ACTIVITY_TYPES } from "@daybell/api";
 import { describe, expect, it } from "vitest";
-import { activityType, STORED_ACTIVITY_TYPES, unnamedSubject } from "./activity";
+import {
+  activityType,
+  JOB_ACTIVITY_TYPES,
+  STORED_ACTIVITY_TYPES,
+  unnamedSubject,
+} from "./activity";
 
 describe("activityType", () => {
   it("shows events written before organizations became clients as client events", () => {
@@ -43,5 +48,16 @@ describe("unnamedSubject", () => {
     expect(unnamedSubject("job.created")).toBe("aJob");
     expect(unnamedSubject("roster.imported")).toBe("aJob");
     expect(unnamedSubject("client.updated")).toBe("aClient");
+  });
+});
+
+describe("JOB_ACTIVITY_TYPES", () => {
+  it("is the job's own changes and roster imports, nothing about children, classes or the team", () => {
+    expect([...JOB_ACTIVITY_TYPES].sort()).toEqual([
+      "job.created",
+      "job.updated",
+      "roster.imported",
+    ]);
+    for (const type of JOB_ACTIVITY_TYPES) expect(STORED_ACTIVITY_TYPES).toContain(type);
   });
 });

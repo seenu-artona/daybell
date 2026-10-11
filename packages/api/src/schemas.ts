@@ -349,6 +349,29 @@ export const rosterQuery = z.object({
     .meta({ description: 'Only this class, team or group; "none" for children without one.' }),
 });
 
+// ── Job page (Phase 1 step 2b, ADR 0013) ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * The menu search box. Sent in a POST body, never a URL: people may type a child's or contact's name (ADR 0011).
+ * Jobs and clients only; children are never searched.
+ */
+export const searchInput = z.object({
+  q: z
+    .string({ error: "validation.searchShort" })
+    .trim()
+    .min(2, { error: "validation.searchShort" })
+    .max(100, { error: "validation.tooLong" })
+    .meta({ description: "2 to 100 characters. Matches job names and numbers, and client names." }),
+});
+export type SearchInput = z.infer<typeof searchInput>;
+
+export const activityQuery = z.object({
+  jobId: z
+    .uuid({ error: "validation.invalid" })
+    .optional()
+    .meta({ description: "Only this job's activity (the job and its roster imports)." }),
+});
+
 /** Turns zod issues into `{ field: messageKey }` for forms. */
 export function fieldErrors(error: z.ZodError): Record<string, string> {
   const out: Record<string, string> = {};

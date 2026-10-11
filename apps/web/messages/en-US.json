@@ -154,7 +154,8 @@
     "studentId": "Use up to 40 characters.",
     "grade": "Use up to 20 characters.",
     "rosterEmpty": "There are no rows to import.",
-    "rosterTooLarge": "Import up to 5,000 rows at a time."
+    "rosterTooLarge": "Import up to 5,000 rows at a time.",
+    "searchShort": "Type at least 2 characters."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -702,7 +703,8 @@
       "Studio": "Studio",
       "Jobs": "Jobs",
       "Roster": "Roster",
-      "Contacts": "Contacts"
+      "Contacts": "Contacts",
+      "Search": "Search"
     },
     "access": {
       "public": "Anyone",

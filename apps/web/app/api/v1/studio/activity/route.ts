@@ -1,31 +1,42 @@
-import { type ActivityItem, ApiError, type StudioRole } from "@daybell/api";
+import { type ActivityItem, ApiError, activityQuery, type StudioRole } from "@daybell/api";
 import { NextResponse } from "next/server";
-import { activityType, STORED_ACTIVITY_TYPES } from "@/lib/activity";
-import { check, handle, requireUser } from "@/lib/api";
-import { currentStudio } from "@/lib/studio";
-import { supabaseForSession } from "@/lib/supabase/server";
+import { activityType, JOB_ACTIVITY_TYPES, STORED_ACTIVITY_TYPES } from "@/lib/activity";
+import { check, handle, parseQuery } from "@/lib/api";
+import { assertCanManage, studioScope } from "@/lib/studio";
 
 /**
  * GET /api/v1/studio/activity — the latest 50 things that happened in the studio (owners and admins, D96).
+ * ?jobId= narrows it to one job of the caller's studio: its own changes and roster imports (D138; ADR 0013).
  * Names (people, jobs, clients) are resolved when read, never stored in events.
  */
-export const GET = handle(async () => {
-  const { region, supabase } = await supabaseForSession();
-  const user = await requireUser(supabase);
-  const studio = await currentStudio(supabase, user, region);
-  if (!studio) throw new ApiError("not_found", "You're not part of a studio yet.");
-  if (studio.role !== "owner" && studio.role !== "admin")
-    throw new ApiError("forbidden", "Owners and admins only.");
+export const GET = handle(async (request: Request) => {
+  const { supabase, studio } = await studioScope();
+  assertCanManage(studio);
+  const { jobId } = parseQuery(request, activityQuery);
 
+  if (jobId) {
+    // An explicit check on top of row-level security: another studio's job is simply not found.
+    const job = check(
+      await supabase
+        .from("jobs")
+        .select("id")
+        .eq("studio_id", studio.id)
+        .eq("id", jobId)
+        .maybeSingle(),
+    );
+    if (!job) throw new ApiError("not_found", "Job not found.");
+  }
+
+  let eventsQuery = supabase
+    .from("events")
+    .select("id, type, actor_id, subject_id, data, occurred_at")
+    .eq("studio_id", studio.id);
+  // Hidden types are filtered here, before the limit, so a big import can't empty the log.
+  eventsQuery = jobId
+    ? eventsQuery.eq("subject_id", jobId).in("type", [...JOB_ACTIVITY_TYPES])
+    : eventsQuery.in("type", [...STORED_ACTIVITY_TYPES]);
   const [events, team] = await Promise.all([
-    supabase
-      .from("events")
-      .select("id, type, actor_id, subject_id, data, occurred_at")
-      .eq("studio_id", studio.id)
-      // Hidden types are filtered here, before the limit, so a big import can't empty the log.
-      .in("type", [...STORED_ACTIVITY_TYPES])
-      .order("id", { ascending: false })
-      .limit(50),
+    eventsQuery.order("id", { ascending: false }).limit(50),
     supabase.rpc("studio_team", { p_studio_id: studio.id }),
   ]);
   const rows = check(events) ?? [];
