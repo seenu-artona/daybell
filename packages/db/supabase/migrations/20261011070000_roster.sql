@@ -107,8 +107,8 @@ for each row execute function app.touch_updated_at();
 alter table public.children enable row level security;
 create policy "members read their studio's children" on public.children
   for select to authenticated using (app.is_member(studio_id));
-create policy "roster editors add children" on public.children
-  for insert to authenticated with check (app.has_role(studio_id, '{owner,admin,photographer}'));
+-- No insert policy or grant: every child gets an access code, and code-bearing writes are server-only (ADR 0011). The
+-- API adds children through add_child and import_roster below, which only the service role can run.
 create policy "roster editors edit children" on public.children
   for update to authenticated
   using (app.has_role(studio_id, '{owner,admin,photographer}'))
@@ -116,13 +116,11 @@ create policy "roster editors edit children" on public.children
 create policy "roster editors remove children" on public.children
   for delete to authenticated using (app.has_role(studio_id, '{owner,admin,photographer}'));
 
--- Column grants: the hash is never readable; codes, job, studio and school_provided can never be changed directly.
+-- Column grants: the hash is never readable; browsers never write codes (no insert at all), and codes, job, studio and
+-- school_provided can never be changed directly.
 revoke all on public.children from anon, authenticated;
 grant select (id, studio_id, job_id, group_id, first_name, last_name, student_id, grade, parent_email,
   do_not_photograph, do_not_publish, school_provided, access_code_ciphertext, created_at, updated_at)
-  on public.children to authenticated;
-grant insert (id, studio_id, job_id, group_id, first_name, last_name, student_id, grade, parent_email,
-  do_not_photograph, do_not_publish, access_code_hash, access_code_ciphertext)
   on public.children to authenticated;
 grant update (group_id, first_name, last_name, student_id, grade, parent_email, do_not_photograph, do_not_publish)
   on public.children to authenticated;
@@ -178,10 +176,79 @@ $$;
 create trigger children_events after insert or update or delete on public.children
 for each row execute function app.on_child_change();
 
+-- ── Server-only writes of access codes (ADR 0011) ─────────────────────────────────────────────────────────────────
+-- Browsers never write codes: adding a child and importing a roster run only as the service role, from API route
+-- handlers that have already checked the signed-in person's studio and role. These functions check the role again for
+-- the person the API acts for (p_actor), so a bug in the API can't let a staff member or another studio's member write.
+-- app.act_for makes auth.uid() return p_actor until the calling function restores it, so app.has_role checks that
+-- person and every event the triggers write is attributed to them, not to the service role.
+create type app.child_row as (
+  id uuid, group_id uuid, first_name text, last_name text, student_id text, grade text, parent_email text,
+  do_not_photograph boolean, do_not_publish boolean, access_code_hash text, access_code_ciphertext text);
+
+create function app.act_for(p_actor uuid, p_studio_id uuid) returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_previous text := current_setting('request.jwt.claim.sub', true);
+begin
+  if p_actor is null or p_studio_id is null then
+    raise exception 'Owners, admins and photographers only' using errcode = '42501';
+  end if;
+  -- Transaction-local, and not undone when this function returns: the caller restores it with app.end_act_for.
+  perform set_config('request.jwt.claim.sub', p_actor::text, true);
+  if not app.has_role(p_studio_id, '{owner,admin,photographer}') then
+    raise exception 'Owners, admins and photographers only' using errcode = '42501';
+  end if;
+  return coalesce(v_previous, '');
+end;
+$$;
+
+create function app.end_act_for(p_previous text) returns void
+language sql security definer
+set search_path = ''
+as $$
+  select set_config('request.jwt.claim.sub', coalesce(p_previous, ''), true);
+$$;
+
+-- Add one child by hand. The API sets the id (the encrypted code is bound to it) and generates the code.
+create function public.add_child(p_actor uuid, p_job_id uuid, p_child jsonb) returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_studio uuid := (select j.studio_id from public.jobs j where j.id = p_job_id);
+  v_previous text;
+  v_id uuid;
+begin
+  if v_studio is null then
+    raise exception 'Job not found' using errcode = 'P0002';
+  end if;
+  v_previous := app.act_for(p_actor, v_studio);
+  if jsonb_typeof(p_child) is distinct from 'object' then
+    raise exception 'The child must be an object' using errcode = '22023';
+  end if;
+  insert into public.children (id, studio_id, job_id, group_id, first_name, last_name, student_id, grade, parent_email,
+    do_not_photograph, do_not_publish, access_code_hash, access_code_ciphertext)
+  select r.id, v_studio, p_job_id, r.group_id, r.first_name, r.last_name, r.student_id, r.grade, r.parent_email,
+    coalesce(r.do_not_photograph, false), coalesce(r.do_not_publish, false), r.access_code_hash, r.access_code_ciphertext
+  from jsonb_populate_record(null::app.child_row, p_child) r
+  on conflict (access_code_hash) do nothing
+  returning id into v_id;
+  if v_id is null then
+    -- The API generates a new code and tries again.
+    raise exception 'access_code_collision' using errcode = 'P0001';
+  end if;
+  perform app.end_act_for(v_previous);
+  return v_id;
+end;
+$$;
+
 -- ── Import: one transaction for a whole confirmed file ────────────────────────────────────────────────────────────
--- The API plans the import (adds and updates matched by student ID), generates codes and sends rows here. SECURITY
--- DEFINER with explicit checks (like create_studio), so the whole file lands or nothing does. Error messages carry no
--- values, so no personal data or hash reaches the Postgres log.
+-- The API plans the import (adds and updates matched by student ID), generates codes and sends rows here, as the
+-- service role (above). SECURITY DEFINER with explicit checks (like create_studio), so the whole file lands or nothing
+-- does. Error messages carry no values, so no personal data or hash reaches the Postgres log.
 -- Re-import fills and changes, never erases (Seenu, Oct 11 2026): names are replaced; group, grade and parent email
 -- change only when the file has a value; opt-outs can be turned on by a file but never off; student ID is the key.
 create type app.roster_row as (
@@ -189,7 +256,7 @@ create type app.roster_row as (
   parent_email text, do_not_photograph boolean, do_not_publish boolean, access_code_hash text,
   access_code_ciphertext text);
 
-create function public.import_roster(p_job_id uuid, p_rows jsonb) returns jsonb
+create function public.import_roster(p_actor uuid, p_job_id uuid, p_rows jsonb) returns jsonb
 language plpgsql security definer
 set search_path = ''
 as $$
@@ -201,13 +268,12 @@ declare
   v_added int;
   v_updated int;
   v_groups int;
+  v_previous text;
 begin
   if v_studio is null then
     raise exception 'Job not found' using errcode = 'P0002';
   end if;
-  if not app.has_role(v_studio, '{owner,admin,photographer}') then
-    raise exception 'Owners, admins and photographers only' using errcode = '42501';
-  end if;
+  v_previous := app.act_for(p_actor, v_studio);
   if jsonb_typeof(p_rows) is distinct from 'array' then
     raise exception 'Rows must be a list' using errcode = '22023';
   end if;
@@ -272,6 +338,7 @@ begin
 
   perform app.emit(v_studio, 'roster.imported', p_job_id,
     jsonb_build_object('added', v_added, 'updated', v_updated, 'groups_added', v_groups));
+  perform app.end_act_for(v_previous);
   return jsonb_build_object('added', v_added, 'updated', v_updated, 'groups_added', v_groups);
 end;
 $$;
@@ -342,11 +409,17 @@ as $$
   where g.job_id = p_job_id;
 $$;
 
-revoke all on function app.on_job_group_change(), app.on_child_change(), app.guard_child_delete() from public;
-revoke all on type app.roster_row from public;
-revoke all on function public.import_roster(uuid, jsonb), public.list_children(uuid, uuid, uuid, int, boolean),
-  public.list_job_groups(uuid) from public, anon;
-grant execute on function public.import_roster(uuid, jsonb), public.list_children(uuid, uuid, uuid, int, boolean),
-  public.list_job_groups(uuid) to authenticated;
+revoke all on function app.on_job_group_change(), app.on_child_change(), app.guard_child_delete(),
+  app.act_for(uuid, uuid), app.end_act_for(text) from public;
+revoke all on type app.roster_row, app.child_row from public;
+revoke all on function public.list_children(uuid, uuid, uuid, int, boolean), public.list_job_groups(uuid)
+  from public, anon;
+grant execute on function public.list_children(uuid, uuid, uuid, int, boolean), public.list_job_groups(uuid)
+  to authenticated;
+-- Code-bearing writes: the service role only (server-side route handlers), never browsers (ADR 0011).
+revoke all on function public.add_child(uuid, uuid, jsonb), public.import_roster(uuid, uuid, jsonb)
+  from public, anon, authenticated;
+grant execute on function public.add_child(uuid, uuid, jsonb), public.import_roster(uuid, uuid, jsonb)
+  to service_role;
 
 notify pgrst, 'reload schema';
