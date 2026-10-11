@@ -6,8 +6,19 @@ import { useEffect, useState } from "react";
 import { unnamedSubject } from "@/lib/activity";
 import { api } from "@/lib/client-api";
 
-/** The studio's activity log (owners and admins). Reads the event log (D96). */
-export function ActivityCard({ refreshKey }: { refreshKey: number }) {
+/**
+ * The activity log (owners and admins). Reads the event log (D96). Studio-wide on Home; with `jobId`, one job's own
+ * changes and roster imports (D138). "flat" sits inside a side panel without a card box.
+ */
+export function ActivityCard({
+  refreshKey,
+  jobId,
+  variant = "card",
+}: {
+  refreshKey: number;
+  jobId?: string;
+  variant?: "card" | "flat";
+}) {
   const t = useTranslations("app.activity");
   const tr = useTranslations("app.roles");
   const format = useFormatter();
@@ -15,19 +26,44 @@ export function ActivityCard({ refreshKey }: { refreshKey: number }) {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey re-fetches after team changes.
   useEffect(() => {
-    api<{ activity: ActivityItem[] }>("/studio/activity").then((res) => {
+    // Only an id goes in the URL.
+    const path = jobId ? `/studio/activity?jobId=${encodeURIComponent(jobId)}` : "/studio/activity";
+    api<{ activity: ActivityItem[] }>(path).then((res) => {
       if (res.ok) setItems(res.data.activity);
     });
-  }, [refreshKey]);
+  }, [refreshKey, jobId]);
 
   if (!items) return null;
+  const flat = variant === "flat";
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-      <h2 className="m-0 px-5 pt-4 pb-3 text-[15px] leading-5 font-bold">{t("title")}</h2>
+    <section
+      className={
+        flat ? "flex flex-col" : "overflow-hidden rounded-2xl border border-line bg-surface"
+      }
+    >
+      <h2
+        className={
+          flat ? "m-0 pb-1 text-title-sm" : "m-0 px-5 pt-4 pb-3 text-[15px] leading-5 font-bold"
+        }
+      >
+        {jobId ? t("jobTitle") : t("title")}
+      </h2>
       {items.length === 0 ? (
-        <p className="m-0 border-t border-line px-5 py-4 text-muted">{t("empty")}</p>
+        <p
+          className={
+            flat ? "m-0 text-sm text-muted" : "m-0 border-t border-line px-5 py-4 text-muted"
+          }
+        >
+          {t("empty")}
+        </p>
       ) : (
-        <ol className="m-0 flex list-none flex-col border-t border-line px-5 py-2">
+        <ol
+          className={
+            flat
+              ? "m-0 flex list-none flex-col p-0"
+              : "m-0 flex list-none flex-col border-t border-line px-5 py-2"
+          }
+        >
           {items.map((item) => (
             <li
               key={item.id}

@@ -1,15 +1,8 @@
 "use client";
 
-import {
-  fieldErrors,
-  type Job,
-  type RosterImportResponse,
-  type RosterRow,
-  rosterRow,
-} from "@daybell/api";
+import { fieldErrors, type RosterImportResponse, type RosterRow, rosterRow } from "@daybell/api";
 import {
   buildRows,
-  canEditRoster,
   groupLabel,
   guessColumns,
   ROSTER_TARGETS,
@@ -18,9 +11,9 @@ import {
 import { Badge, Banner, Button, Table, TableCell, TableHead, TableRow } from "@daybell/ui";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { type ChangeEvent, useEffect, useId, useState } from "react";
+import { type ChangeEvent, useId, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import {
@@ -31,9 +24,9 @@ import {
   readRosterFile,
   toTable,
 } from "@/lib/roster-file";
-import { DesktopOnly } from "../../../desktop-only";
 import { SelectField } from "../../../dialog";
-import { useStudio } from "../../../me-context";
+import { useJob } from "../job-context";
+import { tabHref } from "../tabs";
 
 type Step = "file" | "columns" | "check";
 const STEPS: Step[] = ["file", "columns", "check"];
@@ -52,22 +45,23 @@ interface CheckedRow {
 }
 
 const PAGE = 100;
+/** The import is a full page in the job's main area (white, padded). */
+const PAGE_FRAME = "flex flex-1 flex-col gap-6 bg-surface px-6 pt-4 pb-12";
 
 /**
  * Import a roster from CSV or Excel (Phase 1 step 2, D23, F13; ADR 0011). The file is read in this browser and never
  * uploaded or stored (D113): choose a file, confirm the guessed columns, check the rows (a dry run on the server
- * plans adds, updates by student ID and duplicates), then import them all in one go.
+ * plans adds, updates by student ID and duplicates), then import them all in one go. A full page inside the job's
+ * frame, part of People (D138); the job comes from the job layout.
  */
 export default function ImportRosterPage() {
   const t = useTranslations("app.roster.importPage");
   const tr = useTranslations("app.roster");
   const tv = useApiText();
   const router = useRouter();
-  const { id } = useParams<{ id: string }>();
-  const { me } = useStudio();
-  const canEdit = canEditRoster(me.studio.role);
+  const { job, canEditRoster: canEdit, refreshSummary } = useJob();
+  const id = job.id;
   const fileId = useId();
-  const [job, setJob] = useState<Job | null>(null);
   const [step, setStep] = useState<Step>("file");
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -82,14 +76,7 @@ export default function ImportRosterPage() {
   const [rowFilter, setRowFilter] = useState<RowFilter>("all");
   const [shown, setShown] = useState(PAGE);
 
-  useEffect(() => {
-    api<{ job: Job }>(`/jobs/${encodeURIComponent(id)}`).then((res) => {
-      if (res.ok) setJob(res.data.job);
-      else setProblem(tv.error(res.code));
-    });
-  }, [id, tv]);
-
-  const word = job ? groupLabel(job.type) : "group";
+  const word = groupLabel(job.type);
   const targetLabel = (target: RosterTarget | null) =>
     target ? t(`targets.${target}`, { group: word }) : t("targets.skip", { group: word });
 
@@ -211,7 +198,8 @@ export default function ImportRosterPage() {
     });
     if (res.ok) {
       // Only numbers go in the URL.
-      router.push(`/app/jobs/${id}?imported=${res.data.added}.${res.data.updated}`);
+      refreshSummary();
+      router.push(`${tabHref(id, "people")}?imported=${res.data.added}.${res.data.updated}`);
       return;
     }
     if (res.code === "conflict") {
@@ -226,7 +214,7 @@ export default function ImportRosterPage() {
 
   const back = (
     <Link
-      href={`/app/jobs/${id}`}
+      href={tabHref(id, "people")}
       className="inline-flex min-h-11 items-center gap-2 self-start font-semibold text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
     >
       <ArrowLeft className="size-4" aria-hidden="true" />
@@ -236,11 +224,11 @@ export default function ImportRosterPage() {
 
   if (!canEdit) {
     return (
-      <>
+      <div className={PAGE_FRAME}>
         {back}
-        <h1 className="m-0 text-h1">{t("title")}</h1>
+        <h2 className="m-0 text-h2">{t("title")}</h2>
         <Banner tone="info" title={t("staffOnly")} />
-      </>
+      </div>
     );
   }
 
@@ -251,239 +239,236 @@ export default function ImportRosterPage() {
   );
 
   return (
-    <>
+    <div className={PAGE_FRAME}>
       {back}
-      <h1 className="m-0 text-h1">{t("title")}</h1>
-      {/* Desktop-only tier (D134; ADR 0012): phones see a notice and the back link. */}
-      <DesktopOnly notice={t("desktopOnly")}>
-        <ol
-          aria-label={t("stepsLabel")}
-          className="m-0 flex list-none flex-wrap gap-x-6 gap-y-2 p-0 text-sm"
-        >
-          {STEPS.map((s, i) => (
-            <li
-              key={s}
-              aria-current={s === step ? "step" : undefined}
-              className={`flex items-center gap-2 ${s === step ? "font-semibold text-ink" : "text-muted"}`}
+      <h2 className="m-0 text-h2">{t("title")}</h2>
+      <ol
+        aria-label={t("stepsLabel")}
+        className="m-0 flex list-none flex-wrap gap-x-6 gap-y-2 p-0 text-sm"
+      >
+        {STEPS.map((s, i) => (
+          <li
+            key={s}
+            aria-current={s === step ? "step" : undefined}
+            className={`flex items-center gap-2 ${s === step ? "font-semibold text-ink" : "text-muted"}`}
+          >
+            <span
+              className={`grid size-6 place-items-center rounded-full text-caption ${s === step ? "bg-primary text-on-primary" : "bg-subtle"}`}
+              aria-hidden="true"
             >
-              <span
-                className={`grid size-6 place-items-center rounded-full text-caption ${s === step ? "bg-primary text-on-primary" : "bg-subtle"}`}
-                aria-hidden="true"
-              >
-                {i + 1}
-              </span>
-              {t(`steps.${s}`)}
-            </li>
-          ))}
-        </ol>
+              {i + 1}
+            </span>
+            {t(`steps.${s}`)}
+          </li>
+        ))}
+      </ol>
 
-        {problem ? <Banner tone="danger" title={problem} /> : null}
-        {notice ? <Banner tone="warning" title={notice} /> : null}
+      {problem ? <Banner tone="danger" title={problem} /> : null}
+      {notice ? <Banner tone="warning" title={notice} /> : null}
 
-        {step === "file" ? (
-          <section className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={fileId} className="text-label text-ink">
-                {t("fileLabel")}
-              </label>
-              <input
-                id={fileId}
-                type="file"
-                accept={ROSTER_FILE_ACCEPT}
-                onChange={chooseFile}
-                disabled={busy || !job}
-                className="min-h-11 text-sm file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-md file:border file:border-line-strong file:bg-surface file:px-4 file:font-semibold file:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+      {step === "file" ? (
+        <section className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={fileId} className="text-label text-ink">
+              {t("fileLabel")}
+            </label>
+            <input
+              id={fileId}
+              type="file"
+              accept={ROSTER_FILE_ACCEPT}
+              onChange={chooseFile}
+              disabled={busy}
+              className="min-h-11 text-sm file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-md file:border file:border-line-strong file:bg-surface file:px-4 file:font-semibold file:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+            />
+          </div>
+          <p className="m-0 text-muted">{t("fileNote")}</p>
+          {busy ? <p className="m-0 text-muted">{t("reading")}</p> : null}
+        </section>
+      ) : null}
+
+      {step === "columns" && table ? (
+        <section className="flex flex-col gap-5">
+          {sheets.length > 1 ? (
+            <div className="max-w-80">
+              <SelectField
+                label={t("sheet")}
+                value={String(sheetIndex)}
+                onChange={(v) => {
+                  setSheetIndex(Number(v));
+                  openSheet(sheets, Number(v));
+                }}
+                options={sheets.map((s, i) => ({ value: String(i), label: s.name }))}
               />
             </div>
-            <p className="m-0 text-muted">{t("fileNote")}</p>
-            {busy ? <p className="m-0 text-muted">{t("reading")}</p> : null}
-          </section>
-        ) : null}
-
-        {step === "columns" && table ? (
-          <section className="flex flex-col gap-5">
-            {sheets.length > 1 ? (
-              <div className="max-w-80">
-                <SelectField
-                  label={t("sheet")}
-                  value={String(sheetIndex)}
-                  onChange={(v) => {
-                    setSheetIndex(Number(v));
-                    openSheet(sheets, Number(v));
-                  }}
-                  options={sheets.map((s, i) => ({ value: String(i), label: s.name }))}
-                />
-              </div>
-            ) : null}
-            <p className="m-0 text-muted">{t("columnsIntro")}</p>
-            <ul className="m-0 grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
-              {table.headers.map((header, column) => {
-                const title = header || t("column", { n: column + 1 });
-                const samples = table.rows
-                  .map((r) => r[column] ?? "")
-                  .filter(Boolean)
-                  .slice(0, 3);
-                return (
-                  <li
-                    // biome-ignore lint/suspicious/noArrayIndexKey: columns are fixed for a file.
-                    key={column}
-                    className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4"
-                  >
-                    <p className="m-0 font-semibold break-words">{title}</p>
-                    <div>
-                      <p className="m-0 text-caption text-muted">{t("sample")}</p>
-                      <p className="m-0 truncate text-sm">
-                        {samples.length ? samples.join(" · ") : t("noSample")}
-                      </p>
-                    </div>
-                    <SelectField
-                      label={t("importAs", { column: title })}
-                      value={mapping[column] ?? ""}
-                      onChange={(v) => setTarget(column, (v || null) as RosterTarget | null)}
-                      options={[
-                        { value: "", label: targetLabel(null) },
-                        ...ROSTER_TARGETS.map((target) => ({
-                          value: target,
-                          label: targetLabel(target),
-                        })),
-                      ]}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-            {columnsError ? <Banner tone="danger" title={columnsError} /> : null}
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setStep("file");
-                  setProblem(null);
-                }}
-              >
-                {t("backStep")}
-              </Button>
-              <Button onClick={checkRows} disabled={busy}>
-                {busy ? t("checking") : t("checkRows")}
-              </Button>
-            </div>
-          </section>
-        ) : null}
-
-        {step === "check" ? (
-          <section className="flex flex-col gap-5">
-            <p className="m-0 flex flex-wrap gap-x-2 font-semibold">
-              {[
-                t("summary.add", { count: plan?.added ?? 0 }),
-                t("summary.update", { count: plan?.updated ?? 0 }),
-                t("summary.groups", { count: plan?.groupsAdded ?? 0, group: word }),
-                t("summary.duplicates", { count: plan?.duplicates ?? 0 }),
-                t("summary.invalid", { count: invalidCount }),
-              ].join(" · ")}
-            </p>
-            {validCount === 0 ? <Banner tone="warning" title={t("nothingToImport")} /> : null}
-
-            <fieldset className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
-              <legend className="sr-only">{t("filterLabel")}</legend>
-              {(["all", "duplicates", "invalid"] as const).map((f) => (
-                <label
-                  key={f}
-                  className={`inline-flex min-h-11 cursor-pointer items-center rounded-full border px-4 text-sm font-semibold has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary ${rowFilter === f ? "border-primary bg-primary-soft text-primary-hover" : "border-line-strong bg-surface text-ink"}`}
+          ) : null}
+          <p className="m-0 text-muted">{t("columnsIntro")}</p>
+          <ul className="m-0 grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
+            {table.headers.map((header, column) => {
+              const title = header || t("column", { n: column + 1 });
+              const samples = table.rows
+                .map((r) => r[column] ?? "")
+                .filter(Boolean)
+                .slice(0, 3);
+              return (
+                <li
+                  // biome-ignore lint/suspicious/noArrayIndexKey: columns are fixed for a file.
+                  key={column}
+                  className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4"
                 >
-                  <input
-                    type="radio"
-                    name="row-filter"
-                    value={f}
-                    checked={rowFilter === f}
-                    onChange={() => {
-                      setRowFilter(f);
-                      setShown(PAGE);
-                    }}
-                    className="sr-only"
+                  <p className="m-0 font-semibold break-words">{title}</p>
+                  <div>
+                    <p className="m-0 text-caption text-muted">{t("sample")}</p>
+                    <p className="m-0 truncate text-sm">
+                      {samples.length ? samples.join(" · ") : t("noSample")}
+                    </p>
+                  </div>
+                  <SelectField
+                    label={t("importAs", { column: title })}
+                    value={mapping[column] ?? ""}
+                    onChange={(v) => setTarget(column, (v || null) as RosterTarget | null)}
+                    options={[
+                      { value: "", label: targetLabel(null) },
+                      ...ROSTER_TARGETS.map((target) => ({
+                        value: target,
+                        label: targetLabel(target),
+                      })),
+                    ]}
                   />
-                  {t(`filter.${f}`)}
-                </label>
-              ))}
-            </fieldset>
+                </li>
+              );
+            })}
+          </ul>
+          {columnsError ? <Banner tone="danger" title={columnsError} /> : null}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setStep("file");
+                setProblem(null);
+              }}
+            >
+              {t("backStep")}
+            </Button>
+            <Button onClick={checkRows} disabled={busy}>
+              {busy ? t("checking") : t("checkRows")}
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
-            {visible.length === 0 ? (
-              <p className="m-0 text-muted">{t("noRows")}</p>
-            ) : (
-              <Table>
-                <thead>
-                  <TableRow>
-                    <TableHead numeric>{t("columns.row")}</TableHead>
-                    <TableHead>{t("columns.name")}</TableHead>
-                    <TableHead>{t("columns.group", { group: word })}</TableHead>
-                    <TableHead>{t("columns.studentId")}</TableHead>
-                    <TableHead>{t("columns.grade")}</TableHead>
-                    <TableHead>{t("columns.parentEmail")}</TableHead>
-                    <TableHead>{t("columns.flags")}</TableHead>
-                    <TableHead>{t("columns.status")}</TableHead>
-                  </TableRow>
-                </thead>
-                <tbody>
-                  {visible.slice(0, shown).map((r) => (
-                    <TableRow key={r.line}>
-                      <TableCell numeric>{r.line}</TableCell>
-                      <TableCell className="font-semibold">
-                        {`${r.draft.firstName} ${r.draft.lastName}`.trim()}
-                      </TableCell>
-                      <TableCell>{r.draft.group ?? ""}</TableCell>
-                      <TableCell>{r.draft.studentId ?? ""}</TableCell>
-                      <TableCell>{r.draft.grade ?? ""}</TableCell>
-                      <TableCell>{r.draft.parentEmail ?? ""}</TableCell>
-                      <TableCell>
-                        <span className="flex flex-wrap gap-1.5">
-                          {r.duplicate ? (
-                            <Badge tone="warning">{tr("badges.duplicate")}</Badge>
-                          ) : null}
-                          {r.draft.doNotPhotograph ? (
-                            <Badge tone="danger">{tr("badges.doNotPhotograph")}</Badge>
-                          ) : null}
-                          {r.draft.doNotPublish ? (
-                            <Badge tone="draft">{tr("badges.doNotPublish")}</Badge>
-                          ) : null}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        {r.valid ? (
-                          <Badge tone={r.action === "update" ? "selling" : "money"}>
-                            {t(`status.${r.action ?? "add"}`)}
-                          </Badge>
-                        ) : (
-                          <span className="flex flex-col gap-1">
-                            <Badge tone="danger">{t("status.invalid")}</Badge>
-                            <span className="text-caption text-danger">{r.reason}</span>
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </tbody>
-              </Table>
-            )}
-            {visible.length > shown ? (
-              <Button
-                variant="secondary"
-                className="self-start"
-                onClick={() => setShown((n) => n + PAGE)}
+      {step === "check" ? (
+        <section className="flex flex-col gap-5">
+          <p className="m-0 flex flex-wrap gap-x-2 font-semibold">
+            {[
+              t("summary.add", { count: plan?.added ?? 0 }),
+              t("summary.update", { count: plan?.updated ?? 0 }),
+              t("summary.groups", { count: plan?.groupsAdded ?? 0, group: word }),
+              t("summary.duplicates", { count: plan?.duplicates ?? 0 }),
+              t("summary.invalid", { count: invalidCount }),
+            ].join(" · ")}
+          </p>
+          {validCount === 0 ? <Banner tone="warning" title={t("nothingToImport")} /> : null}
+
+          <fieldset className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
+            <legend className="sr-only">{t("filterLabel")}</legend>
+            {(["all", "duplicates", "invalid"] as const).map((f) => (
+              <label
+                key={f}
+                className={`inline-flex min-h-11 cursor-pointer items-center rounded-full border px-4 text-sm font-semibold has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary ${rowFilter === f ? "border-primary bg-primary-soft text-primary-hover" : "border-line-strong bg-surface text-ink"}`}
               >
-                {t("showMore")}
-              </Button>
-            ) : null}
+                <input
+                  type="radio"
+                  name="row-filter"
+                  value={f}
+                  checked={rowFilter === f}
+                  onChange={() => {
+                    setRowFilter(f);
+                    setShown(PAGE);
+                  }}
+                  className="sr-only"
+                />
+                {t(`filter.${f}`)}
+              </label>
+            ))}
+          </fieldset>
 
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button variant="secondary" onClick={() => setStep("columns")} disabled={busy}>
-                {t("backStep")}
-              </Button>
-              <Button onClick={importRows} disabled={busy || validCount === 0}>
-                {busy ? t("importing") : t("importN", { count: validCount })}
-              </Button>
-            </div>
-          </section>
-        ) : null}
-      </DesktopOnly>
-    </>
+          {visible.length === 0 ? (
+            <p className="m-0 text-muted">{t("noRows")}</p>
+          ) : (
+            <Table>
+              <thead>
+                <TableRow>
+                  <TableHead numeric>{t("columns.row")}</TableHead>
+                  <TableHead>{t("columns.name")}</TableHead>
+                  <TableHead>{t("columns.group", { group: word })}</TableHead>
+                  <TableHead>{t("columns.studentId")}</TableHead>
+                  <TableHead>{t("columns.grade")}</TableHead>
+                  <TableHead>{t("columns.parentEmail")}</TableHead>
+                  <TableHead>{t("columns.flags")}</TableHead>
+                  <TableHead>{t("columns.status")}</TableHead>
+                </TableRow>
+              </thead>
+              <tbody>
+                {visible.slice(0, shown).map((r) => (
+                  <TableRow key={r.line}>
+                    <TableCell numeric>{r.line}</TableCell>
+                    <TableCell className="font-semibold">
+                      {`${r.draft.firstName} ${r.draft.lastName}`.trim()}
+                    </TableCell>
+                    <TableCell>{r.draft.group ?? ""}</TableCell>
+                    <TableCell>{r.draft.studentId ?? ""}</TableCell>
+                    <TableCell>{r.draft.grade ?? ""}</TableCell>
+                    <TableCell>{r.draft.parentEmail ?? ""}</TableCell>
+                    <TableCell>
+                      <span className="flex flex-wrap gap-1.5">
+                        {r.duplicate ? (
+                          <Badge tone="warning">{tr("badges.duplicate")}</Badge>
+                        ) : null}
+                        {r.draft.doNotPhotograph ? (
+                          <Badge tone="danger">{tr("badges.doNotPhotograph")}</Badge>
+                        ) : null}
+                        {r.draft.doNotPublish ? (
+                          <Badge tone="draft">{tr("badges.doNotPublish")}</Badge>
+                        ) : null}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {r.valid ? (
+                        <Badge tone={r.action === "update" ? "selling" : "money"}>
+                          {t(`status.${r.action ?? "add"}`)}
+                        </Badge>
+                      ) : (
+                        <span className="flex flex-col gap-1">
+                          <Badge tone="danger">{t("status.invalid")}</Badge>
+                          <span className="text-caption text-danger">{r.reason}</span>
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </tbody>
+            </Table>
+          )}
+          {visible.length > shown ? (
+            <Button
+              variant="secondary"
+              className="self-start"
+              onClick={() => setShown((n) => n + PAGE)}
+            >
+              {t("showMore")}
+            </Button>
+          ) : null}
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setStep("columns")} disabled={busy}>
+              {t("backStep")}
+            </Button>
+            <Button onClick={importRows} disabled={busy || validCount === 0}>
+              {busy ? t("importing") : t("importN", { count: validCount })}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }

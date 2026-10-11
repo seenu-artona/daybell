@@ -1,0 +1,34 @@
+/** A job's sections, in tab order (D137). Each is its own route under /app/jobs/[id]. */
+export const JOB_TABS = [
+  { key: "overview", segment: "" },
+  { key: "people", segment: "people" },
+  { key: "photos", segment: "photos" },
+  { key: "shop", segment: "shop" },
+  { key: "messages", segment: "messages" },
+  { key: "orders", segment: "orders" },
+  { key: "settings", segment: "settings" },
+] as const;
+
+export type JobTabKey = (typeof JOB_TABS)[number]["key"];
+
+/** The tabs that show a coming-soon panel in this step (D138). */
+export const SOON_TABS = ["photos", "shop", "messages", "orders", "settings"] as const;
+export type SoonTab = (typeof SOON_TABS)[number];
+
+export function isSoonTab(segment: string): segment is SoonTab {
+  return (SOON_TABS as readonly string[]).includes(segment);
+}
+
+export function tabHref(jobId: string, tab: JobTabKey): string {
+  const segment = JOB_TABS.find((t) => t.key === tab)?.segment ?? "";
+  return `/app/jobs/${jobId}${segment ? `/${segment}` : ""}`;
+}
+
+/** Which tab a job path belongs to; the import page is part of People. Null outside a job. */
+export function tabForPath(pathname: string): JobTabKey | null {
+  const match = pathname.replace(/\/+$/, "").match(/^\/app\/jobs\/([^/]+)(?:\/([^/]+))?/);
+  if (!match || match[1] === "new") return null;
+  const segment = match[2] ?? "";
+  if (segment === "import") return "people";
+  return JOB_TABS.find((t) => t.segment === segment)?.key ?? null;
+}

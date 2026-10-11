@@ -283,7 +283,8 @@
       },
       "roster": {
         "imported": "{actor} imported a roster into {name}"
-      }
+      },
+      "jobTitle": "Recent activity"
     },
     "nav": {
       "label": "Main",
@@ -422,24 +423,6 @@
         "loading": "Loading the job…",
         "edit": "Edit job",
         "saved": "Saved.",
-        "client": "Client",
-        "noClient": "No client",
-        "number": "Internal job number",
-        "type": "Type",
-        "pictureDay": "Picture day",
-        "subjects": "Subjects expected",
-        "notSet": "Not set",
-        "progressLabel": "Job progress",
-        "stages": {
-          "pictureDay": "Picture day",
-          "tagged": "Tagged",
-          "shopLive": "Shop live",
-          "shipped": "Shipped"
-        },
-        "upcoming": "Upcoming",
-        "photos": "Photos",
-        "photosBody": "Uploading and tagging photos arrive in an upcoming step.",
-        "comingSoon": "Coming soon",
         "notFound": "We couldn't find that job."
       }
     },
@@ -510,10 +493,7 @@
     },
     "optionalLabel": "{label} (optional)",
     "roster": {
-      "title": "Roster",
       "childCount": "{count, plural, one {# child} other {# children}}",
-      "groupCount": "{count, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
-      "duplicateCount": "{count, plural, one {# duplicate} other {# duplicates}}",
       "add": "Add child",
       "import": "Import roster",
       "loading": "Loading the roster…",
@@ -522,26 +502,19 @@
       "emptyReadOnly": "Owners, admins and photographers manage the roster.",
       "loadFailed": "The roster couldn't be loaded. Reload the page to try again.",
       "filter": "{group, select, class {Class} team {Team} other {Group}}",
-      "filterAll": "{group, select, class {All classes} team {All teams} other {All groups}}",
       "noGroup": "{group, select, class {No class} team {No team} other {No group}}",
-      "renameGroup": "{group, select, class {Rename class} team {Rename team} other {Rename group}}",
       "columns": {
         "name": "Name",
         "group": "{group, select, class {Class} team {Team} other {Group}}",
         "studentId": "Student ID",
         "grade": "Grade",
-        "accessCode": "Access code",
-        "flags": "Flags",
-        "actions": "Actions"
+        "accessCode": "Access code"
       },
       "badges": {
         "duplicate": "Duplicate",
         "doNotPhotograph": "Do not photograph",
         "doNotPublish": "Do not publish"
       },
-      "edit": "Edit {name}",
-      "editShort": "Edit",
-      "loadMore": "Show more",
       "codeUnavailable": "Code unavailable",
       "saved": "Saved.",
       "removed": "Child removed.",
@@ -590,8 +563,7 @@
       },
       "importPage": {
         "title": "Import roster",
-        "desktopOnly": "Open this on a computer to import a roster.",
-        "back": "Back to job",
+        "back": "Back to People",
         "stepsLabel": "Import steps",
         "steps": {
           "file": "Choose file",
@@ -674,6 +646,116 @@
       "jobMeta": "{number} · {status}",
       "loading": "Searching…",
       "empty": "No jobs or clients match."
+    },
+    "job": {
+      "moreActions": "More actions",
+      "startSelling": "Start selling",
+      "sellIntro": "Selling opens in an upcoming step. Before you can sell, finish these:",
+      "close": "Close",
+      "closeDetails": "Close details",
+      "showChecklist": "Show checklist",
+      "showThem": "Show them",
+      "tabs": {
+        "label": "Job sections",
+        "overview": "Overview",
+        "people": "People",
+        "photos": "Photos",
+        "shop": "Shop",
+        "messages": "Messages",
+        "orders": "Orders",
+        "settings": "Settings",
+        "peopleCount": "{count, plural, one {# child} other {# children}}"
+      },
+      "journey": {
+        "label": "Job journey",
+        "done": "done",
+        "stages": {
+          "setUp": "Set up",
+          "pictureDay": "Picture day",
+          "reviewPhotos": "Review photos",
+          "selling": "Selling",
+          "fulfilment": "Fulfilment",
+          "closed": "Closed"
+        }
+      },
+      "nextStep": {
+        "label": "Next step",
+        "comingSoon": "Coming soon",
+        "addRoster": {
+          "title": "Add your roster",
+          "body": "Import the class list from a CSV or Excel file, or add children one by one. Each child gets an access code for their parents.",
+          "action": "Go to People"
+        },
+        "getReady": {
+          "title": "Get ready for picture day",
+          "body": "Picture day is {date}. Check the roster before then."
+        },
+        "uploadPhotos": {
+          "title": "Upload photos",
+          "body": "Uploading and tagging photos arrive in an upcoming step."
+        }
+      },
+      "stats": {
+        "label": "Numbers",
+        "children": "Children",
+        "ofExpected": "of {count} expected",
+        "groups": "{group, select, class {Classes} team {Teams} other {Groups}}",
+        "duplicates": "Possible duplicates",
+        "pictureDay": "Picture day",
+        "countdown": "{days, plural, =0 {Today} =1 {Tomorrow} other {In # days}}",
+        "daysAgo": "{days, plural, one {# day ago} other {# days ago}}"
+      },
+      "checklist": {
+        "title": "Before you can sell",
+        "done": "Done",
+        "todo": "To do",
+        "soon": "Coming soon",
+        "items": {
+          "roster": "Roster added",
+          "photos": "Photos uploaded",
+          "tagging": "Tagging reviewed",
+          "priceList": "Price list chosen",
+          "payouts": "Payouts connected"
+        }
+      }
+    },
+    "people": {
+      "searchLabel": "Search children",
+      "filter": "Filter",
+      "anyGroup": "{group, select, class {Any class} team {Any team} other {Any group}}",
+      "grade": "Grade",
+      "anyGrade": "Any grade",
+      "show": "Only show",
+      "flags": {
+        "doNotPhotograph": "Do not photograph",
+        "doNotPublish": "Do not publish",
+        "duplicates": "Possible duplicates"
+      },
+      "groupBy": "Group: {by}",
+      "groupByLegend": "Group by",
+      "groupNone": "None",
+      "activeFilters": "Active filters",
+      "removeFilter": "Remove filter: {filter}",
+      "chips": {
+        "group": "{group, select, class {Class} team {Team} other {Group}} {name}",
+        "grade": "Grade {grade}"
+      },
+      "duplicatesNotice": "{count, plural, one {# possible duplicate} other {# possible duplicates}}",
+      "showThem": "Show them",
+      "rename": "Rename",
+      "renameLabel": "{group, select, class {Rename class} team {Rename team} other {Rename group}} {name}",
+      "duplicateBadge": "Duplicate?",
+      "noMatches": "No children match.",
+      "loadingMore": "Loading more…",
+      "overCap": "Showing the first {max, number} children by last name; search and filters cover only those.",
+      "panel": {
+        "edit": "Edit",
+        "moreActions": "More actions for {name}",
+        "duplicate": "Possible duplicate",
+        "yes": "Yes",
+        "no": "No",
+        "none": "–"
+      }
     }
   },
   "invite": {
