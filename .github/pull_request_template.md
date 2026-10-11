@@ -18,6 +18,7 @@
 
 - [ ] Architect plan agreed
 - [ ] Tests added and `pnpm check` passes
+- [ ] Tester review
 - [ ] Code review
 - [ ] Security review (required for auth, data, payments, uploads)
 - [ ] Seenu approved

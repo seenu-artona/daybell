@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isUuid, studioId } from "./ids";
+import { isUuid, studioId, userId } from "./ids";
 
 describe("ids", () => {
   it("accepts a v4 UUID", () => {
@@ -9,5 +9,6 @@ describe("ids", () => {
   it("rejects anything else", () => {
     expect(isUuid("studio-1")).toBe(false);
     expect(() => studioId("")).toThrow("Studio ID must be a UUID");
+    expect(() => userId("x")).toThrow("User ID must be a UUID");
   });
 });

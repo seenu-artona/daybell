@@ -7,12 +7,12 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "suspicious": {
         "noExplicitAny": "error",
         "noConsole": { "level": "error", "options": { "allow": ["warn", "error"] } }
       },
-      "a11y": { "recommended": true }
+      "a11y": { "preset": "none" }
     }
   },
   "assist": { "actions": { "source": { "organizeImports": "on" } } }
