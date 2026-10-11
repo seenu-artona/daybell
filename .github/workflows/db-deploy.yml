@@ -36,19 +36,19 @@ jobs:
       - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
         with:
           version: 2.118.0
-      - name: Apply migrations
+      - name: Apply migrations and record the region
+        # A region whose secret isn't set yet is skipped, so adding the US later is just adding its secret (D122).
         env:
           DB_URL: ${{ secrets[matrix.secret] }}
-        run: supabase db push --workdir packages/db --db-url "$DB_URL"
-      - name: Record this database's region (first deploy only; never changes)
-        env:
-          DB_URL: ${{ secrets[matrix.secret] }}
-        run: >
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -c
-          "insert into app.config (key, value) values ('data_region', '${{ matrix.region }}') on conflict (key) do nothing;"
-      - name: Check the region recorded matches
-        env:
-          DB_URL: ${{ secrets[matrix.secret] }}
+          REGION: ${{ matrix.region }}
         run: |
+          if [ -z "$DB_URL" ]; then
+            echo "No database configured for region '$REGION' yet; skipping."
+            exit 0
+          fi
+          supabase db push --workdir packages/db --db-url "$DB_URL"
+          # Record this database's region on first deploy only; it can never change afterwards.
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c \
+            "insert into app.config (key, value) values ('data_region', '$REGION') on conflict (key) do nothing;"
           got=$(psql "$DB_URL" -tAc "select value from app.config where key = 'data_region'")
-          test "$got" = "${{ matrix.region }}" || { echo "Region mismatch: database says '$got'"; exit 1; }
+          test "$got" = "$REGION" || { echo "Region mismatch: database says '$got'"; exit 1; }
