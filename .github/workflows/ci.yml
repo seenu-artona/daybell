@@ -67,7 +67,8 @@ jobs:
           echo "NEXT_PUBLIC_SUPABASE_URL_CA=$API_URL" >> "$GITHUB_ENV"
           echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY_CA=${PUBLISHABLE_KEY:-$ANON_KEY}" >> "$GITHUB_ENV"
           echo "SITE_URL=http://localhost:3000" >> "$GITHUB_ENV"
-      - run: pnpm --filter @daybell/web build
+      # Build through Turborepo exactly as Vercel does, so undeclared settings fail here, not in previews.
+      - run: pnpm turbo run build --filter=@daybell/web
       - run: pnpm --filter @daybell/web exec playwright install --with-deps chromium
       - run: pnpm --filter @daybell/web e2e
       - if: failure()

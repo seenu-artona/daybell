@@ -16,7 +16,9 @@ export function RegionField({
   showFixedNote?: boolean;
 }) {
   const t = useTranslations("auth");
-  if (regions.length <= 1) {
+  // No database set up here: say nothing about where data lives; the form shows the server's error instead.
+  if (regions.length === 0) return null;
+  if (regions.length === 1) {
     return showFixedNote ? (
       <p className="m-0 text-caption text-muted">
         {t("regionFixed", { region: t(`regions.${value}`) })}
