@@ -229,7 +229,7 @@
       "onlyOwners": "Only owners can invite people."
     },
     "activity": {
-      "title": "Activity",
+      "title": "Recently",
       "empty": "Nothing yet.",
       "someone": "Someone",
       "aTeammate": "a teammate",
@@ -247,7 +247,95 @@
         "accepted": "An invite was accepted ({role})",
         "withdrawn": "{actor} withdrew an invite"
       }
-    }
+    },
+    "nav": {
+      "label": "Main",
+      "home": "Home",
+      "jobs": "Jobs",
+      "orders": "Orders",
+      "products": "Products",
+      "contacts": "Contacts",
+      "marketing": "Marketing",
+      "money": "Money",
+      "reports": "Reports",
+      "settings": "Settings",
+      "soon": "Soon",
+      "openMenu": "Open menu",
+      "closeMenu": "Close menu",
+      "menu": "Menu",
+      "more": "More",
+      "help": "Help"
+    },
+    "top": {
+      "search": "Search",
+      "searchPlaceholder": "Jump to…",
+      "searchEmpty": "No matches.",
+      "help": "Help",
+      "helpBody": "Guides and the help assistant arrive soon. For now, email your Daybell contact.",
+      "notifications": "Notifications",
+      "notificationsEmpty": "You're all caught up. New orders and reminders will show here.",
+      "viewShop": "View my shop",
+      "account": "Account",
+      "signedInAs": "Signed in as",
+      "close": "Close",
+      "searchShortcutMac": "⌘K",
+      "searchShortcutOther": "Ctrl K",
+      "searchResults": "{count, plural, =0 {No matches} one {# result} other {# results}}",
+      "searchPlaceholderLong": "Search jobs, contacts, orders",
+      "newCount": "{count, plural, =0 {Notifications} one {# new} other {# new}}"
+    },
+    "soon": {
+      "title": "{section} is coming soon",
+      "body": "We're building this now. It arrives in an upcoming phase.",
+      "back": "Back to Home"
+    },
+    "checklist": {
+      "title": "Get ready to sell",
+      "progress": "{done} of {total} done",
+      "studio": "Create your studio",
+      "studioBody": "Done — welcome aboard.",
+      "team": "Invite your team",
+      "teamBody": "Photographers and staff each get their own login.",
+      "brand": "Brand your shop",
+      "brandBody": "Logo, colour and gallery style parents will see.",
+      "products": "Set up products & prices",
+      "productsBody": "Packages, prints and digital downloads.",
+      "payouts": "Connect payouts",
+      "payoutsBody": "Link Stripe so sales land in your bank.",
+      "job": "Create your first job",
+      "jobBody": "A school, team or event to photograph.",
+      "soon": "Soon",
+      "done": "Done"
+    },
+    "settings": {
+      "title": "Settings",
+      "teamIntro": "Who works at your studio and what they can do."
+    },
+    "home": {
+      "title": "Home",
+      "range": "Date range",
+      "ranges": {
+        "week": "This week",
+        "month": "This month",
+        "season": "This season"
+      },
+      "sales": "Sales",
+      "orders": "Orders",
+      "familiesOrdered": "Families ordered",
+      "averageOrder": "Average order",
+      "noData": "No sales yet",
+      "dash": "–",
+      "needsYou": "Needs you",
+      "nothingNeeded": "Nothing needs you right now.",
+      "jobsSelling": "Jobs selling now",
+      "noJobs": "No jobs are selling yet. Jobs arrive in an upcoming phase.",
+      "recently": "Recently",
+      "actions": {
+        "invite": "Invite"
+      },
+      "checking": "Checking…"
+    },
+    "signOutFailed": "We couldn't sign you out. Check your connection and try again."
   },
   "invite": {
     "title": "You've been invited",

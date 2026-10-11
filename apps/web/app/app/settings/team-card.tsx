@@ -1,6 +1,6 @@
 "use client";
 
-import type { MeResponse, PendingInvite, StudioRole, TeamMember } from "@daybell/api";
+import type { PendingInvite, TeamMember } from "@daybell/api";
 import { STAFF_ROLES } from "@daybell/api";
 import {
   Badge,
@@ -9,126 +9,22 @@ import {
   Card,
   CardTitle,
   Field,
-  MoneyStat,
   Table,
   TableCell,
   TableHead,
   TableRow,
 } from "@daybell/ui";
-import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
-import { ActivityCard } from "./activity-card";
+import { useStudio } from "../me-context";
 
-export function StudioHome() {
-  const t = useTranslations("app");
-  const text = useApiText();
-  const router = useRouter();
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [activityKey, setActivityKey] = useState(0);
-
-  useEffect(() => {
-    api<MeResponse>("/me").then((res) => {
-      if (res.ok) setMe(res.data);
-      else if (res.status === 401) router.replace("/sign-in?next=/app");
-      else setFailed(true);
-    });
-  }, [router]);
-
-  async function signOut() {
-    await api("/auth/sign-out", { method: "POST" });
-    router.replace("/sign-in");
-    router.refresh();
-  }
-
-  if (failed)
-    return (
-      <Shell onSignOut={signOut}>
-        <Banner tone="danger" title={text.error("internal")} />
-      </Shell>
-    );
-  if (!me)
-    return (
-      <Shell onSignOut={signOut}>
-        <p className="text-muted">{t("loading")}</p>
-      </Shell>
-    );
-  if (!me.studio) {
-    return (
-      <Shell onSignOut={signOut}>
-        <Banner tone="info" title={t("noStudio")} />
-      </Shell>
-    );
-  }
-
-  return (
-    <Shell onSignOut={signOut} studioName={me.studio.name}>
-      <div>
-        <h1 className="m-0 text-h1">{t("welcome", { studio: me.studio.name })}</h1>
-        <p className="mt-1 text-muted">{t("welcomeBody")}</p>
-      </div>
-      <MoneyStat
-        label={t("sales")}
-        cents={0}
-        currency={me.studio.region === "ca" ? "CAD" : "USD"}
-        locale={me.studio.region === "ca" ? "en-CA" : "en-US"}
-        delta={t("salesDelta")}
-        animate={false}
-        className="max-w-90"
-      />
-      <Team
-        myEmail={me.email}
-        role={me.studio.role}
-        onChange={() => setActivityKey((k) => k + 1)}
-      />
-      {me.studio.role === "owner" || me.studio.role === "admin" ? (
-        <ActivityCard refreshKey={activityKey} />
-      ) : null}
-    </Shell>
-  );
-}
-
-function Shell({
-  children,
-  onSignOut,
-  studioName,
-}: {
-  children: React.ReactNode;
-  onSignOut: () => void;
-  studioName?: string;
-}) {
-  const t = useTranslations("app");
-  return (
-    <div className="min-h-dvh">
-      <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
-        <span
-          className="grid size-8 place-items-center rounded-[9px] bg-lime font-extrabold"
-          aria-hidden="true"
-        >
-          D
-        </span>
-        <span className="font-bold">{studioName ?? "Daybell"}</span>
-        <Button variant="secondary" size="sm" className="ml-auto" onClick={onSignOut}>
-          {t("signOut")}
-        </Button>
-      </header>
-      <main className="mx-auto flex max-w-[960px] flex-col gap-6 px-4 py-8">{children}</main>
-    </div>
-  );
-}
-
-function Team({
-  myEmail,
-  role,
-  onChange,
-}: {
-  myEmail: string;
-  role: StudioRole;
-  onChange: () => void;
-}) {
+/** Team members, open invites and the invite form (owners). Moved here from Home in step 8. */
+export function TeamCard() {
+  const { me, changed: onChange } = useStudio();
+  const myEmail = me.email;
+  const role = me.studio.role;
   const t = useTranslations("app");
   const format = useFormatter();
   const text = useApiText();
