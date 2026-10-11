@@ -4,7 +4,8 @@ import { signUpOwner } from "./helpers";
 
 // Phase 1 step 2 "Roster" (D23; ADR 0011): an owner adds a child by hand (adding a class from the combobox's last
 // option), edits them, imports a CSV (an update by student ID, duplicates flagged, a bad row left out) and an Excel
-// file, renames a class, removes a child, and the API refuses what it should.
+// file, renames a class, removes a child, and the API refuses what it should. Adding and importing write codes through
+// the server-only path (the app's SUPABASE_SECRET_KEY_CA, which CI takes from the local Supabase stack).
 // The CI database is Canadian (D122), so every access code starts with a symbol from the Canadian set.
 //
 // e2e/fixtures/roster.xlsx (2 KB) was made once with Python's zipfile: one sheet "Roster" with the header
@@ -24,7 +25,8 @@ const CSV = [
   // Same student ID: duplicates.
   "Ava,Patel,4C,S-050,4,,Parent request",
   "Noah,Garcia,4C,S-050,4,,",
-  // A bad email: can't be imported.
+  // A blank line, then a bad email: can't be imported, shown as row 8 of the file.
+  "",
   "Emma,Brooks,4C,S-060,4,not-an-email,",
 ].join("\n");
 
@@ -51,8 +53,15 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   });
   expect(created.status()).toBe(201);
   const jobId = (await created.json()).job.id as string;
+  // The job page loads its job once, not in a loop (a translator that changed every render once refetched forever).
+  let jobLoads = 0;
+  page.on("request", (r) => {
+    if (r.method() === "GET" && new URL(r.url()).pathname === `/api/v1/jobs/${jobId}`) jobLoads++;
+  });
   await page.goto(`/app/jobs/${jobId}`);
   await expect(roster.getByRole("heading", { name: "No children yet" })).toBeVisible();
+  await page.waitForTimeout(1_500);
+  expect(jobLoads).toBeLessThanOrEqual(2);
 
   // 2. Add a child by hand, adding the class "4B" from the combobox's last option.
   await roster.getByRole("button", { name: "Add child", exact: true }).click();
@@ -123,9 +132,10 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   await expect(main.getByRole("row").filter({ hasText: "Ava Patel" })).toContainText(
     "Do not photograph",
   );
-  await expect(main.getByRole("row").filter({ hasText: "Emma Brooks" })).toContainText(
-    "Can't import",
-  );
+  const emma = main.getByRole("row").filter({ hasText: "Emma Brooks" });
+  await expect(emma).toContainText("Can't import");
+  // Row numbers match the file, blank lines included.
+  await expect(emma.getByRole("cell").first()).toHaveText("8");
   await main.getByText("Duplicates", { exact: true }).click();
   await expect(main.getByRole("row").filter({ hasText: "Emma Brooks" })).toHaveCount(0);
   await main.getByRole("button", { name: "Import 5 children" }).click();
@@ -155,11 +165,13 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   await expect(roster.getByRole("cell", { name: "Olivia Brown", exact: true })).toBeVisible();
   await expect(roster.getByRole("cell", { name: "Sophia Wilson", exact: true })).toBeVisible();
 
-  // 6. Filter to one class and rename it.
+  // 6. Filter to one class and rename it. The filter stays on screen and keeps focus while the list loads.
   const filter = roster.getByLabel("Class", { exact: true });
+  await filter.focus();
   await filter.selectOption({ label: "4C" });
   await expect(roster.getByRole("cell", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
   await expect(roster.getByRole("cell", { name: "Olivia Brown", exact: true })).toBeVisible();
+  await expect(filter).toBeFocused();
   await roster.getByRole("button", { name: "Rename class" }).click();
   const rename = page.getByRole("dialog", { name: "Rename class" });
   await rename.getByLabel("Name", { exact: true }).fill("Room 4C");
@@ -193,12 +205,17 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
   });
   expect(empty.status()).toBe(400);
   expect((await empty.json()).error.fields.firstName).toBe("validation.firstName");
+  const control = await page.request.post(`/api/v1/jobs/${jobId}/children`, {
+    data: { firstName: "Ma\u0000ya", lastName: "Brooks" },
+  });
+  expect(control.status()).toBe(400);
+  expect((await control.json()).error.fields.firstName).toBe("validation.firstName");
   const list = await page.request.get(`/api/v1/jobs/${jobId}/children`);
   expect(list.status()).toBe(200);
   const listText = await list.text();
   expect(listText).not.toContain("access_code_hash");
   expect(listText).not.toContain("ciphertext");
-  const children = JSON.parse(listText).children as { id: string; accessCode: string }[];
+  const children = JSON.parse(listText).children as { id: string; accessCode: string | null }[];
   expect(children).toHaveLength(9);
   for (const c of children) expect(c.accessCode).toMatch(CA_CODE);
   const codeChange = await page.request.patch(`/api/v1/children/${children[0]?.id}`, {
@@ -230,5 +247,13 @@ test("owner builds a roster by hand and from CSV and Excel files", async ({
     });
     expect(imported.status()).toBe(200);
     expect(await imported.json()).toMatchObject({ added: 5000, updated: 0, groupsAdded: 20 });
+    // 5,020 hidden child and class events don't push the shown ones out of the latest 50 (filtered before the limit).
+    await page.goto("/app");
+    await expect(
+      main.getByText(`${owner} imported a roster into Load ${tag}`, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      main.getByText(`${owner} imported a roster into ${jobName}`, { exact: true }).first(),
+    ).toBeVisible();
   }
 });
