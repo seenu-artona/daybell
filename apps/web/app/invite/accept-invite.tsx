@@ -9,25 +9,33 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/client-api";
 
 const STORAGE_KEY = "daybell_invite";
+const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Reads the token from the link's #fragment and keeps it in this tab while the person signs up or in. */
+/**
+ * Reads the token from the link's #fragment and keeps it on this device while the person signs up or in. Stored in
+ * localStorage (not per-tab sessionStorage) because the confirmation email usually opens in a new tab.
+ */
 function takeToken(): string | null {
   const fromHash = window.location.hash.slice(1);
   if (/^[0-9a-f]{64}$/.test(fromHash)) {
     try {
-      sessionStorage.setItem(STORAGE_KEY, fromHash);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: fromHash, savedAt: Date.now() }));
+      history.replaceState(null, "", window.location.pathname);
     } catch {
-      // Private mode: keep it in the address bar instead.
-      return fromHash;
+      // Storage blocked: keep it in the address bar instead.
     }
-    history.replaceState(null, "", window.location.pathname);
     return fromHash;
   }
   try {
-    return sessionStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as {
+      token?: string;
+      savedAt?: number;
+    } | null;
+    if (saved?.token && saved.savedAt && Date.now() - saved.savedAt < INVITE_LIFETIME_MS)
+      return saved.token;
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+  return null;
 }
 
 export function AcceptInvite() {
@@ -42,7 +50,7 @@ export function AcceptInvite() {
     const found = takeToken();
     setToken(found);
     if (!found) {
-      setState("invalid");
+      setState("missing");
       return;
     }
     api<MeResponse>("/me").then((res) => setState(res.ok ? "ready" : "signed-out"));
@@ -53,7 +61,7 @@ export function AcceptInvite() {
     const res = await api("/invites/accept", { body: { token } });
     if (res.ok) {
       try {
-        sessionStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEY);
       } catch {}
       setState("joined");
       router.replace("/app");
@@ -76,6 +84,7 @@ export function AcceptInvite() {
         {state === "ready" ? <Button onClick={accept}>{t("accept")}</Button> : null}
         {state === "joined" ? <Banner tone="success" title={t("joined")} /> : null}
         {state === "invalid" ? <Banner tone="danger" title={t("invalid")} /> : null}
+        {state === "missing" ? <Banner tone="info" title={t("missing")} /> : null}
         {state === "signed-out" ? (
           <>
             <p className="m-0">{t("signedOut")}</p>

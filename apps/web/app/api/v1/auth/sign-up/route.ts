@@ -48,7 +48,7 @@ export const POST = handle(async (request: Request) => {
     email,
     options: {
       shouldCreateUser: true,
-      emailRedirectTo: `${siteUrl()}/auth/confirm?next=${encodeURIComponent(afterConfirm)}`,
+      emailRedirectTo: `${siteUrl()}/auth/confirm?region=${region}&next=${encodeURIComponent(afterConfirm)}`,
       ...(data ? { data } : {}),
     },
   });

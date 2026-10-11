@@ -9,7 +9,7 @@ export const POST = handle(async (request: Request) => {
   const input = await parseBody(request, passwordResetRequestInput);
   const supabase = await supabaseFor(input.region);
   await supabase.auth.resetPasswordForEmail(input.email, {
-    redirectTo: `${siteUrl()}/auth/confirm?next=${encodeURIComponent("/set-password?next=/app")}`,
+    redirectTo: `${siteUrl()}/auth/confirm?region=${input.region}&next=${encodeURIComponent("/set-password?next=/app")}`,
   });
   return NextResponse.json({ status: "check_email" }, { status: 202 });
 });

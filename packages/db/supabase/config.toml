@@ -34,3 +34,17 @@ secure_password_change = true
 [auth.rate_limit]
 # Generous locally so the end-to-end tests aren't throttled.
 email_sent = 100
+
+# Email links carry a token_hash to our /auth/confirm so they work on any device (ADR 0005).
+# Hosted projects: paste the same HTML into Authentication > Emails > Templates (see packages/db/README.md).
+[auth.email.template.confirmation]
+subject = "Confirm your email"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.magic_link]
+subject = "Your Daybell link"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.recovery]
+subject = "Reset your password"
+content_path = "./supabase/templates/recovery.html"

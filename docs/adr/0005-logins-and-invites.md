@@ -22,8 +22,13 @@ choice is hidden. Adding the US = set its variables (D122).
 `public.create_studio()` once the email is confirmed (in `/auth/confirm`, or on next sign-in). Browsers never insert into
 `studios` directly.
 
+**Email links work anywhere.** Our auth email templates (`packages/db/supabase/templates/`) link to `/auth/confirm`
+with a `token_hash` and the region, so a link opened in a new tab, another browser or a phone still signs the person in
+to the right regional database.
+
 **Invites.** Owners create an invite for an email and role (never owner). The database stores only a SHA-256 hash of the
-token. The link is `/invite#<token>`: the fragment never reaches a server, so tokens stay out of logs. It works once, for
+token. The link is `/invite#<token>`: the fragment never reaches a server, so tokens stay out of logs. The page keeps
+the token in localStorage (7 days) so it survives the confirmation email opening in a new tab. It works once, for
 that exact *confirmed* email, for 7 days. People join studios only through invites (owners can't insert members
 directly). Until email sending arrives (step 7) the owner copies the link.
 

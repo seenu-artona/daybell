@@ -141,7 +141,7 @@
     "not_found": "We couldn't find that.",
     "conflict": "That already exists.",
     "region_unavailable": "That region isn't available yet.",
-    "invalid_credentials": "That email and password don't match.",
+    "invalid_credentials": "That email and password don't match. Never set a password? Use “Forgot password” to choose one.",
     "email_not_confirmed": "Please confirm your email first — check your inbox.",
     "rate_limited": "Too many tries. Wait a minute and try again.",
     "internal": "Something went wrong on our side. Please try again."
@@ -238,6 +238,7 @@
     "signIn": "Sign in",
     "create": "Create account",
     "joined": "You're in! Taking you to your studio…",
-    "invalid": "This invite link isn't valid for your account. It may have expired, been used, or been sent to a different email."
+    "invalid": "This invite link isn't valid for your account. It may have expired, been used, or been sent to a different email.",
+    "missing": "Open your invite link again — the one your studio sent you — to continue."
   }
 }
