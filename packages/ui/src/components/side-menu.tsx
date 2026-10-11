@@ -33,6 +33,8 @@ type SideMenuItemProps<T extends ElementType> = {
   count?: number;
   /** Read aloud with the count, e.g. "12 new orders". */
   countLabel?: string;
+  /** A small label after the name, e.g. "Soon" for sections still being built. */
+  tag?: ReactNode;
 } & Omit<ComponentPropsWithoutRef<T>, "as">;
 
 export function SideMenuItem<T extends ElementType = "a">({
@@ -41,6 +43,7 @@ export function SideMenuItem<T extends ElementType = "a">({
   current,
   count,
   countLabel,
+  tag,
   className,
   children,
   ...props
@@ -63,6 +66,11 @@ export function SideMenuItem<T extends ElementType = "a">({
         </span>
       ) : null}
       <span className="flex-1">{children}</span>
+      {tag ? (
+        <span className="rounded-full border border-white/20 px-[7px] text-micro font-semibold text-white/60">
+          {tag}
+        </span>
+      ) : null}
       {count ? (
         <span className="rounded-full bg-lime px-[7px] text-micro text-ink">
           <span aria-hidden="true">{count}</span>

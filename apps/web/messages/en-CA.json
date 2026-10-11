@@ -247,6 +247,62 @@
         "accepted": "An invite was accepted ({role})",
         "withdrawn": "{actor} withdrew an invite"
       }
+    },
+    "nav": {
+      "label": "Main",
+      "home": "Home",
+      "jobs": "Jobs",
+      "orders": "Orders",
+      "products": "Products",
+      "contacts": "Contacts",
+      "marketing": "Marketing",
+      "money": "Money",
+      "reports": "Reports",
+      "settings": "Settings",
+      "soon": "Soon",
+      "openMenu": "Open menu",
+      "closeMenu": "Close menu"
+    },
+    "top": {
+      "search": "Search",
+      "searchShortcut": "⌘K",
+      "searchPlaceholder": "Jump to…",
+      "searchEmpty": "No matches.",
+      "help": "Help",
+      "helpBody": "Guides and the help assistant arrive soon. For now, email your Daybell contact.",
+      "notifications": "Notifications",
+      "notificationsEmpty": "You're all caught up. New orders and reminders will show here.",
+      "viewShop": "View my shop",
+      "account": "Account",
+      "signedInAs": "Signed in as",
+      "close": "Close"
+    },
+    "soon": {
+      "title": "{section} is coming soon",
+      "body": "We're building this now. It arrives in an upcoming phase.",
+      "back": "Back to Home"
+    },
+    "checklist": {
+      "title": "Get ready to sell",
+      "progress": "{done} of {total} done",
+      "studio": "Create your studio",
+      "studioBody": "Done — welcome aboard.",
+      "team": "Invite your team",
+      "teamBody": "Photographers and staff each get their own login.",
+      "brand": "Brand your shop",
+      "brandBody": "Logo, colour and gallery style parents will see.",
+      "products": "Set up products & prices",
+      "productsBody": "Packages, prints and digital downloads.",
+      "payouts": "Connect payouts",
+      "payoutsBody": "Link Stripe so sales land in your bank.",
+      "job": "Create your first job",
+      "jobBody": "A school, team or event to photograph.",
+      "soon": "Soon",
+      "done": "Done"
+    },
+    "settings": {
+      "title": "Settings",
+      "teamIntro": "Who works at your studio and what they can do."
     }
   },
   "invite": {

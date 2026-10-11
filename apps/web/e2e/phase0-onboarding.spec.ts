@@ -37,27 +37,47 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await page.getByRole("button", { name: "Save and continue" }).click();
   await expect(page).toHaveURL(/\/app$/);
   await expect(page.getByRole("heading", { name: `Welcome to North Peak ${tag}` })).toBeVisible();
-  await expect(page.getByRole("cell", { name: /Owner/ })).toBeVisible();
+  await expect(page.getByText("Get ready to sell")).toBeVisible();
 
-  // 3. Invites a photographer and gets a link.
+  // Every section is in the menu; unbuilt ones say "Soon" (D126, D128). On phones the menu is behind a button.
+  if (info.project.name === "phone") await page.getByRole("button", { name: "Open menu" }).click();
+  const nav = page.getByRole("navigation", { name: "Main" }).last();
+  await expect(nav.getByRole("link", { name: /Contacts/ })).toBeVisible();
+  await nav.getByRole("link", { name: /Orders/ }).click();
+  await expect(page.getByRole("heading", { name: "Orders is coming soon" })).toBeVisible();
+
+  // 3. From the checklist, goes to Settings and invites a photographer.
+  await page.goto("/app");
+  await page.getByRole("link", { name: /Invite your team/ }).click();
+  await expect(page).toHaveURL(/\/app\/settings$/);
+  await expect(page.getByRole("cell", { name: /Owner/ })).toBeVisible();
   await page.getByLabel("Their email").fill(photographer);
   await page.getByLabel("Role").selectOption("photographer");
   await page.getByRole("button", { name: "Create invite" }).click();
   let inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
   expect(inviteLink).toMatch(/\/invite#[0-9a-f]{64}$/);
   await expect(page.getByText("Waiting to join")).toBeVisible();
-  // The activity log records it (event log, D96).
-  await expect(page.getByText(`${owner} invited someone as photographer`)).toBeVisible();
 
-  // Withdrawing an invite works and is logged; then invite again for the photographer to use.
+  // Withdrawing an invite works; then invite again for the photographer to use.
   await page.getByRole("button", { name: "Withdraw" }).click();
   await expect(page.getByText("Waiting to join")).toHaveCount(0);
-  await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await page.getByLabel("Their email").fill(photographer);
   await page.getByLabel("Role").selectOption("photographer");
   await page.getByRole("button", { name: "Create invite" }).click();
   await expect(page.getByText("Waiting to join")).toBeVisible();
   inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
+
+  // Home now shows the team step done, and the activity log has all three changes (event log, D96).
+  await page.goto("/app");
+  await expect(page.getByText("2 of 6 done")).toBeVisible();
+  await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
+  await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
+
+  // ⌘K search jumps between sections.
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("combobox", { name: "Search" }).fill("sett");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/app\/settings$/);
 
   // 4. The photographer, in a fresh browser, creates an account from the invite and joins.
   const staff = await (await browser.newContext()).newPage();
@@ -80,6 +100,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
     staffTab.getByRole("heading", { name: `Welcome to North Peak ${tag}` }),
   ).toBeVisible();
   // Photographers see the team but cannot invite.
+  await staffTab.goto("/app/settings");
   await expect(staffTab.getByText("Only owners can invite people.")).toBeVisible();
   const staffTeam = await (await staffTab.request.get("/api/v1/studio/team")).json();
   expect(staffTeam.team.map((m: { role: string }) => m.role).sort()).toEqual([
@@ -118,7 +139,8 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   });
   expect(forged.status()).toBe(403);
 
-  // Owner signs out, then back in with their password.
+  // Owner signs out (account menu), then back in with their password.
+  await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/sign-in/);
   await page.getByLabel("Email").fill(owner);
