@@ -112,11 +112,10 @@ export default function JobPage() {
             </Button>
           ) : null}
         </div>
-        {saved ? (
-          <p role="status" className="m-0 text-sm text-muted">
-            {td("saved")}
-          </p>
-        ) : null}
+        {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
+        <p role="status" className="m-0 text-sm text-muted">
+          {saved ? td("saved") : ""}
+        </p>
       </div>
 
       <Card>
@@ -254,13 +253,23 @@ function EditJob({
         options={JOB_TYPES.map((jt) => ({ value: jt, label: t(`types.${jt}`) }))}
         error={text.field(errors.type)}
       />
-      <SelectField
-        label={td("organization")}
-        value={chosen}
-        onChange={setOrganizationId}
-        options={options}
-        error={text.field(errors.organizationId)}
-      />
+      {options.length > 0 ? (
+        <SelectField
+          label={td("organization")}
+          value={chosen}
+          onChange={setOrganizationId}
+          options={options}
+          error={text.field(errors.organizationId)}
+        />
+      ) : (
+        // A type that needs an organization, and the studio has none yet: say where to add one.
+        <p className="m-0 text-sm text-muted">
+          {td("noOrganizationsYet")}{" "}
+          <Link href="/app/contacts/organizations" className="font-semibold text-primary">
+            {td("addOrganization")}
+          </Link>
+        </p>
+      )}
       <Field
         label={t("wizard.pictureDay")}
         help={t("wizard.pictureDayHelp")}

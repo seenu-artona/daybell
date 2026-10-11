@@ -63,6 +63,8 @@ describe("list helpers", () => {
 
   it("escapes LIKE wildcards in searches", () => {
     expect(likePattern("50%_off")).toBe("%50\\%\\_off%");
+    expect(likePattern("*")).toBe("%%");
+    expect(likePattern("Lin*coln")).toBe("%Lincoln%");
   });
 
   it("reads query parameters and reports problems as fields", async () => {

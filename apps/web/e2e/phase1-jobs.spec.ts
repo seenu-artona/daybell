@@ -76,7 +76,7 @@ test("owner creates a job with a new organization", async ({ page: firstTab }, i
   // Contacts opens on Organizations, which lists the new organization.
   await page.goto("/app/contacts");
   await expect(page).toHaveURL(/\/app\/contacts\/organizations$/);
-  await expect(main.getByRole("cell", { name: organization })).toBeVisible();
+  await expect(main.getByRole("cell", { name: organization, exact: true })).toBeVisible();
   await expect(main.getByText("Children")).toBeVisible();
 
   // The activity log names the job and organization by looking them up, never from the event (D96).

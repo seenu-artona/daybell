@@ -32,11 +32,10 @@ create table public.organizations (
   country char(2) check (country in ('US', 'CA')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  -- Quebec is excluded at launch (D131; Seenu, Oct 11 2026). QC is never a US state, so an address with no country
-  -- is treated as Canadian here. Canadian postal codes starting with G, H or J are all in Quebec.
+  -- Quebec is excluded at launch (D131; Seenu, Oct 11 2026). QC is refused whatever the country (it is never a US
+  -- state), and so is a Canadian-shaped postal code starting with G, H or J (all in Quebec).
   constraint organizations_no_quebec check (
-    not (coalesce(country, 'CA') = 'CA'
-         and (upper(region_code) = 'QC' or upper(left(btrim(postal_code), 1)) in ('G', 'H', 'J')))
+    region_code is distinct from 'QC' and coalesce(upper(btrim(postal_code)), '') !~ '^[GHJ][0-9][A-Z]'
   ),
   -- Lets other tables reference an organization together with its studio (composite studio FKs, ADR 0008).
   constraint organizations_studio_id_id_key unique (studio_id, id)

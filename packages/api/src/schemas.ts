@@ -72,7 +72,13 @@ export const COUNTRIES = ["US", "CA"] as const;
 
 /** Optional text: send null (not "") to leave it blank. */
 const optionalText = (max: number) =>
-  z.string().trim().min(1).max(max, { error: "validation.tooLong" }).nullable().optional();
+  z
+    .string()
+    .trim()
+    .min(1, { error: "validation.invalid" })
+    .max(max, { error: "validation.tooLong" })
+    .nullable()
+    .optional();
 
 const organizationFields = {
   name: z
@@ -80,7 +86,7 @@ const organizationFields = {
     .trim()
     .min(1, { error: "validation.organizationName" })
     .max(120, { error: "validation.tooLong" }),
-  kind: z.enum(ORGANIZATION_KINDS),
+  kind: z.enum(ORGANIZATION_KINDS, { error: "validation.invalid" }),
   notes: optionalText(2000),
   addressLine1: optionalText(200),
   addressLine2: optionalText(200),
@@ -101,21 +107,20 @@ const organizationFields = {
     .max(10, { error: "validation.tooLong" })
     .nullable()
     .optional(),
-  country: z.enum(COUNTRIES).nullable().optional(),
+  country: z.enum(COUNTRIES, { error: "validation.invalid" }).nullable().optional(),
 };
 
 /**
- * Quebec is excluded at launch (D131; Seenu, Oct 11 2026). QC is never a US state, so no country means Canada.
- * Canadian postal codes starting with G, H or J are all in Quebec, so those are refused even without a province.
+ * Quebec is excluded at launch (D131; Seenu, Oct 11 2026). "QC" is refused whatever country is sent (it is never a
+ * US state), and so is a Canadian-shaped postal code starting with G, H or J (all in Quebec).
  */
 export function quebecField(address: {
   region?: string | null | undefined;
   postalCode?: string | null | undefined;
   country?: string | null | undefined;
 }): "region" | "postalCode" | null {
-  if ((address.country ?? "CA") !== "CA") return null;
   if (address.region?.trim().toUpperCase() === "QC") return "region";
-  if (/^[GHJ]/i.test(address.postalCode?.trim() ?? "")) return "postalCode";
+  if (/^[GHJ]\d[A-Z]/i.test(address.postalCode?.trim() ?? "")) return "postalCode";
   return null;
 }
 
@@ -131,7 +136,7 @@ export type OrganizationInput = z.infer<typeof organizationInput>;
 
 /** Change some fields of an organization. The merged result must still pass organizationInput. */
 export const organizationPatch = z
-  .strictObject(z.object(organizationFields).partial().shape)
+  .strictObject(z.object(organizationFields).partial().shape, { error: "validation.unknownField" })
   .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
 export type OrganizationPatch = z.infer<typeof organizationPatch>;
 
@@ -141,7 +146,7 @@ const jobFields = {
     .trim()
     .min(1, { error: "validation.jobName" })
     .max(120, { error: "validation.tooLong" }),
-  type: z.enum(JOB_TYPES),
+  type: z.enum(JOB_TYPES, { error: "validation.invalid" }),
   organizationId: z
     .uuid({ error: "validation.organization" })
     .nullable()
@@ -166,7 +171,7 @@ export type JobInput = z.infer<typeof jobInput>;
 
 /** Change some fields of a job. A job's status is not changed here (step 8). */
 export const jobPatch = z
-  .strictObject(z.object(jobFields).partial().shape)
+  .strictObject(z.object(jobFields).partial().shape, { error: "validation.unknownField" })
   .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
 export type JobPatch = z.infer<typeof jobPatch>;
 

@@ -109,7 +109,8 @@ export function filterValue(value: string): string {
 
 /** Escapes LIKE wildcards so a search for "50%" finds "50%", not everything. */
 export function likePattern(text: string): string {
-  return `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  // PostgREST also reads "*" as a wildcard in like/ilike, so it is dropped rather than escaped.
+  return `%${text.replace(/\*/g, "").replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
 /** Throws the matching ApiError when a Supabase call failed. */

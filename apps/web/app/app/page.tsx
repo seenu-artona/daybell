@@ -174,7 +174,7 @@ export default function HomePage() {
                     </span>
                     {step.soon ? (
                       <Badge tone="draft">{t("checklist.soon")}</Badge>
-                    ) : step.href ? (
+                    ) : step.href && (step.key !== "job" || canManage) ? (
                       <Link
                         href={step.href}
                         className="inline-flex min-h-11 items-center px-2 font-semibold text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"

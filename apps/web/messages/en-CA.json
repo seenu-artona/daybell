@@ -141,7 +141,9 @@
     "organizationRequired": "Choose or add the organization this job is for.",
     "pictureDay": "Enter a real date.",
     "nothingToChange": "Change something before saving.",
-    "cursor": "That page link isn't valid."
+    "cursor": "That page link isn't valid.",
+    "invalid": "Please check this field.",
+    "unknownField": "Something unexpected was sent. Please reload the page and try again."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -454,7 +456,9 @@
         "photos": "Photos",
         "photosBody": "Uploading and tagging photos arrive in an upcoming step.",
         "comingSoon": "Coming soon",
-        "notFound": "We couldn't find that job."
+        "notFound": "We couldn't find that job.",
+        "noOrganizationsYet": "This type of job needs an organization, and you haven't added one yet.",
+        "addOrganization": "Add an organization"
       }
     },
     "contacts": {

@@ -101,6 +101,7 @@ describe("organizations", () => {
     for (const input of [
       { ...ok, region: "qc", country: "CA" },
       { ...ok, region: "QC", country: null },
+      { ...ok, region: "QC", country: "US" },
     ]) {
       const result = organizationInput.safeParse(input);
       expect(result.success).toBe(false);
