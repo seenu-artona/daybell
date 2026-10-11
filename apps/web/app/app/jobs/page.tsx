@@ -11,6 +11,7 @@ import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { Dialog } from "../dialog";
 import { useStudio } from "../me-context";
+import { PageFrame } from "../page-frame";
 import { JobForm } from "./job-form";
 import { StatusBadge, useFormatDay } from "./status-badge";
 
@@ -63,7 +64,7 @@ export default function JobsPage() {
   ) : null;
 
   return (
-    <>
+    <PageFrame>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="m-0 text-h1">{t("title")}</h1>
@@ -150,6 +151,6 @@ export default function JobsPage() {
           }}
         />
       </Dialog>
-    </>
+    </PageFrame>
   );
 }

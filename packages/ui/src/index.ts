@@ -8,8 +8,8 @@ export { clampPercent, JobProgress, type JobProgressProps } from "./components/j
 export { MoneyStat, type MoneyStatProps, Stat } from "./components/money-stat";
 export { PhotoTile, type PhotoTileProps } from "./components/photo-tile";
 export { CodeInput, OptionCard, ShopFrame } from "./components/shop";
-export { SideMenu, SideMenuItem } from "./components/side-menu";
-export { Table, TableCell, TableHead, TableRow } from "./components/table";
+export { SideMenu, SideMenuItem, type SideMenuProps } from "./components/side-menu";
+export { Table, TableCell, TableHead, type TableProps, TableRow } from "./components/table";
 export { cn } from "./lib/cn";
 export {
   contrastRatio,

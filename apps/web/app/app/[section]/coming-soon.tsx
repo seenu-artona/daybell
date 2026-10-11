@@ -5,14 +5,20 @@ import { Hammer } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
-export function ComingSoon({ section }: { section: string }) {
-  const t = useTranslations("app");
-  const name =
-    section === "shop"
-      ? t("top.viewShop")
-      : section === "help"
-        ? t("nav.help")
-        : t(`nav.${section as "jobs"}`);
+/**
+ * A section still being built (D128). "page" is a whole page with its own h1 and a way back to Home; "section" sits in
+ * a job's main area under the job's h1 (D138), so it has an h2 and no back link.
+ */
+export function ComingSoon({
+  name,
+  variant = "page",
+}: {
+  /** The section's translated name. */
+  name: string;
+  variant?: "page" | "section";
+}) {
+  const t = useTranslations("app.soon");
+  const Heading = variant === "page" ? "h1" : "h2";
   return (
     <Card className="flex flex-col items-center gap-3 py-12 text-center">
       <span
@@ -21,11 +27,13 @@ export function ComingSoon({ section }: { section: string }) {
       >
         <Hammer className="size-6" />
       </span>
-      <h1 className="m-0 text-h2">{t("soon.title", { section: name })}</h1>
-      <p className="m-0 max-w-100 text-muted">{t("soon.body")}</p>
-      <Button asChild variant="secondary">
-        <Link href="/app">{t("soon.back")}</Link>
-      </Button>
+      <Heading className="m-0 text-h2">{t("title", { section: name })}</Heading>
+      <p className="m-0 max-w-100 text-muted">{t("body")}</p>
+      {variant === "page" ? (
+        <Button asChild variant="secondary">
+          <Link href="/app">{t("back")}</Link>
+        </Button>
+      ) : null}
     </Card>
   );
 }

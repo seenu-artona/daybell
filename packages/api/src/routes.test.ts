@@ -81,4 +81,18 @@ describe("API description", () => {
     expect(JSON.stringify(doc.components.schemas.Child)).not.toContain("accessCodeHash");
     expect(doc.tags.map((t) => t.name)).toContain("Roster");
   });
+
+  it("describes the menu search as a POST, so the text never goes in a URL (ADR 0013)", () => {
+    const search = doc.paths["/search"] as Record<string, unknown> | undefined;
+    expect(search).toHaveProperty("post");
+    expect(search).not.toHaveProperty("get");
+    expect(doc.components.schemas).toHaveProperty("SearchJob");
+    expect(doc.tags.map((t) => t.name)).toContain("Search");
+  });
+
+  it("describes one client and the job filter on activity", () => {
+    expect(doc.paths["/clients/{id}"]).toHaveProperty("get");
+    const activity = doc.paths["/studio/activity"]?.get as { parameters: { name: string }[] };
+    expect(activity.parameters.map((p) => p.name)).toEqual(["jobId"]);
+  });
 });

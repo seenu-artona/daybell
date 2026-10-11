@@ -7,7 +7,6 @@ import { type ReactNode, type TextareaHTMLAttributes, useEffect, useId, useRef }
 /**
  * A modal dialog for short forms. Native <dialog>: focus stays inside, Escape closes only the top dialog, and focus
  * returns to the opener. Dialogs can open on top of each other (e.g. "Add new client" inside "Create photo job").
- * Full width on phones, centred on larger screens.
  */
 export function Dialog({
   open,
@@ -67,6 +66,7 @@ export function SelectField({
   options,
   error,
   required,
+  disabled,
 }: {
   label: string;
   value: string;
@@ -74,6 +74,7 @@ export function SelectField({
   options: { value: string; label: string; disabled?: boolean }[];
   error?: string | undefined;
   required?: boolean;
+  disabled?: boolean;
 }) {
   const id = useId();
   return (
@@ -85,6 +86,7 @@ export function SelectField({
         id={id}
         value={value}
         required={required}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-note` : undefined}

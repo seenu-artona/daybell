@@ -202,3 +202,41 @@ describe("components", () => {
     expect(box?.className).toMatch(/\boverflow-x-auto\b/);
   });
 });
+
+describe("D137 layout pieces", () => {
+  it("a flat table has no box but still scrolls inside itself", () => {
+    render(
+      <Table variant="flat">
+        <tbody>
+          <TableRow>
+            <TableCell>Maya</TableCell>
+          </TableRow>
+        </tbody>
+      </Table>,
+    );
+    const box = screen.getByRole("table").parentElement;
+    expect(box?.className).toMatch(/\brelative\b/);
+    expect(box?.className).toMatch(/\boverflow-x-auto\b/);
+    expect(box?.className).not.toMatch(/\bborder\b/);
+    expect(box?.className).not.toMatch(/\brounded/);
+  });
+
+  it("a folded menu shows icons only, and every item keeps its name", async () => {
+    const { container } = render(
+      <SideMenu label="Main" folded>
+        <SideMenuItem href="/jobs" icon={<svg />} current folded>
+          Jobs
+        </SideMenuItem>
+        <SideMenuItem href="/orders" icon={<svg />} tag="Soon" folded>
+          Orders
+        </SideMenuItem>
+      </SideMenu>,
+    );
+    expect(screen.getByRole("link", { name: "Jobs" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Orders Soon" })).toBeDefined();
+    expect(screen.getByText("Jobs").className).toContain("sr-only");
+    expect(screen.getByText("Soon").className).toContain("sr-only");
+    expect(screen.getByRole("navigation", { name: "Main" }).className).toContain("w-16");
+    await expectNoA11yViolations(container);
+  });
+});

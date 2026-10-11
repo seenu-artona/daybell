@@ -146,6 +146,7 @@ export function Gallery() {
           </tbody>
         </Table>
         <SideMenu
+          className="rounded-lg"
           label={t("menu.label")}
           brand={
             <>

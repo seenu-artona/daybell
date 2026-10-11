@@ -10,12 +10,13 @@ import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { Combobox } from "../../combobox";
 import { CheckboxField, Dialog } from "../../dialog";
+import { RemoveChildDialog } from "./remove-child-dialog";
 
 type GroupRef = { id: string; name: string };
 
 /**
- * Add or rename a class, team or group (one field). Used on top of the child form ("+ Add new class") and from the
- * roster's filter ("Rename class").
+ * Add or rename a class, team or group (one field). Used on top of the child form ("+ Add new class") and from a
+ * People group heading ("Rename").
  */
 export function GroupForm({
   jobId,
@@ -177,17 +178,6 @@ export function ChildForm({
     if (Object.keys(res.fields).length === 0) setProblem(text.error(res.code));
   }
 
-  async function remove() {
-    if (!child) return;
-    setBusy(true);
-    setProblem(null);
-    const res = await api(`/children/${child.id}`, { method: "DELETE" });
-    setBusy(false);
-    setConfirmRemove(false);
-    if (res.ok) return onRemoved();
-    setProblem(res.code === "conflict" ? tr("lockedNote") : text.error(res.code));
-  }
-
   const draft = job.status === "draft";
 
   return (
@@ -341,25 +331,15 @@ export function ChildForm({
       </Dialog>
 
       {child ? (
-        <Dialog
+        <RemoveChildDialog
+          child={child}
           open={confirmRemove}
           onClose={() => setConfirmRemove(false)}
-          title={t("removeTitle")}
-        >
-          <div className="flex flex-col gap-5">
-            <p className="m-0">
-              {t("removeBody", { name: `${child.firstName} ${child.lastName}` })}
-            </p>
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button variant="secondary" onClick={() => setConfirmRemove(false)}>
-                {t("cancel")}
-              </Button>
-              <Button variant="danger" onClick={remove} disabled={busy}>
-                {busy ? t("removing") : t("removeConfirm")}
-              </Button>
-            </div>
-          </div>
-        </Dialog>
+          onRemoved={() => {
+            setConfirmRemove(false);
+            onRemoved();
+          }}
+        />
       ) : null}
     </>
   );

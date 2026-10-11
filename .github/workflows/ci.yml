@@ -83,7 +83,14 @@ jobs:
       # Build through Turborepo exactly as Vercel does, so undeclared settings fail here, not in previews.
       - run: pnpm turbo run build --filter=@daybell/web
       - run: pnpm --filter @daybell/web exec playwright install --with-deps chromium
-      - run: pnpm --filter @daybell/web e2e
+      # Load tests (@load, e.g. the 5,000-row roster) run on pushes to main only, to keep pull requests quick (ADR 0013).
+      - name: End-to-end tests
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pnpm --filter @daybell/web e2e --grep-invert @load
+          else
+            pnpm --filter @daybell/web e2e
+          fi
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -5,10 +5,31 @@ import { check, handle, parseBody } from "@/lib/api";
 import { CLIENT_COLUMNS, type ClientRow, clientColumns, toClient, validClient } from "@/lib/jobs";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
-/** PATCH /api/v1/clients/:id — owners and admins change a client. Send null to clear a field. */
-export const PATCH = handle(async (request: Request, ctx: { params: Promise<{ id: string }> }) => {
+async function clientId(ctx: { params: Promise<{ id: string }> }): Promise<string> {
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) throw new ApiError("not_found", "Client not found.");
+  return id;
+}
+
+/** GET /api/v1/clients/:id — one client, for any member (the menu search opens it, D138). */
+export const GET = handle(async (_request: Request, ctx: { params: Promise<{ id: string }> }) => {
+  const id = await clientId(ctx);
+  const { supabase, studio } = await studioScope();
+  const row = check(
+    await supabase
+      .from("clients")
+      .select(CLIENT_COLUMNS)
+      .eq("studio_id", studio.id)
+      .eq("id", id)
+      .maybeSingle(),
+  ) as ClientRow | null;
+  if (!row) throw new ApiError("not_found", "Client not found.");
+  return NextResponse.json({ client: toClient(row) });
+});
+
+/** PATCH /api/v1/clients/:id — owners and admins change a client. Send null to clear a field. */
+export const PATCH = handle(async (request: Request, ctx: { params: Promise<{ id: string }> }) => {
+  const id = await clientId(ctx);
   const patch = await parseBody(request, clientPatch);
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);

@@ -4,6 +4,7 @@ import { ACCESS_CODE_ALPHABET, JOB_STATUSES, JOB_TYPES } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import { fromDatabaseError } from "./errors";
 import {
+  activityQuery,
   childInput,
   childPatch,
   clientInput,
@@ -18,6 +19,7 @@ import {
   rosterImportInput,
   rosterQuery,
   rosterRow,
+  searchInput,
   signUpInput,
   suggestSlug,
 } from "./schemas";
@@ -369,5 +371,28 @@ describe("roster limits match the database", () => {
     expect(sql).toContain("access_code_hash ~ '^[0-9a-f]{64}$'");
     expect(sql).toContain("access_code_ciphertext ~ '^v1\\.[A-Za-z0-9_-]{48}$'");
     expect(sql).not.toContain(ACCESS_CODE_ALPHABET);
+  });
+});
+
+describe("menu search (ADR 0013)", () => {
+  it("trims the text and needs 2 to 100 characters", () => {
+    expect(searchInput.parse({ q: "  Lincoln  " })).toEqual({ q: "Lincoln" });
+    expect(searchInput.parse({ q: "ab" })).toEqual({ q: "ab" });
+    for (const q of ["a", " a ", "", "  "]) {
+      const result = searchInput.safeParse({ q });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(fieldErrors(result.error).q).toBe("validation.searchShort");
+    }
+    expect(searchInput.safeParse({ q: "x".repeat(100) }).success).toBe(true);
+    const long = searchInput.safeParse({ q: "x".repeat(101) });
+    expect(long.success).toBe(false);
+    expect(searchInput.safeParse({}).success).toBe(false);
+  });
+
+  it("filters activity by a job id only", () => {
+    expect(activityQuery.parse({})).toEqual({});
+    const id = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
+    expect(activityQuery.parse({ jobId: id })).toEqual({ jobId: id });
+    expect(activityQuery.safeParse({ jobId: "Lincoln" }).success).toBe(false);
   });
 });

@@ -3,7 +3,7 @@ import { PASSWORD, VERIFY_LINK } from "./helpers";
 import { linkFromEmail } from "./mail";
 
 // Phase 0 "Done when" (steps 1, 2, 5): sign up a studio, confirm the email, invite staff, staff joins with a role,
-// and a second studio sees nothing of the first. Unique emails per run and per device project.
+// and a second studio sees nothing of the first. Unique emails per run. Desktop only (D136; ADR 0013).
 const run = `${Date.now()}`;
 
 test("owner signs up, invites a photographer, and studios stay separate", async ({
@@ -37,20 +37,12 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   await expect(page.getByText(`North Peak ${tag}`).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs you" })).toBeVisible();
-  const phone = info.project.name === "phone";
 
-  // Every section is reachable; unbuilt ones say "Soon" (D126, D128). Phones use bottom tabs plus a "More" sheet.
-  if (phone) {
-    await page.getByRole("button", { name: "More" }).click();
-    await expect(
-      page.getByRole("dialog", { name: "More" }).getByRole("link", { name: /Contacts/ }),
-    ).toBeVisible();
-    await page.keyboard.press("Escape");
-  } else {
-    await expect(
-      page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /Contacts/ }),
-    ).toBeVisible();
-  }
+  // Every section is in the one dark menu; unbuilt ones say "Soon" (D126, D128). There is no top bar (D137).
+  const menu = page.getByRole("navigation", { name: "Main" });
+  await expect(menu.getByRole("link", { name: "Contacts", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Orders Soon" })).toBeVisible();
+  await expect(page.getByRole("banner")).toHaveCount(0);
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: /Orders/ })
@@ -85,10 +77,14 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
 
-  // ⌘K search jumps between sections.
+  // ⌘K / Ctrl+K focuses the menu's search box (D138); the shortcut is never shown as a label.
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByRole("combobox", { name: "Search" }).fill("sett");
-  await page.keyboard.press("Enter");
+  const search = page.getByRole("combobox", { name: "Search jobs and clients" });
+  await expect(search).toBeFocused();
+  await expect(search).toHaveAttribute("aria-keyshortcuts", "Meta+K Control+K");
+  await expect(page.getByText(/⌘K|Ctrl K/)).toHaveCount(0);
+  await search.press("Escape");
+  await menu.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/settings$/);
 
   // 4. The photographer, in a fresh browser, creates an account from the invite and joins.
@@ -151,8 +147,8 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   });
   expect(forged.status()).toBe(403);
 
-  // Owner signs out (account menu on desktop, "More" on phones), then back in with their password.
-  await page.getByRole("button", { name: phone ? "More" : "Account" }).click();
+  // Owner signs out from the profile menu (their email and studio), then back in with their password.
+  await page.getByRole("button", { name: owner }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/sign-in/);
   await page.getByLabel("Email").fill(owner);

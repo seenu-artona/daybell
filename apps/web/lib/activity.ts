@@ -23,6 +23,14 @@ export const STORED_ACTIVITY_TYPES: readonly string[] = [
   ...Object.keys(RENAMED),
 ];
 
+/**
+ * The stored types a job's own activity shows (GET /studio/activity?jobId=): changes to the job and its roster imports.
+ * Each child and class change stays hidden, as on the studio-wide log.
+ */
+export const JOB_ACTIVITY_TYPES: readonly string[] = STORED_ACTIVITY_TYPES.filter(
+  (type) => type.startsWith("job.") || type.startsWith("roster."),
+);
+
 /** What a nameless subject is called when its name can't be looked up (e.g. it was deleted): jobs and roster imports
  * point at a job; client events (and legacy organization ones) at a client. */
 export function unnamedSubject(type: ActivityType): "aJob" | "aClient" {

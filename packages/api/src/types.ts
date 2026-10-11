@@ -151,6 +151,18 @@ export const clientsResponse = z.object({ clients: z.array(client), nextCursor }
 export type ClientsResponse = z.infer<typeof clientsResponse>;
 export const clientResponse = z.object({ client });
 
+// ── Search (Phase 1 step 2b, ADR 0013) ────────────────────────────────────────────────────────────────────────────
+export const searchJob = job
+  .pick({ id: true, name: true, internalNumber: true, status: true, pictureDay: true })
+  .meta({ id: "SearchJob", description: "A job found by the menu search." });
+export type SearchJob = z.infer<typeof searchJob>;
+export const searchResponse = z.object({
+  jobs: z.array(searchJob).meta({ description: "At most 10, starts-with matches first." }),
+  clients: z.array(clientRef).meta({ description: "At most 10, starts-with matches first." }),
+});
+export type SearchResponse = z.infer<typeof searchResponse>;
+export type ClientRef = z.infer<typeof clientRef>;
+
 // ── Roster (Phase 1 step 2, ADR 0011) ─────────────────────────────────────────────────────────────────────────────
 export const group = z
   .object({

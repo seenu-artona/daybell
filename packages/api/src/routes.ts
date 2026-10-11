@@ -2,6 +2,7 @@ import { z } from "zod";
 import { API_ERROR_CODES, type ApiErrorCode, STATUS_FOR } from "./errors";
 import {
   acceptInviteInput,
+  activityQuery,
   childInput,
   childPatch,
   clientInput,
@@ -18,6 +19,7 @@ import {
   passwordUpdateInput,
   rosterImportInput,
   rosterQuery,
+  searchInput,
   signInInput,
   signUpInput,
 } from "./schemas";
@@ -37,6 +39,7 @@ import {
   meResponse,
   nextJobNumberResponse,
   rosterImportResponse,
+  searchResponse,
   teamResponse,
 } from "./types";
 
@@ -46,7 +49,15 @@ import {
  */
 export type Access = "public" | "signed-in" | "owner-admin" | "owner" | "roster-editor";
 
-export const ROUTE_GROUPS = ["Account", "Team", "Studio", "Jobs", "Roster", "Contacts"] as const;
+export const ROUTE_GROUPS = [
+  "Account",
+  "Team",
+  "Studio",
+  "Jobs",
+  "Roster",
+  "Contacts",
+  "Search",
+] as const;
 
 export interface RouteSpec {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -189,14 +200,15 @@ export const ROUTES: RouteSpec[] = [
     group: "Studio",
     summary: "The studio's activity log",
     description:
-      "The latest 50 changes. Events store IDs only; emails come from the current team list.",
+      "The latest 50 changes. Events store IDs only; emails come from the current team list. With jobId, only that job's own changes and roster imports (not each child or class change); a job of another studio is not found.",
     access: "owner-admin",
+    query: activityQuery,
     success: {
       status: 200,
       schema: activityResponse,
       description: "Latest activity, newest first.",
     },
-    errors: ["not_signed_in", "forbidden", "not_found"],
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
   },
   {
     method: "GET",
@@ -365,6 +377,15 @@ export const ROUTES: RouteSpec[] = [
     errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
   },
   {
+    method: "GET",
+    path: "/clients/{id}",
+    group: "Contacts",
+    summary: "One client",
+    access: "signed-in",
+    success: { status: 200, schema: clientResponse, description: "The client." },
+    errors: ["not_signed_in", "not_found"],
+  },
+  {
     method: "PATCH",
     path: "/clients/{id}",
     group: "Contacts",
@@ -374,6 +395,18 @@ export const ROUTES: RouteSpec[] = [
     body: clientPatch,
     success: { status: 200, schema: clientResponse, description: "The changed client." },
     errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/search",
+    group: "Search",
+    summary: "Search the studio's jobs and clients",
+    description:
+      "The menu search box. Jobs match on name or internal number, clients on name only; children are never searched. A POST so the typed text stays out of URLs and request logs. Only the caller's own studio is searched.",
+    access: "signed-in",
+    body: searchInput,
+    success: { status: 200, schema: searchResponse, description: "Up to 10 jobs and 10 clients." },
+    errors: ["invalid_input", "not_signed_in", "not_found"],
   },
 ];
 

@@ -11,6 +11,7 @@ import { api } from "@/lib/client-api";
 import { ActivityCard } from "./activity-card";
 import { checklistSteps, type StepKey } from "./checklist-steps";
 import { useStudio } from "./me-context";
+import { PageFrame } from "./page-frame";
 
 const STEP_ICON: Record<StepKey, typeof Camera> = {
   studio: Package,
@@ -95,7 +96,7 @@ export default function HomePage() {
   const steps = loading ? [] : checklistSteps({ hasTeam, hasJob }).filter((s) => !s.done);
 
   return (
-    <>
+    <PageFrame>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="m-0 text-h1">{th("title")}</h1>
         <label className="relative">
@@ -200,6 +201,6 @@ export default function HomePage() {
           {canManage ? <ActivityCard refreshKey={version} /> : null}
         </div>
       </div>
-    </>
+    </PageFrame>
   );
 }

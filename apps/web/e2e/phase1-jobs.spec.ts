@@ -39,7 +39,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
     slug: `jobs-${tag}`.slice(0, 40).replace(/-+$/, ""),
     email: owner,
   });
-  // The phone header and the desktop top bar both exist; look inside the page's main area only.
+  // Look inside the page's main area (the menu has its own links and search).
   const main = page.getByRole("main");
 
   // 1. Contacts opens on Clients. Add a client; Quebec is refused (D131).
@@ -75,23 +75,30 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await dialog.getByLabel(/^Subjects expected/).fill("120");
   await dialog.getByRole("button", { name: "Create job", exact: true }).click();
 
-  // The job page: details, the D75 progress steps, and sections still to come.
+  // The job page (D137): header with name, status and details; Overview with its numbers.
   await expect(page).toHaveURL(/\/app\/jobs\/[0-9a-f-]{36}$/);
   await expect(main.getByRole("heading", { name: job, level: 1 })).toBeVisible();
   await expect(main.getByText("Draft", { exact: true })).toBeVisible();
-  await expect(main.getByText(`${client} · Toronto`, { exact: true })).toBeVisible();
-  await expect(main.getByText("JOB00001", { exact: true })).toBeVisible();
-  await expect(main.getByText("120", { exact: true })).toBeVisible();
-  for (const stage of ["Picture day", "Tagged", "Shop live", "Shipped"]) {
-    await expect(main.getByRole("listitem").filter({ hasText: stage })).toContainText("Upcoming");
-  }
+  await expect(
+    main.getByText(`School · ${client} · Oct 14, 2026 · JOB00001`, { exact: true }),
+  ).toBeVisible();
+  await expect(main.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(main.getByText("of 120 expected", { exact: true })).toBeVisible();
+  await expect(main.getByRole("heading", { name: "Add your roster" })).toBeVisible();
+  // One green button: Start selling (owners and admins, while a draft).
+  await expect(main.getByRole("button", { name: "Start selling" })).toBeVisible();
 
-  // Editing uses the same form.
+  // Editing uses the same form, from More actions.
+  await main.getByRole("button", { name: "More actions" }).click();
   await main.getByRole("button", { name: "Edit job" }).click();
   const edit = page.getByRole("dialog", { name: "Edit job" });
   await edit.getByLabel("Job name").fill(`${job} (edited)`);
   await edit.getByRole("button", { name: "Save changes" }).click();
   await expect(main.getByRole("heading", { name: `${job} (edited)`, level: 1 })).toBeVisible();
+  await expect(main.getByText("Saved.", { exact: true })).toBeVisible();
 
   // 3. A second job adds a new client from the combobox's last option. Escape closes only the top dialog.
   await page.goto("/app/jobs");

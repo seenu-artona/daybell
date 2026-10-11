@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useStudio } from "../../me-context";
+import { PageFrame } from "../../page-frame";
 import { JobForm } from "../job-form";
 
 /** The job form as a page, for direct links and small screens. Jobs › "New job" opens the same form in a dialog. */
@@ -16,7 +17,7 @@ export default function NewJobPage() {
   const canManage = me.studio.role === "owner" || me.studio.role === "admin";
 
   return (
-    <>
+    <PageFrame>
       <div className="flex flex-col gap-2">
         <Link
           href="/app/jobs"
@@ -41,6 +42,6 @@ export default function NewJobPage() {
       ) : (
         <Banner tone="info" title={t("emptyReadOnly")} />
       )}
-    </>
+    </PageFrame>
   );
 }
