@@ -12,8 +12,8 @@ create index events_studio_subject_idx on public.events (studio_id, subject_id, 
 -- are never searched. An RPC called with a POST body so the typed text, which may be someone's name, never appears in
 -- a URL or request log (ADR 0011). SECURITY INVOKER: row-level security applies, and the explicit studio filter
 -- makes the scope plain to read. LIKE wildcards in the text are escaped, so "50%" finds "50%". Text shorter than 2
--- characters returns nothing; the function never raises, so the text can't reach the Postgres log in an error.
--- Starts-with matches come first, then by name. At most 10 of each.
+-- characters or longer than 100 returns nothing; the function never raises, so the text can't reach the Postgres log
+-- in an error. Starts-with matches come first, then by name. At most 10 of each.
 create function public.search_studio(p_studio_id uuid, p_query text, p_limit int default 10)
 returns jsonb
 language sql stable
@@ -26,6 +26,7 @@ as $$
       least(greatest(coalesce(p_limit, 10), 0), 10) as n
     from (select replace(replace(replace(lower(btrim(p_query)), '\', '\\'), '%', '\%'), '_', '\_') as e) s
     where char_length(btrim(coalesce(p_query, ''))) >= 2
+      and char_length(p_query) <= 100
   ),
   found_jobs as (
     select j.id, j.name, j.internal_number, j.status, j.picture_day,

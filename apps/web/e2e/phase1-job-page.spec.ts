@@ -91,6 +91,8 @@ test("job page layout, menu search and studio separation", async ({
   await box.fill(job.internalNumber);
   await expect(results.getByRole("option", { name: new RegExp(jobName) })).toBeVisible();
   await box.fill(clientName);
+  // Wait for this search's own answer: the previous one (the job) must not be opened by Enter.
+  await expect(results.getByRole("option", { name: new RegExp(clientName) })).toBeVisible();
   await expect(results.getByRole("option")).toHaveCount(1);
   await box.press("Enter");
   await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
@@ -126,7 +128,8 @@ test("job page layout, menu search and studio separation", async ({
   await expect(
     checklist.getByRole("listitem").filter({ hasText: "Payouts connected" }),
   ).toContainText("Coming soon");
-  // The job's own activity only, not the other job's.
+  // The job's own activity only, not the other job's, under the panel's own heading.
+  await expect(checklist.getByRole("heading", { name: "Recent activity", level: 3 })).toBeVisible();
   await expect(
     checklist.getByText(`${owner} created the job ${jobName}`, { exact: true }),
   ).toBeVisible();
@@ -149,7 +152,7 @@ test("job page layout, menu search and studio separation", async ({
   await add.getByLabel("Last name", { exact: true }).fill("Johnson");
   await add.getByRole("button", { name: "Add child", exact: true }).click();
   await expect(add).toBeHidden();
-  await main.getByRole("link", { name: "Overview" }).click();
+  await main.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(main.getByRole("heading", { name: "Get ready for picture day" })).toBeVisible();
   await expect(
     main.getByText("Picture day is May 1, 2030. Check the roster before then."),
@@ -168,7 +171,7 @@ test("job page layout, menu search and studio separation", async ({
   for (const name of ["Photos", "Shop", "Messages", "Orders", "Settings"]) {
     await main
       .getByRole("navigation", { name: "Job sections" })
-      .getByRole("link", { name })
+      .getByRole("link", { name, exact: true })
       .click();
     await expect(
       main.getByRole("heading", { name: `${name} is coming soon`, level: 2 }),

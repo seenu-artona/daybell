@@ -25,4 +25,11 @@ describe("locale files", () => {
     expect(used.size).toBeGreaterThan(10);
     for (const key of used) expect(Object.keys(enUS.validation), key).toContain(key);
   });
+
+  it("hold whole phrases, not pieces joined in code (D96)", () => {
+    // The job journey's finished stages read "Set up (done)" to screen readers; the brackets are words too.
+    expect(enUS.app.job.journey.stageDone).toBe("{stage} (done)");
+    expect(enCA.app.job.journey.stageDone).toBe("{stage} (done)");
+    expect(Object.keys(enUS.app.job.journey)).not.toContain("done");
+  });
 });

@@ -8,16 +8,19 @@ import { api } from "@/lib/client-api";
 
 /**
  * The activity log (owners and admins). Reads the event log (D96). Studio-wide on Home; with `jobId`, one job's own
- * changes and roster imports (D138). "flat" sits inside a side panel without a card box.
+ * changes and roster imports (D138). "flat" sits inside a side panel without a card box. `headingLevel` keeps the
+ * outline right where it sits: 2 on Home, 3 under a side panel's own h2 (D91).
  */
 export function ActivityCard({
   refreshKey,
   jobId,
   variant = "card",
+  headingLevel = 2,
 }: {
   refreshKey: number;
   jobId?: string;
   variant?: "card" | "flat";
+  headingLevel?: 2 | 3;
 }) {
   const t = useTranslations("app.activity");
   const tr = useTranslations("app.roles");
@@ -35,19 +38,20 @@ export function ActivityCard({
 
   if (!items) return null;
   const flat = variant === "flat";
+  const Heading = headingLevel === 3 ? "h3" : "h2";
   return (
     <section
       className={
         flat ? "flex flex-col" : "overflow-hidden rounded-2xl border border-line bg-surface"
       }
     >
-      <h2
+      <Heading
         className={
           flat ? "m-0 pb-1 text-title-sm" : "m-0 px-5 pt-4 pb-3 text-[15px] leading-5 font-bold"
         }
       >
         {jobId ? t("jobTitle") : t("title")}
-      </h2>
+      </Heading>
       {items.length === 0 ? (
         <p
           className={

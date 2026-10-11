@@ -97,24 +97,24 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const maya = row("Maya Johnson");
   await expect(maya).toContainText("Do not photograph");
   await expect(group("4B")).toContainText("Maya Johnson");
-  await expect(main.getByRole("link", { name: "People 1 child" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "People 1 child", exact: true })).toBeVisible();
   // The access code is always visible to the studio (Seenu #2).
   const codeCell = maya.getByRole("cell").nth(3);
   await expect(codeCell).toHaveText(CA_CODE);
   const mayaCode = ((await codeCell.textContent()) ?? "").trim();
 
   // 3. Open her in the side panel. Only her id goes in the URL; the panel survives a refresh.
-  await maya.getByRole("link", { name: "Maya Johnson" }).click();
+  await maya.getByRole("link", { name: "Maya Johnson", exact: true }).click();
   await expect(page).toHaveURL(/\?child=[0-9a-f-]{36}$/);
   let panel = page.getByRole("complementary", { name: "Maya Johnson" });
-  await expect(panel.getByRole("heading", { name: "Maya Johnson" })).toBeFocused();
+  await expect(panel.getByRole("heading", { name: "Maya Johnson", exact: true })).toBeFocused();
   await expect(panel.getByText(mayaCode, { exact: true })).toBeVisible();
   expect(page.url()).not.toContain("Maya");
   await page.reload();
   panel = page.getByRole("complementary", { name: "Maya Johnson" });
   await expect(panel).toBeVisible();
   // Edit her grade in the same form, from the panel.
-  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
   const edit = page.getByRole("dialog", { name: "Edit child" });
   await expect(edit.getByText(mayaCode, { exact: true })).toBeVisible();
   await edit.getByText("More options", { exact: true }).click();
@@ -126,7 +126,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await panel.getByRole("button", { name: "Close details" }).click();
   await expect(page).toHaveURL(people);
   await expect(panel).toBeHidden();
-  await expect(maya.getByRole("link", { name: "Maya Johnson" })).toBeFocused();
+  await expect(maya.getByRole("link", { name: "Maya Johnson", exact: true })).toBeFocused();
 
   // 4. Import a CSV: a full page in the job's frame (no phone notice, D136). Columns are guessed, rows checked on
   // the server, then imported together; it lands back on People.
@@ -171,7 +171,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(mayaAfter.getByRole("cell").nth(3)).toHaveText(mayaCode);
   await expect(mayaAfter.getByRole("cell").nth(2)).toHaveText("5");
   await expect(main.getByText("4 possible duplicates", { exact: true })).toBeVisible();
-  await expect(main.getByRole("link", { name: "People 5 children" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "People 5 children", exact: true })).toBeVisible();
 
   // 5. Import an Excel file.
   await main.getByRole("link", { name: "Import roster" }).click();
@@ -189,6 +189,19 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
     main.getByText("Roster imported: 5 added, 0 updated.", { exact: true }),
   ).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
+  // The name link is a 44px target (D91): 32px tall plus its invisible hit area above and below.
+  const target = await main
+    .getByRole("link", { name: "Olivia Brown", exact: true })
+    .evaluate((a) => {
+      const after = getComputedStyle(a, "::after");
+      const box = a.getBoundingClientRect();
+      return {
+        height: box.height - parseFloat(after.top) - parseFloat(after.bottom),
+        width: box.width,
+      };
+    });
+  expect(target.height).toBeGreaterThanOrEqual(44);
+  expect(target.width).toBeGreaterThanOrEqual(44);
   await expect(group("Room 5")).toContainText("Sophia Wilson");
   expect(jobLoads).toBeLessThanOrEqual(2);
 
@@ -211,7 +224,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await dupChip.click();
   await expect(dupChip).toHaveCount(0);
 
-  await main.getByRole("button", { name: "Filter" }).click();
+  await main.getByRole("button", { name: "Filter", exact: true }).click();
   await main.getByLabel("Class", { exact: true }).selectOption({ label: "Room 5" });
   await main.getByLabel("Grade", { exact: true }).selectOption("5");
   await main.getByLabel("Do not photograph", { exact: true }).check();
@@ -224,7 +237,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
   // "No class" replaces the class filter.
-  await main.getByRole("button", { name: "Filter" }).click();
+  await main.getByRole("button", { name: "Filter", exact: true }).click();
   await main.getByLabel("No class", { exact: true }).check();
   await page.keyboard.press("Escape");
   await expect(main.getByRole("button", { name: "Remove filter: Class Room 5" })).toHaveCount(0);
@@ -268,19 +281,19 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(main.getByRole("link", { name: "Noah Garcia", exact: true })).toHaveCount(0);
   await expect(page).toHaveURL(people);
 
-  await row("Ava Patel").getByRole("link", { name: "Ava Patel" }).click();
+  await row("Ava Patel").getByRole("link", { name: "Ava Patel", exact: true }).click();
   panel = page.getByRole("complementary", { name: "Ava Patel" });
-  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
   const editAva = page.getByRole("dialog", { name: "Edit child" });
   await editAva.getByRole("button", { name: "Remove child", exact: true }).click();
   confirm = page.getByRole("dialog", { name: "Remove child?" });
   await confirm.getByRole("button", { name: "Remove child", exact: true }).click();
   await expect(editAva).toBeHidden();
   await expect(main.getByRole("link", { name: "Ava Patel", exact: true })).toHaveCount(0);
-  await expect(main.getByRole("link", { name: "People 8 children" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "People 8 children", exact: true })).toBeVisible();
 
   // 9. The job's Overview shows one activity line per import, naming the job by looking it up (D96).
-  await main.getByRole("link", { name: "Overview" }).click();
+  await main.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(
     page
       .getByRole("complementary", { name: "Before you can sell" })

@@ -82,7 +82,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(
     main.getByText(`School · ${client} · Oct 14, 2026 · JOB00001`, { exact: true }),
   ).toBeVisible();
-  await expect(main.getByRole("link", { name: "Overview" })).toHaveAttribute(
+  await expect(main.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );

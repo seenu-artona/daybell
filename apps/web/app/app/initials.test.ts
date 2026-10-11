@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialsFromEmail } from "./initials";
+import { initialsFromEmail, NO_INITIALS } from "./initials";
 
 describe("initialsFromEmail", () => {
   it("takes the first letter of up to two parts before the @", () => {
@@ -10,9 +10,10 @@ describe("initialsFromEmail", () => {
     expect(initialsFromEmail("_x@example.test")).toBe("X");
   });
 
-  it("falls back to D when there is nothing to use", () => {
-    expect(initialsFromEmail("")).toBe("D");
-    expect(initialsFromEmail("@example.test")).toBe("D");
-    expect(initialsFromEmail("..@example.test")).toBe("D");
+  it("falls back to a neutral non-letter when there is nothing to use", () => {
+    expect(NO_INITIALS).not.toMatch(/\p{L}|\p{N}/u);
+    expect(initialsFromEmail("")).toBe(NO_INITIALS);
+    expect(initialsFromEmail("@example.test")).toBe(NO_INITIALS);
+    expect(initialsFromEmail("..@example.test")).toBe(NO_INITIALS);
   });
 });

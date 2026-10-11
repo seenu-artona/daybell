@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { type Ref, useEffect, useId, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { searchKeyAction } from "./menu-search-keys";
 
 const MIN_CHARS = 2;
 const WAIT_MS = 250;
@@ -18,8 +19,9 @@ type Option =
 /**
  * The menu's search box (D137, D138; ADR 0013): finds the studio's jobs and clients, never children. ARIA 1.2 combobox
  * with a listbox of two groups. From 2 characters it waits 250ms after typing, then asks POST /search once; only the
- * newest answer is shown. Arrow keys move, Enter opens, the first Escape closes the list and the second clears the
- * text. The text is never logged and never put in a URL.
+ * newest answer is shown, and older results are cleared as soon as the text changes. Arrow keys move, Enter opens
+ * (never while a search is pending), the first Escape closes the list and the second clears the text. The text is
+ * never logged and never put in a URL.
  */
 export function MenuSearch({ inputRef }: { inputRef: Ref<HTMLInputElement> }) {
   const t = useTranslations("app.search");
@@ -49,6 +51,9 @@ export function MenuSearch({ inputRef }: { inputRef: Ref<HTMLInputElement> }) {
       setFailed(null);
       return;
     }
+    // Older results belong to older text: drop them now, so nothing stale can be opened while this search waits.
+    setResults(null);
+    setFailed(null);
     setLoading(true);
     const timer = window.setTimeout(async () => {
       const res = await api<SearchResponse>("/search", { method: "POST", body: { q: term } });
@@ -153,20 +158,25 @@ export function MenuSearch({ inputRef }: { inputRef: Ref<HTMLInputElement> }) {
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown" && options.length > 0) {
-              e.preventDefault();
+            const action = searchKeyAction(e.key, {
+              options: options.length,
+              hasActive: activeOption !== undefined,
+              loading,
+              panelOpen: showPanel,
+            });
+            if (action === null) return;
+            e.preventDefault();
+            if (action === "next") {
               setOpen(true);
               setActive((a) => Math.min(a + 1, options.length - 1));
-            } else if (e.key === "ArrowUp" && options.length > 0) {
-              e.preventDefault();
+            } else if (action === "previous") {
               setActive((a) => Math.max(a - 1, 0));
-            } else if (e.key === "Enter" && activeOption) {
-              e.preventDefault();
+            } else if (action === "open" && activeOption) {
               go(activeOption);
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              if (showPanel) setOpen(false);
-              else setQuery("");
+            } else if (action === "close") {
+              setOpen(false);
+            } else if (action === "clear") {
+              setQuery("");
             }
           }}
           className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/60"

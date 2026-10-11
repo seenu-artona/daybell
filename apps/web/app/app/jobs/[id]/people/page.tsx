@@ -193,7 +193,8 @@ function PeoplePage() {
               className="py-2"
               title={
                 <span className="flex items-center gap-2 font-semibold">
-                  {t("duplicatesNotice", { count: duplicates })}
+                  {/* Its own element, so the count reads (and is found) apart from the button. */}
+                  <span>{t("duplicatesNotice", { count: duplicates })}</span>
                   <span aria-hidden="true">·</span>
                   <button
                     type="button"

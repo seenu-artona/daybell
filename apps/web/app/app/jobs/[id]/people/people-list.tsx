@@ -123,7 +123,7 @@ export function PeopleList({
                             scroll={false}
                             aria-current={selected ? "true" : undefined}
                             onClick={() => onLinkOpen(child.id)}
-                            className="font-semibold text-ink no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                            className={`${HIT_44} inline-flex h-8 min-w-11 items-center font-semibold text-ink no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary`}
                           >
                             {child.firstName} {child.lastName}
                           </Link>

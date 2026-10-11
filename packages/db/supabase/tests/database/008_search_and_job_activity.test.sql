@@ -4,7 +4,7 @@
 -- another studio's job activity stays hidden.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(27);
+select plan(31);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -30,6 +30,7 @@ insert into public.jobs (id, studio_id, name, type, picture_day, internal_number
   ('a0000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Promo 50% off', 'mini_session', '2026-11-01', 'JOB00003', null),
   ('a0000000-0000-4000-8000-000000000004', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Promo 500 club', 'mini_session', '2026-11-02', 'JOB00004', null),
   ('a0000000-0000-4000-8000-000000000005', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Grade 5_0 team', 'sports', '2026-11-03', 'JOB00005', null),
+  ('a0000000-0000-4000-8000-000000000006', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Longname' || repeat('x', 102), 'sports', '2026-11-04', 'JOB00006', null),
   ('b0000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Lincoln Secret Fall', 'school', '2026-10-14', 'JOB00001', null);
 insert into public.jobs (studio_id, name, type, picture_day, internal_number)
 select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Bulk ' || i, 'seniors', '2026-12-01', 'BULK' || i
@@ -52,6 +53,11 @@ language sql as $$
   select coalesce(array_agg(x ->> 'name' order by ord), '{}')
   from jsonb_array_elements(public.search_studio(p_studio, p_query, p_limit) -> p_list) with ordinality as e(x, ord) $$;
 grant execute on function pg_temp.names(uuid, text, text, int) to authenticated, anon;
+
+-- The job's creation is logged by the jobs trigger: the one event the leak tests below look for.
+select is((select count(*) from public.events
+  where subject_id = 'a0000000-0000-4000-8000-000000000001' and type = 'job.created'), 1::bigint,
+  'job A1 has exactly one job.created event (fixture for the activity leak test)');
 
 -- ── Shape ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 select has_index('public', 'events', 'events_studio_subject_idx', array['studio_id', 'subject_id', 'id'],
@@ -107,6 +113,12 @@ select lives_ok($$ select public.search_studio('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa
 select is(public.search_studio('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '_'),
   '{"jobs": [], "clients": []}'::jsonb, 'a lone wildcard returns nothing');
 
+-- Text longer than 100 characters returns nothing and never raises (a cap on the work one call can ask for).
+select is(pg_temp.names('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Longname' || repeat('x', 92), 'jobs'),
+  array['Longname' || repeat('x', 102)], '100 characters still search');
+select is(public.search_studio('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Longname' || repeat('x', 93)),
+  '{"jobs": [], "clients": []}'::jsonb, '101 characters return nothing, even when a job would match');
+
 -- At most 10 of each, whatever limit is asked for.
 select is(cardinality(pg_temp.names('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bulk', 'jobs')), 10,
   'at most 10 jobs');
@@ -114,6 +126,9 @@ select is(cardinality(pg_temp.names('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bul
   'at most 10 clients, even when more are asked for');
 select is(cardinality(pg_temp.names('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bulk', 'jobs', 3)), 3,
   'a smaller limit is respected');
+
+select is((select count(*) from public.events where subject_id = 'a0000000-0000-4000-8000-000000000001'
+  and type = 'job.created'), 1::bigint, 'owner A reads their own job''s activity');
 
 -- Staff search too (any member).
 select pg_temp.as_user('44444444-4444-4444-8444-444444444444') as signed_in;
@@ -128,8 +143,8 @@ select is(pg_temp.names('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'lincoln', 'clie
   'and only their own clients');
 select is(public.search_studio('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'lincoln'),
   '{"jobs": [], "clients": []}'::jsonb, 'owner B passing studio A''s id sees none of A''s jobs or clients');
-select is((select count(*) from public.events where subject_id = 'a0000000-0000-4000-8000-000000000001'), 0::bigint,
-  'owner B reads none of A''s job activity');
+select is((select count(*) from public.events where subject_id = 'a0000000-0000-4000-8000-000000000001'
+  and type = 'job.created'), 0::bigint, 'owner B reads none of A''s job activity');
 
 -- ── Anonymous ─────────────────────────────────────────────────────────────────────────────────────────────────────
 reset role;

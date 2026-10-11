@@ -59,12 +59,20 @@ test(
 
     // People loads every page (10 × 500) and draws all 5,000 rows, grouped into 20 classes.
     await page.goto(`/app/jobs/${bigJob}/people`);
-    await expect(main.getByRole("link", { name: "People 5,000 children" })).toBeVisible();
+    await expect(
+      main.getByRole("link", { name: "People 5,000 children", exact: true }),
+    ).toBeVisible();
+    // The first page must be drawn before "Loading more…" can mean anything: before it, the text isn't there yet.
+    await expect(main.getByRole("link", { name: /^Load Test \d{4}$/ }).first()).toBeVisible({
+      timeout: 60_000,
+    });
     await expect(main.getByText("Loading more…", { exact: true })).toHaveCount(0, {
       timeout: 60_000,
     });
+    await expect(main.getByRole("link", { name: /^Load Test \d{4}$/ })).toHaveCount(5000, {
+      timeout: 60_000,
+    });
     await expect(main.getByRole("link", { name: "Load Test 4999", exact: true })).toHaveCount(1);
-    await expect(main.getByRole("link", { name: /^Load Test \d{4}$/ })).toHaveCount(5000);
     await expect(main.getByRole("button", { name: /^Load \d+ \d+ children$/ })).toHaveCount(20);
     // Search covers the whole roster.
     await main.getByRole("searchbox", { name: "Search children" }).fill("L-4321");

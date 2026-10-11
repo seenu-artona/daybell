@@ -65,8 +65,16 @@ export default function JobOverviewPage() {
             {current ? (
               <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
             ) : null}
-            {t(`journey.stages.${s}`)}
-            {done ? <span className="sr-only">{` (${t("journey.done")})`}</span> : null}
+            {done ? (
+              <>
+                <span aria-hidden="true">{t(`journey.stages.${s}`)}</span>
+                <span className="sr-only">
+                  {t("journey.stageDone", { stage: t(`journey.stages.${s}`) })}
+                </span>
+              </>
+            ) : (
+              t(`journey.stages.${s}`)
+            )}
           </li>
         );
       })}
@@ -104,7 +112,9 @@ export default function JobOverviewPage() {
             }}
           >
             <SellChecklist roster={children} />
-            {canManage ? <ActivityCard refreshKey={version} jobId={job.id} variant="flat" /> : null}
+            {canManage ? (
+              <ActivityCard refreshKey={version} jobId={job.id} variant="flat" headingLevel={3} />
+            ) : null}
           </SidePanel>
         ) : null
       }

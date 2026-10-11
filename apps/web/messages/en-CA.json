@@ -668,7 +668,7 @@
       },
       "journey": {
         "label": "Job journey",
-        "done": "done",
+        "stageDone": "{stage} (done)",
         "stages": {
           "setUp": "Set up",
           "pictureDay": "Picture day",
