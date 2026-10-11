@@ -58,18 +58,18 @@ export class ApiError extends Error {
   }
 }
 
-/** Maps Postgres error codes raised by our database functions to API errors. */
+/** Maps Postgres error codes to API errors with fixed messages: raw database text never reaches a client. */
 export function fromDatabaseError(
   err: { code?: string; message?: string } | null | undefined,
 ): ApiError {
   switch (err?.code) {
     case "42501":
-      return new ApiError("forbidden", err.message ?? "Not allowed");
+      return new ApiError("forbidden", "You don't have permission to do that.");
     case "23505":
-      return new ApiError("conflict", err.message ?? "Already exists");
+      return new ApiError("conflict", "That already exists.");
     case "23514":
     case "22P02":
-      return new ApiError("invalid_input", err.message ?? "Invalid input");
+      return new ApiError("invalid_input", "Please check what you entered.");
     default:
       return new ApiError("internal", "Something went wrong on our side. Please try again.");
   }

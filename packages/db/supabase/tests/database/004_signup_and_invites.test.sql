@@ -1,13 +1,15 @@
 -- Studio sign-up and staff invites (D96, D113).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(21);
+select plan(23);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
-insert into auth.users (id, email) values
-  ('11111111-1111-4111-8111-111111111111', 'owner@example.test'),
-  ('22222222-2222-4222-8222-222222222222', 'Photographer@Example.test'),
-  ('33333333-3333-4333-8333-333333333333', 'someone-else@example.test');
+insert into auth.users (id, email, email_confirmed_at) values
+  ('11111111-1111-4111-8111-111111111111', 'owner@example.test', now()),
+  ('22222222-2222-4222-8222-222222222222', 'Photographer@Example.test', now()),
+  ('33333333-3333-4333-8333-333333333333', 'someone-else@example.test', now()),
+  ('44444444-4444-4444-8444-444444444444', 'photographer@example.test', null),
+  ('55555555-5555-4555-8555-555555555555', null, null);
 
 create temp table t (studio uuid, token text, token2 text);
 grant all on t to authenticated;
@@ -44,6 +46,14 @@ select throws_ok($$ select public.accept_invite((select token from t)) $$, '4250
 select throws_ok($$ select public.invite_member((select studio from t), 'me@example.test', 'admin') $$, '42501', null,
   'outsiders cannot invite people');
 select is((select count(*) from public.studio_invites), 0::bigint, 'outsiders see no invites');
+
+-- An unconfirmed account with the invited email, and an account with no email, are both refused.
+select set_config('request.jwt.claims', '{"sub":"44444444-4444-4444-8444-444444444444"}', true) is not null as signed_in;
+select throws_ok($$ select public.accept_invite((select token from t)) $$, '42501', null,
+  'an unconfirmed email cannot accept an invite');
+select set_config('request.jwt.claims', '{"sub":"55555555-5555-4555-8555-555555555555"}', true) is not null as signed_in;
+select throws_ok($$ select public.accept_invite((select token from t)) $$, '42501', null,
+  'an account without an email cannot accept an invite');
 
 -- The invited photographer accepts (email match is case-insensitive).
 select set_config('request.jwt.claims', '{"sub":"22222222-2222-4222-8222-222222222222"}', true) is not null as signed_in;

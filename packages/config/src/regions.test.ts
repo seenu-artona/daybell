@@ -27,3 +27,18 @@ describe("regions", () => {
     expect(isDataRegion(undefined)).toBe(false);
   });
 });
+
+import { siteUrl } from "./site";
+
+describe("siteUrl", () => {
+  it("never comes from the request; prefers SITE_URL, then Vercel's own addresses", () => {
+    expect(siteUrl({ SITE_URL: "https://app.daybell.io/" })).toBe("https://app.daybell.io");
+    expect(
+      siteUrl({ VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "daybell.vercel.app" }),
+    ).toBe("https://daybell.vercel.app");
+    expect(siteUrl({ VERCEL_ENV: "preview", VERCEL_BRANCH_URL: "daybell-git-x.vercel.app" })).toBe(
+      "https://daybell-git-x.vercel.app",
+    );
+    expect(siteUrl({})).toBe("http://127.0.0.1:3000");
+  });
+});

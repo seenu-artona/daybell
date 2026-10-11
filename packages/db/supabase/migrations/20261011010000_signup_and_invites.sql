@@ -14,6 +14,8 @@ begin
   if v_user is null then
     raise exception 'Sign in first' using errcode = '42501';
   end if;
+  -- Serialise per person so parallel calls can't each pass the one-studio check.
+  perform pg_advisory_xact_lock(hashtextextended(v_user::text, 0));
   -- One new studio per person for now; stops sign-up spam. Owners of several studios come later.
   if exists (select 1 from public.studio_members m where m.user_id = v_user and m.role = 'owner') then
     raise exception 'You already own a studio' using errcode = 'unique_violation';
@@ -86,7 +88,9 @@ set search_path = ''
 as $$
 declare
   v_user uuid := (select auth.uid());
-  v_email text := (select lower(u.email) from auth.users u where u.id = v_user);
+  v_email text := (
+    select lower(u.email) from auth.users u where u.id = v_user and u.email_confirmed_at is not null
+  );
   v_invite public.studio_invites;
 begin
   if v_user is null then
@@ -96,8 +100,9 @@ begin
   where i.token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex')
   for update;
   -- Same message for every failure, so a guessed token reveals nothing.
-  if v_invite.id is null or v_invite.accepted_at is not null or v_invite.expires_at < now()
-     or v_invite.email <> v_email then
+  -- The account's email must be confirmed and must be exactly the invited one (NULL-safe comparison).
+  if v_email is null or v_invite.id is null or v_invite.accepted_at is not null or v_invite.expires_at < now()
+     or v_invite.email is distinct from v_email then
     raise exception 'This invite link is not valid for your account' using errcode = '42501';
   end if;
   insert into public.studio_members (studio_id, user_id, role)
@@ -122,6 +127,9 @@ begin
   delete from public.studio_invites where id = p_invite_id and accepted_at is null;
 end;
 $$;
+
+-- People join studios only through invites (accept_invite); owners can't insert arbitrary members.
+drop policy "owners add members" on public.studio_members;
 
 revoke all on function public.create_studio(text, text), public.invite_member(uuid, text, public.studio_role),
   public.accept_invite(text), public.revoke_invite(uuid) from public, anon;

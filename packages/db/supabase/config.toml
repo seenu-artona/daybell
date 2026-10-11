@@ -28,6 +28,8 @@ enable_signup = true
 # Same as hosted projects: people must confirm their email before signing in.
 enable_confirmations = true
 double_confirm_changes = true
+# Changing a password needs a recent sign-in (or the emailed link), so a stolen session can't lock someone out.
+secure_password_change = true
 
 [auth.rate_limit]
 # Generous locally so the end-to-end tests aren't throttled.

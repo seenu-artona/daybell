@@ -1,4 +1,5 @@
 import { passwordResetRequestInput } from "@daybell/api";
+import { siteUrl } from "@daybell/config";
 import { NextResponse } from "next/server";
 import { handle, parseBody } from "@/lib/api";
 import { supabaseFor } from "@/lib/supabase/server";
@@ -7,9 +8,8 @@ import { supabaseFor } from "@/lib/supabase/server";
 export const POST = handle(async (request: Request) => {
   const input = await parseBody(request, passwordResetRequestInput);
   const supabase = await supabaseFor(input.region);
-  const origin = new URL(request.url).origin;
   await supabase.auth.resetPasswordForEmail(input.email, {
-    redirectTo: `${origin}/auth/confirm?next=/reset-password`,
+    redirectTo: `${siteUrl()}/auth/confirm?next=${encodeURIComponent("/set-password?next=/app")}`,
   });
   return NextResponse.json({ status: "check_email" }, { status: 202 });
 });

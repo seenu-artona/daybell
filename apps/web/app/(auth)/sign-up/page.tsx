@@ -4,14 +4,8 @@ import { SignUpForm } from "./sign-up-form";
 export default async function SignUpPage({
   searchParams,
 }: {
-  searchParams: Promise<{ invite?: string }>;
+  searchParams: Promise<{ join?: string }>;
 }) {
-  const { invite } = await searchParams;
-  const regions = availableRegions().map((r) => r.region);
-  return (
-    <SignUpForm
-      regions={regions}
-      inviteToken={invite && /^[0-9a-f]{64}$/.test(invite) ? invite : null}
-    />
-  );
+  const { join } = await searchParams;
+  return <SignUpForm regions={availableRegions().map((r) => r.region)} joining={join === "1"} />;
 }

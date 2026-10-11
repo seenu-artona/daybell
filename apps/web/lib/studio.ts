@@ -18,7 +18,19 @@ export async function ensureStudio(supabase: SupabaseClient, user: User): Promis
     .eq("user_id", user.id)
     .limit(1);
   if (data && data.length > 0) return;
-  check(await supabase.rpc("create_studio", { p_name: name, p_slug: slug }));
+  // If someone took the web address between sign-up and confirmation, add a short suffix rather than leave the
+  // person stuck; they can change it in settings.
+  for (const candidate of [slug, `${slug.slice(0, 35)}-${randomSuffix()}`]) {
+    const result = await supabase.rpc("create_studio", { p_name: name, p_slug: candidate });
+    if (!result.error) return;
+    if (result.error.code !== "23505") check(result);
+  }
+}
+
+function randomSuffix(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(2)), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 export async function currentStudio(

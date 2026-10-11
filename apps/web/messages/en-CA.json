@@ -157,23 +157,21 @@
     "regionFixed": "Your studio's data will be stored in {region}.",
     "signUp": {
       "title": "Start your studio",
-      "intro": "Everything GotPhoto does. 3% of what you sell, nothing if nothing sells.",
+      "intro": "Everything GotPhoto does. 3% of what you sell, nothing if nothing sells. We'll email you a link to get started.",
       "studioName": "Studio name",
       "studioSlug": "Studio web address",
       "studioSlugHelp": "Parents see this in links, e.g. {example}.",
       "email": "Your email",
-      "password": "Password",
-      "passwordHelp": "At least 12 characters. A short sentence is easiest to remember.",
-      "submit": "Create my studio",
+      "submit": "Email me a link",
       "haveAccount": "Already have an account?",
       "signInLink": "Sign in",
       "joinTitle": "Join your team on Daybell",
-      "joinIntro": "Create your account to accept the invite.",
-      "joinSubmit": "Create account"
+      "joinIntro": "Enter the email your invite was sent to. We'll send you a link.",
+      "joinSubmit": "Email me a link"
     },
     "checkEmail": {
       "title": "Check your inbox",
-      "body": "We sent a link to confirm your email. Open it on this device to finish setting up.",
+      "body": "We sent you a link. Open it on this device, then choose your password.",
       "resetBody": "If that email has a Daybell account, we sent a link to set a new password.",
       "back": "Back to sign in"
     },
@@ -193,12 +191,13 @@
       "email": "Email",
       "submit": "Send reset link"
     },
-    "reset": {
-      "title": "Choose a new password",
-      "password": "New password",
-      "submit": "Save password",
-      "done": "Password saved. Taking you to your studio…"
-    }
+    "setPassword": {
+      "title": "Choose your password",
+      "password": "Password",
+      "submit": "Save and continue",
+      "done": "Saved. Taking you in…"
+    },
+    "passwordHelp": "At least 12 characters. A short sentence is easiest to remember."
   },
   "app": {
     "loading": "Loading your studio…",

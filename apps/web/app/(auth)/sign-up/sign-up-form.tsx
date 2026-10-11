@@ -11,13 +11,11 @@ import { RegionField } from "@/components/region-field";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 
-export function SignUpForm({
-  regions,
-  inviteToken,
-}: {
-  regions: DataRegion[];
-  inviteToken: string | null;
-}) {
+/**
+ * Passwordless sign-up (ADR 0005): we email a link, and people choose their password after confirming.
+ * `joining` = someone invited to an existing studio, so no studio fields.
+ */
+export function SignUpForm({ regions, joining }: { regions: DataRegion[]; joining: boolean }) {
   const t = useTranslations("auth.signUp");
   const text = useApiText();
   const router = useRouter();
@@ -28,20 +26,14 @@ export function SignUpForm({
   const [fields, setFields] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const joining = inviteToken !== null;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const email = String(new FormData(e.currentTarget).get("email") ?? "");
     setBusy(true);
     setFormError(null);
-    const base = {
-      region,
-      email: String(form.get("email") ?? ""),
-      password: String(form.get("password") ?? ""),
-    };
     const res = await api("/auth/sign-up", {
-      body: joining ? { ...base, inviteToken } : { ...base, studioName, studioSlug },
+      body: joining ? { join: true, region, email } : { region, email, studioName, studioSlug },
     });
     setBusy(false);
     if (res.ok) {
@@ -97,15 +89,6 @@ export function SignUpForm({
         error={text.field(fields.email)}
         required
       />
-      <Field
-        label={t("password")}
-        name="password"
-        type="password"
-        autoComplete="new-password"
-        help={t("passwordHelp")}
-        error={text.field(fields.password)}
-        required
-      />
       <RegionField regions={regions} value={region} onChange={setRegion} showFixedNote={!joining} />
       <Button type="submit" block disabled={busy}>
         {joining ? t("joinSubmit") : t("submit")}
@@ -113,7 +96,7 @@ export function SignUpForm({
       <p className="m-0 text-center text-muted">
         {t("haveAccount")}{" "}
         <Link
-          href={joining ? `/sign-in?next=/invite/${inviteToken}` : "/sign-in"}
+          href={joining ? "/sign-in?next=/invite" : "/sign-in"}
           className="font-semibold text-primary"
         >
           {t("signInLink")}

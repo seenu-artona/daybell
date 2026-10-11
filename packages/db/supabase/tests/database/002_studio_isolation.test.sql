@@ -1,7 +1,7 @@
 -- Cross-studio leak tests (D96). Two studios, four people; nobody may see or touch the other studio.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(19);
+select plan(20);
 
 -- Setup as the database owner. This test database is a US database.
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
@@ -34,6 +34,11 @@ select throws_ok(
   '42501', null, 'owner A cannot add people to studio B'
 );
 delete from public.studio_members where studio_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+select throws_ok(
+  $$ insert into public.studio_members (studio_id, user_id, role)
+     values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '44444444-4444-4444-8444-444444444444', 'owner') $$,
+  '42501', null, 'owners cannot add people directly, only through invites'
+);
 select lives_ok(
   $$ update public.studios set name = 'Studio A Photo' where slug = 'studio-a' $$,
   'owner A can rename studio A'

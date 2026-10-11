@@ -1,4 +1,5 @@
 import { ApiError, inviteInput, type PendingInvite } from "@daybell/api";
+import { siteUrl } from "@daybell/config";
 import { NextResponse } from "next/server";
 import { check, handle, parseBody, requireUser } from "@/lib/api";
 import { currentStudio } from "@/lib/studio";
@@ -47,6 +48,7 @@ export const POST = handle(async (request: Request) => {
       p_role: input.role,
     }),
   ) as string;
-  const link = `${new URL(request.url).origin}/invite/${token}`;
+  // The token travels in the URL fragment (#), which browsers never send to servers, so it stays out of every log.
+  const link = `${siteUrl()}/invite#${token}`;
   return NextResponse.json({ link }, { status: 201 });
 });

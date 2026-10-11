@@ -7,8 +7,9 @@ import { type FormEvent, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 
-export default function ResetPasswordPage() {
-  const t = useTranslations("auth.reset");
+export function SetPasswordForm({ next }: { next: string }) {
+  const t = useTranslations("auth.setPassword");
+  const ta = useTranslations("auth");
   const text = useApiText();
   const router = useRouter();
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -23,7 +24,8 @@ export default function ResetPasswordPage() {
     setBusy(false);
     if (res.ok) {
       setMessage({ tone: "success", text: t("done") });
-      router.replace("/app");
+      router.replace(next);
+      router.refresh();
       return;
     }
     setFields(res.fields);
@@ -40,6 +42,7 @@ export default function ResetPasswordPage() {
         name="password"
         type="password"
         autoComplete="new-password"
+        help={ta("passwordHelp")}
         error={text.field(fields.password)}
         required
       />

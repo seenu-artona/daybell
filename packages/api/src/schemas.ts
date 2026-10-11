@@ -27,23 +27,25 @@ export const studioSlug = z
     error: "validation.slug",
   });
 
+/**
+ * Sign-up takes no password: people confirm their email first and choose a password after (ADR 0005). This stops
+ * anyone planting a password on someone else's email before they sign up (account pre-hijacking).
+ */
 export const signUpInput = z.object({
   studioName: z.string().trim().min(1, { error: "validation.studioName" }).max(120),
   studioSlug,
   region: z.enum(DATA_REGIONS),
   email,
-  password,
 });
 export type SignUpInput = z.infer<typeof signUpInput>;
 
 const inviteToken = z.string().regex(/^[0-9a-f]{64}$/, { error: "validation.inviteToken" });
 
-/** Someone invited to an existing studio creates their account; no new studio. */
+/** Someone invited to an existing studio creates their account (no new studio), then returns to the invite. */
 export const joinSignUpInput = z.object({
+  join: z.literal(true),
   region: z.enum(DATA_REGIONS),
   email,
-  password,
-  inviteToken,
 });
 export type JoinSignUpInput = z.infer<typeof joinSignUpInput>;
 
