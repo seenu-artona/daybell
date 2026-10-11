@@ -1,0 +1,13 @@
+{
+  "name": "@daybell/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Versioned API contracts shared by screens, public API and MCP server (D92).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
