@@ -1,5 +1,5 @@
 import { DATA_REGIONS } from "@daybell/config";
-import { JOB_STATUSES, JOB_TYPES, ORGANIZATION_KINDS } from "@daybell/core";
+import { JOB_STATUSES, JOB_TYPES } from "@daybell/core";
 import { z } from "zod";
 
 /**
@@ -52,8 +52,8 @@ export const ACTIVITY_TYPES = [
   "invite.created",
   "invite.accepted",
   "invite.withdrawn",
-  "organization.created",
-  "organization.updated",
+  "client.created",
+  "client.updated",
   "job.created",
   "job.updated",
 ] as const;
@@ -70,7 +70,7 @@ export const activityItem = z
       .meta({ description: "Who it was about, for member events." }),
     role: studioRole.nullable(),
     subjectName: z.string().nullable().meta({
-      description: "The job's or organization's current name, for job and organization events.",
+      description: "The job's or client's current name, for job and client events.",
     }),
     occurredAt: z.iso.datetime({ offset: true }),
   })
@@ -90,36 +90,44 @@ export const inviteCreatedResponse = z.object({
 export const activityResponse = z.object({ activity: z.array(activityItem) });
 export const checkEmailResponse = z.object({ status: z.literal("check_email") });
 
-// ── Organizations and jobs (Phase 1 step 1, ADR 0008) ─────────────────────────────────────────────────────────────
+// ── Clients and jobs (Phase 1 step 1, ADR 0008 and 0009) ──────────────────────────────────────────────────────────
 const nextCursor = z
   .uuid()
   .nullable()
   .meta({ description: "Pass as ?cursor= for the next page; null on the last page." });
 
-export const organization = z
+export const client = z
   .object({
     id: z.uuid(),
     name: z.string(),
-    kind: z.enum(ORGANIZATION_KINDS),
-    notes: z.string().nullable(),
     addressLine1: z.string().nullable(),
     addressLine2: z.string().nullable(),
+    postalCode: z.string().nullable(),
     city: z.string().nullable(),
     region: z.string().nullable().meta({ description: "State or province code." }),
-    postalCode: z.string().nullable(),
     country: z.enum(["US", "CA"]).nullable(),
+    contactFirstName: z.string().nullable(),
+    contactLastName: z.string().nullable(),
+    contactPhone: z.string().nullable(),
+    contactEmail: z.string().nullable(),
+    notes: z.string().nullable().meta({ description: "Only visible to the studio." }),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
   })
   .meta({
-    id: "Organization",
-    description: "A school, daycare, club or league the studio photographs for.",
+    id: "Client",
+    description: "A school, daycare, team or family the studio photographs for.",
   });
-export type Organization = z.infer<typeof organization>;
+export type Client = z.infer<typeof client>;
 
-export const organizationRef = z
+export const clientRef = z
   .object({ id: z.uuid(), name: z.string(), city: z.string().nullable() })
-  .meta({ id: "OrganizationRef" });
+  .meta({ id: "ClientRef" });
+
+export const jobCategory = z
+  .object({ id: z.uuid(), name: z.string(), position: z.number().int() })
+  .meta({ id: "JobCategory", description: "A studio's job category, e.g. Fall or Graduation." });
+export type JobCategory = z.infer<typeof jobCategory>;
 
 export const job = z
   .object({
@@ -127,8 +135,11 @@ export const job = z
     name: z.string(),
     type: z.enum(JOB_TYPES),
     status: z.enum(JOB_STATUSES).meta({ description: "New jobs are drafts." }),
-    pictureDay: z.iso.date().nullable(),
-    organization: organizationRef.nullable(),
+    pictureDay: z.iso.date(),
+    client: clientRef.nullable(),
+    internalNumber: z.string().meta({ description: "Only the studio sees it." }),
+    category: jobCategory.pick({ id: true, name: true }),
+    subjectsExpected: z.number().int().nullable(),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
   })
@@ -138,9 +149,11 @@ export type Job = z.infer<typeof job>;
 export const jobsResponse = z.object({ jobs: z.array(job), nextCursor });
 export type JobsResponse = z.infer<typeof jobsResponse>;
 export const jobResponse = z.object({ job });
-export const organizationsResponse = z.object({
-  organizations: z.array(organization),
-  nextCursor,
+export const nextJobNumberResponse = z.object({
+  internalNumber: z.string().meta({ description: "The next free JOBnnnnn number." }),
 });
-export type OrganizationsResponse = z.infer<typeof organizationsResponse>;
-export const organizationResponse = z.object({ organization });
+export const clientsResponse = z.object({ clients: z.array(client), nextCursor });
+export type ClientsResponse = z.infer<typeof clientsResponse>;
+export const clientResponse = z.object({ client });
+export const jobCategoriesResponse = z.object({ categories: z.array(jobCategory) });
+export type JobCategoriesResponse = z.infer<typeof jobCategoriesResponse>;

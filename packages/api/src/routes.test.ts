@@ -42,13 +42,17 @@ describe("API description", () => {
       "query:limit:false",
       "query:cursor:false",
     ]);
-    const orgs = doc.paths["/organizations"]?.get as { parameters: { name: string }[] };
-    expect(orgs.parameters.map((p) => p.name)).toContain("q");
+    const clients = doc.paths["/clients"]?.get as { parameters: { name: string }[] };
+    expect(clients.parameters.map((p) => p.name)).toContain("q");
   });
 
-  it("describes job and organization writes", () => {
+  it("describes jobs, clients and categories", () => {
     expect(doc.paths["/jobs/{id}"]).toHaveProperty("patch");
-    expect(doc.paths["/organizations/{id}"]).toHaveProperty("patch");
+    expect(doc.paths["/clients/{id}"]).toHaveProperty("patch");
+    expect(doc.paths["/jobs/next-number"]).toHaveProperty("get");
+    expect(doc.paths["/job-categories"]).toHaveProperty("get");
+    expect(doc.paths).not.toHaveProperty("/organizations");
+    expect(doc.components.schemas).toHaveProperty("Client");
     expect(doc.components.schemas).toHaveProperty("Job");
     expect(doc.tags.map((t) => t.name)).toEqual(expect.arrayContaining(["Jobs", "Contacts"]));
   });

@@ -1,17 +1,18 @@
 "use client";
 
-import type { Job, Organization, OrganizationsResponse } from "@daybell/api";
-import { JOB_TYPES, type JobType, jobTypeRule, organizationRequired } from "@daybell/core";
-import { Badge, Banner, Button, Card, Field } from "@daybell/ui";
+import type { Job } from "@daybell/api";
+import { groupLabel } from "@daybell/core";
+import { Badge, Banner, Button, Card } from "@daybell/ui";
 import { ArrowLeft, CircleDashed, Images, Pencil, Users } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
-import { Dialog, SelectField } from "../../dialog";
+import { Dialog } from "../../dialog";
 import { useStudio } from "../../me-context";
+import { JobForm } from "../job-form";
 import { StatusBadge, useFormatDay } from "../status-badge";
 
 // D75: the steps every job moves through. Nothing has happened yet in step 1, so all are upcoming.
@@ -82,13 +83,16 @@ export default function JobPage() {
 
   const facts = [
     {
-      key: "organization",
-      value: job.organization
-        ? [job.organization.name, job.organization.city].filter(Boolean).join(" · ")
-        : td("noOrganization"),
+      key: "client",
+      value: job.client
+        ? [job.client.name, job.client.city].filter(Boolean).join(" · ")
+        : td("noClient"),
     },
+    { key: "number", value: job.internalNumber },
+    { key: "category", value: job.category.name },
     { key: "type", value: t(`types.${job.type}`) },
-    { key: "pictureDay", value: job.pictureDay ? formatDay(job.pictureDay) : t("notSet") },
+    { key: "pictureDay", value: formatDay(job.pictureDay) },
+    { key: "subjects", value: job.subjectsExpected?.toString() ?? td("notSet") },
   ] as const;
 
   return (
@@ -157,15 +161,15 @@ export default function JobPage() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Soon icon={<Users className="size-5" />} title={td("roster")}>
-          {td("rosterBody", { group: jobTypeRule(job.type).group })}
+          {td("rosterBody", { group: groupLabel(job.type) })}
         </Soon>
         <Soon icon={<Images className="size-5" />} title={td("photos")}>
           {td("photosBody")}
         </Soon>
       </div>
 
-      <Dialog open={editing} onClose={() => setEditing(false)} title={td("editTitle")}>
-        <EditJob
+      <Dialog open={editing} onClose={() => setEditing(false)} title={t("form.editTitle")}>
+        <JobForm
           job={job}
           onCancel={() => setEditing(false)}
           onSaved={(next) => {
@@ -177,115 +181,5 @@ export default function JobPage() {
         />
       </Dialog>
     </>
-  );
-}
-
-function EditJob({
-  job,
-  onCancel,
-  onSaved,
-}: {
-  job: Job;
-  onCancel: () => void;
-  onSaved: (job: Job) => void;
-}) {
-  const t = useTranslations("app.jobs");
-  const td = useTranslations("app.jobs.detail");
-  const text = useApiText();
-  const [name, setName] = useState(job.name);
-  const [type, setType] = useState<JobType>(job.type);
-  const [pictureDay, setPictureDay] = useState(job.pictureDay ?? "");
-  const [organizationId, setOrganizationId] = useState(job.organization?.id ?? "");
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [problem, setProblem] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    api<OrganizationsResponse>("/organizations?limit=100").then((res) => {
-      if (res.ok) setOrganizations(res.data.organizations);
-    });
-  }, []);
-
-  // Keep the current organization choosable even if it isn't in the first page.
-  const options = [
-    ...(organizationRequired(type) ? [] : [{ value: "", label: td("noOrganization") }]),
-    ...(job.organization && !organizations.some((o) => o.id === job.organization?.id)
-      ? [{ value: job.organization.id, label: job.organization.name }]
-      : []),
-    ...organizations.map((o) => ({
-      value: o.id,
-      label: o.city ? `${o.name} · ${o.city}` : o.name,
-    })),
-  ];
-  // A type that needs an organization shows the first one chosen rather than none.
-  const chosen = organizationId || (organizationRequired(type) ? (options[0]?.value ?? "") : "");
-
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setErrors({});
-    setProblem(null);
-    const res = await api<{ job: Job }>(`/jobs/${job.id}`, {
-      method: "PATCH",
-      body: { name, type, pictureDay: pictureDay || null, organizationId: chosen || null },
-    });
-    setBusy(false);
-    if (res.ok) return onSaved(res.data.job);
-    setErrors(res.fields);
-    if (Object.keys(res.fields).length === 0) setProblem(text.error(res.code));
-  }
-
-  return (
-    <form onSubmit={save} noValidate className="flex flex-col gap-3">
-      {problem ? <Banner tone="danger" title={problem} /> : null}
-      <Field
-        label={t("wizard.name")}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        error={text.field(errors.name)}
-        required
-      />
-      <SelectField
-        label={td("type")}
-        value={type}
-        onChange={(v) => setType(v as JobType)}
-        options={JOB_TYPES.map((jt) => ({ value: jt, label: t(`types.${jt}`) }))}
-        error={text.field(errors.type)}
-      />
-      {options.length > 0 ? (
-        <SelectField
-          label={td("organization")}
-          value={chosen}
-          onChange={setOrganizationId}
-          options={options}
-          error={text.field(errors.organizationId)}
-        />
-      ) : (
-        // A type that needs an organization, and the studio has none yet: say where to add one.
-        <p className="m-0 text-sm text-muted">
-          {td("noOrganizationsYet")}{" "}
-          <Link href="/app/contacts/organizations" className="font-semibold text-primary">
-            {td("addOrganization")}
-          </Link>
-        </p>
-      )}
-      <Field
-        label={t("wizard.pictureDay")}
-        help={t("wizard.pictureDayHelp")}
-        type="date"
-        value={pictureDay}
-        onChange={(e) => setPictureDay(e.target.value)}
-        error={text.field(errors.pictureDay)}
-      />
-      <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
-        <Button variant="secondary" onClick={onCancel}>
-          {td("cancel")}
-        </Button>
-        <Button type="submit" disabled={busy}>
-          {busy ? td("saving") : td("save")}
-        </Button>
-      </div>
-    </form>
   );
 }

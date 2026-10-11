@@ -15,6 +15,6 @@ export function checklistSteps(state: { hasTeam: boolean; hasJob: boolean }): St
     { key: "brand", done: false, soon: true },
     { key: "products", done: false, soon: true },
     { key: "payouts", done: false, soon: true },
-    { key: "job", href: "/app/jobs/new", done: state.hasJob, soon: false },
+    { key: "job", href: "/app/jobs?new=1", done: state.hasJob, soon: false },
   ];
 }

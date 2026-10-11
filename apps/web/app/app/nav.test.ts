@@ -9,7 +9,7 @@ describe("sectionForPath", () => {
     expect(sectionForPath("/app/settings")).toBe("settings");
     expect(sectionForPath("/app/orders/123")).toBe("orders");
     expect(sectionForPath("/app/jobs/new")).toBe("jobs");
-    expect(sectionForPath("/app/contacts/organizations")).toBe("contacts");
+    expect(sectionForPath("/app/contacts/clients")).toBe("contacts");
   });
 
   it("highlights nothing for pages outside the menu", () => {
@@ -37,7 +37,7 @@ describe("checklistSteps", () => {
 
   it("links the job step to the wizard until a job exists", () => {
     const job = checklistSteps({ hasTeam: false, hasJob: false }).find((s) => s.key === "job");
-    expect(job).toMatchObject({ href: "/app/jobs/new", done: false, soon: false });
+    expect(job).toMatchObject({ href: "/app/jobs?new=1", done: false, soon: false });
     expect(
       checklistSteps({ hasTeam: false, hasJob: true }).find((s) => s.key === "job")?.done,
     ).toBe(true);

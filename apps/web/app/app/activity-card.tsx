@@ -38,8 +38,7 @@ export function ActivityCard({ refreshKey }: { refreshKey: number }) {
                   subject: item.subjectEmail ?? t("aTeammate"),
                   role: item.role ? tr(item.role).toLowerCase() : "",
                   name:
-                    item.subjectName ??
-                    (item.type.startsWith("job.") ? t("aJob") : t("anOrganization")),
+                    item.subjectName ?? (item.type.startsWith("job.") ? t("aJob") : t("aClient")),
                 })}
               </span>
               <time className="text-caption text-muted" dateTime={item.occurredAt}>
