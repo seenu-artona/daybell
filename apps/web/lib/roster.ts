@@ -53,9 +53,22 @@ export interface ChildRow {
   updated_at: string;
 }
 
+/** The child's code, or null when its encrypted copy can't be read (e.g. a wrong key); never breaks the list. */
+async function readableCode(row: ChildRow, keys: AccessCodeCryptoKeys): Promise<string | null> {
+  try {
+    return formatAccessCode(
+      await decryptAccessCode(row.access_code_ciphertext, row.id, keys.encryption),
+    );
+  } catch {
+    // A fixed event name and the child's id only: never the ciphertext, a code or a name (D96).
+    console.error("access_code_unreadable", row.id);
+    return null;
+  }
+}
+
 /** A child for the API, with the code decrypted for the studio to see (Seenu #2). */
 export async function toChild(row: ChildRow, keys: AccessCodeCryptoKeys): Promise<Child> {
-  const code = await decryptAccessCode(row.access_code_ciphertext, row.id, keys.encryption);
+  const accessCode = await readableCode(row, keys);
   return {
     id: row.id,
     jobId: row.job_id,
@@ -68,7 +81,7 @@ export async function toChild(row: ChildRow, keys: AccessCodeCryptoKeys): Promis
     doNotPhotograph: row.do_not_photograph,
     doNotPublish: row.do_not_publish,
     schoolProvided: row.school_provided,
-    accessCode: formatAccessCode(code),
+    accessCode,
     duplicate: row.duplicate ?? false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -179,11 +192,6 @@ export async function assertGroupInJob(
 
 type DbError = { code?: string; message?: string } | null;
 
-/** Two children were given the same code (astronomically rare): generate another and try again. */
-export function isCodeTaken(error: DbError): boolean {
-  return error?.code === "23505" && (error.message ?? "").includes("children_access_code_hash_key");
-}
-
 export function isGroupNameTaken(error: DbError): boolean {
   return error?.code === "23505" && (error.message ?? "").includes("job_groups_job_name_key");
 }
@@ -196,7 +204,7 @@ export const GROUP_NAME_TAKEN = new ApiError(
   },
 );
 
-/** The named failures import_roster raises (their messages carry no values). */
+/** The named failures add_child and import_roster raise (their messages carry no values). */
 export function isRpcError(
   error: DbError,
   name: "access_code_collision" | "roster_changed",
@@ -353,4 +361,58 @@ export async function importRpcRows(
       };
     }),
   );
+}
+
+type RpcResult = { data: unknown; error: DbError };
+
+/** Tries for codes: a taken code is astronomically rare, so three in a row means something else is wrong. */
+const CODE_ATTEMPTS = 3;
+
+/**
+ * Adds a child through add_child, with a fresh id and code on each try (`attempt` makes them). A taken code tries
+ * again; anything else is returned as it is.
+ */
+export async function addChildWithRetries(
+  attempt: () => PromiseLike<RpcResult>,
+): Promise<RpcResult> {
+  for (let tries = 1; ; tries++) {
+    const result = await attempt();
+    if (isRpcError(result.error, "access_code_collision") && tries < CODE_ATTEMPTS) continue;
+    return result;
+  }
+}
+
+export const ROSTER_CHANGED = new ApiError(
+  "conflict",
+  "The roster changed while importing. Please check the rows again.",
+);
+
+/**
+ * Saves an import through import_roster. `send` builds the rows for a plan (fresh codes each time) and calls the
+ * database. A taken code tries again with new codes (three tries in all); a matched child removed meanwhile
+ * (roster_changed) plans once more from the roster as it is now. Either happening again is a conflict the studio
+ * resolves by checking the rows again.
+ */
+export async function saveImport<P>(options: {
+  plan: P;
+  replan: () => Promise<P>;
+  send: (plan: P) => PromiseLike<RpcResult>;
+}): Promise<{ plan: P; data: unknown }> {
+  let plan = options.plan;
+  let collisions = 0;
+  let replanned = false;
+  for (;;) {
+    const result = await options.send(plan);
+    if (isRpcError(result.error, "access_code_collision")) {
+      if (++collisions < CODE_ATTEMPTS) continue;
+      throw ROSTER_CHANGED;
+    }
+    if (isRpcError(result.error, "roster_changed")) {
+      if (replanned) throw ROSTER_CHANGED;
+      replanned = true;
+      plan = await options.replan();
+      continue;
+    }
+    return { plan, data: check(result) };
+  }
 }

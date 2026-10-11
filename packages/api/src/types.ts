@@ -176,8 +176,9 @@ export const child = z
     schoolProvided: z
       .boolean()
       .meta({ description: "Roster data from the school; never used for marketing." }),
-    accessCode: z.string().meta({
-      description: "8 characters shown as K7QM-4XPA. Never put it in URLs or logs.",
+    accessCode: z.string().nullable().meta({
+      description:
+        "8 characters shown as K7QM-4XPA, or null if the stored copy can't be read. Never put it in URLs or logs.",
     }),
     duplicate: z.boolean().meta({
       description:

@@ -31,9 +31,9 @@ export const GET = handle(async (_request: Request, ctx: Ctx) => {
 /** POST /api/v1/jobs/:id/groups — owners, admins and photographers add a class, team or group. */
 export const POST = handle(async (request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
-  const input = await parseBody(request, groupInput);
   const { supabase, studio } = await studioScope();
   assertCanEditRoster(studio);
+  const input = await parseBody(request, groupInput);
   await loadRosterJob(supabase, studio.id, jobId);
   const result = await supabase
     .from("job_groups")

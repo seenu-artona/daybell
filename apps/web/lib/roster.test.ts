@@ -46,14 +46,27 @@ describe("toChild", () => {
     expect(Object.keys(child)).not.toContain("accessCodeHash");
   });
 
-  it("refuses a code copied from another child's row", async () => {
-    const other = await row({ id: "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f" });
-    await expect(
-      roster.toChild(
-        { ...other, access_code_ciphertext: (await row()).access_code_ciphertext },
-        keys,
-      ),
-    ).rejects.toThrow();
+  it("shows no code, logs only a fixed name and the id, for a copy it can't read", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const otherId = "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f";
+    const copied = {
+      ...(await row({ id: otherId })),
+      access_code_ciphertext: (await row()).access_code_ciphertext,
+    };
+    const child = await roster.toChild(copied, keys);
+    expect(child.accessCode).toBeNull();
+    expect(child).toMatchObject({ id: otherId, firstName: "Maya" });
+    expect(log.mock.calls).toEqual([["access_code_unreadable", otherId]]);
+    log.mockRestore();
+  });
+
+  it("never breaks the list over one unreadable row", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rows = [await row(), await row({ access_code_ciphertext: `v1.${"A".repeat(48)}` })];
+    const children = await Promise.all(rows.map((r) => roster.toChild(r, keys)));
+    expect(children.map((c) => c.accessCode)).toEqual(["K7QM-4XPA", null]);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/Maya|Johnson|v1\./);
+    log.mockRestore();
   });
 
   it("includes the class from list_children", async () => {
@@ -71,16 +84,16 @@ describe("toChild", () => {
 });
 
 describe("database error matchers", () => {
-  it("recognise a taken code, a taken class name and the import's named failures", () => {
-    const taken = {
-      code: "23505",
-      message: 'duplicate key value violates unique constraint "children_access_code_hash_key"',
-    };
-    expect(roster.isCodeTaken(taken)).toBe(true);
-    expect(roster.isGroupNameTaken(taken)).toBe(false);
+  it("recognise a taken class name and the named failures of add_child and import_roster", () => {
     expect(
       roster.isGroupNameTaken({ code: "23505", message: 'constraint "job_groups_job_name_key"' }),
     ).toBe(true);
+    expect(
+      roster.isGroupNameTaken({
+        code: "23505",
+        message: 'duplicate key value violates unique constraint "children_access_code_hash_key"',
+      }),
+    ).toBe(false);
     expect(
       roster.isRpcError(
         { code: "P0001", message: "access_code_collision" },
@@ -91,6 +104,72 @@ describe("database error matchers", () => {
       roster.isRpcError({ code: "P0001", message: "roster_changed" }, "access_code_collision"),
     ).toBe(false);
     expect(roster.isRpcError(null, "roster_changed")).toBe(false);
+  });
+});
+
+const COLLISION = { data: null, error: { code: "P0001", message: "access_code_collision" } };
+const CHANGED = { data: null, error: { code: "P0001", message: "roster_changed" } };
+const SAVED = { data: { added: 1, updated: 0, groups_added: 0 }, error: null };
+
+describe("addChildWithRetries", () => {
+  it("tries a new code after a collision, three tries in all", async () => {
+    const attempt = vi.fn().mockResolvedValueOnce(COLLISION).mockResolvedValueOnce(SAVED);
+    expect(await roster.addChildWithRetries(attempt)).toBe(SAVED);
+    expect(attempt).toHaveBeenCalledTimes(2);
+    const always = vi.fn().mockResolvedValue(COLLISION);
+    expect(await roster.addChildWithRetries(always)).toBe(COLLISION);
+    expect(always).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns other failures at once", async () => {
+    const denied = { data: null, error: { code: "42501", message: "denied" } };
+    const attempt = vi.fn().mockResolvedValue(denied);
+    expect(await roster.addChildWithRetries(attempt)).toBe(denied);
+    expect(attempt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("saveImport", () => {
+  it("sends again with new codes after a collision", async () => {
+    const send = vi.fn().mockResolvedValueOnce(COLLISION).mockResolvedValueOnce(SAVED);
+    const replan = vi.fn();
+    const result = await roster.saveImport({ plan: "p1", replan, send });
+    expect(result).toEqual({ plan: "p1", data: SAVED.data });
+    expect(send.mock.calls).toEqual([["p1"], ["p1"]]);
+    expect(replan).not.toHaveBeenCalled();
+  });
+
+  it("gives up as a conflict after three collisions", async () => {
+    const send = vi.fn().mockResolvedValue(COLLISION);
+    await expect(roster.saveImport({ plan: "p1", replan: vi.fn(), send })).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(send).toHaveBeenCalledTimes(3);
+  });
+
+  it("plans again once when the roster changed, then saves with the new plan", async () => {
+    const send = vi.fn().mockResolvedValueOnce(CHANGED).mockResolvedValueOnce(SAVED);
+    const replan = vi.fn().mockResolvedValue("p2");
+    const result = await roster.saveImport({ plan: "p1", replan, send });
+    expect(result.plan).toBe("p2");
+    expect(send.mock.calls).toEqual([["p1"], ["p2"]]);
+    expect(replan).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a conflict if the roster changes again after planning again", async () => {
+    const send = vi.fn().mockResolvedValue(CHANGED);
+    const replan = vi.fn().mockResolvedValue("p2");
+    await expect(roster.saveImport({ plan: "p1", replan, send })).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("turns other database errors into API errors", async () => {
+    const send = vi.fn().mockResolvedValue({ data: null, error: { code: "42501", message: "x" } });
+    await expect(roster.saveImport({ plan: "p1", replan: vi.fn(), send })).rejects.toMatchObject({
+      code: "forbidden",
+    });
   });
 });
 

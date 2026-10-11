@@ -7,9 +7,9 @@ import { assertCanEditRoster, studioScope } from "@/lib/studio";
 /** PATCH /api/v1/groups/:id — owners, admins and photographers rename a class, team or group. */
 export const PATCH = handle(async (request: Request, ctx: { params: Promise<{ id: string }> }) => {
   const id = await pathId(ctx, "Group not found.");
-  const input = await parseBody(request, groupPatch);
   const { supabase, studio } = await studioScope();
   assertCanEditRoster(studio);
+  const input = await parseBody(request, groupPatch);
   const result = await supabase
     .from("job_groups")
     .update({ name: input.name })

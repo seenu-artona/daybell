@@ -64,13 +64,20 @@ export async function me(
   return { email: user.email ?? "", studio: await currentStudio(supabase, user, region) };
 }
 
-/** The signed-in person's studio and a client acting as them; every query is still filtered by RLS (D96). */
-export async function studioScope(): Promise<{ supabase: SupabaseClient; studio: StudioSummary }> {
+/**
+ * The signed-in person's studio and a client acting as them; every query is still filtered by RLS (D96). userId is
+ * the verified person, for the server-only code writes that act for them (ADR 0011).
+ */
+export async function studioScope(): Promise<{
+  supabase: SupabaseClient;
+  studio: StudioSummary;
+  userId: string;
+}> {
   const { region, supabase } = await supabaseForSession();
   const user = await requireUser(supabase);
   const studio = await currentStudio(supabase, user, region);
   if (!studio) throw new ApiError("not_found", "You're not part of a studio yet.");
-  return { supabase, studio };
+  return { supabase, studio, userId: user.id };
 }
 
 /** Owners and admins only. The database enforces this too; checking first gives a clear error instead of no change. */

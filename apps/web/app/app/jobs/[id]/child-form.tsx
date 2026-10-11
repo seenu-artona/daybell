@@ -197,9 +197,13 @@ export function ChildForm({
         {child ? (
           <dl className="m-0 flex items-baseline gap-3">
             <dt className="text-label text-muted">{t("accessCode")}</dt>
-            <dd className="m-0 font-mono text-base font-semibold tracking-wider">
-              {child.accessCode}
-            </dd>
+            {child.accessCode ? (
+              <dd className="m-0 font-mono text-base font-semibold tracking-wider">
+                {child.accessCode}
+              </dd>
+            ) : (
+              <dd className="m-0 text-muted">{tr("codeUnavailable")}</dd>
+            )}
           </dl>
         ) : null}
         <div className="grid gap-5 sm:grid-cols-2">

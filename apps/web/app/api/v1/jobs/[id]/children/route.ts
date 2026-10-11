@@ -4,11 +4,11 @@ import { accessCodeCryptoKeys, newAccessCode } from "@/lib/access-codes";
 import { check, handle, parseBody, parseQuery } from "@/lib/api";
 import { page } from "@/lib/jobs";
 import {
+  addChildWithRetries,
   assertGroupInJob,
   CHILD_COLUMNS,
   type ChildRow,
   childColumns,
-  isCodeTaken,
   isDuplicate,
   loadRoster,
   loadRosterJob,
@@ -16,6 +16,7 @@ import {
   toChild,
 } from "@/lib/roster";
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
+import { codeWriteRpc } from "@/lib/supabase/service";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -50,38 +51,47 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
 
 /**
  * POST /api/v1/jobs/:id/children — owners, admins and photographers add a child. The server generates the access code
- * (CSPRNG), stores its hash and an encrypted copy, and tries a new code if one were ever taken.
+ * (CSPRNG), stores its hash and an encrypted copy through add_child (server-only, ADR 0011), and tries a new code if one
+ * were ever taken.
  */
 export const POST = handle(async (request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
-  const input = await parseBody(request, childInput);
-  const { supabase, studio } = await studioScope();
+  // Who and what role first: nobody else gets as far as reading the body (S4).
+  const { supabase, studio, userId } = await studioScope();
   assertCanEditRoster(studio);
+  const input = await parseBody(request, childInput);
   await loadRosterJob(supabase, studio.id, jobId);
   const group = await assertGroupInJob(supabase, studio.id, jobId, input.groupId);
   const keys = await accessCodeCryptoKeys();
-  for (let attempt = 0; ; attempt++) {
-    const id = crypto.randomUUID();
-    const code = await newAccessCode(studio.region, id, keys);
-    const result = await supabase
+  let id = "";
+  check(
+    await addChildWithRetries(async () => {
+      id = crypto.randomUUID();
+      const code = await newAccessCode(studio.region, id, keys);
+      return codeWriteRpc(studio.region, "add_child", userId, {
+        p_job_id: jobId,
+        p_child: {
+          id,
+          ...childColumns(input),
+          access_code_hash: code.hash,
+          access_code_ciphertext: code.ciphertext,
+        },
+      });
+    }),
+  );
+  // Read back as the signed-in person, through row-level security.
+  const row = check(
+    await supabase
       .from("children")
-      .insert({
-        id,
-        studio_id: studio.id,
-        job_id: jobId,
-        ...childColumns(input),
-        access_code_hash: code.hash,
-        access_code_ciphertext: code.ciphertext,
-      })
       .select(CHILD_COLUMNS)
-      .single();
-    if (isCodeTaken(result.error) && attempt < 2) continue;
-    const row = check(result) as ChildRow;
-    const roster = await loadRoster(supabase, studio.id, jobId);
-    const child = await toChild(
-      { ...row, group_name: group?.name ?? null, duplicate: isDuplicate(roster.children, id) },
-      keys,
-    );
-    return NextResponse.json({ child }, { status: 201 });
-  }
+      .eq("studio_id", studio.id)
+      .eq("id", id)
+      .single(),
+  ) as ChildRow;
+  const roster = await loadRoster(supabase, studio.id, jobId);
+  const child = await toChild(
+    { ...row, group_name: group?.name ?? null, duplicate: isDuplicate(roster.children, id) },
+    keys,
+  );
+  return NextResponse.json({ child }, { status: 201 });
 });

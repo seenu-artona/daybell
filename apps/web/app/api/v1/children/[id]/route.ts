@@ -22,9 +22,9 @@ type Ctx = { params: Promise<{ id: string }> };
 /** PATCH /api/v1/children/:id — owners, admins and photographers change a child. The access code never changes. */
 export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const id = await pathId(ctx, "Child not found.");
-  const patch = await parseBody(request, childPatch);
   const { supabase, studio } = await studioScope();
   assertCanEditRoster(studio);
+  const patch = await parseBody(request, childPatch);
   const current = check(
     await supabase
       .from("children")

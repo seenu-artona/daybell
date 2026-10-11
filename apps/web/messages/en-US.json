@@ -550,6 +550,7 @@
       "edit": "Edit {name}",
       "editShort": "Edit",
       "loadMore": "Show more",
+      "codeUnavailable": "Code unavailable",
       "saved": "Saved.",
       "removed": "Child removed.",
       "imported": "Roster imported: {added} added, {updated} updated.",
