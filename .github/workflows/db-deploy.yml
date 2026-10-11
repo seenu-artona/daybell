@@ -49,6 +49,12 @@ jobs:
           # Errors are reported as annotations with any connection string removed, so they are readable in the
           # GitHub UI and API without ever exposing the secret.
           fail() { echo "::error title=$1::$(sed -E 's#postgres(ql)?://[^ ]+#<db-url>#g' "$2" | tail -c 900 | tr '\n' ' ')"; exit 1; }
+          # 1) Plain Postgres login first, so a wrong password is told apart from a tool problem.
+          psql "$DB_URL" -tAc "select 'connected'" > login.log 2>&1 || fail "Database login failed ($REGION)" login.log
+          # 2) The Supabase CLI also reads the password from SUPABASE_DB_PASSWORD; pass it explicitly (URL-decoded).
+          SUPABASE_DB_PASSWORD="$(python3 -c 'import sys,urllib.parse as u; print(u.unquote(u.urlsplit(sys.argv[1]).password or ""))' "$DB_URL")"
+          echo "::add-mask::$SUPABASE_DB_PASSWORD"
+          export SUPABASE_DB_PASSWORD
           supabase db push --workdir packages/db --db-url "$DB_URL" --yes > push.log 2>&1 || fail "Applying migrations failed ($REGION)" push.log
           # Record this database's region on first deploy only; it can never change afterwards.
           psql "$DB_URL" -v ON_ERROR_STOP=1 -c \
