@@ -3,7 +3,13 @@ import { API_ERROR_CODES, type ApiErrorCode, STATUS_FOR } from "./errors";
 import {
   acceptInviteInput,
   inviteInput,
+  jobInput,
+  jobPatch,
   joinSignUpInput,
+  listQuery,
+  organizationInput,
+  organizationListQuery,
+  organizationPatch,
   passwordResetRequestInput,
   passwordUpdateInput,
   signInInput,
@@ -14,7 +20,11 @@ import {
   checkEmailResponse,
   inviteCreatedResponse,
   invitesResponse,
+  jobResponse,
+  jobsResponse,
   meResponse,
+  organizationResponse,
+  organizationsResponse,
   teamResponse,
 } from "./types";
 
@@ -24,13 +34,17 @@ import {
  */
 export type Access = "public" | "signed-in" | "owner-admin" | "owner";
 
+export const ROUTE_GROUPS = ["Account", "Team", "Studio", "Jobs", "Contacts"] as const;
+
 export interface RouteSpec {
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
-  group: "Account" | "Studio" | "Team";
+  group: (typeof ROUTE_GROUPS)[number];
   summary: string;
   description?: string;
   access: Access;
+  /** Query string parameters, for lists. */
+  query?: z.ZodObject;
   body?: z.ZodType;
   success: { status: 200 | 201 | 202 | 204; schema?: z.ZodType; description: string };
   errors: ApiErrorCode[];
@@ -172,6 +186,90 @@ export const ROUTES: RouteSpec[] = [
     },
     errors: ["not_signed_in", "forbidden", "not_found"],
   },
+  {
+    method: "GET",
+    path: "/jobs",
+    group: "Jobs",
+    summary: "The studio's jobs",
+    description: "Newest first, in pages (keyset pagination).",
+    access: "signed-in",
+    query: listQuery,
+    success: { status: 200, schema: jobsResponse, description: "A page of jobs." },
+    errors: ["invalid_input", "not_signed_in", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/jobs",
+    group: "Jobs",
+    summary: "Create a job",
+    description:
+      "New jobs are drafts. School, preschool, sports and dance jobs need an organization of the same studio.",
+    access: "owner-admin",
+    body: jobInput,
+    success: { status: 201, schema: jobResponse, description: "Job created." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}",
+    group: "Jobs",
+    summary: "One job",
+    access: "signed-in",
+    success: { status: 200, schema: jobResponse, description: "The job." },
+    errors: ["not_signed_in", "not_found"],
+  },
+  {
+    method: "PATCH",
+    path: "/jobs/{id}",
+    group: "Jobs",
+    summary: "Change a job",
+    description: "Send only the fields to change. The status can't be changed here.",
+    access: "owner-admin",
+    body: jobPatch,
+    success: { status: 200, schema: jobResponse, description: "The changed job." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "GET",
+    path: "/organizations",
+    group: "Contacts",
+    summary: "The studio's organizations",
+    description: "Schools, daycares, clubs and leagues, by name, in pages (keyset pagination).",
+    access: "signed-in",
+    query: organizationListQuery,
+    success: {
+      status: 200,
+      schema: organizationsResponse,
+      description: "A page of organizations.",
+    },
+    errors: ["invalid_input", "not_signed_in", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/organizations",
+    group: "Contacts",
+    summary: "Add an organization",
+    description: "Quebec addresses are not accepted yet. Names don't need to be unique.",
+    access: "owner-admin",
+    body: organizationInput,
+    success: { status: 201, schema: organizationResponse, description: "Organization added." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "PATCH",
+    path: "/organizations/{id}",
+    group: "Contacts",
+    summary: "Change an organization",
+    description: "Send only the fields to change. Send null to clear an optional field.",
+    access: "owner-admin",
+    body: organizationPatch,
+    success: {
+      status: 200,
+      schema: organizationResponse,
+      description: "The changed organization.",
+    },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
 ];
 
 const errorBody = {
@@ -200,8 +298,12 @@ type Json = Record<string, unknown>;
  * JSON Schema (2020-12, which OpenAPI 3.1 uses) for a zod schema. Named shapes (`.meta({ id })`) are moved into
  * `components.schemas` and referenced from there, so every `$ref` in openapi.json resolves.
  */
-function json(schema: z.ZodType, components: Record<string, Json>): Json {
-  const out = z.toJSONSchema(schema, { unrepresentable: "any" }) as Json;
+function json(
+  schema: z.ZodType,
+  components: Record<string, Json>,
+  io: "input" | "output" = "output",
+): Json {
+  const out = z.toJSONSchema(schema, { unrepresentable: "any", io }) as Json;
   delete out.$schema;
   const defs = (out.$defs ?? {}) as Record<string, Json>;
   delete out.$defs;
@@ -216,12 +318,29 @@ export function buildOpenApi(serverUrl: string) {
   const paths: Record<string, Record<string, unknown>> = {};
   const components: Record<string, Json> = {};
   for (const r of ROUTES) {
-    const params = [...r.path.matchAll(/\{(\w+)\}/g)].map((m) => ({
+    const params: Json[] = [...r.path.matchAll(/\{(\w+)\}/g)].map((m) => ({
       name: m[1],
       in: "path",
       required: true,
       schema: { type: "string", format: "uuid" },
     }));
+    if (r.query) {
+      // Described as the client sends it: parameters with defaults are optional.
+      const query = json(r.query, components, "input") as {
+        properties?: Record<string, Json>;
+        required?: string[];
+      };
+      for (const [name, schema] of Object.entries(query.properties ?? {})) {
+        const { description, ...rest } = schema;
+        params.push({
+          name,
+          in: "query",
+          required: query.required?.includes(name) ?? false,
+          ...(description ? { description } : {}),
+          schema: rest,
+        });
+      }
+    }
     const responses: Record<string, unknown> = {
       [r.success.status]: {
         description: r.success.description,
@@ -264,7 +383,7 @@ export function buildOpenApi(serverUrl: string) {
         "Every Daybell screen uses this same API (D92). Today it authenticates with the session cookie set by sign-in; API keys for integrations come later.",
     },
     servers: [{ url: `${serverUrl}/api/v1` }],
-    tags: [{ name: "Account" }, { name: "Team" }, { name: "Studio" }],
+    tags: ROUTE_GROUPS.map((name) => ({ name })),
     paths,
     components: { schemas: components },
   };

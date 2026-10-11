@@ -10,7 +10,9 @@ export function useApiText() {
     field: (key: string | undefined) =>
       key?.startsWith("validation.")
         ? tv(key.slice("validation.".length) as Parameters<typeof tv>[0])
-        : key,
+        : key
+          ? tv("invalid")
+          : undefined,
     error: (code: string) => {
       const k = (code in ERROR_KEYS ? code : "internal") as Parameters<typeof te>[0];
       return te(k);

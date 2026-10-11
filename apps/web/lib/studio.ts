@@ -1,8 +1,9 @@
 import "server-only";
-import type { MeResponse, StudioRole, StudioSummary } from "@daybell/api";
+import { ApiError, type MeResponse, type StudioRole, type StudioSummary } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { check } from "./api";
+import { check, requireUser } from "./api";
+import { supabaseForSession } from "./supabase/server";
 
 /**
  * After the email is confirmed, create the studio the person asked for at sign-up (saved on their account then).
@@ -60,4 +61,19 @@ export async function me(
   region: DataRegion,
 ): Promise<MeResponse> {
   return { email: user.email ?? "", studio: await currentStudio(supabase, user, region) };
+}
+
+/** The signed-in person's studio and a client acting as them; every query is still filtered by RLS (D96). */
+export async function studioScope(): Promise<{ supabase: SupabaseClient; studio: StudioSummary }> {
+  const { region, supabase } = await supabaseForSession();
+  const user = await requireUser(supabase);
+  const studio = await currentStudio(supabase, user, region);
+  if (!studio) throw new ApiError("not_found", "You're not part of a studio yet.");
+  return { supabase, studio };
+}
+
+/** Owners and admins only. The database enforces this too; checking first gives a clear error instead of no change. */
+export function assertCanManage(studio: StudioSummary): void {
+  if (studio.role !== "owner" && studio.role !== "admin")
+    throw new ApiError("forbidden", "Owners and admins only.");
 }

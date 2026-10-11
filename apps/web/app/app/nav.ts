@@ -13,10 +13,10 @@ import {
 /** The studio app's sections, in menu order (D126). `built: false` shows as "Soon" (D128). */
 export const SECTIONS = [
   { key: "home", href: "/app", icon: House, built: true, tab: true },
-  { key: "jobs", href: "/app/jobs", icon: Camera, built: false, tab: true },
+  { key: "jobs", href: "/app/jobs", icon: Camera, built: true, tab: true },
   { key: "orders", href: "/app/orders", icon: ShoppingBag, built: false, tab: true },
   { key: "products", href: "/app/products", icon: Package, built: false, tab: false },
-  { key: "contacts", href: "/app/contacts", icon: Users, built: false, tab: false },
+  { key: "contacts", href: "/app/contacts", icon: Users, built: true, tab: false },
   { key: "marketing", href: "/app/marketing", icon: Megaphone, built: false, tab: false },
   { key: "money", href: "/app/money", icon: CircleDollarSign, built: false, tab: false },
   { key: "reports", href: "/app/reports", icon: ChartColumn, built: false, tab: false },

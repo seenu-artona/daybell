@@ -68,6 +68,7 @@ export function fromDatabaseError(
     case "23505":
       return new ApiError("conflict", "That already exists.");
     case "23514":
+    case "23503":
     case "22P02":
       return new ApiError("invalid_input", "Please check what you entered.");
     default:

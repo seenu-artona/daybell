@@ -1,6 +1,6 @@
 "use client";
 
-import type { PendingInvite, TeamMember } from "@daybell/api";
+import type { JobsResponse, PendingInvite, TeamMember } from "@daybell/api";
 import { formatMoney, money } from "@daybell/core";
 import { Badge } from "@daybell/ui";
 import { Camera, ChevronDown, Megaphone, Package, Palette, Plug, UserPlus } from "lucide-react";
@@ -64,15 +64,18 @@ export default function HomePage() {
   const canManage = studio.role === "owner" || studio.role === "admin";
   const [range, setRange] = useState<(typeof RANGES)[number]>("week");
   const [hasTeam, setHasTeam] = useState<boolean | null>(null);
+  const [hasJob, setHasJob] = useState<boolean | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: version re-checks after team changes.
   useEffect(() => {
     Promise.all([
       api<{ team: TeamMember[] }>("/studio/team"),
       canManage ? api<{ invites: PendingInvite[] }>("/studio/invites") : Promise.resolve(null),
-    ]).then(([team, invites]) => {
+      api<JobsResponse>("/jobs?limit=1"),
+    ]).then(([team, invites, jobs]) => {
       const members = team.ok ? team.data.team.length : 1;
       setHasTeam(members > 1 || (invites?.ok ? invites.data.invites.length > 0 : false));
+      setHasJob(jobs.ok ? jobs.data.jobs.length > 0 : false);
     });
   }, [version, canManage]);
 
@@ -88,7 +91,8 @@ export default function HomePage() {
     { key: "averageOrder", value: th("dash"), money: false },
   ] as const;
 
-  const steps = hasTeam === null ? [] : checklistSteps({ hasTeam }).filter((s) => !s.done);
+  const loading = hasTeam === null || hasJob === null;
+  const steps = loading ? [] : checklistSteps({ hasTeam, hasJob }).filter((s) => !s.done);
 
   return (
     <>
@@ -143,7 +147,7 @@ export default function HomePage() {
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
         <Panel title={th("needsYou")}>
-          {hasTeam === null ? (
+          {loading ? (
             <p className="m-0 border-t border-line px-5 py-4 text-muted">{th("checking")}</p>
           ) : steps.length === 0 ? (
             <p className="m-0 border-t border-line px-5 py-4 text-muted">{th("nothingNeeded")}</p>
@@ -170,12 +174,12 @@ export default function HomePage() {
                     </span>
                     {step.soon ? (
                       <Badge tone="draft">{t("checklist.soon")}</Badge>
-                    ) : step.href ? (
+                    ) : step.href && (step.key !== "job" || canManage) ? (
                       <Link
                         href={step.href}
                         className="inline-flex min-h-11 items-center px-2 font-semibold text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
                       >
-                        {th("actions.invite")}
+                        {th(`actions.${step.key as "team" | "job"}`)}
                         <span className="sr-only"> — {t(`checklist.${step.key}`)}</span>
                       </Link>
                     ) : null}

@@ -6,7 +6,10 @@ import { supabaseForSession } from "@/lib/supabase/server";
 
 const KNOWN = new Set<string>(ACTIVITY_TYPES);
 
-/** GET /api/v1/studio/activity — the latest 50 things that happened in the studio (owners and admins, D96). */
+/**
+ * GET /api/v1/studio/activity — the latest 50 things that happened in the studio (owners and admins, D96).
+ * Names (people, jobs, organizations) are resolved when read, never stored in events.
+ */
 export const GET = handle(async () => {
   const { region, supabase } = await supabaseForSession();
   const user = await requireUser(supabase);
@@ -28,6 +31,31 @@ export const GET = handle(async () => {
   const emails = new Map(
     ((check(team) ?? []) as { user_id: string; email: string }[]).map((m) => [m.user_id, m.email]),
   );
+  // Events hold IDs only; job and organization names are looked up now, so they are always current.
+  const subjectsOf = (prefix: string) => [
+    ...new Set(
+      rows.filter((e) => e.type.startsWith(prefix) && e.subject_id).map((e) => e.subject_id),
+    ),
+  ];
+  const [jobIds, organizationIds] = [subjectsOf("job."), subjectsOf("organization.")];
+  const [jobs, organizations] = await Promise.all([
+    jobIds.length
+      ? supabase.from("jobs").select("id, name").eq("studio_id", studio.id).in("id", jobIds)
+      : null,
+    organizationIds.length
+      ? supabase
+          .from("organizations")
+          .select("id, name")
+          .eq("studio_id", studio.id)
+          .in("id", organizationIds)
+      : null,
+  ]);
+  const names = new Map<string, string>(
+    [
+      ...(jobs ? (check(jobs) ?? []) : []),
+      ...(organizations ? (check(organizations) ?? []) : []),
+    ].map((r: { id: string; name: string }) => [r.id, r.name]),
+  );
 
   const activity: ActivityItem[] = rows
     .filter((e) => KNOWN.has(e.type))
@@ -40,6 +68,7 @@ export const GET = handle(async () => {
         subjectEmail:
           e.subject_id && e.type.startsWith("member.") ? (emails.get(e.subject_id) ?? null) : null,
         role: data.to ?? data.role ?? null,
+        subjectName: e.subject_id ? (names.get(e.subject_id) ?? null) : null,
         occurredAt: e.occurred_at,
       };
     });
