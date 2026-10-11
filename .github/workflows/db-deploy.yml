@@ -1,0 +1,54 @@
+name: Deploy database (staging)
+
+# Applies migrations to both staging databases when they change on main (D113: one database per region).
+# Secrets live in the GitHub Environment "staging" (Settings > Environments), limited to the main branch so no
+# other branch or workflow can read them:
+#   STAGING_DB_URL_US, STAGING_DB_URL_CA  - each project's Postgres connection string (session pooler)
+on:
+  push:
+    branches: [main]
+    paths: ["packages/db/supabase/migrations/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - region: us
+            secret: STAGING_DB_URL_US
+          - region: ca
+            secret: STAGING_DB_URL_CA
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
+        with:
+          version: 2.118.0
+      - name: Apply migrations and record the region
+        # A region whose secret isn't set yet is skipped, so adding the US later is just adding its secret (D122).
+        env:
+          DB_URL: ${{ secrets[matrix.secret] }}
+          REGION: ${{ matrix.region }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "No database configured for region '$REGION' yet; skipping."
+            exit 0
+          fi
+          supabase db push --workdir packages/db --db-url "$DB_URL"
+          # Record this database's region on first deploy only; it can never change afterwards.
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c \
+            "insert into app.config (key, value) values ('data_region', '$REGION') on conflict (key) do nothing;"
+          got=$(psql "$DB_URL" -tAc "select value from app.config where key = 'data_region'")
+          test "$got" = "$REGION" || { echo "Region mismatch: database says '$got'"; exit 1; }
