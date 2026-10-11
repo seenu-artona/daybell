@@ -67,6 +67,9 @@ jobs:
           echo "NEXT_PUBLIC_SUPABASE_URL_CA=$API_URL" >> "$GITHUB_ENV"
           echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY_CA=${PUBLISHABLE_KEY:-$ANON_KEY}" >> "$GITHUB_ENV"
           echo "SITE_URL=http://localhost:3000" >> "$GITHUB_ENV"
+          # Access code keys (ADR 0011): fixed, test-only values for this throwaway database. Never used anywhere else.
+          echo "ACCESS_CODE_HMAC_KEY=Y2ktdGVzdC1vbmx5LWFjY2Vzcy1jb2RlLWhtYWMtMDE=" >> "$GITHUB_ENV"
+          echo "ACCESS_CODE_ENCRYPTION_KEY=Y2ktdGVzdC1vbmx5LWFjY2Vzcy1jb2RlLWFlcy1rMDE=" >> "$GITHUB_ENV"
       # Build through Turborepo exactly as Vercel does, so undeclared settings fail here, not in previews.
       - run: pnpm turbo run build --filter=@daybell/web
       - run: pnpm --filter @daybell/web exec playwright install --with-deps chromium
