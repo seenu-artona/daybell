@@ -1,4 +1,3 @@
-import { notFound } from "next/navigation";
 import { SOON_SECTIONS } from "../nav";
 import { ComingSoon } from "./coming-soon";
 
@@ -11,7 +10,7 @@ export function generateStaticParams() {
 export const dynamicParams = false;
 
 export default async function SectionPage({ params }: { params: Promise<{ section: string }> }) {
+  // dynamicParams = false: any other section is a 404 before this runs.
   const { section } = await params;
-  if (!ALLOWED.has(section)) notFound();
   return <ComingSoon section={section} />;
 }

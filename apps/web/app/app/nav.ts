@@ -26,9 +26,12 @@ export const SECTIONS = [
 export type SectionKey = (typeof SECTIONS)[number]["key"];
 export const SOON_SECTIONS = SECTIONS.filter((s) => !s.built).map((s) => s.key.toString());
 
-export function sectionForPath(pathname: string): SectionKey {
-  const match = [...SECTIONS]
-    .reverse()
-    .find((s) => s.href !== "/app" && pathname.startsWith(s.href));
-  return match?.key ?? "home";
+/** Which menu item to highlight for a path; null for pages outside the menu (e.g. the shop preview). */
+export function sectionForPath(pathname: string): SectionKey | null {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (path === "/app") return "home";
+  const match = SECTIONS.find(
+    (s) => s.href !== "/app" && (path === s.href || path.startsWith(`${s.href}/`)),
+  );
+  return match?.key ?? null;
 }

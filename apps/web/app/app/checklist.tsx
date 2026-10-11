@@ -7,14 +7,8 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client-api";
+import { checklistSteps } from "./checklist-steps";
 import { useStudio } from "./me-context";
-
-interface Step {
-  key: "studio" | "team" | "brand" | "products" | "payouts" | "job";
-  href?: string;
-  done: boolean;
-  soon: boolean;
-}
 
 /** "Get ready to sell" (D127). Leads Home until every step is done, then disappears. */
 export function Checklist() {
@@ -36,14 +30,7 @@ export function Checklist() {
   }, [version, canInvite]);
 
   if (hasTeam === null) return null;
-  const steps: Step[] = [
-    { key: "studio", done: true, soon: false },
-    { key: "team", href: "/app/settings", done: hasTeam, soon: false },
-    { key: "brand", done: false, soon: true },
-    { key: "products", done: false, soon: true },
-    { key: "payouts", done: false, soon: true },
-    { key: "job", done: false, soon: true },
-  ];
+  const steps = checklistSteps({ hasTeam });
   const done = steps.filter((s) => s.done).length;
   if (done === steps.length) return null;
 

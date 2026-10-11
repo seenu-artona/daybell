@@ -60,6 +60,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
 
+  // The drawer is for small screens; if the window grows past the desktop breakpoint, close it so the page stays usable.
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => {
+      if (desktop.matches) drawer.current?.close();
+    };
+    desktop.addEventListener("change", onChange);
+    return () => desktop.removeEventListener("change", onChange);
+  }, []);
+
   useEffect(() => {
     api<MeResponse>("/me").then((res) => {
       if (res.ok) setMe(res.data);
@@ -88,14 +98,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <dialog
         ref={drawer}
-        aria-label={t("nav.label")}
+        aria-label={t("nav.menu")}
         className="m-0 h-dvh max-h-dvh w-[264px] bg-ink p-0 backdrop:bg-ink/50 lg:hidden"
       >
         <button
           type="button"
           onClick={() => drawer.current?.close()}
           aria-label={t("nav.closeMenu")}
-          className="absolute top-3 right-3 z-10 grid size-11 place-items-center rounded-md text-white/80 hover:bg-white/10"
+          className="absolute top-3 right-3 z-10 grid size-11 place-items-center rounded-md text-white/80 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-lime"
         >
           <X className="size-5" aria-hidden="true" />
         </button>
@@ -108,7 +118,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             onClick={() => drawer.current?.showModal()}
             aria-label={t("nav.openMenu")}
-            className="grid size-11 place-items-center rounded-md hover:bg-subtle lg:hidden"
+            className="grid size-11 place-items-center rounded-md hover:bg-subtle focus-visible:outline-2 focus-visible:outline-primary lg:hidden"
           >
             <Menu className="size-5" aria-hidden="true" />
           </button>

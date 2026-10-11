@@ -261,11 +261,11 @@
       "settings": "Settings",
       "soon": "Soon",
       "openMenu": "Open menu",
-      "closeMenu": "Close menu"
+      "closeMenu": "Close menu",
+      "menu": "Menu"
     },
     "top": {
       "search": "Search",
-      "searchShortcut": "⌘K",
       "searchPlaceholder": "Jump to…",
       "searchEmpty": "No matches.",
       "help": "Help",
@@ -275,7 +275,10 @@
       "viewShop": "View my shop",
       "account": "Account",
       "signedInAs": "Signed in as",
-      "close": "Close"
+      "close": "Close",
+      "searchShortcutMac": "⌘K",
+      "searchShortcutOther": "Ctrl K",
+      "searchResults": "{count, plural, =0 {No matches} one {# result} other {# results}}"
     },
     "soon": {
       "title": "{section} is coming soon",

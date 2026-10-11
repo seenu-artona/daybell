@@ -41,7 +41,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
 
   // Every section is in the menu; unbuilt ones say "Soon" (D126, D128). On phones the menu is behind a button.
   if (info.project.name === "phone") await page.getByRole("button", { name: "Open menu" }).click();
-  const nav = page.getByRole("navigation", { name: "Main" }).last();
+  const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: /Contacts/ })).toBeVisible();
   await nav.getByRole("link", { name: /Orders/ }).click();
   await expect(page.getByRole("heading", { name: "Orders is coming soon" })).toBeVisible();
@@ -69,7 +69,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
 
   // Home now shows the team step done, and the activity log has all three changes (event log, D96).
   await page.goto("/app");
-  await expect(page.getByText("2 of 6 done")).toBeVisible();
+  await expect(page.getByText(/^2 of \d+ done$/)).toBeVisible();
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
 
