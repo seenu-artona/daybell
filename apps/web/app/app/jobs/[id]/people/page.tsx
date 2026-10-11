@@ -102,9 +102,14 @@ function PeoplePage() {
     refreshSummary();
   }
 
-  function open(childId: string) {
+  /** Notes who opened the panel: focus moves to it, and returns to this row when it closes. */
+  function opened(childId: string) {
     opener.current = childId;
     setPanelFocus(childId);
+  }
+
+  function open(childId: string) {
+    opened(childId);
     router.replace(childHref(childId), { scroll: false });
   }
 
@@ -242,6 +247,7 @@ function PeoplePage() {
                 selectedId={selected?.id ?? null}
                 childHref={childHref}
                 onOpen={open}
+                onLinkOpen={opened}
                 onRename={canEdit ? setRenaming : null}
                 word={word}
                 busy={roster.loadingMore}

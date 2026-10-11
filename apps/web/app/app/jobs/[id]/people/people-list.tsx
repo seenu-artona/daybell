@@ -27,6 +27,7 @@ export function PeopleList({
   selectedId,
   childHref,
   onOpen,
+  onLinkOpen,
   onRename,
   word,
   busy,
@@ -37,7 +38,10 @@ export function PeopleList({
   onToggle: (key: string) => void;
   selectedId: string | null;
   childHref: (childId: string) => string;
+  /** A row was clicked: open the child (the page updates the URL). */
   onOpen: (childId: string) => void;
+  /** The name link was used: it updates the URL itself; the page only notes who opened the panel. */
+  onLinkOpen: (childId: string) => void;
   /** Roster editors rename a class from its heading; null for everyone else. */
   onRename: ((group: { id: string; name: string }) => void) | null;
   word: GroupLabel;
@@ -118,6 +122,7 @@ export function PeopleList({
                             replace
                             scroll={false}
                             aria-current={selected ? "true" : undefined}
+                            onClick={() => onLinkOpen(child.id)}
                             className="font-semibold text-ink no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
                           >
                             {child.firstName} {child.lastName}

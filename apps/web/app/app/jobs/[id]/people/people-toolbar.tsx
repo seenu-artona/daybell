@@ -144,7 +144,7 @@ export function PeopleToolbar({
         triggerClassName={`${BAR_CONTROL} min-h-0 min-w-0`}
         panelClassName="w-56 p-3"
       >
-        {(close) => (
+        {() => (
           <fieldset className="m-0 flex flex-col border-0 p-0">
             <legend className="mb-1 p-0 text-label text-ink">{t("groupByLegend")}</legend>
             {(["group", "none"] as const).map((value) => (
@@ -156,10 +156,8 @@ export function PeopleToolbar({
                   type="radio"
                   name={`${id}-group-by`}
                   checked={groupBy === value}
-                  onChange={() => {
-                    onGroupBy(value);
-                    close();
-                  }}
+                  // Stays open: arrow keys move between radios and change the choice as they go.
+                  onChange={() => onGroupBy(value)}
                   className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 />
                 {value === "group" ? tr("filter", { group: word }) : t("groupNone")}
