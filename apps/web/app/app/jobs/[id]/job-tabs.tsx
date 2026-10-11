@@ -32,6 +32,7 @@ export function JobTabs() {
                 }`}
               >
                 {t(tab.key)}
+                {count !== undefined && count > 0 ? " " : null}
                 {count !== undefined && count > 0 ? (
                   <span className="rounded-full bg-subtle px-2 text-caption font-semibold text-ink">
                     <span aria-hidden="true">{count}</span>

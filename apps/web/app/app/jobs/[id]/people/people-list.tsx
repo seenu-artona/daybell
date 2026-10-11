@@ -83,7 +83,7 @@ export function PeopleList({
                       ) : (
                         <ChevronRight className="size-4" aria-hidden="true" />
                       )}
-                      {name}
+                      {name}{" "}
                       <span className="font-medium text-muted">
                         {tr("childCount", { count: section.rows.length })}
                       </span>

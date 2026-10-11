@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * End-to-end tests against a real local Supabase (`supabase start`) and a production build of the app.
- * CI runs them on every pull request; the Phase 0 "Done when" list is the script (D10).
+ * CI runs them on every pull request, except tests tagged @load, which run on pushes to main (ADR 0013).
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -16,7 +16,8 @@ export default defineConfig({
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },
-    { name: "phone", use: { ...devices["Pixel 7"] } },
+    // The studio app is desktop only (D136; ADR 0013); phone tests cover the parent shop, in shop-*.spec.ts files.
+    { name: "phone", use: { ...devices["Pixel 7"] }, testMatch: /shop-.*\.spec\.ts$/ },
   ],
   webServer: {
     command: "pnpm start --port 3000",
