@@ -22,7 +22,6 @@ import {
   clientsResponse,
   inviteCreatedResponse,
   invitesResponse,
-  jobCategoriesResponse,
   jobResponse,
   jobsResponse,
   meResponse,
@@ -205,7 +204,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Jobs",
     summary: "Create a job",
     description:
-      "New jobs are drafts. The client (optional) and category must belong to the same studio. Without an internalNumber, the next JOBnnnnn number is used.",
+      "New jobs are drafts. The client (optional) must belong to the same studio. Without an internalNumber, the next JOBnnnnn number is used.",
     access: "owner-admin",
     body: jobInput,
     success: { status: 201, schema: jobResponse, description: "Job created." },
@@ -240,21 +239,6 @@ export const ROUTES: RouteSpec[] = [
     body: jobPatch,
     success: { status: 200, schema: jobResponse, description: "The changed job." },
     errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
-  },
-  {
-    method: "GET",
-    path: "/job-categories",
-    group: "Jobs",
-    summary: "The studio's job categories",
-    description:
-      "Every studio starts with Fall, Spring, Graduation, Sports, Dance, Yearbook and Other.",
-    access: "signed-in",
-    success: {
-      status: 200,
-      schema: jobCategoriesResponse,
-      description: "Categories in their display order.",
-    },
-    errors: ["not_signed_in", "not_found"],
   },
   {
     method: "GET",

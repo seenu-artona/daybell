@@ -89,7 +89,6 @@ export default function JobPage() {
         : td("noClient"),
     },
     { key: "number", value: job.internalNumber },
-    { key: "category", value: job.category.name },
     { key: "type", value: t(`types.${job.type}`) },
     { key: "pictureDay", value: formatDay(job.pictureDay) },
     { key: "subjects", value: job.subjectsExpected?.toString() ?? td("notSet") },

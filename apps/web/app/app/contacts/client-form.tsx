@@ -64,19 +64,24 @@ function body(draft: ClientDraft) {
   };
 }
 
-const LEGEND = "mb-2 p-0 text-title-sm font-bold";
+const LEGEND = "mb-3 p-0 text-title-sm";
+const SECTION = "m-0 flex flex-col gap-5 border-0 p-0";
+const PAIR = "grid gap-5 sm:grid-cols-2";
 
 /**
- * Add or edit a client (GotPhoto "Add new client"): name, address, contact person and private notes. Used in
- * Contacts › Clients and on top of the job form. Address labels follow the studio's region: State / ZIP code in the
- * US, Province / Postal code in Canada.
+ * Add or edit a client: name, address, contact person and notes, laid out by the D133 form rules (two columns on
+ * desktop, one on phones, hints as placeholders). Used in Contacts › Clients and on top of the job form. Address
+ * labels follow the studio's region: State / ZIP code in the US, Province / Postal code in Canada.
  */
 export function ClientForm({
   client,
+  initialName = "",
   onCancel,
   onSaved,
 }: {
   client: Client | null;
+  /** For a new client: the name typed in the job form's client field, if any. */
+  initialName?: string;
   onCancel: () => void;
   onSaved: (client: Client) => void;
 }) {
@@ -84,7 +89,10 @@ export function ClientForm({
   const text = useApiText();
   const { me, changed } = useStudio();
   const region = me.studio.region;
-  const [draft, setDraft] = useState(() => draftFor(client, region));
+  const [draft, setDraft] = useState(() => ({
+    ...draftFor(client, region),
+    ...(client ? {} : { name: initialName }),
+  }));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -119,11 +127,11 @@ export function ClientForm({
   }
 
   return (
-    <form onSubmit={save} noValidate className="flex flex-col gap-5">
+    <form onSubmit={save} noValidate className="flex flex-col gap-6">
       {problem ? <Banner tone="danger" title={problem} /> : null}
       <Field label={t("form.name")} required autoComplete="organization" {...input("name")} />
 
-      <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
+      <fieldset className={SECTION}>
         <legend className={LEGEND}>{t("form.address")}</legend>
         <Field
           label={optional(t("form.addressLine1"))}
@@ -135,12 +143,7 @@ export function ClientForm({
           autoComplete="address-line2"
           {...input("addressLine2")}
         />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field
-            label={optional(t(`address.${region}.postalCode`))}
-            autoComplete="postal-code"
-            {...input("postalCode")}
-          />
+        <div className={PAIR}>
           <Field
             label={optional(t("form.city"))}
             autoComplete="address-level2"
@@ -148,10 +151,17 @@ export function ClientForm({
           />
           <Field
             label={optional(t(`address.${region}.region`))}
-            help={t(`address.${region}.regionHelp`)}
+            placeholder={t(`address.${region}.regionPlaceholder`)}
             autoComplete="address-level1"
             maxLength={2}
             {...input("region")}
+          />
+        </div>
+        <div className={PAIR}>
+          <Field
+            label={optional(t(`address.${region}.postalCode`))}
+            autoComplete="postal-code"
+            {...input("postalCode")}
           />
           <SelectField
             label={t("form.country")}
@@ -163,9 +173,9 @@ export function ClientForm({
         </div>
       </fieldset>
 
-      <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
+      <fieldset className={SECTION}>
         <legend className={LEGEND}>{t("form.contact")}</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className={PAIR}>
           <Field
             label={optional(t("form.firstName"))}
             autoComplete="off"
@@ -176,6 +186,8 @@ export function ClientForm({
             autoComplete="off"
             {...input("contactLastName")}
           />
+        </div>
+        <div className={PAIR}>
           <Field
             label={optional(t("form.phone"))}
             type="tel"
@@ -194,7 +206,7 @@ export function ClientForm({
 
       <TextAreaField
         label={optional(t("form.notes"))}
-        help={t("form.notesHelp")}
+        placeholder={t("form.notesPlaceholder")}
         {...input("notes")}
       />
 
@@ -203,7 +215,7 @@ export function ClientForm({
           {t("form.cancel")}
         </Button>
         <Button type="submit" disabled={busy}>
-          {busy ? t("form.saving") : t("form.save")}
+          {busy ? t("form.saving") : client ? t("form.save") : t("form.add")}
         </Button>
       </div>
     </form>

@@ -150,10 +150,9 @@ describe("clients", () => {
 });
 
 describe("jobs", () => {
-  const category = "3f6c1a52-8d3e-4b6a-9c1f-2e7d5a9b0c11";
-  const ok = { name: "Fall", type: "school", pictureDay: "2026-10-14", categoryId: category };
+  const ok = { name: "Fall", type: "school", pictureDay: "2026-10-14" };
 
-  it("need a name, picture day, type and category; client and number are optional", () => {
+  it("need a name, picture day and type; client and number are optional", () => {
     expect(jobInput.safeParse(ok).success).toBe(true);
     const result = jobInput.safeParse({ name: "", type: "school" });
     expect(result.success).toBe(false);
@@ -161,7 +160,6 @@ describe("jobs", () => {
       expect(fieldErrors(result.error)).toMatchObject({
         name: "validation.jobName",
         pictureDay: "validation.pictureDay",
-        categoryId: "validation.category",
       });
   });
 

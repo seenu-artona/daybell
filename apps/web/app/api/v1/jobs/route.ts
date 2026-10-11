@@ -2,7 +2,7 @@ import { jobInput, listQuery } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { check, filterValue, handle, parseBody, parseQuery } from "@/lib/api";
 import {
-  assertJobReferences,
+  assertClientInStudio,
   isNumberTaken,
   JOB_COLUMNS,
   type JobRow,
@@ -52,7 +52,7 @@ export const POST = handle(async (request: Request) => {
   const input = await parseBody(request, jobInput);
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
-  await assertJobReferences(supabase, studio.id, input);
+  await assertClientInStudio(supabase, studio.id, input.clientId);
   for (let attempt = 0; ; attempt++) {
     const internalNumber = input.internalNumber ?? (await nextJobNumber(supabase, studio.id));
     const result = await supabase

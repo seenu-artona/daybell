@@ -46,11 +46,11 @@ describe("API description", () => {
     expect(clients.parameters.map((p) => p.name)).toContain("q");
   });
 
-  it("describes jobs, clients and categories", () => {
+  it("describes jobs and clients", () => {
     expect(doc.paths["/jobs/{id}"]).toHaveProperty("patch");
     expect(doc.paths["/clients/{id}"]).toHaveProperty("patch");
     expect(doc.paths["/jobs/next-number"]).toHaveProperty("get");
-    expect(doc.paths["/job-categories"]).toHaveProperty("get");
+    expect(doc.paths).not.toHaveProperty("/job-categories");
     expect(doc.paths).not.toHaveProperty("/organizations");
     expect(doc.components.schemas).toHaveProperty("Client");
     expect(doc.components.schemas).toHaveProperty("Job");

@@ -1,24 +1,27 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
-// Phase 1 step 1 "Jobs and clients" (ADR 0008, 0009): an owner adds a client in Contacts, creates a job in the
-// one-form dialog picking that client, then creates a second job adding a new client from inside the job dialog.
+// Phase 1 step 1 "Jobs and clients" (ADR 0008–0010): an owner adds a client in Contacts, creates a job in the
+// one-form dialog picking that client in the combobox, then creates a second job adding a new client from the
+// combobox's last option.
 // The CI database is Canadian (D122), so address labels read Province / Postal code.
 const run = `${Date.now()}`;
 
 /** Fills the client form inside `dialog`. */
-async function fillClient(dialog: Locator, name: string, province: string) {
-  await dialog.getByLabel("Client name", { exact: true }).fill(name);
+async function fillClient(dialog: Locator, name: string | null, province: string) {
+  if (name !== null) await dialog.getByLabel("Client name", { exact: true }).fill(name);
   await dialog.getByLabel(/^City/).fill("Toronto");
   await dialog.getByLabel(/^Province/).fill(province);
   await dialog.getByLabel(/^First name/).fill("Pat");
   await dialog.getByLabel(/^Email/).fill("pat@example.test");
 }
 
-/** The job dialog, opened from Jobs. */
+/** The job dialog, opened from Jobs. "More options" starts closed, with the next number inside it. */
 async function openJobDialog(page: Page, button: string): Promise<Locator> {
   await page.getByRole("main").getByRole("button", { name: button, exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Create photo job" });
+  const dialog = page.getByRole("dialog", { name: "Create job" });
+  await expect(dialog.getByLabel("Internal job number")).toBeHidden();
+  await dialog.getByText("More options", { exact: true }).click();
   await expect(dialog.getByLabel("Internal job number")).toHaveValue(/^JOB\d{5}$/);
   return dialog;
 }
@@ -45,30 +48,30 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   // The tab reads "Children" followed by a "Soon" badge.
   await expect(main.getByText(/^Children/)).toBeVisible();
   await main.getByRole("button", { name: "Add client", exact: true }).click();
-  const addClient = page.getByRole("dialog", { name: "Add new client" });
+  const addClient = page.getByRole("dialog", { name: "Add client" });
   await fillClient(addClient, client, "QC");
   await expect(addClient.getByLabel("Country")).toHaveValue("CA");
-  await addClient.getByRole("button", { name: "Save client" }).click();
+  await addClient.getByRole("button", { name: "Add client", exact: true }).click();
   await expect(addClient.getByText("Daybell isn't available in Quebec yet")).toBeVisible();
   await addClient.getByLabel(/^Province/).fill("ON");
-  await addClient.getByRole("button", { name: "Save client" }).click();
+  await addClient.getByRole("button", { name: "Add client", exact: true }).click();
   await expect(addClient).toBeHidden();
   await expect(main.getByRole("cell", { name: client, exact: true })).toBeVisible();
 
-  // 2. Jobs is empty; create the first job in the dialog, picking the client.
+  // 2. Jobs is empty; create the first job in the dialog, picking the client in the combobox.
   await page.goto("/app/jobs");
   await expect(main.getByRole("heading", { name: "No jobs yet" })).toBeVisible();
   let dialog = await openJobDialog(page, "Create your first job");
   await expect(dialog.getByLabel("Internal job number")).toHaveValue("JOB00001");
   await dialog.getByLabel("Job name").fill(job);
-  await dialog.getByLabel("Date of picture day").fill("2026-10-14");
-  await dialog.getByLabel("Search your clients").fill("Lincoln");
-  await dialog.getByRole("button", { name: new RegExp(client) }).click();
-  await expect(dialog.getByText(`Selected client: ${client}`)).toBeAttached();
+  await dialog.getByLabel("Picture day").fill("2026-10-14");
   await dialog.getByLabel("Job type").selectOption("school");
-  await dialog.getByLabel("Job category").selectOption({ label: "Fall" });
+  let combobox = dialog.getByRole("combobox", { name: "Client (optional)" });
+  await combobox.fill("Lincoln");
+  await dialog.getByRole("option", { name: new RegExp(client) }).click();
+  await expect(combobox).toHaveValue(client);
   await dialog.getByLabel(/^Subjects expected/).fill("120");
-  await dialog.getByRole("button", { name: "Save job" }).click();
+  await dialog.getByRole("button", { name: "Create job", exact: true }).click();
 
   // The job page: details, the D75 progress steps, and sections still to come.
   await expect(page).toHaveURL(/\/app\/jobs\/[0-9a-f-]{36}$/);
@@ -76,7 +79,6 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(main.getByText("Draft", { exact: true })).toBeVisible();
   await expect(main.getByText(`${client} · Toronto`, { exact: true })).toBeVisible();
   await expect(main.getByText("JOB00001", { exact: true })).toBeVisible();
-  await expect(main.getByText("Fall", { exact: true })).toBeVisible();
   await expect(main.getByText("120", { exact: true })).toBeVisible();
   for (const stage of ["Picture day", "Tagged", "Shop live", "Shipped"]) {
     await expect(main.getByRole("listitem").filter({ hasText: stage })).toContainText("Upcoming");
@@ -86,29 +88,39 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await main.getByRole("button", { name: "Edit job" }).click();
   const edit = page.getByRole("dialog", { name: "Edit job" });
   await edit.getByLabel("Job name").fill(`${job} (edited)`);
-  await edit.getByRole("button", { name: "Save job" }).click();
+  await edit.getByRole("button", { name: "Save changes" }).click();
   await expect(main.getByRole("heading", { name: `${job} (edited)`, level: 1 })).toBeVisible();
 
-  // 3. A second job adds a new client from inside the job dialog; Escape closes only the client dialog.
+  // 3. A second job adds a new client from the combobox's last option. Escape closes only the top dialog.
   await page.goto("/app/jobs");
   dialog = await openJobDialog(page, "New job");
   await expect(dialog.getByLabel("Internal job number")).toHaveValue("JOB00002");
   await dialog.getByLabel("Job name").fill(`Westview Spring ${tag}`);
-  await dialog.getByLabel("Date of picture day").fill("2027-04-02");
-  await dialog.getByRole("button", { name: "Add new client" }).click();
-  const nested = page.getByRole("dialog", { name: "Add new client" });
-  await expect(nested).toBeVisible();
+  await dialog.getByLabel("Picture day").fill("2027-04-02");
+  await dialog.getByLabel("Job type").selectOption("sports");
+  combobox = dialog.getByRole("combobox", { name: "Client (optional)" });
+  await combobox.fill(newClient);
+  // No client matches yet, so the list holds only "Add new client".
+  await expect(dialog.getByRole("option")).toHaveCount(1);
+  // Escape closes the list, not the dialog.
+  await combobox.press("Escape");
+  await expect(combobox).toHaveAttribute("aria-expanded", "false");
+  await expect(dialog).toBeVisible();
+  await combobox.fill(newClient);
+  await dialog.getByRole("option", { name: "Add new client" }).click();
+  const nested = page.getByRole("dialog", { name: "Add client" });
+  await expect(nested.getByLabel("Client name", { exact: true })).toHaveValue(newClient);
   await page.keyboard.press("Escape");
   await expect(nested).toBeHidden();
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Add new client" }).click();
-  await fillClient(nested, newClient, "ON");
-  await nested.getByRole("button", { name: "Save client" }).click();
+  await combobox.click();
+  await dialog.getByRole("option", { name: "Add new client" }).click();
+  await nested.getByLabel("Client name", { exact: true }).fill(newClient);
+  await fillClient(nested, null, "ON");
+  await nested.getByRole("button", { name: "Add client", exact: true }).click();
   await expect(nested).toBeHidden();
-  await expect(dialog.getByText(`Selected client: ${newClient}`)).toBeAttached();
-  await dialog.getByLabel("Job type").selectOption("sports");
-  await dialog.getByLabel("Job category").selectOption({ label: "Spring" });
-  await dialog.getByRole("button", { name: "Save job" }).click();
+  await expect(combobox).toHaveValue(newClient);
+  await dialog.getByRole("button", { name: "Create job", exact: true }).click();
   await expect(
     main.getByRole("heading", { name: `Westview Spring ${tag}`, level: 1 }),
   ).toBeVisible();
@@ -123,7 +135,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
 
   // Home's "Create job" link opens the same dialog.
   await page.goto("/app/jobs?new=1");
-  await expect(page.getByRole("dialog", { name: "Create photo job" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Create job" })).toBeVisible();
   await page.keyboard.press("Escape");
 
   // The activity log names jobs and clients by looking them up, never from the event (D96).
