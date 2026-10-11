@@ -1,9 +1,16 @@
 export { Badge, type BadgeProps, badgeVariants } from "./components/badge";
 export { Button, type ButtonProps, buttonVariants } from "./components/button";
-export { Card, CardMeta, CardTitle } from "./components/card";
+export { Card, CardMeta, type CardProps, CardRow, CardTitle } from "./components/card";
 export { Celebration, type CelebrationProps } from "./components/celebration";
 export { Banner, type BannerProps, Toast } from "./components/feedback";
 export { Field, type FieldProps } from "./components/field";
+export { IconButton, type IconButtonProps, iconButtonVariants } from "./components/icon-button";
+export {
+  ICON_CHIP_TONES,
+  IconChip,
+  type IconChipProps,
+  type IconChipTone,
+} from "./components/icon-chip";
 export { clampPercent, JobProgress, type JobProgressProps } from "./components/job-progress";
 export { MoneyStat, type MoneyStatProps, Stat } from "./components/money-stat";
 export { PhotoTile, type PhotoTileProps } from "./components/photo-tile";
