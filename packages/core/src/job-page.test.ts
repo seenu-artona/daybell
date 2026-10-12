@@ -15,17 +15,28 @@ describe("qrCardsDone", () => {
 });
 
 describe("sellChecklist", () => {
-  const none = { children: 0, taggingReviewed: false, hasPriceList: false };
+  const none = {
+    children: 0,
+    taggingReviewed: false,
+    hasPriceList: false,
+    payoutsConnected: false,
+  };
 
-  it("marks the roster, reviewed tagging and the price list done; the rest are coming soon (ADR 0018, 0019)", () => {
+  it("marks the roster, reviewed tagging, the price list and payouts done; photos are coming soon (ADR 0018-0020)", () => {
     expect(sellChecklist(none).filter((i) => i.done)).toEqual([]);
-    const items = sellChecklist({ children: 4, taggingReviewed: true, hasPriceList: true });
+    const items = sellChecklist({
+      children: 4,
+      taggingReviewed: true,
+      hasPriceList: true,
+      payoutsConnected: true,
+    });
     expect(items.filter((i) => i.done).map((i) => i.key)).toEqual([
       "roster",
       "tagging",
       "priceList",
+      "payouts",
     ]);
-    expect(items.filter((i) => i.soon).map((i) => i.key)).toEqual(["photos", "payouts"]);
+    expect(items.filter((i) => i.soon).map((i) => i.key)).toEqual(["photos"]);
     expect(items.every((i) => !(i.done && i.soon))).toBe(true);
     expect(sellChecklist({ ...none, children: 4 }).find((i) => i.key === "tagging")).toEqual({
       key: "tagging",
@@ -37,6 +48,22 @@ describe("sellChecklist", () => {
       done: false,
       soon: false,
     });
+    expect(sellChecklist(none).find((i) => i.key === "payouts")).toEqual({
+      key: "payouts",
+      done: false,
+      soon: false,
+    });
+  });
+
+  it("treats Payouts connected the same for every studio: real, never coming soon (Seenu, Oct 12)", () => {
+    for (const payoutsConnected of [true, false])
+      expect(sellChecklist({ ...none, payoutsConnected }).find((i) => i.key === "payouts")).toEqual(
+        {
+          key: "payouts",
+          done: payoutsConnected,
+          soon: false,
+        },
+      );
   });
 });
 

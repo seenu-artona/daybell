@@ -14,6 +14,7 @@ import {
   MAX_PHOTOS_PER_MOVE,
   MAX_PRICE_LIST_ITEMS,
   MAX_SHIPPING_CENTS,
+  PAYOUT_WEEKDAY_CHOICES,
   PHOTO_PAGE_SIZE,
   PRICE_ITEM_KINDS,
   PRICE_LIST_NAME_MAX,
@@ -906,3 +907,36 @@ export function suggestSlug(name: string): string {
     .slice(0, 40)
     .replace(/-+$/g, "");
 }
+
+// ── Payouts (Phase 1 step 7, ADR 0020) ────────────────────────────────────────────────────────────────────────────
+
+/** The owner's payout schedule (Seenu, answer 3 and Q6): weekly on a weekday, daily, or monthly on a date. */
+export const payoutScheduleInput = z.discriminatedUnion(
+  "interval",
+  [
+    z.strictObject(
+      {
+        interval: z.literal("weekly"),
+        weeklyAnchor: z.enum(PAYOUT_WEEKDAY_CHOICES, { error: "validation.payoutWeekday" }).meta({
+          description: "Monday to Friday.",
+        }),
+      },
+      { error: "validation.unknownField" },
+    ),
+    z.strictObject({ interval: z.literal("daily") }, { error: "validation.unknownField" }),
+    z.strictObject(
+      {
+        interval: z.literal("monthly"),
+        monthlyAnchor: z
+          .number({ error: "validation.payoutMonthDay" })
+          .int({ error: "validation.payoutMonthDay" })
+          .min(1, { error: "validation.payoutMonthDay" })
+          .max(31, { error: "validation.payoutMonthDay" })
+          .meta({ description: "1-31; 29-31 fall on the last day of shorter months." }),
+      },
+      { error: "validation.unknownField" },
+    ),
+  ],
+  { error: "validation.payoutInterval" },
+);
+export type PayoutScheduleInput = z.infer<typeof payoutScheduleInput>;

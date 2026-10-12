@@ -110,3 +110,39 @@ export function photoSystemRpc(
 ) {
   return serviceClient(region).rpc(fn, args);
 }
+
+/**
+ * Payout writes (ADR 0020): browsers never write payout accounts (Stripe ids and status must never be chosen by a
+ * browser). Only from route handlers after studioScope() and assertCanManagePayouts(); each acts for the person and checks again
+ * that they are the owner.
+ */
+export type PayoutWriteRpc = "create_payout_account" | "set_payout_schedule";
+
+export function payoutWriteRpc(
+  region: DataRegion,
+  fn: PayoutWriteRpc,
+  actorId: string,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, { p_actor: actorId, ...args });
+}
+
+/**
+ * Payout work nobody signed in does: Stripe's webhook (only after its signature is checked) and the status refresh
+ * (only after studioScope() and the owner-or-admin check). Each copies what Stripe says about one account it names.
+ */
+export type PayoutSystemRpc =
+  | "record_stripe_event"
+  | "finish_stripe_event"
+  | "sync_payout_account"
+  | "sync_payout"
+  // The per-studio budget of calls to Stripe (rate limit), after the route's own role check.
+  | "take_stripe_call";
+
+export function payoutSystemRpc(
+  region: DataRegion,
+  fn: PayoutSystemRpc,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, args);
+}

@@ -5,6 +5,11 @@ import {
   JOB_TYPES,
   MILESTONES,
   ONBOARDING_TASKS,
+  PAYOUT_ACCOUNT_STATUSES,
+  PAYOUT_INTERVALS,
+  PAYOUT_METHODS,
+  PAYOUT_STATUSES,
+  PAYOUT_WEEKDAYS,
   PHOTO_FLAGS,
   PHOTO_PLACES,
   PRICE_ITEM_KINDS,
@@ -771,7 +776,7 @@ export const studioChecklistResponse = z
       .nullable()
       .meta({
         description:
-          "The studio setup checklist (account, first job), for owners and admins until it is first complete; then null for good.",
+          "The studio setup checklist (account, payouts where offered, price list, first job), for owners and admins until it is first complete; then null for good.",
       }),
     upNext: z
       .object({
@@ -899,3 +904,137 @@ export const PRICE_LIST_CONFLICTS = {
   jobClosed: "priceLists.jobClosed",
 } as const;
 export type PriceListConflict = (typeof PRICE_LIST_CONFLICTS)[keyof typeof PRICE_LIST_CONFLICTS];
+
+// ── Payouts with Stripe Connect (Phase 1 step 7, ADR 0020) ─────────────────────────────────────────────────────────
+export const payoutSchedule = z
+  .object({
+    interval: z.enum(PAYOUT_INTERVALS).meta({
+      description:
+        "As Stripe has it. Studios choose weekly (the default), daily or monthly; manual means payouts are made only when requested, not on a schedule.",
+    }),
+    weeklyAnchor: z
+      .enum(PAYOUT_WEEKDAYS)
+      .nullable()
+      .meta({ description: "The weekday of weekly payouts; null otherwise." }),
+    monthlyAnchor: z.number().int().nullable().meta({
+      description:
+        "The day of the month (1-31) of monthly payouts; 29-31 fall on the last day of shorter months. Null otherwise.",
+    }),
+  })
+  .meta({ id: "PayoutSchedule" });
+export type PayoutScheduleResponse = z.infer<typeof payoutSchedule>;
+
+export const payoutAccount = z
+  .object({
+    status: z.enum(PAYOUT_ACCOUNT_STATUSES).meta({
+      description:
+        'needs_info (Stripe needs details), pending_verification (Stripe is checking them), active (card payments and payouts on, nothing due) or restricted. No account at all is "not started".',
+    }),
+    chargesEnabled: z.boolean(),
+    payoutsEnabled: z.boolean(),
+    detailsSubmitted: z.boolean(),
+    currentlyDue: z
+      .number()
+      .int()
+      .meta({ description: "How many things Stripe needs now (a count only)." }),
+    pastDue: z.number().int().meta({ description: "How many of them are past their deadline." }),
+    deadline: z.iso
+      .datetime({ offset: true })
+      .nullable()
+      .meta({ description: "When what is due must be in by." }),
+    disabledReason: z
+      .string()
+      .nullable()
+      .meta({ description: "Stripe's reason code, if Stripe turned something off." }),
+    schedule: payoutSchedule,
+  })
+  .meta({
+    id: "PayoutAccount",
+    description:
+      "The studio's Stripe account as Daybell last saw it: no bank details, names or addresses.",
+  });
+export type PayoutAccount = z.infer<typeof payoutAccount>;
+
+export const payout = z
+  .object({
+    id: z.uuid(),
+    amount: money,
+    status: z.enum(PAYOUT_STATUSES),
+    method: z.enum(PAYOUT_METHODS).meta({ description: "standard, or instant (not offered yet)." }),
+    automatic: z.boolean().meta({ description: "Made by the schedule rather than by hand." }),
+    arrivalDate: z.iso.date().meta({ description: "When the bank should have it." }),
+    failureCode: z.string().nullable().meta({ description: "Stripe's code when a payout failed." }),
+  })
+  .meta({ id: "Payout", description: "A payout from the studio's Stripe balance to its bank." });
+export type Payout = z.infer<typeof payout>;
+
+const percentPlusFixed = z.object({
+  basisPoints: z.number().int().meta({ description: "Hundredths of a percent: 290 is 2.9%." }),
+  fixed: money,
+});
+
+export const payoutFees = z
+  .object({
+    daybellBasisPoints: z.number().int().meta({
+      description: "Daybell's fee on product sales only, nothing if nothing sells (300 = 3%).",
+    }),
+    card: percentPlusFixed.meta({ description: "Stripe's fee on each card payment, passed on." }),
+    payout: percentPlusFixed.meta({
+      description: "Stripe Connect's fee on each payout, passed on (D98).",
+    }),
+    activeAccount: money.meta({
+      description:
+        "Stripe Connect's fee for each month the studio receives a payout, passed on (D98).",
+    }),
+    instantBasisPoints: z
+      .number()
+      .int()
+      .meta({ description: "Stripe's instant payout fee (not offered yet)." }),
+  })
+  .meta({ id: "PayoutFees", description: "What selling costs, in the studio's currency." });
+export type PayoutFees = z.infer<typeof payoutFees>;
+
+export const studioPayoutsResponse = z
+  .object({
+    account: payoutAccount
+      .nullable()
+      .meta({ description: "Null until the owner starts setting up payouts." }),
+    nextPayoutDate: z.iso.date().nullable().meta({
+      description:
+        "The schedule's next payout day (UTC), weekly and monthly only; Stripe pays out only when there is money to pay.",
+    }),
+    payouts: z.array(payout).meta({ description: "The 10 latest, by arrival date, newest first." }),
+    fees: payoutFees,
+    canManage: z
+      .boolean()
+      .meta({ description: "Only the owner sets up payouts and changes the schedule." }),
+  })
+  .meta({ id: "StudioPayouts" });
+export type StudioPayoutsResponse = z.infer<typeof studioPayoutsResponse>;
+
+export const payoutLinkResponse = z
+  .object({
+    url: z
+      .url()
+      .meta({ description: "A single-use Stripe address. Open it straight away; never store it." }),
+    expiresAt: z.iso.datetime({ offset: true }).nullable(),
+  })
+  .meta({ id: "PayoutLink" });
+export type PayoutLinkResponse = z.infer<typeof payoutLinkResponse>;
+
+export const stripeWebhookResponse = z.object({ received: z.literal(true) });
+
+/** Why a payouts request was refused with 409, in the error's `fields.form`. */
+export const PAYOUT_CONFLICTS = {
+  /** The studio has no payout account yet. */
+  notConnected: "payouts.notConnected",
+  /** The studio already has another Stripe account (no replacing in Phase 1). */
+  alreadyConnected: "payouts.alreadyConnected",
+} as const;
+export type PayoutConflict = (typeof PAYOUT_CONFLICTS)[keyof typeof PAYOUT_CONFLICTS];
+
+/**
+ * In the error's `fields.form` when payouts are refused with region_unavailable because Stripe isn't set up in this
+ * deployment at all (e.g. PR previews), as opposed to the studio's region not having payouts yet.
+ */
+export const PAYOUT_NOT_CONFIGURED = "payouts.notConfigured";

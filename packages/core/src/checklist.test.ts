@@ -370,25 +370,46 @@ describe("rankUpNext", () => {
 });
 
 describe("onboarding", () => {
-  const none = { hasJob: false, priceListReviewed: false };
+  const none = { hasJob: false, priceListReviewed: false, payoutsConnected: false };
 
-  it("lists the built tasks only: account, price list and first job (Seenu, answers 4 and 12: no team task)", () => {
+  it("lists the built tasks only: account, payouts, price list and first job (D143's order; no team task)", () => {
     expect(onboardingChecklist(none)).toEqual([
       { key: "account", done: true, state: "done" },
-      { key: "priceList", done: false, state: "next" },
+      { key: "payouts", done: false, state: "next" },
+      { key: "priceList", done: false, state: "todo" },
       { key: "firstJob", done: false, state: "todo" },
     ]);
-    expect(ONBOARDING_TASKS).toEqual(["account", "priceList", "firstJob"]);
+    expect(ONBOARDING_TASKS).toEqual(["account", "payouts", "priceList", "firstJob"]);
+  });
+
+  it("is the same for every studio: Set up payouts stays until the account is Active (Seenu, Oct 12; ADR 0020)", () => {
+    // No regional variant: a studio whose region has no payouts yet keeps the task open, and onboarding isn't done.
+    expect(onboardingChecklist(none).map((t) => t.key)).toEqual(ONBOARDING_TASKS);
+    expect(
+      onboardingComplete(onboardingChecklist({ ...none, hasJob: true, priceListReviewed: true })),
+    ).toBe(false);
+  });
+
+  it("ticks Set up payouts only when the account is Active (Seenu Q5)", () => {
+    expect(onboardingChecklist({ ...none, payoutsConnected: true }).map((t) => t.state)).toEqual([
+      "done",
+      "done",
+      "next",
+      "todo",
+    ]);
   });
 
   it("ticks Review your price list from the studio's first price list save, never by hand (ADR 0019)", () => {
-    expect(onboardingChecklist({ ...none, priceListReviewed: true }).map((t) => t.state)).toEqual([
+    const paid = { ...none, payoutsConnected: true };
+    expect(onboardingChecklist({ ...paid, priceListReviewed: true }).map((t) => t.state)).toEqual([
+      "done",
       "done",
       "done",
       "next",
     ]);
     // A first job before the price list: the price list is still next.
-    expect(onboardingChecklist({ ...none, hasJob: true }).map((t) => t.state)).toEqual([
+    expect(onboardingChecklist({ ...paid, hasJob: true }).map((t) => t.state)).toEqual([
+      "done",
       "done",
       "next",
       "done",
@@ -398,15 +419,17 @@ describe("onboarding", () => {
   it("is complete only when every built task is done", () => {
     expect(onboardingComplete(onboardingChecklist(none))).toBe(false);
     expect(onboardingComplete(onboardingChecklist({ ...none, hasJob: true }))).toBe(false);
-    expect(onboardingComplete(onboardingChecklist({ ...none, priceListReviewed: true }))).toBe(
-      false,
-    );
-    expect(onboardingComplete(onboardingChecklist({ hasJob: true, priceListReviewed: true }))).toBe(
-      true,
-    );
+    expect(
+      onboardingComplete(onboardingChecklist({ ...none, hasJob: true, priceListReviewed: true })),
+    ).toBe(false);
+    expect(
+      onboardingComplete(
+        onboardingChecklist({ hasJob: true, priceListReviewed: true, payoutsConnected: true }),
+      ),
+    ).toBe(true);
   });
 
-  it("is seen by owners and admins, who create jobs and edit price lists", () => {
+  it("is seen by owners and admins; only the owner sets up payouts (Seenu, answer 1)", () => {
     expect(["owner", "admin", "photographer", "staff"].map(seesOnboarding)).toEqual([
       true,
       true,
@@ -419,6 +442,9 @@ describe("onboarding", () => {
       expect(canDoOnboardingTask("photographer", key)).toBe(false);
       expect(canDoOnboardingTask("staff", key)).toBe(false);
     }
+    expect(
+      ["owner", "admin", "photographer", "staff"].map((r) => canDoOnboardingTask(r, "payouts")),
+    ).toEqual([true, false, false, false]);
     expect(canDoOnboardingTask("owner", "account")).toBe(false);
   });
 });

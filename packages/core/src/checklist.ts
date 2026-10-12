@@ -305,12 +305,14 @@ export const UP_NEXT_SHOWN = 3;
 
 /**
  * The studio setup checklist (D143): account, studio name and logo, payouts, price list, first job. Only the built
- * ones are listed (Seenu, answer 4: "Studio name and logo" waits for branding; payouts come later). Inviting the team
- * is not part of it (Seenu, answer 12): it stays in Settings. "Review your price list" (step 6, ADR 0019) ticks itself
- * the first time an owner or admin saves a price list change or creates a list (Claude's call 3): every studio starts
- * with the starter list, so having one proves nothing.
+ * ones are listed (Seenu, answer 4: "Studio name and logo" waits for branding). Inviting the team is not part of it
+ * (Seenu, answer 12): it stays in Settings. "Review your price list" (step 6, ADR 0019) ticks itself the first time an
+ * owner or admin saves a price list change or creates a list (Claude's call 3): every studio starts with the starter
+ * list, so having one proves nothing. "Set up payouts" (step 7, ADR 0020) ticks only when the studio's payout account
+ * is Active (Seenu, Q5). It is the same for every studio (Seenu, Oct 12: one checklist, no regional variant): where
+ * payouts aren't offered yet (US studios, Q3) the task simply stays open until they are.
  */
-export const ONBOARDING_TASKS = ["account", "priceList", "firstJob"] as const;
+export const ONBOARDING_TASKS = ["account", "payouts", "priceList", "firstJob"] as const;
 export type OnboardingTaskKey = (typeof ONBOARDING_TASKS)[number];
 
 export interface OnboardingFacts {
@@ -318,6 +320,8 @@ export interface OnboardingFacts {
   hasJob: boolean;
   /** An owner or admin has saved a price list change (studios.price_list_reviewed_at is set). */
   priceListReviewed: boolean;
+  /** The studio's payout account is Active. */
+  payoutsConnected: boolean;
 }
 
 export interface OnboardingTask {
@@ -329,6 +333,7 @@ export interface OnboardingTask {
 export function onboardingChecklist(facts: OnboardingFacts): OnboardingTask[] {
   const done: Record<OnboardingTaskKey, boolean> = {
     account: true,
+    payouts: facts.payoutsConnected,
     priceList: facts.priceListReviewed,
     firstJob: facts.hasJob,
   };
@@ -345,9 +350,13 @@ export function onboardingComplete(tasks: readonly OnboardingTask[]): boolean {
   return tasks.every((t) => t.done);
 }
 
-/** Owners and admins create jobs and edit price lists. The account row has nowhere to go. */
+/**
+ * Owners and admins create jobs and edit price lists; only the owner sets up payouts (Seenu, answer 1), so admins see
+ * that row as plain text. The account row has nowhere to go.
+ */
 export function canDoOnboardingTask(role: string, key: OnboardingTaskKey): boolean {
   if (key === "firstJob" || key === "priceList") return role === "owner" || role === "admin";
+  if (key === "payouts") return role === "owner";
   return false;
 }
 

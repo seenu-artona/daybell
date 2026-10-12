@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { assertFunctionRegion, assertStorageRegion } from "./region-guard";
+import {
+  assertFunctionRegion,
+  assertPayoutFunctionRegion,
+  assertPayoutRegion,
+  assertStorageRegion,
+} from "./region-guard";
 
 describe("assertFunctionRegion (D113; ADR 0015, 0016)", () => {
   it("refuses a Canadian studio's work outside Montréal, logging region names only", () => {
@@ -27,5 +32,29 @@ describe("assertStorageRegion (Seenu, answer 8)", () => {
       expect.objectContaining({ code: "region_unavailable" }),
     );
     errors.mockRestore();
+  });
+});
+
+describe("assertPayoutRegion (Seenu, Q3; ADR 0020)", () => {
+  it("offers payouts to Canadian studios and refuses US ones for now", () => {
+    expect(() => assertPayoutRegion("ca")).not.toThrow();
+    expect(() => assertPayoutRegion("us")).toThrow(
+      expect.objectContaining({ code: "region_unavailable" }),
+    );
+  });
+});
+
+describe("assertPayoutFunctionRegion (D113; security review M1)", () => {
+  it("refuses payout work outside the payout regions' function regions (Montréal in Phase 1)", () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() => assertPayoutFunctionRegion({ VERCEL_REGION: "iad1" })).toThrow(
+      expect.objectContaining({ code: "region_unavailable" }),
+    );
+    expect(errors).toHaveBeenCalledWith("wrong_function_region", "payouts", "iad1");
+    errors.mockRestore();
+  });
+  it("allows Montréal, and anywhere when not on Vercel (local, CI)", () => {
+    expect(() => assertPayoutFunctionRegion({ VERCEL_REGION: "yul1" })).not.toThrow();
+    expect(() => assertPayoutFunctionRegion({})).not.toThrow();
   });
 });

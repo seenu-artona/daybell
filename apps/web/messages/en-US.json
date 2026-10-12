@@ -187,7 +187,10 @@
     "packageEmpty": "Add at least one print or the digital download.",
     "packageLines": "A package can hold up to 20 lines.",
     "packageDigitals": "A package can include the digital download only once.",
-    "itemOrder": "This price list changed. Reload the page and try again."
+    "itemOrder": "This price list changed. Reload the page and try again.",
+    "payoutInterval": "Choose weekly, daily or monthly.",
+    "payoutWeekday": "Choose a weekday, Monday to Friday.",
+    "payoutMonthDay": "Choose a day of the month from 1 to 31."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -388,7 +391,12 @@
     },
     "settings": {
       "title": "Settings",
-      "teamIntro": "Who works at your studio and what they can do."
+      "teamIntro": "Who works at your studio and what they can do.",
+      "sections": {
+        "label": "Settings sections",
+        "team": "Team",
+        "payouts": "Payouts"
+      }
     },
     "home": {
       "title": "Home",
@@ -412,6 +420,7 @@
         "title": "Set up your studio",
         "tasks": {
           "account": "Create your account",
+          "payouts": "Set up payouts",
           "priceList": "Review your price list",
           "firstJob": "Create your first job"
         }
@@ -879,6 +888,7 @@
         "done": "Done",
         "todo": "To do",
         "soon": "Coming soon",
+        "checking": "Checking…",
         "items": {
           "roster": "Roster added",
           "photos": "Photos uploaded",
@@ -1212,6 +1222,125 @@
           "move": "Move"
         }
       }
+    },
+    "payouts": {
+      "title": "Payouts",
+      "intro": "How parents’ payments reach your bank, and what selling costs.",
+      "loading": "Loading payouts…",
+      "notForRole": "Only the studio’s owner and admins can see payouts.",
+      "unavailable": "Payouts aren’t available in this region yet.",
+      "notConfigured": "Payouts aren’t set up in this environment.",
+      "status": {
+        "title": "Connection",
+        "notStarted": "Not started",
+        "needs_info": "Needs info",
+        "pending_verification": "Pending verification",
+        "active": "Active",
+        "restricted": "Restricted"
+      },
+      "explain": {
+        "notStarted": "Connect a Stripe account so parents’ payments are paid out to your bank. Stripe asks for your business and bank details.",
+        "needs_info": "{count, plural, =0 {Stripe needs a few more details before you can be paid.} one {Stripe needs # more detail before you can be paid.} other {Stripe needs # more details before you can be paid.}}",
+        "deadline": "Please add them by {date}.",
+        "deadlineOwner": "The studio owner needs to add them by {date}.",
+        "pending_verification": "Stripe is checking your details. This usually takes minutes, sometimes a few days.",
+        "active": "Card payments and payouts are on.",
+        "restricted": "Stripe has paused card payments or payouts for this account. Update your details on Stripe to turn them back on."
+      },
+      "ownerOnly": "Only the studio owner can set up or change payouts.",
+      "goToStripe": "You’ll go to Stripe to finish, then come back here.",
+      "actions": {
+        "start": "Set up payouts",
+        "continue": "Continue on Stripe",
+        "update": "Update details",
+        "manage": "Manage on Stripe",
+        "manageHelp": "Change your bank account and see every payout on Stripe."
+      },
+      "opening": "Opening Stripe…",
+      "checking": "Checking with Stripe…",
+      "checked": "Status checked: {status}.",
+      "linkExpired": "That Stripe link has expired. Continue on Stripe to get a new one.",
+      "schedule": {
+        "title": "Payout schedule",
+        "legend": "How often to pay out",
+        "weekly": "Weekly",
+        "daily": "Daily",
+        "monthly": "Monthly",
+        "weekday": "Day of the week",
+        "monthDay": "Day of the month",
+        "monthDayHelp": "If you pick the 29th, 30th or 31st, shorter months pay out on their last day.",
+        "delay": "Stripe holds each payment for a few days before it can be paid out.",
+        "save": "Save schedule",
+        "saved": "Payout schedule saved: {schedule}.",
+        "notYet": "You can choose a schedule once you’ve started setting up payouts.",
+        "readOnly": "Only the studio owner can change the schedule.",
+        "summary": {
+          "weekly": "Weekly, every {day}",
+          "daily": "Every business day",
+          "monthly": "Monthly, on day {day}",
+          "manual": "Manual payouts"
+        },
+        "days": {
+          "monday": "Monday",
+          "tuesday": "Tuesday",
+          "wednesday": "Wednesday",
+          "thursday": "Thursday",
+          "friday": "Friday",
+          "saturday": "Saturday",
+          "sunday": "Sunday"
+        }
+      },
+      "next": {
+        "title": "Next payout",
+        "date": "{date}, if there’s money to pay out",
+        "daily": "Every business day, if there’s money to pay out",
+        "manual": "Manual payouts: none are scheduled.",
+        "notActive": "Once payouts are active.",
+        "onItsWay": "{amount} on its way, arriving {date}"
+      },
+      "recent": {
+        "title": "Recent payouts",
+        "caption": "Your 10 latest payouts",
+        "empty": "No payouts yet. They start once parents buy.",
+        "columns": {
+          "arrival": "Arrives",
+          "amount": "Amount",
+          "status": "Status",
+          "method": "Type"
+        },
+        "statuses": {
+          "pending": "Pending",
+          "in_transit": "On its way",
+          "paid": "Paid",
+          "failed": "Failed",
+          "canceled": "Canceled"
+        },
+        "methods": {
+          "standard": "Standard",
+          "instant": "Instant"
+        }
+      },
+      "fees": {
+        "title": "Fees",
+        "daybell": "Daybell: {percent}% of product sales. Nothing if nothing sells, and never on shipping or tax.",
+        "card": "Stripe card fees: {percent}% + {fixed} per payment, passed on at Stripe’s rates.",
+        "payout": "Stripe payout fees: {percent}% + {fixed} per payout, plus {monthly} for each month you’re paid out, passed on at Stripe’s rates.",
+        "instant": "Instant payouts: {percent}% at Stripe’s fee, coming later."
+      },
+      "conflicts": {
+        "notConnected": "Payouts aren’t set up yet.",
+        "alreadyConnected": "This studio is already connected to Stripe. Contact support to change it."
+      },
+      "devStripe": {
+        "title": "Fake Stripe onboarding",
+        "dashboardTitle": "Fake Stripe Express dashboard",
+        "intro": "For development and tests only. Nothing here talks to Stripe.",
+        "finish": "Finish onboarding",
+        "leave": "Leave unfinished",
+        "payoutPaid": "Pay out a test payout",
+        "paidOut": "A test payout was paid.",
+        "back": "Back to Daybell"
+      }
     }
   },
   "invite": {
@@ -1245,6 +1374,7 @@
       "Roster": "Roster",
       "Photos": "Photos",
       "Products": "Products",
+      "Payouts": "Payouts",
       "Contacts": "Contacts",
       "Search": "Search",
       "Internal": "Internal"
@@ -1256,7 +1386,7 @@
       "owner": "Owners",
       "roster-editor": "Owners, admins and photographers",
       "uploader": "Owners, admins and photographers",
-      "internal": "Internal: the image worker and the daily clean-up"
+      "internal": "Internal: the image worker, the daily clean-up and Stripe's webhook"
     },
     "englishOnly": "Endpoint descriptions are in English, for developers.",
     "query": "Query parameters"

@@ -7,6 +7,9 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 // preview or staging) that would use it fails here, before it can be deployed.
 if (process.env.STORAGE_DRIVER === "local" && (process.env.VERCEL || process.env.VERCEL_ENV))
   throw new Error("STORAGE_DRIVER=local is not allowed on Vercel");
+// The same for the fake Stripe (ADR 0020).
+if (process.env.STRIPE_DRIVER === "fake" && (process.env.VERCEL || process.env.VERCEL_ENV))
+  throw new Error("STRIPE_DRIVER=fake is not allowed on Vercel");
 
 const config: NextConfig = {
   // Internal packages ship TypeScript source; Next compiles them (D7).

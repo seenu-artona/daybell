@@ -3,6 +3,8 @@ import {
   jobChecklist,
   onboardingChecklist,
   onboardingComplete,
+  type PayoutAccountStatus,
+  payoutsConnected,
   rankUpNext,
   seesOnboarding,
   UP_NEXT_SHOWN,
@@ -29,8 +31,8 @@ function counted(result: {
 }
 
 /**
- * The studio setup checklist (D143) for owners and admins, until it is first complete: account, price list (ADR 0019)
- * and first job (Seenu, answer 12: the team stays in Settings). The first time it is complete, the server records it on the studio (answer
+ * The studio setup checklist (D143) for owners and admins, until it is first complete: account, payouts (ADR 0020),
+ * price list (ADR 0019) and first job (Seenu, answer 12: the team stays in Settings). The first time it is complete, the server records it on the studio (answer
  * 5); from then on it is never shown again, even if the only job goes. Returns null once it's done. Reads and the one
  * write go through the person's own session, so row-level security applies (only owners and admins may update the
  * studio). This is the one GET with a write: idempotent, since the database keeps the first time (ADR 0017).
@@ -51,10 +53,16 @@ async function onboarding(
     .from("jobs")
     .select("id", { count: "exact", head: true })
     .eq("studio_id", studioId);
+  // "Set up payouts" ticks when the payout account is Active (ADR 0020, Seenu Q5), the same for every studio (Seenu,
+  // Oct 12: one checklist). Owners and admins read the account through row-level security.
+  const account = check(
+    await supabase.from("payout_accounts").select("status").eq("studio_id", studioId).maybeSingle(),
+  ) as { status: PayoutAccountStatus } | null;
   // "Review your price list" ticks from the database's own stamp of the first price list change (ADR 0019).
   const tasks = onboardingChecklist({
     hasJob: counted(jobs) > 0,
     priceListReviewed: studio.price_list_reviewed_at !== null,
+    payoutsConnected: payoutsConnected(account?.status),
   });
   if (!onboardingComplete(tasks)) return { tasks: tasks.map(({ key, done }) => ({ key, done })) };
   // The database stamps its own time and keeps the first one (ADR 0017); the event carries the studio id only.

@@ -1,7 +1,7 @@
 import "server-only";
 import { ApiError, type MeResponse, type StudioRole, type StudioSummary } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
-import { canEditRoster } from "@daybell/core";
+import { canEditRoster, canManagePayouts, canSeePayouts } from "@daybell/core";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { check, requireUser } from "./api";
 import { supabaseForSession } from "./supabase/server";
@@ -90,4 +90,17 @@ export function assertCanManage(studio: StudioSummary): void {
 export function assertCanEditRoster(studio: StudioSummary): void {
   if (!canEditRoster(studio.role))
     throw new ApiError("forbidden", "Owners, admins and photographers only.");
+}
+
+/** Payouts (ADR 0020; Seenu, answer 1): owners and admins see them; photographers and staff don't. */
+export function assertCanSeePayouts(studio: StudioSummary): void {
+  if (!canSeePayouts(studio.role)) throw new ApiError("forbidden", "Owners and admins only.");
+}
+
+/**
+ * Payout management (connecting, the schedule, Stripe links): only the owner today (Seenu, answer 1). Named for the
+ * payouts rule, not for "owner", so other owner-only checks never borrow it by accident. The database checks it again.
+ */
+export function assertCanManagePayouts(studio: StudioSummary): void {
+  if (!canManagePayouts(studio.role)) throw new ApiError("forbidden", "The studio owner only.");
 }
