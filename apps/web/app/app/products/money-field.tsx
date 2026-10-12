@@ -1,8 +1,10 @@
 "use client";
 
 import type { Currency } from "@daybell/core";
+import { cn } from "@daybell/ui";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
+import { moneyInputClass } from "./money-input-class";
 
 /**
  * A price input (ADR 0019): a labelled text field (inputmode decimal, so phones and tablets show numbers) with the
@@ -49,7 +51,7 @@ export function MoneyField({
           onChange={(e) => onChange(e.target.value)}
           aria-invalid={error ? true : undefined}
           aria-describedby={`${id}-currency${note ? ` ${id}-note` : ""}`}
-          className={`min-h-11 w-36 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink tabular-nums hover:border-muted focus:border-primary focus:shadow-[0_0_0_3px_var(--color-primary-soft)] focus:outline-none ${error ? "border-danger bg-danger-soft" : ""}`}
+          className={moneyInputClass(Boolean(error))}
         />
         <span aria-hidden="true" className="text-caption text-muted">
           {currency}
@@ -59,7 +61,10 @@ export function MoneyField({
         </span>
       </div>
       {note ? (
-        <span id={`${id}-note`} className={`text-caption ${error ? "text-danger" : "text-muted"}`}>
+        <span
+          id={`${id}-note`}
+          className={cn("text-caption", error ? "text-danger" : "text-muted")}
+        >
           {note}
         </span>
       ) : null}

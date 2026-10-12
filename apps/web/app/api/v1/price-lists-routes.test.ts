@@ -507,6 +507,18 @@ describe("items", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error.fields).toEqual({ itemIds: "validation.itemOrder" });
   });
+
+  it("refuses unknown fields in an order instead of dropping them", async () => {
+    const db = fakeDatabase({ price_lists: LIST_ROW, set_price_list_item_order: null });
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("owner"), userId: "u" });
+    const res = await (await routes.order())(
+      send("PUT", { itemIds: [ITEM, OTHER], position: 1 }),
+      ctx(LIST),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.fields).toEqual({ form: "validation.unknownField" });
+    expect(db.calls.some((c) => c.name === "set_price_list_item_order")).toBe(false);
+  });
 });
 
 describe("a job's price list and delivery", () => {

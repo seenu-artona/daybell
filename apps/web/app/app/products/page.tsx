@@ -97,7 +97,7 @@ export default function PriceListsPage() {
                     <Link href={priceListHref(list.id)} className={LINK}>
                       {list.name}
                     </Link>
-                    {list.isDefault ? <Badge tone="selling">{t("default")}</Badge> : null}
+                    {list.isDefault ? <Badge tone="info">{t("default")}</Badge> : null}
                   </span>
                 </TableCell>
                 <TableCell>{t("itemCounts", list.counts)}</TableCell>
@@ -113,13 +113,20 @@ export default function PriceListsPage() {
                         >
                           {t("makeDefault")}
                         </Button>
-                        <Button
-                          variant="ghost"
-                          aria-label={t("deleteLabel", { name: list.name })}
-                          onClick={() => setDeleting(list)}
-                        >
-                          {t("delete")}
-                        </Button>
+                        {/* A list jobs use can't be deleted (the API answers 409), so say why instead. */}
+                        {list.jobs > 0 ? (
+                          <span className="inline-flex min-h-11 items-center px-2 text-caption text-muted">
+                            {t("inUseNoDelete")}
+                          </span>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            aria-label={t("deleteLabel", { name: list.name })}
+                            onClick={() => setDeleting(list)}
+                          >
+                            {t("delete")}
+                          </Button>
+                        )}
                       </span>
                     )}
                   </TableCell>

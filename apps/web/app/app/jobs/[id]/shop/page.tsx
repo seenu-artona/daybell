@@ -8,10 +8,10 @@ import type {
   PriceListsResponse,
 } from "@daybell/api";
 import { orderedItems, PRICE_ITEM_GROUPS, priceItemGroup } from "@daybell/core";
-import { Banner, Card } from "@daybell/ui";
+import { Banner, Button, Card } from "@daybell/ui";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { CheckboxField, SelectField } from "../../../dialog";
@@ -28,6 +28,10 @@ const LINK =
  * delivery: the list's flat home shipping fee, and free delivery to school, off unless turned on (Claude's call 6).
  * Owners and admins change both while the job is a draft or selling (new orders only; answer 5, call 4); a closed
  * job's don't change. Everyone else reads.
+ *
+ * Keyboard (D91, WCAG 2.4.3 and 3.2.2): the list is picked, then saved with its own button, so arrowing through the
+ * select saves nothing on the way. Nothing is disabled while a save runs (that would drop focus to the page); input
+ * that arrives meanwhile is ignored, and the tab is marked aria-busy.
  */
 export default function ShopPage() {
   const t = useTranslations("app.job.shop");
@@ -42,6 +46,9 @@ export default function ShopPage() {
   const [problem, setProblem] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  // Read and set synchronously, so two quick toggles can't both start a save.
+  const saving = useRef(false);
+  const [chosen, setChosen] = useState(job.priceListId);
   const listTitle = useId();
   const deliveryTitle = useId();
   const closed = job.status === "closed";
@@ -53,6 +60,12 @@ export default function ShopPage() {
       if (res.ok) setLists(res.data.priceLists);
     });
   }, [canChange]);
+
+  // A new list: the picker follows it, and an earlier load error no longer applies.
+  useEffect(() => {
+    setChosen(job.priceListId);
+    setProblem(null);
+  }, [job.priceListId]);
 
   useEffect(() => {
     let live = true;
@@ -68,9 +81,12 @@ export default function ShopPage() {
   }, [job.priceListId, text]);
 
   async function save(change: { priceListId: string } | { deliverToSchool: boolean }) {
+    if (saving.current) return;
+    saving.current = true;
     setBusy(true);
     setProblem(null);
     const res = await api<{ job: Job }>(`/jobs/${job.id}`, { method: "PATCH", body: change });
+    saving.current = false;
     setBusy(false);
     if (!res.ok)
       return setProblem(
@@ -89,11 +105,16 @@ export default function ShopPage() {
     );
   }
 
+  function saveList(event: FormEvent) {
+    event.preventDefault();
+    if (chosen !== job.priceListId) void save({ priceListId: chosen });
+  }
+
   const items = list ? orderedItems(list.items) : [];
 
   return (
     <JobSection title={tt("shop")} subline={tp("beforeTax")}>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" aria-busy={busy || undefined}>
         {job.status === "selling" ? <Banner tone="info" title={t("live")} /> : null}
         {closed ? <Banner tone="info" title={t("closed")} /> : null}
         {!canManage ? <p className="m-0 text-muted">{t("readOnly")}</p> : null}
@@ -108,18 +129,22 @@ export default function ShopPage() {
               {t("priceList")}
             </h3>
             {canChange && lists ? (
-              <div className="max-w-md">
-                <SelectField
-                  label={t("chooseLabel")}
-                  value={job.priceListId}
-                  disabled={busy}
-                  onChange={(priceListId) => void save({ priceListId })}
-                  options={lists.map((l) => ({
-                    value: l.id,
-                    label: l.isDefault ? t("defaultOption", { name: l.name }) : l.name,
-                  }))}
-                />
-              </div>
+              <form onSubmit={saveList} className="flex max-w-xl flex-wrap items-end gap-3">
+                <div className="min-w-0 flex-1">
+                  <SelectField
+                    label={t("chooseLabel")}
+                    value={chosen}
+                    onChange={setChosen}
+                    options={lists.map((l) => ({
+                      value: l.id,
+                      label: l.isDefault ? t("defaultOption", { name: l.name }) : l.name,
+                    }))}
+                  />
+                </div>
+                <Button type="submit" variant="secondary">
+                  {t("saveList")}
+                </Button>
+              </form>
             ) : (
               <p className="m-0 font-semibold">{list?.name ?? t("loading")}</p>
             )}
@@ -184,7 +209,7 @@ export default function ShopPage() {
               label={t("toSchool")}
               help={t("toSchoolHelp")}
               checked={job.deliverToSchool}
-              disabled={!canChange || busy}
+              disabled={!canChange}
               onChange={(deliverToSchool) => void save({ deliverToSchool })}
             />
           </section>

@@ -69,6 +69,13 @@ describe("price list mapping (ADR 0019)", () => {
         'duplicate key value violates unique constraint "price_list_items_one_digital_all"',
       ).fields,
     ).toEqual({ form: "priceLists.digitalTaken" });
+    // A package's second digital line is not "the list already has that digital download".
+    expect(
+      named(
+        "23505",
+        'duplicate key value violates unique constraint "price_list_package_lines_one_digital"',
+      ).fields?.form,
+    ).not.toBe("priceLists.digitalTaken");
     expect(named("P0002", "not_found").code).toBe("not_found");
     const other = named("XX000", "secret internals");
     expect([other.code, other.message]).toEqual([

@@ -578,9 +578,10 @@
       "usedBy": "{count, plural, =0 {No jobs} one {# job} other {# jobs}}",
       "add": "New price list",
       "makeDefault": "Make default",
-      "makeDefaultLabel": "Make {name} the default",
+      "makeDefaultLabel": "Make default: {name}",
       "delete": "Delete",
       "deleteLabel": "Delete {name}",
+      "inUseNoDelete": "In use, so it can't be deleted",
       "madeDefault": "{name} is now the default for new jobs.",
       "deleted": "{name} was deleted.",
       "newForm": {
@@ -889,6 +890,7 @@
       "shop": {
         "priceList": "Price list",
         "chooseLabel": "Price list for this job",
+        "saveList": "Save price list",
         "defaultOption": "{name} (default)",
         "saved": "Price list saved.",
         "edit": "Edit this price list",

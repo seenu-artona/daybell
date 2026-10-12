@@ -125,7 +125,7 @@ export default function PriceListPage() {
       <div>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="m-0 text-h1">{list.name}</h1>
-          {list.isDefault ? <Badge tone="selling">{t("default")}</Badge> : null}
+          {list.isDefault ? <Badge tone="info">{t("default")}</Badge> : null}
         </div>
         <p className="m-0 text-muted">{t("beforeTax")}</p>
       </div>

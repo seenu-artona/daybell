@@ -21,6 +21,7 @@ import {
   fieldErrors,
   groupInput,
   inviteInput,
+  isPriceText,
   itemKindIssues,
   itemOrderInput,
   jobInput,
@@ -670,6 +671,27 @@ describe("price lists (ADR 0019)", () => {
     expect(itemOrderInput.parse({ itemIds: [ID] })).toEqual({ itemIds: [ID] });
     expect(itemOrderInput.safeParse({ itemIds: [ID, ID] }).success).toBe(false);
     expect(itemOrderInput.safeParse({ itemIds: ["x"] }).success).toBe(false);
+    // Unknown fields are refused, not silently dropped, like every other input.
+    expect(errors(itemOrderInput.safeParse({ itemIds: [ID], position: 3 }))).toEqual({
+      form: "validation.unknownField",
+    });
+  });
+
+  it("refuses control characters and bidi overrides in names and descriptions (as the database does)", () => {
+    for (const bad of ["Spring\u0007", "Spring\u0085", "Spring \u202Egnirps", "A\u2066B\u2069"]) {
+      expect(errors(priceListInput.safeParse({ name: bad })), JSON.stringify(bad)).toEqual({
+        name: "validation.priceListName",
+      });
+      expect(errors(priceListItemPatch.safeParse({ name: bad })), JSON.stringify(bad)).toEqual({
+        name: "validation.itemName",
+      });
+      expect(
+        errors(priceListItemPatch.safeParse({ description: bad })),
+        JSON.stringify(bad),
+      ).toEqual({ description: "validation.invalid" });
+    }
+    expect(isPriceText("8×10 print — café, 日本")).toBe(true);
+    expect(priceListItemPatch.parse({ name: "Ünïcode ✓" })).toEqual({ name: "Ünïcode ✓" });
   });
 
   it("lets a job name its price list and school delivery", () => {

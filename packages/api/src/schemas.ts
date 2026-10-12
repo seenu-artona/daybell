@@ -734,12 +734,22 @@ export type TaggingChildrenQuery = z.infer<typeof taggingChildrenQuery>;
 const cents = (error: string, max: number) =>
   z.number({ error }).int({ error }).min(0, { error }).max(max, { error });
 
+// Names and descriptions parents see: besides C0 controls and lone surrogates (isCleanText), no C1 controls and no
+// bidi overrides or isolates, which can make a name read differently from what it is. The database refuses the same
+// characters (price_lists and price_list_items checks), so this only gives the person a field error first.
+const PRICE_TEXT_FORBIDDEN = /[\u0080-\u009F\u202A-\u202E\u2066-\u2069]/;
+
+/** Text for a price list or item: clean text without C1 controls or bidi overrides and isolates. */
+export function isPriceText(value: string): boolean {
+  return isCleanText(value) && !PRICE_TEXT_FORBIDDEN.test(value);
+}
+
 const priceListName = z
   .string({ error: "validation.priceListName" })
   .trim()
   .min(1, { error: "validation.priceListName" })
   .max(PRICE_LIST_NAME_MAX, { error: "validation.priceListName" })
-  .refine(isCleanText, { error: "validation.priceListName" });
+  .refine(isPriceText, { error: "validation.priceListName" });
 
 /** A new price list: blank, or a copy of one of the studio's lists (Claude's call 2). */
 export const priceListInput = z.strictObject(
@@ -801,13 +811,13 @@ const itemFields = {
     .trim()
     .min(1, { error: "validation.itemName" })
     .max(ITEM_NAME_MAX, { error: "validation.itemName" })
-    .refine(isCleanText, { error: "validation.itemName" }),
+    .refine(isPriceText, { error: "validation.itemName" }),
   description: z
     .string({ error: "validation.invalid" })
     .trim()
     .min(1, { error: "validation.invalid" })
     .max(ITEM_DESCRIPTION_MAX, { error: "validation.tooLong" })
-    .refine(isCleanText, { error: "validation.invalid" })
+    .refine(isPriceText, { error: "validation.invalid" })
     .nullable()
     .optional()
     .meta({ description: "Shown to parents. Send null to clear it." }),
@@ -864,12 +874,15 @@ export const priceListItemPatch = z
 export type PriceListItemPatch = z.infer<typeof priceListItemPatch>;
 
 /** Every item of the list, each once, in the new order (Move up / Move down; no drag, WCAG 2.5.7). */
-export const itemOrderInput = z.object({
-  itemIds: z
-    .array(z.uuid({ error: "validation.itemOrder" }), { error: "validation.itemOrder" })
-    .max(MAX_PRICE_LIST_ITEMS, { error: "validation.itemOrder" })
-    .refine((ids) => new Set(ids).size === ids.length, { error: "validation.itemOrder" }),
-});
+export const itemOrderInput = z.strictObject(
+  {
+    itemIds: z
+      .array(z.uuid({ error: "validation.itemOrder" }), { error: "validation.itemOrder" })
+      .max(MAX_PRICE_LIST_ITEMS, { error: "validation.itemOrder" })
+      .refine((ids) => new Set(ids).size === ids.length, { error: "validation.itemOrder" }),
+  },
+  { error: "validation.unknownField" },
+);
 export type ItemOrderInput = z.infer<typeof itemOrderInput>;
 
 /** Turns zod issues into `{ field: messageKey }` for forms. */

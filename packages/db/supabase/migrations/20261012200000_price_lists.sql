@@ -19,7 +19,10 @@ create type public.print_size as enum ('4x6', '5x7', '8x10', '11x14', 'wallets_8
 create table public.price_lists (
   id uuid primary key default gen_random_uuid(),
   studio_id uuid not null references public.studios (id) on delete cascade,
-  name text not null check (char_length(name) between 1 and 80 and name = btrim(name)),
+  -- Shown to parents: no control characters (C0, DEL, C1) and no bidi overrides or isolates, which could make a name
+  -- read differently from what it is (U+202A–U+202E, U+2066–U+2069). Spelled out rather than [[:cntrl:]] so the rule
+  -- doesn't depend on the server's locale, and matches the API's (packages/api priceText).
+  name text not null check (char_length(name) between 1 and 80 and name = btrim(name) and name !~ '[\u0001-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]'),
   -- Set by app.guard_price_list from the studio's region; clients never send it and it never changes.
   currency char(3) not null check (currency in ('USD', 'CAD')),
   home_shipping_cents bigint not null default 0 check (home_shipping_cents between 0 and 100000),
@@ -36,11 +39,14 @@ create table public.price_list_items (
   studio_id uuid not null references public.studios (id) on delete cascade,
   price_list_id uuid not null,
   kind public.price_item_kind not null,
-  name text not null check (char_length(name) between 1 and 80 and name = btrim(name)),
-  description text check (char_length(description) between 1 and 500 and description = btrim(description)),
+  -- The same text rules as price_lists.name.
+  name text not null check (char_length(name) between 1 and 80 and name = btrim(name) and name !~ '[\u0001-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]'),
+  description text check (
+    char_length(description) between 1 and 500 and description = btrim(description) and description !~ '[\u0001-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]'),
   print_size public.print_size,
   price_cents bigint not null check (price_cents between 0 and 1000000),
-  position integer not null default 0,
+  -- Bounded so max(position) + 1 can never overflow; at most 100 items, renumbered 1..n on reorder.
+  position integer not null default 0 check (position between 0 and 10000),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint price_list_items_list_fk foreign key (studio_id, price_list_id)
@@ -69,7 +75,7 @@ create table public.price_list_package_lines (
   line_kind text not null check (line_kind in ('print', 'digital')),
   print_size public.print_size,
   quantity integer not null check (quantity between 1 and 99),
-  position integer not null default 0,
+  position integer not null default 0 check (position between 0 and 10000),
   created_at timestamptz not null default now(),
   constraint price_list_package_lines_item_fk foreign key (studio_id, price_list_id, package_item_id)
     references public.price_list_items (studio_id, price_list_id, id) on delete cascade,
@@ -90,15 +96,24 @@ for each row execute function app.touch_updated_at();
 
 -- ── Guards ────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- Currency follows the studio's region and never changes; at most 50 lists per studio. SECURITY DEFINER so it reads
--- the studio whoever writes (RLS still decides whether the write is allowed). Error messages carry no values.
+-- the studio whoever writes; it first refuses a signed-in person who isn't an owner or admin of the row's studio
+-- (42501, as row-level security would), so it never reveals anything about another studio. No values in errors.
 create function app.guard_price_list() returns trigger
 language plpgsql security definer
 set search_path = ''
 as $$
 declare
-  v_currency text := (
-    select case s.data_region when 'us' then 'USD' else 'CAD' end from public.studios s where s.id = new.studio_id);
+  v_currency text;
 begin
+  -- Before anything else, so the lock and counts below never run for another studio's rows (BEFORE triggers run
+  -- ahead of row-level security's WITH CHECK; otherwise a failure would tell an outsider that a list exists). The
+  -- starter list, written by the studio's own insert trigger before its owner is a member, runs one level deeper.
+  if pg_trigger_depth() = 1 and (select auth.uid()) is not null
+     and not app.has_role(new.studio_id, '{owner,admin}') then
+    raise exception 'Owners and admins only' using errcode = 'insufficient_privilege';
+  end if;
+  v_currency := (
+    select case s.data_region when 'us' then 'USD' else 'CAD' end from public.studios s where s.id = new.studio_id);
   if tg_op = 'INSERT' then
     if new.currency is null then
       new.currency := v_currency;
@@ -125,6 +140,11 @@ language plpgsql security definer
 set search_path = ''
 as $$
 begin
+  -- As in app.guard_price_list: refuse other studios' rows before the lock and count.
+  if pg_trigger_depth() = 1 and (select auth.uid()) is not null
+     and not app.has_role(new.studio_id, '{owner,admin}') then
+    raise exception 'Owners and admins only' using errcode = 'insufficient_privilege';
+  end if;
   if tg_op = 'INSERT' then
     perform pg_advisory_xact_lock(hashtextextended('price_list_items:' || new.price_list_id::text, 0));
     if (select count(*) from public.price_list_items i
@@ -147,6 +167,11 @@ language plpgsql security definer
 set search_path = ''
 as $$
 begin
+  -- As in app.guard_price_list: refuse other studios' rows before the lookup, lock and count.
+  if pg_trigger_depth() = 1 and (select auth.uid()) is not null
+     and not app.has_role(new.studio_id, '{owner,admin}') then
+    raise exception 'Owners and admins only' using errcode = 'insufficient_privilege';
+  end if;
   if (select i.kind from public.price_list_items i
       where i.id = new.package_item_id and i.studio_id = new.studio_id) is distinct from 'package' then
     raise exception 'not_package' using errcode = 'check_violation';
@@ -161,6 +186,33 @@ end;
 $$;
 create trigger price_list_package_lines_guard before insert on public.price_list_package_lines
 for each row execute function app.guard_package_line();
+
+-- Every package holds at least one line (answer 3), whoever writes: checked at commit, so save_price_list_item can
+-- replace a package's contents (delete, then insert) and a new package can get its lines after it is inserted. A
+-- package deleted along the way (or its list, or its studio) needs nothing. SECURITY DEFINER so it sees every line of
+-- the package, not just the ones row-level security shows; it reads the one package the write touched.
+create function app.check_package_has_lines() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  -- Read through jsonb: NEW and OLD have different row types on the two tables.
+  v_package uuid := case when tg_table_name = 'price_list_items' then (to_jsonb(new) ->> 'id')::uuid
+                    else (to_jsonb(old) ->> 'package_item_id')::uuid end;
+begin
+  if exists (select 1 from public.price_list_items i where i.id = v_package and i.kind = 'package')
+     and not exists (select 1 from public.price_list_package_lines l where l.package_item_id = v_package) then
+    raise exception 'package_empty' using errcode = 'P0001';
+  end if;
+  return null;
+end;
+$$;
+create constraint trigger price_list_items_package_has_lines after insert on public.price_list_items
+deferrable initially deferred
+for each row when (new.kind = 'package') execute function app.check_package_has_lines();
+create constraint trigger price_list_package_lines_package_has_lines after delete on public.price_list_package_lines
+deferrable initially deferred
+for each row execute function app.check_package_has_lines();
 
 -- ── Row-level security (answer 8) ─────────────────────────────────────────────────────────────────────────────────
 alter table public.price_lists enable row level security;
@@ -204,7 +256,8 @@ grant insert (studio_id, name, home_shipping_cents) on public.price_lists to aut
 grant update (name, home_shipping_cents) on public.price_lists to authenticated;
 grant insert (studio_id, price_list_id, kind, name, description, print_size, price_cents, position)
   on public.price_list_items to authenticated;
-grant update (name, description, print_size, price_cents, position) on public.price_list_items to authenticated;
+-- Position isn't updatable: the order changes only through set_price_list_item_order (all items, renumbered 1..n).
+grant update (name, description, print_size, price_cents) on public.price_list_items to authenticated;
 grant insert (studio_id, price_list_id, package_item_id, line_kind, print_size, quantity, position)
   on public.price_list_package_lines to authenticated;
 
@@ -224,18 +277,23 @@ comment on column public.studios.price_list_reviewed_at is
   'cleared or moved, and never set by hand.';
 
 -- Only the database writes it: browsers lose the table-wide UPDATE on studios (Supabase's default) and get the columns
--- they already used, plus the default list (column grants only work without the table-wide grant). The id and
--- created_at were never meant to change and are no longer updatable by browsers either.
+-- they already used, plus the default list (column grants only work without the table-wide grant). The id,
+-- created_at and data_region were never meant to change and are no longer updatable by browsers either.
 revoke update on public.studios from authenticated;
-grant update (name, slug, data_region, onboarded_at, default_price_list_id) on public.studios to authenticated;
+-- Not data_region: nothing in the browser writes it, and a trigger refuses changes anyway (D113).
+grant update (name, slug, onboarded_at, default_price_list_id) on public.studios to authenticated;
 
 -- Write-once, with the database's clock. A person changing the studio's default list (not the first default, set
--- when the studio is created) counts as a price list change.
+-- when the studio is created) counts as a price list change. Once a studio has a default it always has one (answer
+-- 1): new jobs need it (jobs.price_list_id is NOT NULL), and it keeps the studio's last list from being deleted.
 create function app.guard_studio_price_list_review() returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
+  if old.default_price_list_id is not null and new.default_price_list_id is null then
+    raise exception 'default_price_list_required' using errcode = 'check_violation';
+  end if;
   if old.price_list_reviewed_at is not null then
     new.price_list_reviewed_at := old.price_list_reviewed_at;
   elsif new.price_list_reviewed_at is not null then
@@ -587,8 +645,8 @@ begin
       position)
     values (v_studio, p_price_list_id, (p_item ->> 'kind')::public.price_item_kind, p_item ->> 'name',
       p_item ->> 'description', (p_item ->> 'print_size')::public.print_size, (p_item ->> 'price_cents')::bigint,
-      coalesce((select max(i.position) + 1 from public.price_list_items i
-                where i.price_list_id = p_price_list_id and i.studio_id = v_studio), 1))
+      least(coalesce((select max(i.position) + 1 from public.price_list_items i
+                      where i.price_list_id = p_price_list_id and i.studio_id = v_studio), 1), 10000))
     returning id, kind into v_id, v_kind;
   else
     update public.price_list_items i set
@@ -670,6 +728,7 @@ set search_path = ''
 as $$
 declare
   v_studio uuid := (select l.studio_id from public.price_lists l where l.id = p_price_list_id);
+  v_changed bigint;
 begin
   if v_studio is null or not app.is_member(v_studio) then
     raise exception 'not_found' using errcode = 'P0002';
@@ -687,6 +746,11 @@ begin
   from unnest(p_item_ids) with ordinality o (id, ordinality)
   where i.id = o.id and i.price_list_id = p_price_list_id and i.studio_id = v_studio
     and i.position is distinct from o.ordinality::int;
+  -- The same order again (or an empty list) changes nothing: no event, and it doesn't count as a review.
+  get diagnostics v_changed = row_count;
+  if v_changed = 0 then
+    return;
+  end if;
   perform app.emit(v_studio, 'price_list.reordered', p_price_list_id, '{}'::jsonb);
   perform app.mark_price_list_reviewed(v_studio);
 end;
@@ -722,7 +786,7 @@ as $$
 $$;
 
 revoke all on function app.guard_price_list(), app.guard_price_list_item(), app.guard_package_line(),
-  app.guard_studio_price_list_review(), app.mark_price_list_reviewed(uuid), app.starter_price_list(),
+  app.check_package_has_lines(), app.guard_studio_price_list_review(), app.mark_price_list_reviewed(uuid), app.starter_price_list(),
   app.seed_price_list(uuid), app.on_studio_created_seed_price_list(), app.default_job_price_list(),
   app.guard_job_shop_open(), app.on_price_list_change(), app.on_price_list_item_change(),
   app.on_package_line_change(), app.on_default_price_list_change() from public;

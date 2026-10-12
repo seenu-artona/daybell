@@ -237,7 +237,7 @@ test("job page layout, menu search and studio separation", async ({
   await expect(
     main
       .getByRole("region", { name: "Price list", exact: true })
-      .getByLabel("Price list for this job"),
+      .getByLabel("Price list for this job", { exact: true }),
   ).toHaveValue(job.priceListId);
   for (const name of ["Messages", "Orders", "Settings"]) {
     await main

@@ -48,26 +48,41 @@ read (8).
 - **Enums:** `price_item_kind` (`package`, `print`, `digital_single`, `digital_all`) and `print_size` (`4x6`, `5x7`,
   `8x10`, `11x14`, `wallets_8`). Core's `PRICE_ITEM_KINDS` and `PRINT_SIZES` mirror them; a test in `packages/api`
   keeps them in step, with the bounds.
+- **Text parents see** (list and item names, descriptions): the database refuses control characters (C0, DEL, C1)
+  and bidi overrides and isolates (U+202A–U+202E, U+2066–U+2069), spelled out rather than `[[:cntrl:]]` so the rule
+  doesn't depend on the server's locale; zod refuses the same (`isPriceText`), so people get a field error first.
 - **`price_lists`:** `studio_id`, name (1–80, trimmed; names may repeat), `currency` (`USD`/`CAD`),
   `home_shipping_cents bigint` (0–100,000), timestamps; `unique (studio_id, id)`. `app.guard_price_list` sets the
   currency from the studio's region on insert, refuses any other, and never lets it (or the studio) change; it also
   holds the 50-list limit (serialised per studio with an advisory lock).
 - **`price_list_items`:** composite FK `(studio_id, price_list_id)` → the list, `on delete cascade`; kind, name (1–80),
   description (≤ 500), `print_size` (set exactly when the kind is `print`), `price_cents bigint` (0–1,000,000),
-  `position`. Partial unique indexes allow one `digital_single` and one `digital_all` per list. A guard keeps kind,
-  list and studio fixed and holds the 100-item limit.
+  `position` (0–10,000, so `max + 1` never overflows; not in the update grant: the order changes only through
+  `set_price_list_item_order`). Partial unique indexes allow one `digital_single` and one `digital_all` per list. A
+  guard keeps kind, list and studio fixed and holds the 100-item limit.
 - **`price_list_package_lines`:** composite FK `(studio_id, price_list_id, package_item_id)` → the item, `on delete
   cascade`; `line_kind` `print` (with a size, quantity 1–99) or `digital` (quantity 1, at most one per package: one
   pose). Only packages have lines; at most 20. Lines belong to the package rather than pointing at the list's print
   items, so a package stays whole if a size stops being sold on its own. Lines are replaced as a whole, never updated.
+  Line positions are 0–10,000. **Every package holds at least one line**, however it is written: two deferrable,
+  initially deferred constraint triggers (after a package is inserted, after a line is deleted) run
+  `app.check_package_has_lines` at commit, so replacing a package's lines in one transaction works and a package
+  deleted along the way needs nothing (`package_empty`).
+- **The guards** (`guard_price_list`, `guard_price_list_item`, `guard_package_line`) are SECURITY DEFINER and run
+  before row-level security's WITH CHECK, so each first refuses a signed-in person who isn't an owner or admin of the
+  row's studio (42501) before any lookup, lock or count: a failure tells an outsider nothing about another studio's
+  rows. The starter list, written by the studio's own insert trigger before its owner is a member, runs one trigger
+  level deeper and is not checked.
 - **`studios.default_price_list_id`:** composite FK `(id, default_price_list_id)` → `price_lists (studio_id, id)`,
   `no action`, so the default can't be deleted and the default is always the studio's own. One pointer: switching the
-  default is one update.
+  default is one update. Once set it is never cleared (`default_price_list_required`, 23514, from the studio guard):
+  new jobs need it, and it keeps a studio's last list from being deleted.
 - **`studios.price_list_reviewed_at`:** write-once, the database's clock. Only the database writes it
   (`app.mark_price_list_reviewed`, SECURITY DEFINER, from the price list triggers for a signed-in person's own change;
   the studio guard when a person changes the default). To keep browsers from writing it, **the table-wide UPDATE
-  Supabase grants on `studios` is replaced by column grants** (`name`, `slug`, `data_region`, `onboarded_at`,
-  `default_price_list_id`); `id` and `created_at` are no longer updatable by browsers either (amends ADR 0008's
+  Supabase grants on `studios` is replaced by column grants** (`name`, `slug`, `onboarded_at`,
+  `default_price_list_id`); `id`, `created_at` and `data_region` (nothing in the browser writes it, and a trigger
+  refuses changes; D113) are no longer updatable by browsers either (amends ADR 0008's
   "column grants" rule to cover studios).
 - **`jobs.price_list_id`** (not null) with composite FK `(studio_id, price_list_id)`, **`no action` rather than
   `restrict`** (amends ADR 0008): deleting a studio cascades to both its jobs and its lists, and `restrict` is checked
@@ -85,13 +100,16 @@ read (8).
   lines in one transaction (`package_empty`, `not_package`, `item_limit`; `not_found` for another studio's list or
   item). `copy_price_list` (SECURITY INVOKER) copies a list's settings, items and lines. `set_price_list_item_order` is
   **SECURITY DEFINER** so it can write one `price_list.reordered` event; it checks membership and the owner/admin role
-  itself and touches only that list's rows (the plan had it INVOKER; RLS-bound functions can't write events).
+  itself and touches only that list's rows (the plan had it INVOKER; RLS-bound functions can't write events). An
+  order that changes no position (the same order again, or an empty list) writes no event and doesn't count as a
+  review.
   `price_list_summaries` (SECURITY INVOKER) gives counts by group, jobs and selling jobs per list. All have an empty
   `search_path` and no PUBLIC or anon execute.
 
-pgTAP `013_price_lists` (111 tests) covers seeding, money bounds, kinds and contents, roles, every cross-studio leak
-(lists, items, lines, defaults, job lists, the four functions), deletes, defaults for new jobs, closed jobs, events and
-the review stamp; `014_price_lists_canada` checks a Canadian studio's list is CAD and USD is refused.
+pgTAP `013_price_lists` (146 tests) covers seeding, money bounds, text and position bounds, kinds and contents (at least
+one line per package at commit), roles, every cross-studio leak (lists, items, lines, defaults, job lists, the four
+functions, the guards' 42501 before any lookup), the column grants as `authenticated`, the default never cleared,
+deletes, defaults for new jobs, closed jobs, events (none for a no-change reorder) and the review stamp; `014_price_lists_canada` checks a Canadian studio's list is CAD and USD is refused.
 
 ## Money
 
@@ -127,16 +145,21 @@ and checks the role before reading the body (photographers and staff get 403). C
 - **Price lists** (`/app/products`): a table of lists, the default badged first, with item counts and "Used by N
   jobs". Owners and admins get "New price list" (name, and "Start from": an empty list or a copy of one), and per row
   "Make default" and "Delete" buttons (with a confirm dialog that names why a list can't go). The plan's ⋯ menu became
-  two plain buttons: simpler, and every action is a 44px labelled target.
+  two plain buttons: simpler, and every action is a 44px labelled target. Their accessible names start with the
+  visible words ("Make default: Spring", "Delete Spring"; WCAG 2.5.3). A list jobs use shows "In use, so it can't be
+  deleted" instead of Delete (the API's 409 still covers the race). The "Default" badge uses the `info` tone, not a
+  job status tone.
 - **Editor** (`/app/products/price-lists/{id}`): name and default badge, "Prices before tax", the live note when
   selling jobs use the list, a Settings card (name and home shipping fee), then Packages, Prints and Digital downloads
   cards with each item's contents or description and price. Owners and admins add, edit (a dialog with name,
   description, price, a print's size, and a package's lines with Add prints / Remove line buttons and "Includes the
   digital download of the chosen pose"), remove and reorder with **Move up / Move down buttons** (no drag, WCAG 2.5.7;
   focus stays on the moved item's button). Photographers and staff see it read-only.
-- **Job Shop tab** (no longer "coming soon"): the job's list (a select for owners and admins while the job isn't
-  closed), a link to edit it, what parents can buy with prices, and Delivery: the list's home shipping fee and the
-  "Free delivery to school" checkbox. Saves go through `PATCH /jobs/{id}` and are announced in a status region.
+- **Job Shop tab** (no longer "coming soon"): the job's list (a select and a "Save price list" button for owners and
+  admins while the job isn't closed, so arrowing through the select saves nothing on the way), a link to edit it, what
+  parents can buy with prices, and Delivery: the list's home shipping fee and the "Free delivery to school" checkbox.
+  Saves go through `PATCH /jobs/{id}` and are announced in a status region. Nothing is disabled while a save runs
+  (that would drop keyboard focus, WCAG 2.4.3); input meanwhile is ignored and the tab is `aria-busy`.
 - **Start selling** dialog: "Price list chosen" is real (done when the job has a list).
 - Status messages live in `role="status"` regions that stay in the accessibility tree while empty.
 

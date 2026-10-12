@@ -47,10 +47,10 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(
     setup.getByRole("listitem").filter({ hasText: "Review your price list" }),
   ).toContainText("Next");
-  await expect(setup.getByRole("link", { name: /^Review your price list/ })).toHaveAttribute(
-    "href",
-    "/app/products",
-  );
+  // The row's link is named by its label and its state in words ("Next").
+  await expect(
+    setup.getByRole("link", { name: "Review your price list Next", exact: true }),
+  ).toHaveAttribute("href", "/app/products");
   await expect(
     setup.getByRole("listitem").filter({ hasText: "Create your first job" }),
   ).toContainText("To do");

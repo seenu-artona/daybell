@@ -6,7 +6,7 @@
 -- kinds and field names only; "Review your price list" is stamped once, by the database, from a person's own change.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(111);
+select plan(146);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -59,7 +59,12 @@ begin
   get diagnostics n = row_count;
   return n;
 end $$;
-grant execute on function pg_temp.as_user(uuid), pg_temp.changed(text) to authenticated, anon;
+-- Ends a throws_ok probe that should succeed up to here, undoing it (lives_ok would keep its changes).
+create function pg_temp.undo() returns void language plpgsql as $$
+begin
+  raise exception 'undone' using errcode = 'P0001';
+end $$;
+grant execute on function pg_temp.as_user(uuid), pg_temp.changed(text), pg_temp.undo() to authenticated, anon;
 
 -- ── Shape ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 select has_table('public', 'price_lists', 'price_lists exists');
@@ -153,6 +158,41 @@ select throws_ok($$ insert into public.price_list_package_lines (studio_id, pric
 select throws_ok($$ insert into public.price_list_package_lines (studio_id, price_list_id, package_item_id, line_kind,
   print_size, quantity) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select a_list from ids), (select a_package from ids),
   'print', '4x6', 100) $$, '23514', null, 'at most 99 prints per line');
+-- Text parents see: no control characters, no bidi overrides or isolates (security review L3).
+select throws_ok($$ update public.price_lists set name = E'Spring\u0007' where id = (select a_list from ids) $$,
+  '23514', null, 'a list name has no control characters');
+select throws_ok($$ update public.price_lists set name = E'Spring \u202Egnirps' where id = (select a_list from ids) $$,
+  '23514', null, 'nor bidi overrides');
+select throws_ok($$ update public.price_list_items set name = E'8x10\u0085' where id = (select a_print from ids) $$,
+  '23514', null, 'an item name has no C1 control characters');
+select throws_ok($$ update public.price_list_items set name = E'8x10 \u2066print' where id = (select a_print from ids) $$,
+  '23514', null, 'nor bidi isolates');
+select throws_ok($$ update public.price_list_items set description = E'One\nphoto' where id = (select a_print from ids) $$,
+  '23514', null, 'a description has no line breaks or other control characters');
+select throws_ok($$ update public.price_list_items set name = '8×10 print — café' where id = (select a_print from ids);
+  select pg_temp.undo() $$, 'P0001', 'undone', 'ordinary Unicode is fine');
+-- Positions are bounded (L2), so max(position) + 1 never overflows.
+select throws_ok($$ update public.price_list_items set position = 10001 where id = (select a_print from ids) $$,
+  '23514', null, 'an item position is at most 10000');
+select throws_ok($$ update public.price_list_items set position = -1 where id = (select a_print from ids) $$,
+  '23514', null, 'and never negative');
+select throws_ok($$ insert into public.price_list_package_lines (studio_id, price_list_id, package_item_id, line_kind,
+  print_size, quantity, position) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select a_list from ids),
+  (select a_package from ids), 'print', '4x6', 1, 2147483647) $$, '23514', null, 'a package line position is bounded too');
+-- Every package holds at least one line, however it is written (L1). Checked at commit; SET CONSTRAINTS IMMEDIATE
+-- runs the check now, inside the test's savepoint.
+select throws_ok($$ insert into public.price_list_items (studio_id, price_list_id, kind, name, price_cents)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select a_list from ids), 'package', 'Hollow', 100);
+  set constraints all immediate $$, 'P0001', 'package_empty', 'a package inserted on its own, with no lines, is refused');
+select throws_ok($$ delete from public.price_list_package_lines where package_item_id = (select a_package from ids);
+  set constraints all immediate $$, 'P0001', 'package_empty', 'deleting all of a package''s lines is refused');
+select throws_ok($$ delete from public.price_list_package_lines where package_item_id = (select a_package from ids)
+  and line_kind = 'digital'; set constraints all immediate; select pg_temp.undo() $$, 'P0001', 'undone',
+  'deleting some of them is fine');
+select throws_ok($$ delete from public.price_list_items where id = (select a_package from ids);
+  set constraints all immediate; select pg_temp.undo() $$, 'P0001', 'undone',
+  'deleting the package itself takes its lines with it');
+set constraints all deferred;
 
 -- ── Photographers and staff read only (answer 8) ──────────────────────────────────────────────────────────────────
 set local role authenticated;
@@ -174,11 +214,18 @@ select is(pg_temp.changed($$ update public.studios set default_price_list_id = d
   where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$), 0::bigint, 'a photographer can''t change the default');
 select is(pg_temp.changed($$ update public.jobs set deliver_to_school = true
   where id = 'a0000000-0000-4000-8000-000000000001' $$), 0::bigint, 'a photographer can''t change a job''s delivery');
+select is(pg_temp.changed($$ delete from public.price_list_package_lines where package_item_id = (select a_package from ids) $$),
+  0::bigint, 'a photographer can''t delete a package''s contents');
+select throws_ok($$ insert into public.price_list_package_lines (studio_id, price_list_id, package_item_id, line_kind,
+  print_size, quantity) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select a_list from ids), (select a_package from ids),
+  'print', '4x6', 1) $$, '42501', null, 'nor add to them');
 select pg_temp.as_user('44444444-4444-4444-8444-444444444444') as signed_in;
 select is((select count(*) from public.price_list_package_lines where price_list_id = (select a_list from ids)), 9::bigint,
   'staff read package contents');
 select is(pg_temp.changed($$ delete from public.price_lists where id = (select a_list from ids) $$), 0::bigint,
   'staff can''t delete a list');
+select is(pg_temp.changed($$ delete from public.price_list_package_lines where price_list_id = (select a_list from ids) $$),
+  0::bigint, 'staff can''t delete package contents');
 select is((select count(*) from public.studios where price_list_reviewed_at is not null), 0::bigint,
   'none of that ticked "Review your price list"');
 
@@ -229,6 +276,48 @@ select is_empty($$ select * from public.price_list_summaries('bbbbbbbb-bbbb-4bbb
   'price_list_summaries shows nothing of B');
 select throws_ok($$ update public.studios set price_list_reviewed_at = now() where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$,
   '42501', null, 'nobody ticks "Review your price list" by hand');
+-- The SECURITY DEFINER guards refuse another studio's rows before looking anything up (L4): a real package of B's and
+-- a made-up id give the same answer, so failures tell A nothing about B.
+select throws_ok($$ insert into public.price_list_package_lines (studio_id, price_list_id, package_item_id, line_kind,
+  quantity) values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', (select b_list from ids), (select b_package from ids), 'digital', 1) $$,
+  '42501', null, 'A adding a line to B''s real package is refused as unauthorised');
+select throws_ok($$ insert into public.price_list_package_lines (studio_id, price_list_id, package_item_id, line_kind,
+  quantity) values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', (select b_list from ids), gen_random_uuid(), 'digital', 1) $$,
+  '42501', null, 'and so is a made-up one (no existence oracle)');
+select throws_ok($$ insert into public.price_list_items (studio_id, price_list_id, kind, name, print_size, price_cents)
+  values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', gen_random_uuid(), 'print', 'Probe', '4x6', 1) $$,
+  '42501', null, 'an item for a made-up list of B''s is refused the same way');
+-- Columns browsers can't write, even in their own studio (column grants).
+select throws_ok($$ insert into public.price_lists (studio_id, name, currency)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Mine', 'USD') $$, '42501', null, 'an owner can''t send a currency');
+select throws_ok($$ update public.price_lists set currency = 'USD' where id = (select a_list from ids) $$,
+  '42501', null, 'nor change one');
+select throws_ok($$ update public.price_lists set studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  where id = (select a_list from ids) $$, '42501', null, 'a list never moves studio');
+select throws_ok($$ update public.price_list_items set studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  where id = (select a_print from ids) $$, '42501', null, 'nor does an item');
+select throws_ok($$ update public.price_list_items set price_list_id = (select a_list from ids)
+  where id = (select a_print from ids) $$, '42501', null, 'or move list');
+select throws_ok($$ update public.price_list_items set position = 1 where id = (select a_print from ids) $$,
+  '42501', null, 'positions change only through set_price_list_item_order');
+select throws_ok($$ update public.price_list_package_lines set studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  where package_item_id = (select a_package from ids) $$, '42501', null, 'package lines are never updated');
+select throws_ok($$ update public.studios set data_region = 'us' where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$,
+  '42501', null, 'browsers can''t write a studio''s data region');
+-- Once a studio has a default list it always has one (M1).
+select throws_ok($$ update public.studios set default_price_list_id = null where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$,
+  '23514', 'default_price_list_required', 'an owner can''t clear the default list');
+
+-- As B's owner, who hasn't reviewed yet: reordering into the same order changes nothing (L6).
+select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as signed_in;
+select lives_ok($$ select public.set_price_list_item_order((select b_list from ids),
+  (select array_agg(id order by position, id) from public.price_list_items where price_list_id = (select b_list from ids))) $$,
+  'B saves its list in the order it already has');
+select is((select count(*) from public.events where studio_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  and type = 'price_list.reordered'), 0::bigint, 'which writes no event');
+select is((select price_list_reviewed_at from public.studios where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'), null,
+  'and doesn''t tick "Review your price list"');
+select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;
 
 -- ── Owners and admins edit ────────────────────────────────────────────────────────────────────────────────────────
 select results_eq($$ select name, currency, is_default, packages, prints, digitals, jobs, selling_jobs
@@ -252,6 +341,8 @@ with x as (insert into public.price_lists (studio_id, name) values ('aaaaaaaa-aa
 update ids set a_second = (select id from x);
 select is((select currency::text from public.price_lists where id = (select a_second from ids)), 'USD',
   'an admin adds a blank list; the database sets its currency');
+select throws_ok($$ update public.studios set default_price_list_id = null where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$,
+  '23514', 'default_price_list_required', 'nor can an admin');
 update ids set a_new_package = public.save_price_list_item((select a_second from ids), null,
   '{"kind":"package","name":"Mini","description":null,"price_cents":3000}',
   '[{"kind":"print","print_size":"5x7","quantity":2},{"kind":"digital","print_size":null,"quantity":1}]');
@@ -296,6 +387,12 @@ select is((select position from public.price_list_items where id = (select a_pac
   'positions follow the new order');
 select is((select count(*) from public.events where type = 'price_list.reordered'), 1::bigint,
   'reordering writes one event, not one per item');
+select lives_ok($$ select public.set_price_list_item_order((select a_second from ids), (select array_agg(id order by position)
+  from public.price_list_items where price_list_id = (select a_second from ids))) $$, 'the same order again is accepted');
+select is((select count(*) from public.events where type = 'price_list.reordered'), 1::bigint,
+  'but writes no second event');
+select lives_ok($$ set constraints all immediate $$, 'every package still has contents after the saves above');
+set constraints all deferred;
 
 -- Jobs: the default for new jobs, a chosen list, a new default, closed jobs.
 select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;

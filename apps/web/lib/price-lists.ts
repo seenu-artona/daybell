@@ -262,7 +262,9 @@ export function priceListError(error: NonNullable<DbError>): ApiError {
   const named = error.code === "P0001" && error.message ? NAMED[error.message] : undefined;
   if (named) return named();
   if (error.code === "P0002") return new ApiError("not_found", "We couldn't find that.");
-  if (error.code === "23505" && /one_digital/.test(error.message ?? "")) return DIGITAL_TAKEN();
+  // The list's one single digital / one "all digitals" only, not a package's one digital line (zod catches that one).
+  if (error.code === "23505" && /price_list_items_one_digital/.test(error.message ?? ""))
+    return DIGITAL_TAKEN();
   return fromDatabaseError(error);
 }
 

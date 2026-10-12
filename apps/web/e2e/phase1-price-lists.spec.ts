@@ -8,6 +8,8 @@ import { signUpOwner } from "./helpers";
 // tab switching list and school delivery, the refusals for a list in use, and that another studio can't read or
 // change any of it. Desktop only (D136).
 const run = `${Date.now()}`;
+/** A whole-text match: the status line says exactly this, not something that merely contains it. */
+const whole = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 
 test("price lists: starter list, edits, a copy as default, and a job's Shop tab", async ({
   page: firstTab,
@@ -88,7 +90,9 @@ test("price lists: starter list, edits, a copy as default, and a job's Shop tab"
   const settings = main.getByRole("region", { name: "Settings", exact: true });
   await settings.getByLabel("Home shipping fee", { exact: true }).fill("9.50");
   await settings.getByRole("button", { name: "Save settings", exact: true }).click();
-  await expect(main.getByRole("status").filter({ hasText: "Settings saved." })).toBeVisible();
+  await expect(
+    main.getByRole("status").filter({ hasText: whole("Settings saved.") }),
+  ).toBeVisible();
   await page.reload();
   await expect(
     main.getByRole("region", { name: "Settings", exact: true }).getByLabel("Home shipping fee", {
@@ -142,12 +146,12 @@ test("price lists: starter list, edits, a copy as default, and a job's Shop tab"
   ).toBeVisible();
   await main.getByRole("link", { name: "All price lists", exact: true }).click();
   const springRow = main.getByRole("row").filter({ hasText: `Spring ${tag}` });
-  await springRow
-    .getByRole("button", { name: `Make Spring ${tag} the default`, exact: true })
-    .click();
+  await springRow.getByRole("button", { name: `Make default: Spring ${tag}`, exact: true }).click();
   await expect(springRow.getByText("Default", { exact: true })).toBeVisible();
   await expect(
-    main.getByRole("status").filter({ hasText: `Spring ${tag} is now the default for new jobs.` }),
+    main
+      .getByRole("status")
+      .filter({ hasText: whole(`Spring ${tag} is now the default for new jobs.`) }),
   ).toBeVisible();
 
   // 8. A new job gets the new default; its Shop tab switches list and turns on school delivery, kept after a reload.
@@ -174,21 +178,37 @@ test("price lists: starter list, edits, a copy as default, and a job's Shop tab"
   const listCard = main.getByRole("region", { name: "Price list", exact: true });
   const choose = listCard.getByLabel("Price list for this job", { exact: true });
   await expect(choose).toHaveValue(spring?.id ?? "");
+  // Picking a list saves nothing until Save (arrowing through the select must not save each step; D91).
   await choose.selectOption(starter?.id ?? "");
-  await expect(main.getByRole("status").filter({ hasText: "Price list saved." })).toBeVisible();
+  await expect(
+    main.getByRole("status").filter({ hasText: whole("Price list saved.") }),
+  ).toHaveCount(0);
+  await listCard.getByRole("button", { name: "Save price list", exact: true }).click();
+  await expect(
+    main.getByRole("status").filter({ hasText: whole("Price list saved.") }),
+  ).toBeVisible();
   await expect(
     listCard.getByRole("listitem").filter({ hasText: "4×6 print" }).getByText("$12.00", {
       exact: true,
     }),
   ).toBeVisible();
   const delivery = main.getByRole("region", { name: "Delivery", exact: true });
-  await expect(delivery.getByText("$9.50 per order", { exact: false })).toBeVisible();
+  await expect(
+    delivery.getByText(
+      "$9.50 per order, set on the price list. Digital-only orders pay no shipping.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   const toSchool = delivery.getByRole("checkbox", { name: "Free delivery to school", exact: true });
   await expect(toSchool).not.toBeChecked();
-  await toSchool.check();
+  // Keyboard: Space toggles it, and focus stays on the checkbox through the save (WCAG 2.4.3).
+  await toSchool.focus();
+  await page.keyboard.press("Space");
   await expect(
-    main.getByRole("status").filter({ hasText: "Free delivery to school is on." }),
+    main.getByRole("status").filter({ hasText: whole("Free delivery to school is on.") }),
   ).toBeVisible();
+  await expect(toSchool).toBeChecked();
+  await expect(toSchool).toBeFocused();
   await page.reload();
   await expect(
     main
@@ -201,25 +221,23 @@ test("price lists: starter list, edits, a copy as default, and a job's Shop tab"
       .getByRole("checkbox", { name: "Free delivery to school", exact: true }),
   ).toBeChecked();
 
-  // 9. A list a job uses can't be deleted; the reason is said in words.
+  // 9. A list a job uses can't be deleted: no Delete button, and the reason is said in words. (The API's 409 for the
+  // race is covered by the route tests.)
   await page.goto("/app/products");
   const usedRow = main.getByRole("row").filter({ hasText: "Starter price list" });
   await expect(usedRow.getByText("1 job", { exact: true })).toBeVisible();
-  await usedRow.getByRole("button", { name: "Delete Starter price list", exact: true }).click();
-  dialog = page.getByRole("dialog", { name: "Delete this price list?" });
-  await dialog.getByRole("button", { name: "Delete price list", exact: true }).click();
+  await expect(usedRow.getByText("In use, so it can't be deleted", { exact: true })).toBeVisible();
   await expect(
-    dialog.getByText("Jobs use this price list. Give them another list on their Shop tab first.", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    usedRow.getByRole("button", { name: "Delete Starter price list", exact: true }),
+  ).toHaveCount(0);
 
   // Saving price list changes ticked "Review your price list" on Home's setup checklist.
+  // Either the task is done, or the whole setup checklist is (it is gone once complete); nothing else passes.
   const checklist = await (await page.request.get("/api/v1/studio/checklist")).json();
-  expect(
-    checklist.onboarding?.tasks.find((t: { key: string }) => t.key === "priceList")?.done ?? true,
-  ).toBe(true);
+  const priceListTask = checklist.onboarding?.tasks.find(
+    (t: { key: string }) => t.key === "priceList",
+  );
+  expect(checklist.onboarding === null || priceListTask?.done === true).toBe(true);
 
   // 10. Another studio can't read or change any of it, nor give its own job the first studio's list.
   const outsider = await signUpOwner(await (await browser.newContext()).newPage(), {
