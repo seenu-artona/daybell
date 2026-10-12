@@ -2,7 +2,7 @@
 
 import type { ActivityItem } from "@daybell/api";
 import { Card, CardRow, IconChip } from "@daybell/ui";
-import { FilePlus2, Pencil, Store, Upload, Users } from "lucide-react";
+import { FilePlus2, Pencil, QrCode, Store, Upload, Users } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { type ActivityIcon, activityChip, unnamedSubject } from "@/lib/activity";
@@ -12,6 +12,7 @@ const ICONS: Record<ActivityIcon, typeof Pencil> = {
   created: FilePlus2,
   edited: Pencil,
   imported: Upload,
+  printed: QrCode,
   team: Users,
   studio: Store,
 };

@@ -5,6 +5,7 @@ import {
   type AccessCodeCryptoKeys,
   type AccessCodeRegion,
   encryptAccessCode,
+  encryptCardAccessCode,
   generateAccessCode,
   hashAccessCode,
   importAccessCodeKeys,
@@ -42,4 +43,21 @@ export async function newAccessCode(
     encryptAccessCode(code, childId, cryptoKeys.encryption),
   ]);
   return { hash, ciphertext };
+}
+
+/**
+ * A fresh pre-made code for a blank QR card (ADR 0015): the code itself (printed on the card, then forgotten), its
+ * lookup hash and the encrypted copy bound to the card's id. Unique against every child and card in the region.
+ */
+export async function newCardAccessCode(
+  region: AccessCodeRegion,
+  cardId: string,
+  cryptoKeys: AccessCodeCryptoKeys,
+): Promise<{ code: string; hash: string; ciphertext: string }> {
+  const code = generateAccessCode(region);
+  const [hash, ciphertext] = await Promise.all([
+    hashAccessCode(code, cryptoKeys.hmac),
+    encryptCardAccessCode(code, cardId, cryptoKeys.encryption),
+  ]);
+  return { code, hash, ciphertext };
 }

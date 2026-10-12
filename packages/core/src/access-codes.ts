@@ -136,7 +136,11 @@ export type AccessCodeOwner = { child: string } | { card: string };
 const associatedData = (owner: AccessCodeOwner) =>
   encoder.encode("child" in owner ? `daybell:child:${owner.child}` : `daybell:card:${owner.card}`);
 
-async function seal(code: string, owner: AccessCodeOwner, encryptionKey: CryptoKey): Promise<string> {
+async function seal(
+  code: string,
+  owner: AccessCodeOwner,
+  encryptionKey: CryptoKey,
+): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const sealed = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv, additionalData: associatedData(owner) },

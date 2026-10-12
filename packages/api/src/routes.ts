@@ -17,6 +17,7 @@ import {
   listQuery,
   passwordResetRequestInput,
   passwordUpdateInput,
+  qrCardsInput,
   rosterImportInput,
   rosterQuery,
   searchInput,
@@ -38,6 +39,8 @@ import {
   jobsResponse,
   meResponse,
   nextJobNumberResponse,
+  QR_CARD_HEADERS,
+  qrCardStatusResponse,
   rosterImportResponse,
   searchResponse,
   teamResponse,
@@ -69,7 +72,15 @@ export interface RouteSpec {
   /** Query string parameters, for lists. */
   query?: z.ZodObject;
   body?: z.ZodType;
-  success: { status: 200 | 201 | 202 | 204; schema?: z.ZodType; description: string };
+  success: {
+    status: 200 | 201 | 202 | 204;
+    schema?: z.ZodType;
+    description: string;
+    /** A file instead of JSON (e.g. the QR card PDF). */
+    contentType?: "application/pdf";
+    /** Response headers worth knowing, by name. */
+    headers?: Record<string, string>;
+  };
   errors: ApiErrorCode[];
 }
 
@@ -200,7 +211,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Studio",
     summary: "The studio's activity log",
     description:
-      "The latest 50 changes. Events store IDs only; emails come from the current team list. With jobId, only that job's own changes and roster imports (not each child or class change); a job of another studio is not found.",
+      "The latest 50 changes. Events store IDs only; emails come from the current team list. With jobId, only that job's own changes, roster imports and QR card prints (not each child or class change); a job of another studio is not found.",
     access: "owner-admin",
     query: activityQuery,
     success: {
@@ -356,6 +367,39 @@ export const ROUTES: RouteSpec[] = [
   },
   {
     method: "GET",
+    path: "/jobs/{id}/qr-cards",
+    group: "Roster",
+    summary: "How many of a job's children have a QR card",
+    description:
+      "For the Overview's Print QR cards to-do: done when every child who may be photographed has a card. A child added later reopens it.",
+    access: "signed-in",
+    success: { status: 200, schema: qrCardStatusResponse, description: "Card counts." },
+    errors: ["not_signed_in", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/qr-cards",
+    group: "Roster",
+    summary: "Print QR cards (PDF)",
+    description:
+      "A PDF of cards, four per US Letter page, sorted by class: the studio's name, the child's name and class, a QR holding a random card ID (never the access code), the access code and the shop link. Children marked Do not photograph get no card. A child's card is made on their first print and reused on every reprint, so cards already handed out keep working. Blank cards (0–100) have a line for the name and a new access code; each print makes new ones. Made on demand in the studio's region and never stored. A card whose access code can't be read is left out and counted, never printed without a working code.",
+    access: "roster-editor",
+    body: qrCardsInput,
+    success: {
+      status: 200,
+      contentType: "application/pdf",
+      description: "The PDF, as a download.",
+      headers: {
+        [QR_CARD_HEADERS.cards]: "Cards in the PDF, blank cards included.",
+        [QR_CARD_HEADERS.skipped]: "Cards left out because their access code can't be read.",
+        [QR_CARD_HEADERS.replaced]:
+          "Cards with characters the font can't print, shown as ? (Latin letters and accents only).",
+      },
+    },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "conflict"],
+  },
+  {
+    method: "GET",
     path: "/clients",
     group: "Contacts",
     summary: "The studio's clients",
@@ -482,9 +526,25 @@ export function buildOpenApi(serverUrl: string) {
     const responses: Record<string, unknown> = {
       [r.success.status]: {
         description: r.success.description,
-        ...(r.success.schema
-          ? { content: { "application/json": { schema: json(r.success.schema, components) } } }
+        ...(r.success.headers
+          ? {
+              headers: Object.fromEntries(
+                Object.entries(r.success.headers).map(([name, description]) => [
+                  name,
+                  { description, schema: { type: "integer" } },
+                ]),
+              ),
+            }
           : {}),
+        ...(r.success.contentType
+          ? {
+              content: {
+                [r.success.contentType]: { schema: { type: "string", format: "binary" } },
+              },
+            }
+          : r.success.schema
+            ? { content: { "application/json": { schema: json(r.success.schema, components) } } }
+            : {}),
       },
     };
     for (const code of r.errors) {

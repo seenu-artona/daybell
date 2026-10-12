@@ -56,8 +56,7 @@ export type CardScope =
 
 /** The children a print makes cards for. Children marked Do not photograph never get a card (D138). */
 export function cardChildren<T extends CardPerson>(children: readonly T[], scope: CardScope): T[] {
-  return children.filter((c) => {
-    if (c.doNotPhotograph) return false;
+  const inScope = (c: T): boolean => {
     switch (scope.kind) {
       case "job":
         return true;
@@ -66,7 +65,8 @@ export function cardChildren<T extends CardPerson>(children: readonly T[], scope
       case "groups":
         return c.group ? scope.groupIds.includes(c.group.id) : scope.noGroup;
     }
-  });
+  };
+  return children.filter((c) => !c.doNotPhotograph && inScope(c));
 }
 
 /**

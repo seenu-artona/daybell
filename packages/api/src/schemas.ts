@@ -1,5 +1,5 @@
 import { DATA_REGIONS } from "@daybell/config";
-import { JOB_TYPES } from "@daybell/core";
+import { JOB_TYPES, MAX_BLANK_CARDS } from "@daybell/core";
 import { z } from "zod";
 
 /**
@@ -371,6 +371,46 @@ export const activityQuery = z.object({
     .optional()
     .meta({ description: "Only this job's activity (the job and its roster imports)." }),
 });
+
+// ── QR cards (Phase 1 step 3, ADR 0015) ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * What to print (Seenu, answer 4): the whole job (no groupIds, no childId), chosen classes, or one child's card. Only
+ * IDs and a count: the request never carries names or codes, and it is a POST body, never a URL (D113).
+ */
+export const qrCardsInput = z
+  .object({
+    groupIds: z
+      .array(z.union([z.uuid(), z.literal("none")]), { error: "validation.group" })
+      .min(1, { error: "validation.qrCardsGroups" })
+      .max(500, { error: "validation.group" })
+      .refine((ids) => new Set(ids).size === ids.length, { error: "validation.group" })
+      .optional()
+      .meta({
+        description:
+          'Only these classes, teams or groups; "none" for children without one. Leave out for the whole job.',
+      }),
+    childId: z
+      .uuid({ error: "validation.invalid" })
+      .optional()
+      .meta({ description: "Only this child's card. Not with groupIds or blank cards." }),
+    blankCards: z
+      .number({ error: "validation.blankCards" })
+      .int({ error: "validation.blankCards" })
+      .min(0, { error: "validation.blankCards" })
+      .max(MAX_BLANK_CARDS, { error: "validation.blankCards" })
+      .default(0)
+      .meta({
+        description: `Extra cards with a line for the name and a new access code, 0–${MAX_BLANK_CARDS}.`,
+      }),
+  })
+  .superRefine((value, ctx) => {
+    if (value.childId && value.groupIds)
+      ctx.addIssue({ code: "custom", path: ["groupIds"], message: "validation.invalid" });
+    if (value.childId && value.blankCards > 0)
+      ctx.addIssue({ code: "custom", path: ["blankCards"], message: "validation.blankCards" });
+  });
+export type QrCardsInput = z.infer<typeof qrCardsInput>;
 
 /** Turns zod issues into `{ field: messageKey }` for forms. */
 export function fieldErrors(error: z.ZodError): Record<string, string> {
