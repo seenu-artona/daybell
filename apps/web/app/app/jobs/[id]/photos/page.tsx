@@ -1,6 +1,7 @@
 "use client";
 
 import { PHOTO_CONFLICTS, type PhotosMovedResponse } from "@daybell/api";
+import { MAX_PHOTOS_PER_BIN_REQUEST } from "@daybell/core";
 import { Banner, Button } from "@daybell/ui";
 import { ArrowLeft, Trash2, Undo2, Upload } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -61,11 +62,12 @@ function PhotosPage() {
   const index = rows.findIndex((p) => p.id === selectedId);
   const selected = index >= 0 ? rows[index] : null;
 
-  // A photo that isn't in what's loaded (binned, another job's id) is dropped from the URL quietly.
+  // A photo that isn't in what's loaded (binned, another job's id) is dropped from the URL quietly, but never while
+  // the photos are being loaded again (review CR6).
   useEffect(() => {
-    if (selectedId && photos.rows && !photos.loadingMore && !selected)
+    if (selectedId && photos.rows && !photos.loadingMore && !photos.refreshing && !selected)
       router.replace(base, { scroll: false });
-  }, [selectedId, selected, photos.rows, photos.loadingMore, router, base]);
+  }, [selectedId, selected, photos.rows, photos.loadingMore, photos.refreshing, router, base]);
 
   function problem(res: { ok: false; code: string; fields: Record<string, string> }) {
     const key = CONFLICT_KEYS[res.fields.form ?? ""];
@@ -74,12 +76,21 @@ function PhotosPage() {
 
   async function move(action: "bin" | "restore", ids: string[]) {
     setStatus("");
-    const res = await api<PhotosMovedResponse>(
-      `/jobs/${encodeURIComponent(job.id)}/photos/${action}`,
-      { method: "POST", body: { photoIds: ids } },
-    );
-    if (!res.ok) return setStatus(problem(res));
-    setStatus(t(action === "bin" ? "binned" : "restored", { count: res.data.moved }));
+    // The API takes 500 at a time.
+    let moved = 0;
+    for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_BIN_REQUEST) {
+      const res = await api<PhotosMovedResponse>(
+        `/jobs/${encodeURIComponent(job.id)}/photos/${action}`,
+        { method: "POST", body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_BIN_REQUEST) } },
+      );
+      if (!res.ok) {
+        setStatus(problem(res));
+        await photos.reload();
+        return;
+      }
+      moved += res.data.moved;
+    }
+    setStatus(t(action === "bin" ? "binned" : "restored", { count: moved }));
     setChecked(new Set());
     if (selectedId && ids.includes(selectedId)) closePanel();
     await photos.reload();

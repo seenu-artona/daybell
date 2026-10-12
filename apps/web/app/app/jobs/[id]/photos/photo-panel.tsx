@@ -11,7 +11,7 @@ import { FloatingPanel } from "../floating-panel";
 /**
  * One photo in the floating panel (D140): the 1600 px preview (studio only, unwatermarked), its file's name, when it
  * was taken, its size and status in words, and for people who can bin: Move to bin (or Restore), and Try again for a
- * photo that couldn't be read. ?photo=<id> in the URL (an id only).
+ * photo that couldn't be read or has been processing for 15 minutes. ?photo=<id> in the URL (an id only).
  */
 export function PhotoPanel({
   photo,
@@ -132,7 +132,7 @@ export function PhotoPanel({
       </dl>
       {canEdit ? (
         <div className="flex flex-wrap gap-2">
-          {photo.failureReason === "unreadable" && !photo.binnedAt ? (
+          {photo.retryable ? (
             <Button variant="secondary" shape="pill" disabled={busy} onClick={() => act(onRetry)}>
               <RotateCcw aria-hidden="true" />
               {tp("retry")}

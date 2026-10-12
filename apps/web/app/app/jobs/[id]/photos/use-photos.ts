@@ -10,8 +10,8 @@ const POLL_MS = 4000;
 
 /**
  * A job's photos (or its bin) for the Photos tab, a page of 200 at a time in tagging order, and the job's counts.
- * While photos are processing (or an upload runs), the counts are checked every few seconds and the first page is
- * loaded again when they change, so new previews appear.
+ * While photos are processing (or an upload runs), the counts are checked every few seconds; when they change, every
+ * page already shown is loaded again (review CR6), so new previews appear without losing the place or the open photo.
  */
 export function usePhotos(jobId: string, bin: boolean, busy: boolean) {
   const [rows, setRows] = useState<Photo[] | null>(null);
@@ -19,43 +19,71 @@ export function usePhotos(jobId: string, bin: boolean, busy: boolean) {
   const [counts, setCounts] = useState<PhotoCounts | null>(null);
   const [failed, setFailed] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
+  const shown = useRef(0);
   const base = `/jobs/${encodeURIComponent(jobId)}/photos`;
+  const page = useCallback(
+    (cursor: string | null) =>
+      api<PhotosResponse>(
+        `${base}?limit=${PHOTO_PAGE_SIZE}&bin=${bin}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      ),
+    [base, bin],
+  );
 
-  const reload = useCallback(async () => {
+  /** Loads again from the start, as many photos as are shown now (at least one page). */
+  const refresh = useCallback(async () => {
     const mine = ++generation.current;
-    const [page, summary] = await Promise.all([
-      api<PhotosResponse>(`${base}?limit=${PHOTO_PAGE_SIZE}&bin=${bin}`),
-      api<PhotoCountsResponse>(`${base}/summary`),
-    ]);
+    setRefreshing(true);
+    const want = Math.max(shown.current, PHOTO_PAGE_SIZE);
+    const summary = api<PhotoCountsResponse>(`${base}/summary`);
+    const collected: Photo[] = [];
+    let cursor: string | null = null;
+    let ok = true;
+    do {
+      const res = await page(cursor);
+      if (!res.ok) {
+        ok = false;
+        break;
+      }
+      collected.push(...res.data.photos);
+      cursor = res.data.nextCursor;
+    } while (cursor && collected.length < want);
+    const counted = await summary;
     if (mine !== generation.current) return;
-    if (summary.ok) setCounts(summary.data.counts);
-    if (!page.ok) {
+    setRefreshing(false);
+    if (counted.ok) setCounts(counted.data.counts);
+    if (!ok) {
       setFailed(true);
       return;
     }
     setFailed(false);
-    setRows(page.data.photos);
-    setNextCursor(page.data.nextCursor);
-  }, [base, bin]);
+    shown.current = collected.length;
+    setRows(collected);
+    setNextCursor(cursor);
+  }, [base, page]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor) return;
     setLoadingMore(true);
     const mine = generation.current;
-    const page = await api<PhotosResponse>(
-      `${base}?limit=${PHOTO_PAGE_SIZE}&bin=${bin}&cursor=${encodeURIComponent(nextCursor)}`,
-    );
+    const res = await page(nextCursor);
     setLoadingMore(false);
-    if (mine !== generation.current || !page.ok) return;
-    setRows((current) => [...(current ?? []), ...page.data.photos]);
-    setNextCursor(page.data.nextCursor);
-  }, [base, bin, nextCursor]);
+    if (mine !== generation.current || !res.ok) return;
+    setRows((current) => {
+      const merged = [...(current ?? []), ...res.data.photos];
+      shown.current = merged.length;
+      return merged;
+    });
+    setNextCursor(res.data.nextCursor);
+  }, [page, nextCursor]);
 
+  // A new job or the bin toggled: start from the first page.
   useEffect(() => {
+    shown.current = 0;
     setRows(null);
-    void reload();
-  }, [reload]);
+    void refresh();
+  }, [refresh]);
 
   // Keep checking while previews are being made or an upload runs.
   const processing = (counts?.processing ?? 0) > 0;
@@ -69,10 +97,10 @@ export function usePhotos(jobId: string, bin: boolean, busy: boolean) {
       if (key === last.current) return;
       last.current = key;
       setCounts(summary.data.counts);
-      void reload();
+      void refresh();
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [processing, busy, base, reload]);
+  }, [processing, busy, base, refresh]);
 
-  return { rows, counts, failed, nextCursor, loadingMore, reload, loadMore };
+  return { rows, counts, failed, nextCursor, loadingMore, refreshing, reload: refresh, loadMore };
 }

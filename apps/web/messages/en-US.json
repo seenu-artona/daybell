@@ -866,7 +866,8 @@
         "notUploading": "Some photos had already finished uploading.",
         "incomplete": "Some parts of a photo didn't arrive. Drop the photos again to send them.",
         "photoSold": "A photo that has sold can't be moved to the bin.",
-        "notRetryable": "This photo can't be tried again right now."
+        "notRetryable": "This photo can't be tried again: it isn't stuck, or the job already has the same photo.",
+        "photoPurging": "This photo is being deleted for good, so it can't be restored."
       },
       "uploader": {
         "title": "Upload photos",
@@ -874,7 +875,7 @@
         "or": "or",
         "chooseFolder": "Choose folder",
         "choosePhotos": "Choose photos",
-        "rules": "JPEG only, up to 50 MB each. Photos the job already has are skipped. If your connection drops, the upload waits and carries on; if you close the page, drop the same photos again to finish.",
+        "rules": "JPEG only, up to 50 MB each. Photos the job already has are skipped. If your connection drops, the upload waits and carries on; if you close the page, drop the same photos again to finish. Stop cancels the photos not yet uploaded.",
         "close": "Close",
         "batch": "Upload {n}",
         "checking": "Checking {checked, number} of {total, number} files",
@@ -886,7 +887,8 @@
         "skipped": "{count, plural, one {# file skipped: not a JPEG, empty or over 50 MB} other {# files skipped: not JPEGs, empty or over 50 MB}}",
         "retry": "Retry",
         "nothing": "No JPEG photos in what you dropped.",
-        "announce": "{uploaded, number} of {total, number} photos uploaded"
+        "announce": "{uploaded, number} of {total, number} photos uploaded",
+        "stop": "Stop"
       },
       "panel": {
         "file": "File",

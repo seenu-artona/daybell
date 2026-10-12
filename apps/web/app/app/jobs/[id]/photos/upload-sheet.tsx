@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Card, CardRow, IconButton } from "@daybell/ui";
-import { FolderOpen, Images, RotateCcw, X } from "lucide-react";
+import { FolderOpen, Images, RotateCcw, Square, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
@@ -237,6 +237,12 @@ export function UploadSheet({
                         </span>
                       ) : null}
                     </span>
+                    {isActive(r) ? (
+                      <Button variant="secondary" shape="pill" onClick={() => void r.run.cancel()}>
+                        <Square aria-hidden="true" />
+                        {t("stop")}
+                      </Button>
+                    ) : null}
                     {!isActive(r) && r.run.failed().length > 0 ? (
                       <Button
                         variant="secondary"

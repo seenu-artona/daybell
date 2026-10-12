@@ -85,6 +85,12 @@ export class UploadRun {
   readonly progress: UploadProgress;
   private batchId: string | null = null;
   private stopped = false;
+  /** Files that were twice in the drop: sent once, and counted on the batch as duplicates (review CR10). */
+  private dropDuplicates = 0;
+  /** Registered photos, and those uploaded whole (the rest are cancelled by Stop). */
+  private readonly registered: Item[] = [];
+  private readonly uploadedItems = new Set<Item>();
+  private running: Promise<void> | null = null;
 
   constructor(
     private readonly jobId: string,
@@ -121,9 +127,19 @@ export class UploadRun {
     this.onProgress({ ...this.progress });
   }
 
-  /** Stops after the requests in flight; the server keeps what arrived, so dropping the files again resumes. */
-  stop() {
+  /**
+   * Stop: no new part is sent, the parts in flight finish, the batch is finished, and the photos that hadn't finished
+   * uploading are cancelled (their parts dropped), so nothing half-sent is left in the job.
+   */
+  async cancel(): Promise<void> {
     this.stopped = true;
+    await this.running;
+    for (const item of this.registered)
+      if (!this.uploadedItems.has(item))
+        await this.deps.api(`/photos/${encodeURIComponent(item.photoId)}/upload`, {
+          method: "DELETE",
+        });
+    this.emit({ phase: "stopped", problem: null });
   }
 
   /** Calls the API, trying again on network and server errors (waiting while offline). */
@@ -158,7 +174,12 @@ export class UploadRun {
     this.emit({ phase: "stopped", problem });
   }
 
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    this.running ??= this.run();
+    return this.running;
+  }
+
+  private async run(): Promise<void> {
     if (this.accepted.length === 0) {
       this.emit({ phase: "done" });
       return;
@@ -171,12 +192,16 @@ export class UploadRun {
     this.batchId = batch.data.batchId;
 
     const hashed = await this.hashAll();
-    if (this.stopped) return this.fail("stopped");
-    const items = await this.registerAll(hashed);
-    if (items === null || this.stopped) return;
+    if (this.stopped) {
+      await this.finish();
+      return;
+    }
+    // Files registered before a later chunk was refused are still uploaded, then the upload stops and says why.
+    const { items, problem } = await this.registerAll(hashed);
     this.emit({ phase: "uploading" });
     await this.uploadAll(items);
     await this.finish();
+    if (problem) this.fail(problem);
   }
 
   private async hashAll(): Promise<{ drop: DropFile; sha256: string }[]> {
@@ -204,6 +229,7 @@ export class UploadRun {
       if (!h) return false;
       if (seen.has(h.sha256)) {
         this.progress.duplicates++;
+        this.dropDuplicates++;
         return false;
       }
       seen.add(h.sha256);
@@ -211,9 +237,11 @@ export class UploadRun {
     });
   }
 
-  private async registerAll(hashed: { drop: DropFile; sha256: string }[]): Promise<Item[] | null> {
+  private async registerAll(
+    hashed: { drop: DropFile; sha256: string }[],
+  ): Promise<{ items: Item[]; problem: string | null }> {
     const items: Item[] = [];
-    for (let i = 0; i < hashed.length; i += MAX_FILES_PER_REQUEST) {
+    for (let i = 0; i < hashed.length && !this.stopped; i += MAX_FILES_PER_REQUEST) {
       const chunk = hashed.slice(i, i + MAX_FILES_PER_REQUEST);
       const res = await this.call<RegisterFilesResponse>(`/upload-batches/${this.batchId}/files`, {
         method: "POST",
@@ -225,10 +253,8 @@ export class UploadRun {
           })),
         },
       });
-      if (!res.ok) {
-        this.fail(res.fields.form ?? res.code);
-        return null;
-      }
+      if (!res.ok) return { items, problem: res.fields.form ?? res.code };
+      const resumed: Item[] = [];
       for (const r of res.data.results) {
         const h = chunk[r.index];
         if (!h) continue;
@@ -247,16 +273,25 @@ export class UploadRun {
           partCount: r.partCount,
           missing: all,
         };
-        if (r.outcome === "resume") {
-          // Only the parts storage doesn't have yet.
-          const parts = await this.call<UploadPartsResponse>(`/photos/${r.photoId}/upload-parts`);
-          if (parts.ok) item.missing = all.filter((n) => !parts.data.parts.includes(n));
-        }
+        if (r.outcome === "resume") resumed.push(item);
         items.push(item);
+        this.registered.push(item);
       }
+      // Resumed files send only the parts storage doesn't have yet; asked a few at a time (review CR11).
+      let next = 0;
+      const ask = async () => {
+        while (next < resumed.length) {
+          const item = resumed[next++] as Item;
+          const parts = await this.call<UploadPartsResponse>(
+            `/photos/${item.photoId}/upload-parts`,
+          );
+          if (parts.ok) item.missing = item.missing.filter((n) => !parts.data.parts.includes(n));
+        }
+      };
+      await Promise.all(Array.from({ length: PARTS_IN_FLIGHT }, ask));
       this.emit();
     }
-    return items;
+    return { items, problem: null };
   }
 
   private async uploadAll(items: Item[]): Promise<void> {
@@ -281,7 +316,7 @@ export class UploadRun {
         if (broken.has(item)) continue;
         const ok = await this.sendPart(item, partNumber, urlsFor);
         if (!ok) {
-          if (!broken.has(item)) {
+          if (!broken.has(item) && !this.stopped) {
             broken.add(item);
             this.failedFiles.add(item.drop);
             this.emit({ failed: this.progress.failed + 1 });
@@ -338,9 +373,15 @@ export class UploadRun {
           method: "POST",
         },
       );
-      if (res.ok) {
-        if (res.data.status === "processing") this.emit({ uploaded: this.progress.uploaded + 1 });
-        else {
+      // An earlier try (or another tab) already finished it: it's uploaded.
+      const done = res.ok
+        ? res.data.status === "processing"
+        : res.fields.form === "photos.notUploading";
+      if (res.ok || done) {
+        if (done) {
+          this.uploadedItems.add(item);
+          this.emit({ uploaded: this.progress.uploaded + 1 });
+        } else {
           this.failedFiles.add(item.drop);
           this.emit({ failed: this.progress.failed + 1 });
         }
@@ -368,7 +409,7 @@ export class UploadRun {
     this.emit({ phase: "finishing" });
     await this.call(`/upload-batches/${this.batchId}/finish`, {
       method: "POST",
-      body: { skipped: this.progress.skipped },
+      body: { skipped: this.progress.skipped, duplicates: this.dropDuplicates },
     });
     this.emit({ phase: this.stopped ? "stopped" : "done" });
   }

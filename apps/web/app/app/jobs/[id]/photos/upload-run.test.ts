@@ -167,9 +167,10 @@ describe("UploadRun", () => {
       expect.objectContaining({ name: "IMG_0001.JPG" }),
       expect.objectContaining({ name: "IMG_0002.jpg" }),
     ]);
+    // The browser's own duplicate (the same file twice in the drop) is counted on the batch too (review CR10).
     expect(server.api).toHaveBeenLastCalledWith("/upload-batches/batch-1/finish", {
       method: "POST",
-      body: { skipped: 1 },
+      body: { skipped: 1, duplicates: 1 },
     });
   });
 
@@ -247,6 +248,66 @@ describe("UploadRun", () => {
         .map((f) => f.path)
         .sort(),
     ).toEqual(["a.jpg", "b.jpg"]);
+  });
+
+  it("uploads what was registered before a later chunk was refused, then stops and says why (review CR9)", async () => {
+    const server = fakeServer();
+    const real = server.api.getMockImplementation() as NonNullable<
+      ReturnType<typeof server.api.getMockImplementation>
+    >;
+    let chunks = 0;
+    server.api.mockImplementation(async (path, init) => {
+      if (path.endsWith("/files") && ++chunks === 2)
+        return fail(409, "conflict", "photos.photoLimit");
+      return real(path, init);
+    });
+    const files = Array.from({ length: 501 }, (_, i) => file(`IMG_${i}.jpg`, `photo ${i}`));
+    const progress = await run(files, deps(server));
+    expect(progress).toMatchObject({
+      phase: "stopped",
+      problem: "photos.photoLimit",
+      uploaded: 500,
+    });
+    expect(server.calls).toContain("POST /upload-batches/batch-1/finish");
+  });
+
+  it("counts a photo another request already finished as uploaded", async () => {
+    const server = fakeServer();
+    const real = server.api.getMockImplementation() as NonNullable<
+      ReturnType<typeof server.api.getMockImplementation>
+    >;
+    server.api.mockImplementation(async (path, init) =>
+      path.endsWith("/upload-complete")
+        ? fail(409, "conflict", "photos.notUploading")
+        : real(path, init),
+    );
+    expect(await run([file("a.jpg", "one")], deps(server))).toMatchObject({
+      uploaded: 1,
+      failed: 0,
+    });
+  });
+
+  it("Stop cancels the photos that hadn't finished uploading (review CR14)", async () => {
+    const server = fakeServer();
+    let release!: () => void;
+    const held = new Promise<number>((ok) => {
+      release = () => ok(200);
+    });
+    server.put.mockImplementation(() => held);
+    const upload = new UploadRun(
+      JOB,
+      [file("a.jpg", "one"), file("b.jpg", "two")],
+      deps(server),
+      () => {},
+    );
+    const started = upload.start();
+    await new Promise((ok) => setTimeout(ok, 20));
+    const cancelled = upload.cancel();
+    release();
+    await started;
+    await cancelled;
+    expect(upload.progress.phase).toBe("stopped");
+    expect(server.calls.filter((c) => c.startsWith("DELETE"))).toHaveLength(2);
   });
 
   it("sends a part again when storage says it is missing at completion", async () => {
