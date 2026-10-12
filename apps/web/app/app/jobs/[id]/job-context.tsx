@@ -1,6 +1,6 @@
 "use client";
 
-import type { Job } from "@daybell/api";
+import type { Job, QrCardStatus } from "@daybell/api";
 import { createContext, useContext } from "react";
 
 export interface JobSummary {
@@ -10,6 +10,8 @@ export interface JobSummary {
   duplicates: number;
   /** Classes, teams or groups. */
   groups: number;
+  /** QR cards (ADR 0015): who may be photographed and how many of them have a card. */
+  qrCards: QrCardStatus;
 }
 
 export interface JobContextValue {
@@ -17,7 +19,7 @@ export interface JobContextValue {
   setJob: (job: Job) => void;
   /** Null until loaded (or if it couldn't be loaded). */
   summary: JobSummary | null;
-  /** Call after any roster change, so the People count and the Overview numbers stay right. */
+  /** Call after any roster change or print, so the People count and the Overview numbers stay right. */
   refreshSummary: () => void;
   /** Owners and admins: edit the job, start selling, see its activity. */
   canManage: boolean;

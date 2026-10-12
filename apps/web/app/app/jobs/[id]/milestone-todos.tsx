@@ -1,5 +1,6 @@
 "use client";
 
+import type { QrCardStatus } from "@daybell/api";
 import type { GroupLabel, Milestone, Todo, TodoKey } from "@daybell/core";
 import { Button, Card, CardRow, IconChip, type IconChipTone } from "@daybell/ui";
 import {
@@ -39,7 +40,8 @@ function chipFor(todo: Todo): IconChipTone {
 /**
  * The current milestone's to-dos (D140), beside Recent activity: one hairline row each, with a pastel chip, the
  * to-do, a short note and its state in words ("Done", "To do", "Soon"). "Roster added" links to People while there
- * is no roster (for people who can edit it); Soon items have no link or button until their step ships.
+ * is no roster, and "Print QR cards" opens People's print dialog while some child has no card (for people who can
+ * edit the roster; ADR 0015). Soon items have no link or button until their step ships.
  */
 export function MilestoneTodos({
   milestone,
@@ -48,6 +50,7 @@ export function MilestoneTodos({
   jobId,
   createdOn,
   roster,
+  qrCards,
   canEditRoster,
 }: {
   milestone: Milestone;
@@ -58,6 +61,7 @@ export function MilestoneTodos({
   /** The day the job was created, already formatted. */
   createdOn: string;
   roster: { children: number; groups: number; duplicates: number; word: GroupLabel };
+  qrCards: QrCardStatus;
   canEditRoster: boolean;
 }) {
   const t = useTranslations("app.job");
@@ -93,6 +97,12 @@ export function MilestoneTodos({
             </Link>
           ),
         });
+      case "printQrCards":
+        if (todo.done) return t("todos.notes.printQrCardsDone");
+        if (qrCards.withCard === 0) return t("todos.notes.printQrCards");
+        return t("todos.notes.printQrCardsMissing", {
+          count: qrCards.eligible - qrCards.withCard,
+        });
       default:
         return t(`todos.notes.${todo.key}`);
     }
@@ -114,6 +124,15 @@ export function MilestoneTodos({
           {todoText}
           <Button asChild variant="secondary" shape="pill">
             <Link href={people}>{t("todos.addRoster")}</Link>
+          </Button>
+        </span>
+      );
+    if (todo.key === "printQrCards" && canEditRoster && qrCards.eligible > 0)
+      return (
+        <span className="flex items-center gap-3">
+          {todoText}
+          <Button asChild variant="secondary" shape="pill">
+            <Link href={`${people}?print=qr`}>{t("todos.printCards")}</Link>
           </Button>
         </span>
       );

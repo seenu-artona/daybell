@@ -1,6 +1,6 @@
 "use client";
 
-import type { Child } from "@daybell/api";
+import { type Child, QR_CARD_HEADERS } from "@daybell/api";
 import {
   addFilter,
   applyFilters,
@@ -12,11 +12,13 @@ import {
   ROSTER_VIEW_MAX,
 } from "@daybell/core";
 import { Banner, Button } from "@daybell/ui";
-import { Check, Plus, Upload } from "lucide-react";
+import { Check, Plus, QrCode, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useApiText } from "@/components/use-messages";
+import { download } from "@/lib/client-api";
 import { Dialog } from "../../../dialog";
 import { ChildForm, GroupForm } from "../child-form";
 import { useJob } from "../job-context";
@@ -26,6 +28,7 @@ import { tabHref } from "../tabs";
 import { ChildPanel } from "./child-panel";
 import { PeopleList, rowLinkId } from "./people-list";
 import { FilterChips, type GroupBy, PeopleToolbar } from "./people-toolbar";
+import { PrintQrCardsDialog } from "./print-qr-cards-dialog";
 import { useRoster } from "./use-roster";
 
 export default function PeoplePageRoute() {
@@ -46,6 +49,8 @@ export default function PeoplePageRoute() {
 function PeoplePage() {
   const t = useTranslations("app.people");
   const tr = useTranslations("app.roster");
+  const tq = useTranslations("app.qrCards");
+  const text = useApiText();
   const router = useRouter();
   const { job, summary, refreshSummary, canEditRoster: canEdit } = useJob();
   const word = groupLabel(job.type);
@@ -59,6 +64,7 @@ function PeoplePage() {
   const [editing, setEditing] = useState<Child | "new" | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [removing, setRemoving] = useState<Child | null>(null);
+  const [printing, setPrinting] = useState(false);
   // Set when the person opens a child, so focus moves to the panel; not on a refresh with ?child= in the URL.
   const [panelFocus, setPanelFocus] = useState<string | null>(null);
   const opener = useRef<string | null>(null);
@@ -67,16 +73,19 @@ function PeoplePage() {
   const selected = roster.rows?.find((c) => c.id === selectedId) ?? null;
   const childHref = (childId: string) => `${base}?child=${childId}`;
 
-  // ?imported=a.b (numbers only) and ?show=duplicates arrive once from Import and Overview; then the URL is cleaned.
+  // ?imported=a.b (numbers only), ?show=duplicates and ?print=qr arrive once from Import and Overview; then the URL
+  // is cleaned.
   // biome-ignore lint/correctness/useExhaustiveDependencies: read once on open.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const imported = params.get("imported")?.match(/^(\d+)\.(\d+)$/);
     const show = params.get("show");
+    const print = params.get("print");
     if (imported)
       setStatus(tr("imported", { added: Number(imported[1]), updated: Number(imported[2]) }));
     if (show === "duplicates") setFilters((f) => addFilter(f, { kind: "duplicates" }));
-    if (imported || show) router.replace(base, { scroll: false });
+    if (print === "qr" && canEdit) setPrinting(true);
+    if (imported || show || print) router.replace(base, { scroll: false });
   }, []);
 
   // A child that isn't on this roster (removed, or another job's id) is dropped from the URL quietly.
@@ -95,6 +104,18 @@ function PeoplePage() {
     [visible, roster.groups, groupBy, searching],
   );
   const grades = useMemo(() => gradeOptions(roster.rows ?? []), [roster.rows]);
+
+  /** One child's card, from the panel (Seenu, answer 4): the same card on every print. */
+  async function printCard(child: Child) {
+    setStatus("");
+    const res = await download(`/jobs/${encodeURIComponent(job.id)}/qr-cards`, {
+      childId: child.id,
+    });
+    if (!res.ok) return setStatus(res.code === "conflict" ? tq("nothing") : text.error(res.code));
+    const skipped = Number(res.headers.get(QR_CARD_HEADERS.skipped) ?? "0");
+    setStatus(skipped > 0 ? tq("skipped", { count: skipped }) : tq("printedCard"));
+    refreshSummary();
+  }
 
   function changed(message: string) {
     setStatus(message);
@@ -156,6 +177,12 @@ function PeoplePage() {
           )}
           {canEdit ? (
             <>
+              {empty || !roster.rows ? null : (
+                <Button variant="white" shape="pill" onClick={() => setPrinting(true)}>
+                  <QrCode aria-hidden="true" />
+                  {tq("button")}
+                </Button>
+              )}
               <Button asChild variant="white" shape="pill">
                 <Link href={`/app/jobs/${job.id}/import`}>
                   <Upload aria-hidden="true" />
@@ -221,6 +248,7 @@ function PeoplePage() {
             onClose={closePanel}
             onEdit={() => setEditing(selected)}
             onRemove={() => setRemoving(selected)}
+            onPrintCard={() => printCard(selected)}
           />
         ) : null
       }
@@ -306,6 +334,18 @@ function PeoplePage() {
           />
         ) : null}
       </Dialog>
+
+      {canEdit && roster.rows ? (
+        <PrintQrCardsDialog
+          open={printing}
+          onClose={() => setPrinting(false)}
+          jobId={job.id}
+          roster={roster.rows}
+          groups={roster.groups}
+          word={word}
+          onPrinted={refreshSummary}
+        />
+      ) : null}
 
       {removing ? (
         <RemoveChildDialog

@@ -34,6 +34,7 @@ export default function JobOverviewPage() {
     status: job.status,
     pictureDay: job.pictureDay,
     children: summary?.children ?? 0,
+    qrCards: summary?.qrCards ?? null,
     today,
   };
   const current = milestone(facts);
@@ -90,6 +91,7 @@ export default function JobOverviewPage() {
                     duplicates: summary.duplicates,
                     word: groupLabel(job.type),
                   }}
+                  qrCards={summary.qrCards}
                   canEditRoster={canEditRoster}
                 />
               </div>
