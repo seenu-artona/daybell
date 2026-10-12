@@ -1,48 +1,23 @@
 "use client";
 
-import {
-  daysUntil,
-  groupLabel,
-  localDay,
-  MILESTONES,
-  milestone,
-  milestoneTodos,
-  timeline,
-  todoProgress,
-} from "@daybell/core";
-import { useFormatter, useTranslations } from "next-intl";
+import { type ChecklistFacts, daysUntil, localDay } from "@daybell/core";
+import { useTranslations } from "next-intl";
 import { ActivityCard } from "../../activity-card";
 import { useStudio } from "../../me-context";
-import { useFormatDay } from "../status-badge";
+import { JobChecklist } from "./job-checklist";
 import { useJob } from "./job-context";
-import { JobTimeline } from "./job-timeline";
-import { MilestoneTodos } from "./milestone-todos";
 
 /**
- * A job's Overview (D140, amending D138): one big hero line (the picture day countdown) with where the job is, the
- * five-milestone job timeline, then the current milestone's to-dos beside the job's recent activity (owners and
- * admins; otherwise the to-dos take the full width). A closed job has every milestone done and no to-dos.
+ * A job's Overview (D140, D143; ADR 0014, 0017): one big hero line (the picture day countdown), then the job's
+ * checklist beside its recent activity (owners and admins; otherwise the checklist takes the full width). The
+ * milestone shows only with the checklist; the header pill shows the shop state alone (Draft, Selling or Closed).
  */
 export default function JobOverviewPage() {
   const t = useTranslations("app.job");
-  const formatDay = useFormatDay();
-  const format = useFormatter();
   const { version } = useStudio();
-  const { job, summary, canManage, canEditRoster } = useJob();
+  const { job, summary, canManage } = useJob();
   const today = localDay(new Date());
-  const facts = {
-    status: job.status,
-    pictureDay: job.pictureDay,
-    children: summary?.children ?? 0,
-    qrCards: summary?.qrCards ?? null,
-    readyPhotos: summary?.photos?.ready ?? null,
-    today,
-  };
-  const current = milestone(facts);
-  const todos = current ? milestoneTodos(current, facts) : [];
-  const progress = current ? todoProgress(todos) : null;
   const days = daysUntil(job.pictureDay, today);
-  const steps = MILESTONES.length;
 
   const hero =
     job.status === "closed"
@@ -51,61 +26,32 @@ export default function JobOverviewPage() {
         ? t("hero.countdown", { days })
         : t("hero.ago", { days: -days });
 
+  const facts: ChecklistFacts | null = summary
+    ? {
+        status: job.status,
+        pictureDay: job.pictureDay,
+        children: summary.children,
+        qrCards: summary.qrCards,
+        hasReadyPhoto: (summary.photos?.ready ?? 0) > 0,
+        failedPhotos: summary.photos?.failed ?? 0,
+        today,
+      }
+    : null;
+
   return (
     <div className="flex flex-col gap-5">
-      <div className="mt-1 flex flex-col gap-0.5">
-        <p className="m-0 text-hero">{hero}</p>
-        {summary ? (
-          <p className="m-0 text-title-sm font-semibold text-primary">
-            {current && progress
-              ? t("hero.step", {
-                  step: MILESTONES.indexOf(current) + 1,
-                  steps,
-                  milestone: t(`timeline.milestones.${current}`),
-                  done: progress.done,
-                  total: progress.total,
-                })
-              : t("hero.allDone", { steps })}
-          </p>
-        ) : null}
-      </div>
-
-      {summary ? (
-        <>
-          <JobTimeline
-            milestones={timeline(facts)}
-            progress={progress}
-            pictureDay={formatDay(job.pictureDay)}
-          />
-          <div className="flex items-start gap-5">
-            {current && progress ? (
-              <div className="min-w-0 flex-1">
-                <MilestoneTodos
-                  milestone={current}
-                  todos={todos}
-                  progress={progress}
-                  jobId={job.id}
-                  createdOn={format.dateTime(new Date(job.createdAt), { dateStyle: "medium" })}
-                  roster={{
-                    children: summary.children,
-                    groups: summary.groups,
-                    duplicates: summary.duplicates,
-                    word: groupLabel(job.type),
-                  }}
-                  qrCards={summary.qrCards}
-                  readyPhotos={summary.photos?.ready ?? null}
-                  canEditRoster={canEditRoster}
-                  canUpload={canEditRoster && job.status !== "closed"}
-                />
-              </div>
-            ) : null}
-            {canManage ? (
-              <div className="min-w-0 flex-1">
-                <ActivityCard refreshKey={version} jobId={job.id} variant="sheet" />
-              </div>
-            ) : null}
+      <p className="m-0 mt-1 text-hero">{hero}</p>
+      {facts ? (
+        <div className="flex items-start gap-5">
+          <div className="min-w-0 flex-1">
+            <JobChecklist facts={facts} />
           </div>
-        </>
+          {canManage ? (
+            <div className="min-w-0 flex-1">
+              <ActivityCard refreshKey={version} jobId={job.id} variant="sheet" />
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

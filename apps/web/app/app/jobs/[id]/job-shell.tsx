@@ -50,7 +50,7 @@ export function JobShell({ children }: { children: ReactNode }) {
       api<QrCardStatusResponse>(`/jobs/${jobId}/qr-cards`),
       api<PhotoCountsResponse>(`/jobs/${jobId}/photos/summary`),
     ]).then(([kids, groups, cards, photos]) => {
-      // The card and photo counts only feed one to-do each: if they fail, the rest of the summary still shows.
+      // The card and photo counts only feed one checklist task each: if they fail, the rest of the summary still shows.
       if (kids.ok && groups.ok)
         setSummary({
           children: kids.data.total,

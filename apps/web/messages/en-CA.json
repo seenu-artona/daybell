@@ -340,22 +340,39 @@
       "back": "Back to Home"
     },
     "checklist": {
-      "title": "Get ready to sell",
+      "title": "Checklist",
       "progress": "{done} of {total} done",
-      "studio": "Create your studio",
-      "studioBody": "Done — welcome aboard.",
-      "team": "Invite your team",
-      "teamBody": "Photographers and staff each get their own login.",
-      "brand": "Brand your shop",
-      "brandBody": "Logo, colour and gallery style parents will see.",
-      "products": "Set up products & prices",
-      "productsBody": "Packages, prints and digital downloads.",
-      "payouts": "Connect payouts",
-      "payoutsBody": "Link Stripe so sales land in your bank.",
-      "job": "Create your first job",
-      "jobBody": "A school, team or event to photograph.",
-      "soon": "Soon",
-      "done": "Done"
+      "next": "Next",
+      "nextTask": "Next: {task}",
+      "nextTaskIn": "Next: {task}, {job}",
+      "done": "Done",
+      "todo": "To do",
+      "now": "Now",
+      "allDone": "All done",
+      "allDoneForNow": "Everything built so far is done",
+      "showAll": "Show all tasks",
+      "hideAll": "Hide tasks",
+      "milestones": {
+        "setUp": "Set up",
+        "pictureDay": "Picture day",
+        "photosIn": "Photos in",
+        "selling": "Selling",
+        "fulfilment": "Fulfilment"
+      },
+      "tasks": {
+        "createJob": "Create the job",
+        "addRoster": "Add the roster",
+        "printQrCards": "Print QR cards",
+        "pictureDay": "Picture day",
+        "uploadPhotos": "Upload photos",
+        "reviewFailedPhotos": "Check failed photos"
+      },
+      "notes": {
+        "children": "{count, plural, one {# child} other {# children}}",
+        "withoutCard": "{count, plural, one {# child without a card} other {# children without a card}}",
+        "photosReady": "{count, plural, one {# photo ready} other {# photos ready}}",
+        "photosFailed": "{count, plural, one {# photo failed} other {# photos failed}}"
+      }
     },
     "settings": {
       "title": "Settings",
@@ -375,16 +392,31 @@
       "averageOrder": "Average order",
       "noData": "No sales yet",
       "dash": "–",
-      "needsYou": "Needs you",
-      "nothingNeeded": "Nothing needs you right now.",
       "jobsSelling": "Jobs selling now",
       "noJobs": "No jobs are selling yet.",
       "recently": "Recently",
-      "actions": {
-        "team": "Invite",
-        "job": "Create job"
+      "checking": "Checking…",
+      "onboarding": {
+        "title": "Set up your studio",
+        "tasks": {
+          "account": "Create your account",
+          "team": "Invite your team",
+          "firstJob": "Create your first job"
+        }
       },
-      "checking": "Checking…"
+      "upNext": {
+        "title": "Up next",
+        "intro": "Picked from all your jobs, most urgent first",
+        "empty": "Nothing needs you right now.",
+        "row": "{job} · {reason}",
+        "more": "{count, plural, one {# more job in Jobs} other {# more jobs in Jobs}}",
+        "reasons": {
+          "photosOverdue": "{days, plural, one {Picture day was # day ago, no photos yet} other {Picture day was # days ago, no photos yet}}",
+          "dateClose": "{days, plural, =0 {Picture day is today} =1 {Picture day is tomorrow} other {Picture day in # days}}",
+          "brokenPhotos": "{count, plural, one {# photo failed} other {# photos failed}}",
+          "nextStep": "Next step"
+        }
+      }
     },
     "signOutFailed": "We couldn't sign you out. Check your connection and try again.",
     "dialog": {
@@ -405,7 +437,8 @@
         "client": "Client",
         "pictureDay": "Picture day",
         "subjects": "Subjects",
-        "status": "Status"
+        "status": "Status",
+        "progress": "Progress"
       },
       "none": "–",
       "loadMore": "Show more",
@@ -691,65 +724,7 @@
       "hero": {
         "countdown": "{days, plural, =0 {Picture day is today} =1 {Picture day is tomorrow} other {Picture day in # days}}",
         "ago": "{days, plural, one {Picture day was # day ago} other {Picture day was # days ago}}",
-        "closed": "This job is closed",
-        "step": "Step {step} of {steps} · {milestone} · {done} of {total} done",
-        "allDone": "All {steps} steps done"
-      },
-      "timeline": {
-        "title": "Job timeline",
-        "note": "The shop opens after photos are in",
-        "done": "Done",
-        "now": "Now",
-        "nowProgress": "Now · {done} of {total} done",
-        "milestones": {
-          "setUp": "Set up",
-          "pictureDay": "Picture day",
-          "photosIn": "Photos in",
-          "selling": "Selling",
-          "fulfilment": "Fulfilment"
-        },
-        "hints": {
-          "photosIn": "Soon · Upload and tag",
-          "selling": "Soon · Price list and payouts",
-          "fulfilment": "Soon · Orders close, then ship"
-        }
-      },
-      "todos": {
-        "title": "{milestone}: to-dos",
-        "progress": "{done} of {total} done",
-        "done": "Done",
-        "todo": "To do",
-        "soon": "Soon",
-        "addRoster": "Add roster",
-        "items": {
-          "jobCreated": "Job created",
-          "rosterAdded": "Roster added",
-          "printQrCards": "Print QR cards",
-          "uploadPhotos": "Upload photos",
-          "tagPhotos": "Tag photos",
-          "choosePriceList": "Choose a price list",
-          "connectPayouts": "Connect payouts",
-          "startSelling": "Start selling",
-          "sendToLab": "Send orders to the lab"
-        },
-        "notes": {
-          "jobCreated": "Created {date}",
-          "rosterAdded": "{children, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
-          "rosterAddedDuplicates": "{children, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · <link>{count, plural, one {# possible duplicate} other {# possible duplicates}}</link>",
-          "rosterMissing": "Import a CSV or Excel file, or add children one by one.",
-          "printQrCards": "Hand out before picture day",
-          "uploadPhotos": "After picture day",
-          "tagPhotos": "Match photos to children",
-          "choosePriceList": "What parents can buy",
-          "connectPayouts": "Where your sales are paid",
-          "startSelling": "Open the shop to parents",
-          "sendToLab": "Print and ship orders",
-          "printQrCardsDone": "Every child who may be photographed has a card",
-          "printQrCardsMissing": "{count, plural, one {# child without a card} other {# children without a card}}",
-          "uploadPhotosDone": "{count, plural, one {# photo ready} other {# photos ready}}"
-        },
-        "printCards": "Print cards",
-        "uploadPhotos": "Upload photos"
+        "closed": "This job is closed"
       },
       "checklist": {
         "title": "Before you can sell",
