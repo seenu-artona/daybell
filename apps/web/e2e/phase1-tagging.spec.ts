@@ -275,6 +275,11 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
     timeout: 90_000,
   });
   await page.goto(`/app/jobs/${jobId}`);
+  // On track, so the checklist opens collapsed to its next task.
+  await expect(
+    checklist.getByRole("link", { name: "Next: Review tagging", exact: true }),
+  ).toBeVisible();
+  await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
   await expect(reviewRow).toContainText("Next");
   await page.goto(`/app/jobs/${jobId}/photos/review`);
   await expect(
