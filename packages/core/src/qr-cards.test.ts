@@ -101,10 +101,26 @@ describe("card order (D138: sorted by class)", () => {
       person("b", "Ann", "Lee", "Room 10"),
       person("c", "Bob", "lee", "Room 2"),
       person("d", "Amy", "Lee", "Room 2"),
-      person("e", "Cal", "Diaz", "room 2"),
+      person("e", "Cal", "Diaz", "Room 2"),
       person("f", "Amy", "Lee", "Room 2"),
     ]);
     expect(sorted.map((c) => c.id)).toEqual(["e", "d", "f", "c", "b", "a"]);
+  });
+
+  it("keeps two classes whose names compare equal apart (by class id)", () => {
+    const a = (id: string, group: string, groupId: string): CardPerson => ({
+      id,
+      firstName: "Amy",
+      lastName: id,
+      group: { id: groupId, name: group },
+      doNotPhotograph: false,
+    });
+    const sorted = sortCardChildren([
+      a("A", "Salle é", "g2"),
+      a("B", "Salle e", "g1"),
+      a("C", "Salle é", "g2"),
+    ]);
+    expect(sorted.map((c) => c.id)).toEqual(["B", "A", "C"]);
   });
 
   it("never changes between prints (the id breaks ties)", () => {
@@ -134,10 +150,17 @@ describe("pages", () => {
     ]);
   });
 
-  it("prints a QR of at least 1.75 inches that fits inside the card", () => {
-    const { qrSize, card, padding } = CARD_LAYOUT;
-    expect(qrSize).toBeGreaterThanOrEqual(1.75 * 72);
-    expect(qrSize).toBeLessThanOrEqual(card.width - 2 * padding);
+  it("prints a QR symbol of at least 1.75 inches, whose quiet zone fits inside the card and clear of the text", () => {
+    const { qrSymbol, qrQuietModules, card, padding, at } = CARD_LAYOUT;
+    expect(qrSymbol).toBeGreaterThanOrEqual(1.75 * 72);
+    // The payload is always QR version 2 (25 modules).
+    const quiet = (qrSymbol / 25) * qrQuietModules;
+    expect(qrSymbol + 2 * quiet).toBeLessThanOrEqual(card.width - 2 * padding);
+    expect(at.qr - quiet).toBeGreaterThanOrEqual(at.group + CARD_LAYOUT.group.size * 1.25);
+    expect(at.qr + qrSymbol + quiet).toBeLessThanOrEqual(at.codeLabel);
+    expect(at.instructions + CARD_LAYOUT.instructions.size * 2.6).toBeLessThanOrEqual(
+      card.height - padding,
+    );
   });
 });
 

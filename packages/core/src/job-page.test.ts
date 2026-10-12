@@ -166,9 +166,19 @@ describe("milestoneTodos", () => {
     });
     // A child added after printing reopens it.
     expect(qr({ eligible: 10, withCard: 9 })?.done).toBe(false);
-    expect(qr({ eligible: 0, withCard: 0 })?.done).toBe(false);
     expect(qr(null)?.done).toBe(false);
     expect(qr(undefined)?.done).toBe(false);
+  });
+
+  it("counts a roster where every child is marked Do not photograph as done, and an empty one as not", () => {
+    const qr = (children: number) =>
+      milestoneTodos("setUp", {
+        status: "draft",
+        children,
+        qrCards: { eligible: 0, withCard: 0 },
+      }).find((t) => t.key === "printQrCards")?.done;
+    expect(qr(3)).toBe(true);
+    expect(qr(0)).toBe(false);
   });
 
   it("marks the price list, payouts and Start selling done once the job sells, and Soon before", () => {

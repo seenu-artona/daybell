@@ -1,8 +1,9 @@
 /**
  * The job page's Overview (D140, amending D138; ADR 0014): one job timeline of five milestones, the current
  * milestone's to-dos and the picture day countdown. Only data that exists today is used: the job's status, its
- * picture day, how many children are on its roster and how many of them have a QR card (step 3). Photos, the shop, payouts and the lab arrive in later steps,
- * so "Photos in" and "Fulfilment" are never current yet and the to-dos that need them are "Soon", never done.
+ * picture day, how many children are on its roster and how many of them have a QR card (step 3). Photos, the shop,
+ * payouts and the lab arrive in later steps, so "Photos in" and "Fulfilment" are never current yet and the to-dos
+ * that need them are "Soon", never done.
  */
 import type { JobStatus } from "./jobs";
 
@@ -81,10 +82,14 @@ export interface QrCardProgress {
 
 /**
  * "Print QR cards" is done when every child who may be photographed has a card (Seenu, answer 2 to the step 3 plan),
- * so adding a child later reopens it. With nobody to print for, it isn't done.
+ * so adding a child later reopens it. Read literally, a roster where every child is marked Do not photograph is done
+ * too: there is no card to print. An empty roster is not done.
  */
-export function qrCardsDone(progress: QrCardProgress | null | undefined): boolean {
-  return !!progress && progress.eligible > 0 && progress.withCard >= progress.eligible;
+export function qrCardsDone(
+  progress: QrCardProgress | null | undefined,
+  children: number,
+): boolean {
+  return !!progress && children > 0 && progress.withCard >= progress.eligible;
 }
 
 /** Each milestone's to-dos, in order (Seenu's answer 3 to the step 2c plan). */
@@ -106,9 +111,10 @@ export interface Todo {
 }
 
 /**
- * A milestone's to-dos. Print QR cards is real since step 3 (see qrCardsDone). Photos and tagging ship in step 4, the shop, payouts and selling in later
- * steps, so those are "Soon". A job can only be selling once it has a price list and payouts, so once it sells (or
- * has closed) "Choose a price list", "Connect payouts" and "Start selling" are done; before that they are Soon.
+ * A milestone's to-dos. Print QR cards is real since step 3 (see qrCardsDone). Photos and tagging ship in step 4,
+ * the shop, payouts and selling in later steps, so those are "Soon". A job can only be selling once it has a price
+ * list and payouts, so once it sells (or has closed) "Choose a price list", "Connect payouts" and "Start selling" are
+ * done; before that they are Soon.
  */
 export function milestoneTodos(
   m: Milestone,
@@ -121,7 +127,7 @@ export function milestoneTodos(
       case "rosterAdded":
         return { key, done: children > 0, soon: false };
       case "printQrCards":
-        return { key, done: qrCardsDone(qrCards), soon: false };
+        return { key, done: qrCardsDone(qrCards, children), soon: false };
       case "choosePriceList":
       case "connectPayouts":
       case "startSelling": {

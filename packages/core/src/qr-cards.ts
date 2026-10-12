@@ -31,7 +31,10 @@ export function cardQrPayload(cardCode: string): string {
   return `${CARD_QR_PREFIX}${cardCode}`;
 }
 
-/** The card code a scanned QR holds, or null if it isn't a Daybell card (for the tagging app, later). */
+/**
+ * The card code a scanned QR holds, or null if it isn't a Daybell card. Not used yet: it is for the tagging app in
+ * step 4, kept here so the format is defined (and tested) in one place.
+ */
 export function parseCardQrPayload(text: string): string | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith(CARD_QR_PREFIX)) return null;
@@ -69,19 +72,24 @@ export function cardChildren<T extends CardPerson>(children: readonly T[], scope
   return children.filter((c) => !c.doNotPhotograph && inScope(c));
 }
 
+const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
 /**
  * Cards in print order (D138, sorted by class): by class name, numbers in order ("Room 2" before "Room 10"), children
- * without a class last; then last name, first name and id, so the order never changes between prints.
+ * without a class last. Two classes whose names compare equal (e.g. differing only by an accent) are kept apart by
+ * their id. Then last name, first name and id, so the order never changes between prints.
  */
 export function sortCardChildren<T extends CardPerson>(children: readonly T[]): T[] {
   const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
   return [...children].sort((a, b) => {
     if (!a.group !== !b.group) return a.group ? -1 : 1;
     return (
-      (a.group && b.group ? collator.compare(a.group.name, b.group.name) : 0) ||
+      (a.group && b.group
+        ? collator.compare(a.group.name, b.group.name) || byId(a.group.id, b.group.id)
+        : 0) ||
       collator.compare(a.lastName, b.lastName) ||
       collator.compare(a.firstName, b.firstName) ||
-      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      byId(a.id, b.id)
     );
   });
 }
@@ -124,9 +132,10 @@ export function printableText(
 }
 
 /**
- * US Letter in PDF points (72 per inch), two by two, cut along the dashed lines. The QR is 2 inches (at least the
- * 1.75 inches tagging needs at arm's length). Long names shrink to fit, then go on two lines (first, last), then are
- * cut with "…": a card never prints over its neighbour.
+ * US Letter in PDF points (72 per inch), two by two, cut along the dashed lines. The QR symbol itself (its modules,
+ * not counting the light quiet zone around it) is at least 1.75 inches, the size tagging needs at arm's length. Long
+ * names shrink to fit, then go on two lines (first, last), then are cut with "…": a card never prints over its
+ * neighbour. `at` is each element's top, measured from the card's top edge.
  */
 export const CARD_LAYOUT = {
   page: { width: 612, height: 792 },
@@ -134,11 +143,22 @@ export const CARD_LAYOUT = {
   rows: 2,
   card: { width: 306, height: 396 },
   padding: 24,
-  qrSize: 144,
-  /** Light modules around the QR, as the QR standard asks. */
+  /** The QR symbol's width and height, quiet zone excluded: 1.78 inches. */
+  qrSymbol: 128,
+  /** Light modules around the QR, as the QR standard asks; nothing is printed in them. */
   qrQuietModules: 4,
+  at: {
+    studio: 22,
+    name: 42,
+    nameBlock: 52,
+    group: 100,
+    qr: 136,
+    codeLabel: 286,
+    code: 300,
+    instructions: 338,
+  },
   studio: { size: 11 },
-  name: { max: 22, min: 12, twoLineMin: 11 },
+  name: { max: 22, min: 12, twoLineMin: 11, lineHeight: 1.15 },
   group: { size: 12 },
   codeLabel: { size: 9 },
   code: { size: 26 },
