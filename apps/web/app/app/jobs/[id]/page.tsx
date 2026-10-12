@@ -76,11 +76,12 @@ export default function JobOverviewPage() {
             pictureDay={formatDay(job.pictureDay)}
           />
           <div className="flex items-start gap-5">
-            {current ? (
+            {current && progress ? (
               <div className="min-w-0 flex-1">
                 <MilestoneTodos
                   milestone={current}
                   todos={todos}
+                  progress={progress}
                   jobId={job.id}
                   createdOn={format.dateTime(new Date(job.createdAt), { dateStyle: "medium" })}
                   roster={{

@@ -157,12 +157,18 @@ describe("milestoneTodos", () => {
         ).toEqual({ key: "printQrCards", done: false, soon: true });
   });
 
-  it("marks Start selling done once the job sells, and Soon before", () => {
-    const start = (status: JobFacts["status"]) =>
-      milestoneTodos("selling", { status, children: 3 }).find((t) => t.key === "startSelling");
-    expect(start("draft")).toEqual({ key: "startSelling", done: false, soon: true });
-    expect(start("selling")).toEqual({ key: "startSelling", done: true, soon: false });
-    expect(start("closed")).toEqual({ key: "startSelling", done: true, soon: false });
+  it("marks the price list, payouts and Start selling done once the job sells, and Soon before", () => {
+    const selling = (status: JobFacts["status"]) =>
+      milestoneTodos("selling", { status, children: 3 });
+    expect(selling("draft")).toEqual([
+      { key: "choosePriceList", done: false, soon: true },
+      { key: "connectPayouts", done: false, soon: true },
+      { key: "startSelling", done: false, soon: true },
+    ]);
+    for (const status of ["selling", "closed"] as const) {
+      expect(selling(status).every((t) => t.done && !t.soon)).toBe(true);
+      expect(todoProgress(selling(status))).toEqual({ done: 3, total: 3 });
+    }
   });
 
   it("is never both done and Soon", () => {

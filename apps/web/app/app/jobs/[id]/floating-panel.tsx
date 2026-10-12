@@ -42,8 +42,8 @@ export function FloatingPanel({
     <aside
       aria-labelledby={headingId}
       onKeyDown={(e) => {
-        // A menu inside the panel handles its own Escape first (it stops the event).
-        if (e.key === "Escape" && !e.defaultPrevented) {
+        // An open menu inside the panel closes on Escape and stops the event, so it never reaches here.
+        if (e.key === "Escape") {
           e.preventDefault();
           onClose();
         }

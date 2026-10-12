@@ -55,8 +55,9 @@ removed; every control on the job page is at least 44px.
 
 ## Calls made in this step
 
-- "Start selling" as a Selling to-do is Soon until selling ships in step 8 (the dialog only lists what is missing);
-  it is done once a job's status is selling or closed.
+- A job can only be selling once it has a price list and payouts, so when its status is selling (or closed) the
+  Selling to-dos "Choose a price list", "Connect payouts" and "Start selling" are all done. Before that they are
+  Soon: selling ships in step 8, and today's Start selling dialog only lists what is missing.
 - A closed job shows no to-do card; Recent activity takes the full width.
 - "Roster added" without a roster says how to add one and, for roster editors, has an "Add roster" pill to People.
 - The design-system gallery (`/dev/components`) shows the new pieces.

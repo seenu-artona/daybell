@@ -44,6 +44,7 @@ function chipFor(todo: Todo): IconChipTone {
 export function MilestoneTodos({
   milestone,
   todos,
+  progress,
   jobId,
   createdOn,
   roster,
@@ -51,6 +52,8 @@ export function MilestoneTodos({
 }: {
   milestone: Milestone;
   todos: Todo[];
+  /** The to-dos' progress, from core's todoProgress. */
+  progress: { done: number; total: number };
   jobId: string;
   /** The day the job was created, already formatted. */
   createdOn: string;
@@ -60,7 +63,6 @@ export function MilestoneTodos({
   const t = useTranslations("app.job");
   const tr = useTranslations("app.roster");
   const titleId = useId();
-  const done = todos.filter((todo) => todo.done).length;
   const people = tabHref(jobId, "people");
 
   const note = (todo: Todo): ReactNode => {
@@ -70,26 +72,27 @@ export function MilestoneTodos({
       case "rosterAdded":
         if (roster.children === 0)
           return canEditRoster ? t("todos.notes.rosterMissing") : tr("emptyReadOnly");
-        return (
-          <>
-            {t("todos.notes.rosterAdded", {
-              children: roster.children,
-              groups: roster.groups,
-              group: roster.word,
-            })}
-            {roster.duplicates > 0 ? (
-              <>
-                <span aria-hidden="true"> · </span>
-                <Link
-                  href={`${people}?show=duplicates`}
-                  className="font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary"
-                >
-                  {t("todos.notes.duplicates", { count: roster.duplicates })}
-                </Link>
-              </>
-            ) : null}
-          </>
-        );
+        if (roster.duplicates === 0)
+          return t("todos.notes.rosterAdded", {
+            children: roster.children,
+            groups: roster.groups,
+            group: roster.word,
+          });
+        // One message; the duplicates part is a 44px link to People's duplicates filter (D96, D91).
+        return t.rich("todos.notes.rosterAddedDuplicates", {
+          children: roster.children,
+          groups: roster.groups,
+          group: roster.word,
+          count: roster.duplicates,
+          link: (chunks) => (
+            <Link
+              href={`${people}?show=duplicates`}
+              className="inline-flex min-h-11 items-center font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              {chunks}
+            </Link>
+          ),
+        });
       default:
         return t(`todos.notes.${todo.key}`);
     }
@@ -124,9 +127,7 @@ export function MilestoneTodos({
           <h2 id={titleId} className="m-0 flex-1 text-h3 font-bold">
             {t("todos.title", { milestone: t(`timeline.milestones.${milestone}`) })}
           </h2>
-          <p className="m-0 text-label text-muted">
-            {t("todos.progress", { done, total: todos.length })}
-          </p>
+          <p className="m-0 text-label text-muted">{t("todos.progress", progress)}</p>
         </CardRow>
         <ul className="m-0 list-none p-0">
           {todos.map((todo) => {

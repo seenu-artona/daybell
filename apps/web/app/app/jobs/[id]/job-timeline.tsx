@@ -1,14 +1,10 @@
 "use client";
 
-import type { Milestone, MilestoneView } from "@daybell/core";
+import type { MilestoneView } from "@daybell/core";
 import { Card } from "@daybell/ui";
 import { Check } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
-
-const HINTS = ["photosIn", "selling", "fulfilment"] as const;
-const hasHint = (key: Milestone): key is (typeof HINTS)[number] =>
-  (HINTS as readonly string[]).includes(key);
 
 /**
  * The job timeline (D140): five milestones in order. Every state is written out, never shown by colour alone (D91):
@@ -78,7 +74,7 @@ export function JobTimeline({
                         : t("now")
                       : m.key === "pictureDay"
                         ? pictureDay
-                        : m.soon && hasHint(m.key)
+                        : m.soon && m.key !== "setUp"
                           ? t(`hints.${m.key}`)
                           : null}
                 </span>

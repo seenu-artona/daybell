@@ -89,9 +89,9 @@ export interface Todo {
 }
 
 /**
- * A milestone's to-dos. Only "Job created", "Roster added" and "Start selling" can be done today; QR cards ship in
- * step 3, photos and tagging in step 4, the shop, payouts and selling in later steps, so the rest are "Soon".
- * "Start selling" is done once the job sells; until then it is Soon, because selling itself isn't built yet.
+ * A milestone's to-dos. QR cards ship in step 3, photos and tagging in step 4, the shop, payouts and selling in later
+ * steps, so those are "Soon". A job can only be selling once it has a price list and payouts, so once it sells (or
+ * has closed) "Choose a price list", "Connect payouts" and "Start selling" are done; before that they are Soon.
  */
 export function milestoneTodos(
   m: Milestone,
@@ -103,6 +103,8 @@ export function milestoneTodos(
         return { key, done: true, soon: false };
       case "rosterAdded":
         return { key, done: children > 0, soon: false };
+      case "choosePriceList":
+      case "connectPayouts":
       case "startSelling": {
         const done = status === "selling" || status === "closed";
         return { key, done, soon: !done };

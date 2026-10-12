@@ -726,8 +726,8 @@
         "notes": {
           "jobCreated": "Created {date}",
           "rosterAdded": "{children, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
+          "rosterAddedDuplicates": "{children, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · <link>{count, plural, one {# possible duplicate} other {# possible duplicates}}</link>",
           "rosterMissing": "Import a CSV or Excel file, or add children one by one.",
-          "duplicates": "{count, plural, one {# possible duplicate} other {# possible duplicates}}",
           "printQrCards": "Hand out before picture day",
           "uploadPhotos": "After picture day",
           "tagPhotos": "Match photos to children",

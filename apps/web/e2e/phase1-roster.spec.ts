@@ -144,9 +144,11 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(panel.getByRole("heading", { name: "Maya Johnson", exact: true })).toBeFocused();
   const panelBox = await panel.boundingBox();
   expect(panelBox?.width).toBe(400);
-  expect(panelBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(
-    page.viewportSize()?.height ?? 0,
-  );
+  // As tall as its content: nothing scrolls inside it, and it doesn't stretch down the page like a full-height panel.
+  const fits = await panel.evaluate((el) => el.scrollHeight <= el.clientHeight);
+  expect(fits).toBe(true);
+  const mainBox = await main.boundingBox();
+  expect(panelBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(mainBox?.height ?? 0);
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await expect(page).toHaveURL(people);

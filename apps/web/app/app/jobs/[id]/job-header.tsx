@@ -50,7 +50,7 @@ export function JobHeader() {
         </div>
         <p className="m-0 text-label text-muted">{details.join(" · ")}</p>
         {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
-        <p role="status" className="m-0 text-caption text-muted">
+        <p role="status" className="m-0 min-h-5 text-caption text-muted">
           {saved ? tj("detail.saved") : ""}
         </p>
       </div>
