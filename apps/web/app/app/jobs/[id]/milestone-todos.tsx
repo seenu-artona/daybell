@@ -61,7 +61,8 @@ export function MilestoneTodos({
   /** The day the job was created, already formatted. */
   createdOn: string;
   roster: { children: number; groups: number; duplicates: number; word: GroupLabel };
-  qrCards: QrCardStatus;
+  /** null if the counts couldn't be loaded. */
+  qrCards: QrCardStatus | null;
   canEditRoster: boolean;
 }) {
   const t = useTranslations("app.job");
@@ -99,7 +100,7 @@ export function MilestoneTodos({
         });
       case "printQrCards":
         if (todo.done) return t("todos.notes.printQrCardsDone");
-        if (qrCards.withCard === 0) return t("todos.notes.printQrCards");
+        if (!qrCards || qrCards.withCard === 0) return t("todos.notes.printQrCards");
         return t("todos.notes.printQrCardsMissing", {
           count: qrCards.eligible - qrCards.withCard,
         });
@@ -127,7 +128,11 @@ export function MilestoneTodos({
           </Button>
         </span>
       );
-    if (todo.key === "printQrCards" && canEditRoster && qrCards.eligible > 0)
+    if (
+      todo.key === "printQrCards" &&
+      canEditRoster &&
+      (qrCards ? qrCards.eligible > 0 : roster.children > 0)
+    )
       return (
         <span className="flex items-center gap-3">
           {todoText}

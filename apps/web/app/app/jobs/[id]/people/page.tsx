@@ -19,6 +19,7 @@ import { useTranslations } from "next-intl";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { download } from "@/lib/client-api";
+import { qrCardProblem } from "@/lib/qr-card-messages";
 import { Dialog } from "../../../dialog";
 import { ChildForm, GroupForm } from "../child-form";
 import { useJob } from "../job-context";
@@ -111,7 +112,16 @@ function PeoplePage() {
     const res = await download(`/jobs/${encodeURIComponent(job.id)}/qr-cards`, {
       childId: child.id,
     });
-    if (!res.ok) return setStatus(res.code === "conflict" ? tq("nothing") : text.error(res.code));
+    if (!res.ok) {
+      const why = qrCardProblem(res);
+      return setStatus(
+        why?.key === "skipped"
+          ? tq("skipped", { count: why.count })
+          : why
+            ? tq(why.key)
+            : text.error(res.code),
+      );
+    }
     const skipped = Number(res.headers.get(QR_CARD_HEADERS.skipped) ?? "0");
     setStatus(skipped > 0 ? tq("skipped", { count: skipped }) : tq("printedCard"));
     refreshSummary();

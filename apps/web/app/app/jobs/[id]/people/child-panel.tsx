@@ -109,8 +109,11 @@ export function ChildPanel({
               <Button
                 variant="secondary"
                 shape="pill"
-                disabled={printing}
+                // aria-disabled, not disabled: focus stays on the button while the card downloads.
+                aria-disabled={printing || undefined}
+                className="aria-disabled:opacity-60"
                 onClick={async () => {
+                  if (printing) return;
                   setPrinting(true);
                   await onPrintCard();
                   setPrinting(false);

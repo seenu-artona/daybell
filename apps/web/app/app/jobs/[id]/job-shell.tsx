@@ -43,12 +43,13 @@ export function JobShell({ children }: { children: ReactNode }) {
       api<GroupsResponse>(`/jobs/${jobId}/groups`),
       api<QrCardStatusResponse>(`/jobs/${jobId}/qr-cards`),
     ]).then(([kids, groups, cards]) => {
-      if (kids.ok && groups.ok && cards.ok)
+      // The card counts only feed one to-do: if they fail, the rest of the summary still shows.
+      if (kids.ok && groups.ok)
         setSummary({
           children: kids.data.total,
           duplicates: kids.data.duplicates,
           groups: groups.data.groups.length,
-          qrCards: cards.data.qrCards,
+          qrCards: cards.ok ? cards.data.qrCards : null,
         });
     });
   }, [id]);

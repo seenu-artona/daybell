@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl";
 import { type FormEvent, useId, useMemo, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { download } from "@/lib/client-api";
+import { qrCardProblem } from "@/lib/qr-card-messages";
 import { CheckboxField, Dialog } from "../../../dialog";
 
 const NO_GROUP = "none";
@@ -95,8 +96,18 @@ export function PrintQrCardsDialog({
     });
   }
 
+  /** Closes and forgets the last result, from the header's X, Escape and the footer's Close alike. */
+  function close() {
+    setProblem(null);
+    setPrinted(null);
+    setFields({});
+    onClose();
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
+    // aria-disabled keeps focus on the button while the PDF is made; this stops a second print meanwhile.
+    if (busy) return;
     setProblem(null);
     setPrinted(null);
     const errors: Record<string, string> = {};
@@ -120,11 +131,19 @@ export function PrintQrCardsDialog({
       onPrinted();
       return;
     }
-    if (Object.keys(res.fields).length > 0)
+    const { form: _reason, ...inputs } = res.fields;
+    if (Object.keys(inputs).length > 0)
       setFields(
-        Object.fromEntries(Object.entries(res.fields).map(([k, v]) => [k, text.field(v) ?? ""])),
+        Object.fromEntries(Object.entries(inputs).map(([k, v]) => [k, text.field(v) ?? ""])),
       );
-    setProblem(res.code === "conflict" ? t("nothing") : text.error(res.code));
+    const why = qrCardProblem(res);
+    setProblem(
+      why?.key === "skipped"
+        ? t("skipped", { count: why.count })
+        : why
+          ? t(why.key)
+          : text.error(res.code),
+    );
   }
 
   const radio = (value: "all" | "choose", label: string) => (
@@ -141,16 +160,7 @@ export function PrintQrCardsDialog({
   );
 
   return (
-    <Dialog
-      open={open}
-      onClose={() => {
-        setProblem(null);
-        setPrinted(null);
-        setFields({});
-        onClose();
-      }}
-      title={t("title")}
-    >
+    <Dialog open={open} onClose={close} title={t("title")}>
       <form noValidate onSubmit={submit} className="flex flex-col gap-5">
         {problem ? <Banner tone="danger" title={problem} /> : null}
 
@@ -223,10 +233,14 @@ export function PrintQrCardsDialog({
         </div>
 
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            {t("cancel")}
+          <Button type="button" variant="secondary" onClick={close}>
+            {t("close")}
           </Button>
-          <Button type="submit" disabled={busy}>
+          <Button
+            type="submit"
+            aria-disabled={busy || undefined}
+            className="aria-disabled:opacity-60"
+          >
             <Download aria-hidden="true" />
             {busy ? t("preparing") : t("download")}
           </Button>

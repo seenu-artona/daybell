@@ -128,7 +128,8 @@ test("QR cards: print from the API and from People, with the Overview to-do", as
   await expect(
     dialog.getByText("Enter a whole number of blank cards from 0 to 100.", { exact: true }),
   ).toBeVisible();
-  await dialog.getByRole("button", { name: "Close", exact: true }).last().click();
+  // The footer's Close (the header's X is also named Close, outside the form).
+  await dialog.locator("form").getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
 
   // 6. One child's card from the panel; a child marked Do not photograph has none.

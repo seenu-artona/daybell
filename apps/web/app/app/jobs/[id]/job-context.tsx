@@ -10,8 +10,8 @@ export interface JobSummary {
   duplicates: number;
   /** Classes, teams or groups. */
   groups: number;
-  /** QR cards (ADR 0015): who may be photographed and how many of them have a card. */
-  qrCards: QrCardStatus;
+  /** QR cards (ADR 0015): who may be photographed and how many of them have a card; null if it couldn't be loaded. */
+  qrCards: QrCardStatus | null;
 }
 
 export interface JobContextValue {
