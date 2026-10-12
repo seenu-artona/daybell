@@ -5,6 +5,11 @@
 - Decisions: D32, D138, D140; touches D91, D92, D96, D112, D113. Seenu's answers to the step 3 brief (1–4) and to the
   step 3 plan's questions (1–9), Oct 11, 2026.
 
+> **Forward note (Oct 12, 2026):** the card's layout changed in step 5. Seenu's answer 11: the access code no longer
+> prints on the photographed side. The front holds the name, class and QR only; the studio's name, the access code and
+> the instructions are on a tab below a dashed "Fold back before picture day" line. See ADR 0018, "QR cards: the access
+> code off the photographed side". The description below is the step 3 card.
+
 ## What a card is
 
 A card a child takes home (D138): the studio's name, the child's name and class, a QR, the parent access code and

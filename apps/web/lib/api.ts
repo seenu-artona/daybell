@@ -80,6 +80,30 @@ export async function parseBody<S extends z.ZodType>(
   return result.data;
 }
 
+/**
+ * An optional JSON body: an empty body (however it was sent: with a content-length of 0, chunked, or over HTTP/2 without
+ * a length) counts as {}, and anything else must be JSON that passes the schema. Never decided from content-length
+ * (code review S1): a chunked body has none.
+ */
+export async function parseOptionalBody<S extends z.ZodType>(
+  request: Request,
+  schema: S,
+): Promise<z.infer<S>> {
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    throw new ApiError("invalid_input", "The request body must be JSON.");
+  }
+  return parseBody(
+    new Request("http://body.invalid", {
+      method: "POST",
+      body: text.trim() === "" ? "{}" : text,
+    }),
+    schema,
+  );
+}
+
 export async function requireUser(supabase: {
   auth: { getUser: () => Promise<{ data: { user: User | null } }> };
 }): Promise<User> {

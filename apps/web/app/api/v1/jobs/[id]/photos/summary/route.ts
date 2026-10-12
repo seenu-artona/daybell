@@ -35,6 +35,8 @@ export const GET = handle(async (_request: Request, ctx: Ctx) => {
       binned: Number(c.binned ?? 0),
       uploads: Number(c.uploads ?? 0),
       duplicatesSkipped: Number(c.duplicates_skipped ?? 0),
+      leftovers: Number(c.leftovers ?? 0),
+      flagged: Number(c.flagged ?? 0),
     },
   };
   return NextResponse.json(body, { headers: { "cache-control": "private, no-store" } });

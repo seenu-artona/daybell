@@ -68,8 +68,8 @@ describe("GET /jobs", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.jobs.map((j: { checklist: unknown }) => j.checklist)).toEqual([
-      { milestone: "setUp", done: 2, total: 5, next: "printQrCards" },
-      { milestone: null, done: 2, total: 5, next: null },
+      { milestone: "setUp", done: 2, total: 6, next: "printQrCards" },
+      { milestone: null, done: 2, total: 6, next: null },
     ]);
     expect(db.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
     expect(db.rpc).toHaveBeenCalledOnce();

@@ -64,7 +64,7 @@ select throws_ok($$ select public.create_upload_batch('11111111-1111-4111-8111-1
 select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1, '{"status":"failed","failure_reason":"unreadable"}') $$,
   '42501', null, 'nobody signed in can record a worker result');
 select is((select count(*) from unnest(array[
-    'public.create_upload_batch(uuid, uuid)', 'public.register_photos(uuid, uuid, jsonb)',
+    'public.create_upload_batch(uuid, uuid, uuid)', 'public.register_photos(uuid, uuid, jsonb)',
     'public.set_photo_upload_id(uuid, uuid, text)', 'public.mark_photo_uploaded(uuid, uuid, text)',
     'public.cancel_photo_upload(uuid, uuid)', 'public.photos_uploading(uuid, uuid[])', 'public.finish_upload_batch(uuid, uuid, int, int)',
     'public.photo_for_worker(uuid)', 'public.record_photo_result(uuid, int, jsonb)', 'public.retry_photo(uuid, uuid)',
@@ -167,9 +167,10 @@ select is((select duplicates_skipped from public.upload_batches where id = (sele
 
 -- The worker's result, idempotent.
 select ok(not public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 2,
-  '{"status":"ready","width":1,"height":1}'), 'a result for another round is ignored');
+  '{"status":"ready","width":1,"height":1,"qr":{"kind":"none"}}'), 'a result for another round is ignored');
 select ok(public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
-  '{"status":"ready","width":6000,"height":4000,"captured_at":"2026-10-01T09:30:05.47"}'), 'the worker records a result');
+  '{"status":"ready","width":6000,"height":4000,"captured_at":"2026-10-01T09:30:05.47","qr":{"kind":"none"}}'),
+  'the worker records a result');
 select ok(not public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
   '{"status":"failed","failure_reason":"unreadable"}'), 'a repeated message changes nothing');
 select is((select status::text || ' ' || width || 'x' || height || ' ' || captured_at::text from public.photos
@@ -181,10 +182,10 @@ select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
   '{"status":"failed","failure_reason":"Maya Johnson.jpg"}') $$, '22023', 'A result is ready (with a size) or failed',
   'an unknown failure reason is refused, with no values');
 select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
-  '{"status":"ready","width":1,"height":1,"captured_at":"yesterday"}') $$, '22023', null,
+  '{"status":"ready","width":1,"height":1,"captured_at":"yesterday","qr":{"kind":"none"}}') $$, '22023', null,
   'and so is a capture time that isn''t one');
 select ok(not public.record_photo_result((select (v -> 1 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
-  '{"status":"ready","width":1,"height":1}'), 'a photo still uploading takes no result');
+  '{"status":"ready","width":1,"height":1,"qr":{"kind":"none"}}'), 'a photo still uploading takes no result');
 select is((select public.photo_for_worker((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) - 'id'),
   jsonb_build_object('studio_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_id', 'a0000000-0000-4000-8000-000000000001',
     'status', 'ready', 'sha256', encode(extensions.digest('two', 'sha256'), 'hex'), 'byte_size', 1000,
@@ -360,7 +361,7 @@ select is((select count(*) from public.job_photos_page('a0000000-0000-4000-8000-
 -- ── Studio A's photographer, signed in: counts and tagging order ──────────────────────────────────────────────────
 select pg_temp.as_user('33333333-3333-4333-8333-333333333333') as signed_in_a;
 select is(public.job_photo_counts('a0000000-0000-4000-8000-000000000001'),
-  '{"photos": 3, "ready": 1, "processing": 1, "failed": 1, "uploading": 0, "binned": 0, "uploads": 1, "duplicates_skipped": 4}'::jsonb,
+  '{"photos": 3, "ready": 1, "processing": 1, "failed": 1, "uploading": 0, "binned": 0, "uploads": 1, "duplicates_skipped": 4, "leftovers": 0, "flagged": 0}'::jsonb,
   'the Photos tab''s counts');
 reset role;
 -- Order: a second batch, untimed photos and a tie on time.

@@ -365,12 +365,14 @@
         "printQrCards": "Print QR cards",
         "pictureDay": "Picture day",
         "uploadPhotos": "Upload photos",
+        "reviewTagging": "Review tagging",
         "reviewFailedPhotos": "Check failed photos"
       },
       "notes": {
         "children": "{count, plural, one {# child} other {# children}}",
         "withoutCard": "{count, plural, one {# child without a card} other {# children without a card}}",
-        "photosFailed": "{count, plural, one {# photo failed} other {# photos failed}}"
+        "photosFailed": "{count, plural, one {# photo failed} other {# photos failed}}",
+        "taggingProblems": "{leftovers, number} in Leftovers · {flagged, number} to check"
       }
     },
     "settings": {
@@ -412,6 +414,7 @@
           "photosOverdue": "{days, plural, one {Picture day was # day ago, no photos yet} other {Picture day was # days ago, no photos yet}}",
           "dateClose": "{days, plural, =0 {Picture day is today} =1 {Picture day is tomorrow} other {Picture day in # days}}",
           "brokenPhotos": "{count, plural, one {# photo failed} other {# photos failed}}",
+          "taggingProblems": "{leftovers, number} in Leftovers, {flagged, number} to check",
           "nextStep": "Next step"
         }
       },
@@ -862,7 +865,16 @@
         "retry": "Retry",
         "nothing": "No JPEG photos in what you dropped.",
         "announce": "{uploaded, number} of {total, number} photos uploaded",
-        "stop": "Stop"
+        "stop": "Stop",
+        "chooseClassFirst": "Choose the class first.",
+        "kind": {
+          "legend": "What are these photos?",
+          "individual": "Individual photos (read QR cards)",
+          "classPhoto": "Class photo for a class",
+          "noClasses": "Add classes in People to upload class photos.",
+          "class": "Class",
+          "chooseClass": "Choose a class"
+        }
       },
       "panel": {
         "file": "File",
@@ -887,6 +899,151 @@
         "inBin": "In the bin",
         "megabytes": "{size} MB",
         "pixels": "Pixels"
+      },
+      "views": {
+        "label": "Photos views",
+        "all": "All photos",
+        "review": "Review"
+      },
+      "review": {
+        "title": "Review tagging",
+        "subline": "{photos, plural, one {# photo} other {# photos}} · {leftovers, number} in Leftovers · {flagged, number} to check",
+        "markReviewed": "Mark reviewed",
+        "reviewed": "Reviewed {date}. New photos, Leftovers or flagged photos reopen the review.",
+        "ready": "Tagging looks clean. Mark it reviewed to tick Review tagging.",
+        "notReviewable": {
+          "noPhotos": "Mark reviewed opens once photos are uploaded.",
+          "pending": "Mark reviewed opens once every photo is processed and tagged.",
+          "leftovers": "Mark reviewed opens once Leftovers is empty: move each photo to a child, or put it in the bin.",
+          "flagged": "Mark reviewed opens once every flagged photo is checked.",
+          "blankCards": "Mark reviewed opens once every blank card's child is named."
+        },
+        "hint": "Drag photos onto a child, a class or Leftovers, or tick them and use Move to…",
+        "readOnly": "Owners, admins and photographers fix tagging.",
+        "loading": "Loading the review…",
+        "loadFailed": "We couldn't load the review. Please try again.",
+        "empty": "No photos yet. Upload the photos from picture day in All photos.",
+        "noPhotos": {
+          "title": "No photos yet",
+          "count": "{count, plural, one {# child} other {# children}}",
+          "intro": "Children with no photos, for a retake day. It doesn't stop you selling.",
+          "loading": "Loading…",
+          "none": "Every child has photos.",
+          "childName": "{first} {last}",
+          "noClass": "No class"
+        },
+        "pending": "{count, plural, =0 {Tagging the latest photos…} one {# photo is still being processed. Tags update when it's done.} other {# photos are still being processed. Tags update when they're done.}}",
+        "selection": {
+          "selected": "{count, plural, one {# photo selected} other {# photos selected}}",
+          "moveTo": "Move to…",
+          "looksRight": "Looks right",
+          "normalPhoto": "It's a normal photo",
+          "isCard": "This is a card photo",
+          "undoCard": "Not a card photo after all",
+          "bin": "Move to bin",
+          "clear": "Clear",
+          "confirmFirst": "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be moved."
+        },
+        "announce": {
+          "moved": "{count, plural, =0 {No photo was moved.} one {Moved # photo to {target}.} other {Moved # photos to {target}.}}",
+          "confirmed": "{count, plural, =0 {Nothing changed.} one {Confirmed # photo.} other {Confirmed # photos.}}",
+          "cards": "{count, plural, =0 {Nothing changed.} one {Marked # card photo. It is hidden from parents.} other {Marked # card photos. They are hidden from parents.}}",
+          "reviewed": "Tagging marked reviewed.",
+          "undoneCards": "{count, plural, =0 {Nothing changed.} one {# photo is back in Flagged. Parents can't see it until it's checked.} other {# photos are back in Flagged. Parents can't see them until they're checked.}}"
+        },
+        "conflicts": {
+          "cardPhoto": "Card photos stay card photos and can't be moved.",
+          "photoNotReady": "Only processed photos that aren't in the bin can be moved or checked.",
+          "cardClaimed": "This card's child has already been named.",
+          "notReady": "Tagging changed meanwhile and isn't clean yet. Check the counts above.",
+          "confirmFirst": "Confirm photos that may be a card first: mark them card photos, or say they're normal photos. Then move them.",
+          "otherCard": "A photo of another job's card can only be marked a card photo.",
+          "notMarkedCard": "Only photos someone marked as card photos can be undone. A photo whose card was read stays a card photo."
+        },
+        "tile": {
+          "alt": "{where}, photo {n}",
+          "select": "Select {where}, photo {n}",
+          "processing": "Processing",
+          "failed": "Couldn't process",
+          "card": "Card"
+        },
+        "flags": {
+          "unreadableCard": "Card unreadable",
+          "otherCard": "Another job's card",
+          "afterUnreadable": "Check: after a card",
+          "afterFailed": "Check: after a failed photo",
+          "afterPurge": "Check: near deleted photos",
+          "removedCard": "Removed card"
+        },
+        "flagged": {
+          "title": "Flagged",
+          "count": "{count, plural, one {# photo} other {# photos}}",
+          "intro": "Hidden from parents until you check them. Each stays where tagging guessed: confirm the ones that look right, mark card photos, or move them. A photo that may be a card is confirmed before it moves.",
+          "where": "Flagged",
+          "showMore": "Show more"
+        },
+        "leftovers": {
+          "title": "Leftovers",
+          "count": "{count, plural, one {# photo} other {# photos}}",
+          "intro": "Photos taken before the first card of an upload. Move them to a child or a class, or tick junk and move it to the bin.",
+          "empty": "Nothing in Leftovers.",
+          "showMore": "Show more"
+        },
+        "blankCards": {
+          "title": "New children from blank cards",
+          "intro": "Type the name and class written on each blank card. The child joins the roster with the card's own access code.",
+          "card": "Blank card {n}",
+          "photos": "{count, plural, one {# photo waiting} other {# photos waiting}}",
+          "cardPhotoAlt": "Photo of blank card {n}",
+          "firstName": "First name",
+          "lastName": "Last name",
+          "class": "Class",
+          "noClass": "No class",
+          "create": "Add child",
+          "existing": "Give photos to an existing child",
+          "created": "Added {first} {last} with the card's access code.",
+          "claimed": "This card's child has already been named.",
+          "unreadable": "This card's access code can't be read, so its child can't be added from it. Move its photos to a child instead."
+        },
+        "unlinkedCards": {
+          "title": "Other card photos",
+          "count": "{count, plural, one {# photo} other {# photos}}",
+          "intro": "Photos marked card photos that aren't linked to a child's card, such as another job's card. Parents never see them.",
+          "showMore": "Show more"
+        },
+        "albums": {
+          "title": "Classes",
+          "empty": "No classes or children yet.",
+          "noClass": "No class",
+          "summary": "{withPhotos, number} of {children, plural, one {# child} other {# children}} with photos",
+          "classPhoto": "{name} class photo",
+          "classPhotos": "Class photo",
+          "noClassPhotos": "No class photo yet. Upload one as a class photo, or move photos here.",
+          "showMorePhotos": "Show more",
+          "loading": "Loading children…",
+          "loadFailed": "We couldn't load these children. Please try again.",
+          "noChildren": "No children in this class.",
+          "showMoreChildren": "Show more children",
+          "childName": "{first} {last}",
+          "childPhotos": "{count, plural, =0 {No photos} one {# photo} other {# photos}}",
+          "showAll": "Show all {count, number} photos",
+          "showFewer": "Show fewer"
+        },
+        "moveDialog": {
+          "title": "{count, plural, one {Move # photo} other {Move # photos}}",
+          "search": "Find a child or class",
+          "hint": "Choose where the photos go, then press Move.",
+          "loading": "Loading children…",
+          "loadFailed": "We couldn't load the children. Please try again.",
+          "noMatch": "No child or class matches.",
+          "places": "Leftovers and class photos",
+          "leftovers": "Leftovers",
+          "classSet": "{name} class photo",
+          "noClass": "No class",
+          "childName": "{first} {last}",
+          "cancel": "Cancel",
+          "move": "Move"
+        }
       }
     }
   },
@@ -943,7 +1100,8 @@
       "groupLabel": "{group, select, class {Class} team {Team} other {Group}}",
       "nameLabel": "Name",
       "accessCode": "Access code",
-      "instructions": "Go to {link}, enter your code"
+      "instructions": "Go to {link}, enter your code",
+      "foldBack": "Fold back before picture day"
     }
   }
 }

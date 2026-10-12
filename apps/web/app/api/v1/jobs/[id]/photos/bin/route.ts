@@ -1,11 +1,12 @@
 import { photoIdsInput } from "@daybell/api";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { handle, parseBody } from "@/lib/api";
 import { assertCanUpload, photoResult } from "@/lib/photos";
 import { assertFunctionRegion, assertStorageRegion } from "@/lib/region-guard";
 import { loadRosterJob, pathId } from "@/lib/roster";
 import { studioScope } from "@/lib/studio";
 import { photoWriteRpc } from "@/lib/supabase/service";
+import { tagBatchesOfPhotos } from "@/lib/tagging";
 
 export const runtime = "nodejs";
 // Canadian studios' photos are handled in Montréal (D113; ADR 0016).
@@ -32,5 +33,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
       p_photo_ids: input.photoIds,
     }),
   );
+  // Their batches are tagged again: binned photos get no tag but still mark where cards were (ADR 0018).
+  if (moved > 0) after(() => tagBatchesOfPhotos(studio.region, input.photoIds));
   return NextResponse.json({ moved });
 });

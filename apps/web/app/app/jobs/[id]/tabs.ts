@@ -19,6 +19,11 @@ export function isSoonTab(segment: string): segment is SoonTab {
   return (SOON_TABS as readonly string[]).includes(segment);
 }
 
+/** Photos' Review (ADR 0018): QR tagging, fixed by hand. Part of the Photos tab. */
+export function reviewHref(jobId: string): string {
+  return `${tabHref(jobId, "photos")}/review`;
+}
+
 export function tabHref(jobId: string, tab: JobTabKey): string {
   const segment = JOB_TABS.find((t) => t.key === tab)?.segment ?? "";
   return `/app/jobs/${jobId}${segment ? `/${segment}` : ""}`;

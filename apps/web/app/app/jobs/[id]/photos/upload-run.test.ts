@@ -174,6 +174,21 @@ describe("UploadRun", () => {
     });
   });
 
+  it("starts a class-photo upload for its class, and an individual upload with no body (ADR 0018)", async () => {
+    const server = fakeServer();
+    const upload = new UploadRun(JOB, [file("IMG_0001.JPG", "one")], deps(server), () => {}, {
+      groupId: "g-1",
+    });
+    await upload.start();
+    expect(server.api).toHaveBeenCalledWith(`/jobs/${JOB}/upload-batches`, {
+      method: "POST",
+      body: { groupId: "g-1" },
+    });
+    const plain = fakeServer();
+    await run([file("IMG_0002.JPG", "two")], deps(plain));
+    expect(plain.api).toHaveBeenCalledWith(`/jobs/${JOB}/upload-batches`, { method: "POST" });
+  });
+
   it("counts files the job already has as duplicates and sends none of their bytes", async () => {
     const one = file("a.jpg", "one");
     const server = fakeServer({ dupes: new Set([await sha(one.file)]) });

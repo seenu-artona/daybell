@@ -27,12 +27,17 @@ export function JobChecklist({
   rosterSize,
   qrCards,
   failedPhotos,
+  leftovers,
+  flagged,
 }: {
   checklist: JobChecklistData;
   /** Children on the roster. */
   rosterSize: number;
   qrCards: QrCardStatus | null;
   failedPhotos: number;
+  /** Photos in Leftovers and photos flagged for checking (ADR 0018). */
+  leftovers: number;
+  flagged: number;
 }) {
   const t = useTranslations("app.checklist");
   const formatDay = useFormatDay();
@@ -65,6 +70,11 @@ export function JobChecklist({
       case "uploadPhotos":
         // Problems are marked inline where they are (D143): failed photos on their own row.
         return failedPhotos > 0 ? t("notes.photosFailed", { count: failedPhotos }) : null;
+      case "reviewTagging":
+        // Problems inline where they are (D143): what is left to fix at review.
+        return !task.done && leftovers + flagged > 0
+          ? t("notes.taggingProblems", { leftovers, flagged })
+          : null;
       default:
         return null;
     }

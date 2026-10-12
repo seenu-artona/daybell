@@ -189,10 +189,33 @@ describe("GET /studio/checklist", () => {
         qr_eligible: 1,
         qr_with_card: 1,
         has_ready_photo: true,
+        tagging_reviewed: true,
       }),
     ]);
     scope.mockResolvedValue({ supabase: db.supabase, studio: as("staff"), userId: "u" });
     expect((await (await get()).json()).upNext).toEqual({ items: [], total: 0 });
+  });
+
+  it("ranks Leftovers and flagged photos as broken, like failed photos (ADR 0018, plan answer 9)", async () => {
+    const db = fakeDatabase({ jobs: [job("a", utcDay(-30)), job("b", utcDay(-5))] }, {}, [
+      fact("a", { children: 1, qr_eligible: 1, qr_with_card: 1, has_ready_photo: true }),
+      fact("b", {
+        children: 1,
+        qr_eligible: 1,
+        qr_with_card: 1,
+        has_ready_photo: true,
+        leftovers: 3,
+        flagged: 1,
+      }),
+    ]);
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("staff"), userId: "u" });
+    const items = (await (await get()).json()).upNext.items;
+    expect(items.map((i: { jobId: string; task: string }) => [i.jobId, i.task])).toEqual([
+      ["b", "reviewTagging"],
+      ["a", "reviewTagging"],
+    ]);
+    expect(items[0].reason).toEqual({ kind: "taggingProblems", leftovers: 3, flagged: 1 });
+    expect(items[1].reason).toEqual({ kind: "nextStep" });
   });
 
   it("warns with a count only when the active jobs are cut off", async () => {

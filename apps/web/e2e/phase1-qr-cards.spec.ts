@@ -100,7 +100,7 @@ test("QR cards: print from the API and from People, with the checklist task", as
   // 3. Overview: the task ticked itself; Set up is done and picture day is far, so the list is collapsed to the next
   // task (on track), and the print is in the job's Recent activity.
   await page.reload();
-  await expect(checklist.getByText("3 of 5 done", { exact: true })).toBeVisible();
+  await expect(checklist.getByText("3 of 6 done", { exact: true })).toBeVisible();
   await expect(checklist.getByText("Next: Picture day", { exact: true })).toBeVisible();
   await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
   await expect(qrTodo).toContainText("Done");

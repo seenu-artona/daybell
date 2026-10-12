@@ -5,8 +5,8 @@
  * list: the group of the next unfinished task (Seenu, answer 2).
  *
  * Built tasks today (Seenu, answers 1 and 3): Set up = Create the job, Add the roster, Print QR cards; Picture day =
- * Picture day (ticks itself once the date has passed); Photos in = Upload photos. Review tagging (step 5), Selling and
- * Fulfilment tasks arrive with their steps.
+ * Picture day (ticks itself once the date has passed); Photos in = Upload photos, Review tagging (step 5; ADR 0018).
+ * Selling and Fulfilment tasks arrive with their steps.
  */
 import {
   daysUntil,
@@ -17,6 +17,7 @@ import {
 } from "./job-page";
 import { JOB_TYPES, type JobStatus, type JobType } from "./jobs";
 import { canEditRoster } from "./roster";
+import { reviewTaggingDone, type TaggingFacts } from "./tagging";
 
 /** Every built job task, in checklist order. */
 export const TASK_KEYS = [
@@ -25,17 +26,18 @@ export const TASK_KEYS = [
   "printQrCards",
   "pictureDay",
   "uploadPhotos",
+  "reviewTagging",
 ] as const;
 export type TaskKey = (typeof TASK_KEYS)[number];
 
 /**
  * Where the work happens. Screens map these to their links: the job's Overview, People, People with the print dialog
- * open, or Photos.
+ * open, Photos, or Photos' Review.
  */
-export type TaskTarget = "overview" | "people" | "peoplePrint" | "photos";
+export type TaskTarget = "overview" | "people" | "peoplePrint" | "photos" | "photosReview";
 
 /** What the checklist knows about a job. Only data that exists today. */
-export interface ChecklistFacts {
+export interface ChecklistFacts extends TaggingFacts {
   status: JobStatus;
   /** A calendar date, YYYY-MM-DD. */
   pictureDay: string;
@@ -43,8 +45,6 @@ export interface ChecklistFacts {
   children: number;
   /** Children who may be photographed and how many of them have a card; null if unknown. */
   qrCards: QrCardProgress | null;
-  /** The job has a ready photo (previews made, not in the bin). */
-  hasReadyPhoto: boolean;
   /** Photos that failed (not in the bin). */
   failedPhotos: number;
   /** Today's calendar date where the person is, YYYY-MM-DD (see localDay). */
@@ -89,6 +89,14 @@ const TASKS: Record<TaskKey, TaskSpec> = {
     canDo: canEditRoster,
     done: (f) => f.hasReadyPhoto,
   },
+  // Clean (no Leftovers, flags or blank cards to name) and marked reviewed; reopens when new photos arrive (Seenu,
+  // answer 4; ADR 0018).
+  reviewTagging: {
+    milestone: "photosIn",
+    target: "photosReview",
+    canDo: canEditRoster,
+    done: reviewTaggingDone,
+  },
 };
 
 /** The tasks of one list, in order. Today every job type shares it; it is per type so the lists can diverge. */
@@ -98,6 +106,7 @@ const STANDARD: readonly TaskKey[] = [
   "printQrCards",
   "pictureDay",
   "uploadPhotos",
+  "reviewTagging",
 ];
 
 export const JOB_CHECKLISTS: Record<JobType, readonly TaskKey[]> = Object.fromEntries(
@@ -190,7 +199,10 @@ export function taskTarget(key: TaskKey | AttentionTaskKey): TaskTarget {
 /** "A date is close" for Set up tasks: within this many days before picture day (Seenu, answer 7). */
 export const DATE_CLOSE_DAYS = 14;
 
-/** Not a checklist task: a problem that needs someone (Seenu, answer 9: failed photos only, for now). */
+/**
+ * Not a checklist task: a problem that needs someone (ADR 0017 answer 9: failed photos). Leftovers and flagged photos
+ * are broken too (ADR 0018, plan answer 9), but they point at the Review tagging task itself.
+ */
 export type AttentionTaskKey = "reviewFailedPhotos";
 
 /**
@@ -202,14 +214,23 @@ export type UpNextReason =
   | { kind: "photosOverdue"; days: number }
   | { kind: "dateClose"; days: number }
   | { kind: "brokenPhotos"; count: number }
+  | { kind: "taggingProblems"; leftovers: number; flagged: number }
   | { kind: "nextStep" };
 
-export const UP_NEXT_REASONS = ["photosOverdue", "dateClose", "brokenPhotos", "nextStep"] as const;
+export const UP_NEXT_REASONS = [
+  "photosOverdue",
+  "dateClose",
+  "brokenPhotos",
+  "taggingProblems",
+  "nextStep",
+] as const;
 
 const REASON_RANK: Record<UpNextReason["kind"], number> = {
   photosOverdue: 0,
   dateClose: 1,
   brokenPhotos: 2,
+  // The same tier as failed photos (plan answer 9).
+  taggingProblems: 2,
   nextStep: 4,
 };
 
@@ -237,6 +258,11 @@ export function upNextForJob(checklist: Checklist, facts: ChecklistFacts): UpNex
     return {
       task: "reviewFailedPhotos",
       reason: { kind: "brokenPhotos", count: facts.failedPhotos },
+    };
+  if (facts.leftovers > 0 || facts.flagged > 0)
+    return {
+      task: "reviewTagging",
+      reason: { kind: "taggingProblems", leftovers: facts.leftovers, flagged: facts.flagged },
     };
   const step = tasks.find((t) => !t.done && t.target !== "overview");
   return step ? { task: step.key, reason: { kind: "nextStep" } } : null;

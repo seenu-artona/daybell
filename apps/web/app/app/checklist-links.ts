@@ -1,5 +1,5 @@
 import type { OnboardingTaskKey, TaskTarget } from "@daybell/core";
-import { tabHref } from "./jobs/[id]/tabs";
+import { reviewHref, tabHref } from "./jobs/[id]/tabs";
 
 /** Where a job task's work happens (D143; ADR 0017): every row is a plain link there, never a button. */
 export function taskHref(jobId: string, target: TaskTarget): string {
@@ -13,6 +13,8 @@ export function taskHref(jobId: string, target: TaskTarget): string {
       return `${tabHref(jobId, "people")}?print=qr`;
     case "photos":
       return tabHref(jobId, "photos");
+    case "photosReview":
+      return reviewHref(jobId);
   }
 }
 

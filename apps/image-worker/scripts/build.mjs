@@ -5,13 +5,16 @@
 //                                                  image-worker.zip, the file the deploy workflow uploads
 //
 // Layout of the zip (handler "lib/index.handler"):
-//   lib/index.mjs                    the bundle (our code, @daybell/*, the AWS SDK, exif-reader)
+//   lib/index.mjs                    the bundle (our code, @daybell/*, the AWS SDK, exif-reader, zxing-wasm's JS)
+//   lib/zxing_reader.wasm            zxing-wasm's QR reader (ADR 0018), read from disk next to the bundle, never fetched
 //   assets/PlusJakartaSans-Bold.ttf  the watermark font, found at ../assets from lib/ as in the source tree
 //   node_modules/sharp, @img/*       sharp and libvips for linux-arm64, from lambda/package-lock.json
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -33,12 +36,39 @@ await build({
   external: ["sharp"],
   // Some bundled CommonJS packages call require(); ESM has none unless it is made.
   banner: {
-    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    // Aliased, so it never clashes with a bundled module's own import of createRequire (the QR reader has one).
+    js: "import { createRequire as __daybellRequire } from 'node:module'; const require = __daybellRequire(import.meta.url);",
   },
   legalComments: "external",
   logLevel: "warning",
 });
 cpSync(join(pipeline, "assets"), join(dist, "assets"), { recursive: true });
+
+// zxing-wasm's reader (ADR 0018), pinned in the pipeline at 3.1.4. Its checksum is pinned here too, so a changed file
+// is noticed before it ships; the package states the same checksum for itself. packages/image-pipeline/src/qr.ts pins
+// the same value and checks it again every time the Lambda loads the file (qr.test.ts keeps the two equal).
+const ZXING_READER_SHA256 = "e8af31edb56d0522f4de74495839385ef019ba8bc90d38e5ecb2f18795d86fb2";
+const fromPipeline = createRequire(join(pipeline, "package.json"));
+const wasm = fromPipeline.resolve("zxing-wasm/reader/zxing_reader.wasm");
+const wasmSha = createHash("sha256").update(readFileSync(wasm)).digest("hex");
+const { ZXING_WASM_SHA256 } = await import(
+  pathToFileURL(fromPipeline.resolve("zxing-wasm/reader")).href
+);
+if (wasmSha !== ZXING_READER_SHA256 || wasmSha !== ZXING_WASM_SHA256)
+  throw new Error("zxing_reader.wasm doesn't match its pinned SHA-256");
+cpSync(wasm, join(dist, "lib", "zxing_reader.wasm"));
+
+// The bundle reads QR cards with the wasm file next to it, offline: nothing is fetched.
+execFileSync(
+  process.execPath,
+  [
+    "--input-type=module",
+    "-e",
+    `const m = await import(${JSON.stringify(pathToFileURL(join(dist, "lib", "index.mjs")).href)});
+     if ((await m.qrSelfCheck()) !== 0) throw new Error("QR self-check");`,
+  ],
+  { stdio: "inherit" },
+);
 
 if (process.argv.includes("--package")) {
   // sharp for Lambda (Linux, arm64), from the committed lockfile: exact versions, integrity checked by npm ci, and no

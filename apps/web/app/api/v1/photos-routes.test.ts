@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // region before any storage), another studio's batches and photos are simply not found (row-level security, faked
 // here), uploads complete only from what storage has, and the internal routes accept only signed or cron requests.
 vi.mock("server-only", () => ({}));
-const { scope, writeRpc, systemRpc, storage } = vi.hoisted(() => ({
+const { scope, writeRpc, systemRpc, storage, afterCallbacks } = vi.hoisted(() => ({
+  afterCallbacks: [] as (() => Promise<void>)[],
   scope: vi.fn(),
   writeRpc: vi.fn(),
   systemRpc: vi.fn(),
@@ -29,6 +30,11 @@ vi.mock("@/lib/studio", async (original) => ({
   studioScope: () => scope(),
 }));
 vi.mock("@/lib/supabase/service", () => ({ photoWriteRpc: writeRpc, photoSystemRpc: systemRpc }));
+// Work after the response (tagging, ADR 0018) is collected here and run by the tests that look at it.
+vi.mock("next/server", async (original) => ({
+  ...(await original<typeof import("next/server")>()),
+  after: (fn: () => Promise<void>) => void afterCallbacks.push(fn),
+}));
 // The local stack's Canadian database is configured (read at import time in the real module).
 vi.mock("@daybell/config", async (original) => ({
   ...(await original<typeof import("@daybell/config")>()),
@@ -143,6 +149,7 @@ beforeEach(() => {
   storage.presignGet.mockImplementation(async (key: string) => `https://s3.test/${key}?sig`);
 });
 afterEach(() => {
+  afterCallbacks.length = 0;
   scope.mockReset();
   writeRpc.mockReset();
   systemRpc.mockReset();
@@ -603,14 +610,24 @@ describe("the image worker's routes accept signed requests only", () => {
       width: 10,
       height: 8,
       capturedAt: "2026-10-01T09:30:05.47",
+      qr: { kind: "none" },
     });
     const res = await result(await signed("POST", `${path}/result`, body));
     expect(await res.json()).toEqual({ recorded: true });
     expect(systemRpc).toHaveBeenCalledWith("ca", "record_photo_result", {
       p_photo_id: PHOTO,
       p_attempt: 2,
-      p_result: { status: "ready", width: 10, height: 8, captured_at: "2026-10-01T09:30:05.47" },
+      p_result: {
+        status: "ready",
+        width: 10,
+        height: 8,
+        captured_at: "2026-10-01T09:30:05.47",
+        qr: { kind: "none" },
+      },
     });
+    // After the response, the photo's batch is tagged (ADR 0018).
+    expect(afterCallbacks).toHaveLength(1);
+    afterCallbacks.length = 0;
     systemRpc.mockClear();
     const genuine = await signed("POST", `${path}/result`, body);
     const forged = new Request(genuine.url, {
@@ -619,6 +636,16 @@ describe("the image worker's routes accept signed requests only", () => {
       body: body.replace("ready", "failed"),
     });
     expect((await result(forged)).status).toBe(401);
+    expect(systemRpc).not.toHaveBeenCalled();
+    // A ready result from a worker that doesn't read cards is refused (its message is tried again; security review 2).
+    const old = JSON.stringify({
+      status: "ready",
+      attempt: 2,
+      width: 10,
+      height: 8,
+      capturedAt: null,
+    });
+    expect((await result(await signed("POST", `${path}/result`, old))).status).toBe(400);
     expect(systemRpc).not.toHaveBeenCalled();
   });
 
@@ -668,7 +695,12 @@ describe("the daily clean-up", () => {
     });
     storage.deleteAllVersions.mockResolvedValueOnce(3).mockRejectedValueOnce(new Error("S3 down"));
     const res = await cron(`Bearer ${SECRET}`);
-    expect(await res.json()).toEqual({ finishedBatches: 1, droppedUploads: 0, purgedPhotos: 1 });
+    expect(await res.json()).toEqual({
+      finishedBatches: 1,
+      droppedUploads: 0,
+      purgedPhotos: 1,
+      taggedBatches: 0,
+    });
     expect(systemRpc).toHaveBeenCalledWith("ca", "delete_purged_photos", { p_photo_ids: [PHOTO] });
   });
 });

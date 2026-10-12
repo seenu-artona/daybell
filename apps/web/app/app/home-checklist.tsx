@@ -41,12 +41,15 @@ const ROW =
 function UpNextRow({ item, role }: { item: UpNextItem; role: string }) {
   const t = useTranslations("app.checklist");
   const tu = useTranslations("app.home.upNext");
+  const r = item.reason;
   const reason =
-    item.reason.kind === "brokenPhotos"
-      ? tu("reasons.brokenPhotos", { count: item.reason.count })
-      : item.reason.kind === "nextStep"
-        ? tu("reasons.nextStep")
-        : tu(`reasons.${item.reason.kind}`, { days: item.reason.days });
+    r.kind === "brokenPhotos"
+      ? tu("reasons.brokenPhotos", { count: r.count })
+      : r.kind === "taggingProblems"
+        ? tu("reasons.taggingProblems", { leftovers: r.leftovers, flagged: r.flagged })
+        : r.kind === "nextStep"
+          ? tu("reasons.nextStep")
+          : tu(`reasons.${r.kind}`, { days: r.days });
   const content = (
     <span className="flex min-w-0 flex-1 flex-col">
       <span className="font-bold">{t(`tasks.${item.task}`)}</span>

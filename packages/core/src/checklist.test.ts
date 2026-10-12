@@ -29,9 +29,17 @@ const facts = (over: Partial<ChecklistFacts> = {}): ChecklistFacts => ({
   qrCards: null,
   hasReadyPhoto: false,
   failedPhotos: 0,
+  taggingPending: false,
+  leftovers: 0,
+  flagged: 0,
+  blankCardsPending: 0,
+  taggingReviewed: false,
   today: TODAY,
   ...over,
 });
+
+/** Photos uploaded, tagged cleanly and marked reviewed. */
+const reviewed = { hasReadyPhoto: true, taggingReviewed: true } as const;
 
 /** A job with a roster and every card printed. */
 const setUpDone = (over: Partial<ChecklistFacts> = {}) =>
@@ -72,9 +80,9 @@ describe("jobChecklist", () => {
     expect(c.groups.map((g) => [g.milestone, g.tasks.map((t) => t.key)])).toEqual([
       ["setUp", ["createJob", "addRoster", "printQrCards"]],
       ["pictureDay", ["pictureDay"]],
-      ["photosIn", ["uploadPhotos"]],
+      ["photosIn", ["uploadPhotos", "reviewTagging"]],
     ]);
-    expect(c.total).toBe(5);
+    expect(c.total).toBe(6);
     for (const type of JOB_TYPES) {
       const order = jobChecklist(type, facts()).groups.map((g) => MILESTONES.indexOf(g.milestone));
       expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -88,9 +96,10 @@ describe("jobChecklist", () => {
       printQrCards: "todo",
       pictureDay: "todo",
       uploadPhotos: "todo",
+      reviewTagging: "todo",
     });
     const c = list();
-    expect([c.done, c.total, c.next?.key, c.milestone]).toEqual([1, 5, "addRoster", "setUp"]);
+    expect([c.done, c.total, c.next?.key, c.milestone]).toEqual([1, 6, "addRoster", "setUp"]);
   });
 
   it("ticks Add the roster and Print QR cards from the roster and the cards", () => {
@@ -123,6 +132,25 @@ describe("jobChecklist", () => {
     );
   });
 
+  it("ticks Review tagging only when clean and marked reviewed (Seenu, answer 4; ADR 0018)", () => {
+    const past = { pictureDay: "2026-10-01", hasReadyPhoto: true };
+    expect(states(setUpDone(past)).reviewTagging).toBe("next");
+    expect(states(setUpDone({ ...past, taggingReviewed: true })).reviewTagging).toBe("done");
+    for (const over of [
+      { leftovers: 1 },
+      { flagged: 1 },
+      { blankCardsPending: 1 },
+      { taggingPending: true },
+    ])
+      expect(states(setUpDone({ ...past, ...over, taggingReviewed: true })).reviewTagging).toBe(
+        "next",
+      );
+    // A job with no photos can't have reviewed tagging (plan answer 7).
+    expect(
+      states(setUpDone({ pictureDay: "2026-10-01", taggingReviewed: true })).reviewTagging,
+    ).toBe("todo");
+  });
+
   it("keeps the milestone at the next task's group: dates don't move it (Seenu, answer 2)", () => {
     // Picture day passed without a roster: still Set up.
     expect(list({ pictureDay: "2026-01-01" }).milestone).toBe("setUp");
@@ -136,8 +164,8 @@ describe("jobChecklist", () => {
   });
 
   it("shows the next stage once every built task of a draft is done", () => {
-    const c = jobChecklist("school", setUpDone({ pictureDay: "2026-10-01", hasReadyPhoto: true }));
-    expect([c.done, c.total, c.next, c.milestone]).toEqual([5, 5, null, "selling"]);
+    const c = jobChecklist("school", setUpDone({ pictureDay: "2026-10-01", ...reviewed }));
+    expect([c.done, c.total, c.next, c.milestone]).toEqual([6, 6, null, "selling"]);
   });
 
   it("follows the status once the job sells or closes", () => {
@@ -180,8 +208,11 @@ describe("canDoTask and taskTarget", () => {
       "peoplePrint",
       "overview",
       "photos",
+      "photosReview",
     ]);
     expect(taskTarget("reviewFailedPhotos")).toBe("photos");
+    expect(canDoTask("staff", "reviewTagging")).toBe(false);
+    expect(canDoTask("photographer", "reviewTagging")).toBe(true);
   });
 });
 
@@ -221,8 +252,8 @@ describe("upNextForJob", () => {
       const p = pick(f);
       if (p) expect(["createJob", "pictureDay"]).not.toContain(p.task);
     }
-    // Photos already uploaded before picture day: only Picture day is left, so nothing to do.
-    expect(pick(setUpDone({ hasReadyPhoto: true }))).toBeNull();
+    // Photos already uploaded and reviewed before picture day: only Picture day is left, so nothing to do.
+    expect(pick(setUpDone(reviewed))).toBeNull();
   });
 
   it("flags failed photos as broken, after dates", () => {
@@ -235,9 +266,30 @@ describe("upNextForJob", () => {
     );
   });
 
+  it("ranks Leftovers and flagged photos as broken, in the same tier as failed ones (plan answer 9)", () => {
+    const past = { pictureDay: "2026-10-01", hasReadyPhoto: true };
+    expect(pick(setUpDone({ ...past, leftovers: 3, flagged: 1 }))).toEqual({
+      task: "reviewTagging",
+      reason: { kind: "taggingProblems", leftovers: 3, flagged: 1 },
+    });
+    expect(pick(setUpDone({ ...past, flagged: 2 }))?.reason.kind).toBe("taggingProblems");
+    // Failed photos come first within the tier; a close date still wins.
+    expect(pick(setUpDone({ ...past, leftovers: 3, failedPhotos: 1 }))?.task).toBe(
+      "reviewFailedPhotos",
+    );
+    expect(pick(facts({ pictureDay: "2026-10-14", leftovers: 4 }))?.reason.kind).toBe("dateClose");
+    // Blank cards to name aren't broken: Review tagging is simply the next step.
+    expect(pick(setUpDone({ ...past, blankCardsPending: 1 }))).toEqual({
+      task: "reviewTagging",
+      reason: { kind: "nextStep" },
+    });
+    const onTrack = (f: ChecklistFacts) => isOnTrack(jobChecklist("school", f), f);
+    expect(onTrack(setUpDone({ ...past, leftovers: 1 }))).toBe(false);
+  });
+
   it("falls back to the next step, and picks nothing when nothing is left or the job is closed", () => {
     expect(pick(facts())).toEqual({ task: "addRoster", reason: { kind: "nextStep" } });
-    expect(pick(setUpDone({ pictureDay: "2026-10-01", hasReadyPhoto: true }))).toBeNull();
+    expect(pick(setUpDone({ pictureDay: "2026-10-01", ...reviewed }))).toBeNull();
     expect(pick(facts({ status: "closed", pictureDay: "2026-10-01" }))).toBeNull();
   });
 
@@ -246,6 +298,7 @@ describe("upNextForJob", () => {
       const p = pick(f);
       if (!p) continue;
       if (p.reason.kind === "brokenPhotos") expect(f.failedPhotos).toBeGreaterThan(0);
+      if (p.reason.kind === "taggingProblems") expect(f.leftovers + f.flagged).toBeGreaterThan(0);
       if (p.reason.kind === "photosOverdue") expect(f.hasReadyPhoto).toBe(false);
       expect(f.status).not.toBe("closed");
     }

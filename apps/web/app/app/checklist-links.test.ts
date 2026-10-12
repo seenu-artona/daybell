@@ -10,6 +10,7 @@ describe("taskHref", () => {
     expect(taskHref(JOB, "people")).toBe(`/app/jobs/${JOB}/people`);
     expect(taskHref(JOB, "peoplePrint")).toBe(`/app/jobs/${JOB}/people?print=qr`);
     expect(taskHref(JOB, "photos")).toBe(`/app/jobs/${JOB}/photos`);
+    expect(taskHref(JOB, "photosReview")).toBe(`/app/jobs/${JOB}/photos/review`);
   });
 });
 

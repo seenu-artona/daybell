@@ -4,6 +4,7 @@ import type {
   ChildrenResponse,
   GroupsResponse,
   Job,
+  JobDetailResponse,
   PhotoCountsResponse,
   QrCardStatusResponse,
 } from "@daybell/api";
@@ -34,11 +35,17 @@ export function JobShell({ children }: { children: ReactNode }) {
   const [job, setJob] = useState<Job | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [summary, setSummary] = useState<JobSummary | null>(null);
+  const [taggingReviewed, setTaggingReviewed] = useState(false);
 
   useEffect(() => {
-    api<{ job: Job }>(`/jobs/${encodeURIComponent(id)}`).then((res) => {
-      if (res.ok) setJob(res.data.job);
-      else setProblem(res.code === "not_found" ? tj("notFound") : text.error(res.code));
+    api<JobDetailResponse>(`/jobs/${encodeURIComponent(id)}`).then((res) => {
+      if (res.ok) {
+        const { checklist, ...rest } = res.data.job;
+        setJob(rest);
+        setTaggingReviewed(
+          checklist.tasks.some((task) => task.key === "reviewTagging" && task.done),
+        );
+      } else setProblem(res.code === "not_found" ? tj("notFound") : text.error(res.code));
     });
   }, [id, tj, text]);
 
@@ -75,11 +82,13 @@ export function JobShell({ children }: { children: ReactNode }) {
             setJob,
             summary,
             refreshSummary,
+            taggingReviewed,
+            setTaggingReviewed,
             canManage: role === "owner" || role === "admin",
             canEditRoster: canEditRoster(role),
           }
         : null,
-    [job, summary, refreshSummary, role],
+    [job, summary, refreshSummary, taggingReviewed, role],
   );
 
   if (!value) {

@@ -4,10 +4,12 @@ import {
   type DerivativeVariant,
   exifCaptureTime,
   MAX_PHOTO_BYTES,
+  type QrReading,
   sha256OfBytes,
 } from "@daybell/core";
 import exif from "exif-reader";
 import sharp, { type Metadata, type Sharp } from "sharp";
+import { loadQrReader, type QrReader, type RgbaImage, readCard } from "./qr";
 
 /**
  * Makes a photo's previews once, at upload (D60, D100; ADR 0016). Pure: bytes in, previews and facts out; the image
@@ -24,6 +26,8 @@ export interface PhotoFacts {
   height: number;
   /** EXIF capture time with sub-seconds, "YYYY-MM-DDTHH:MM:SS[.fff]", or null. */
   capturedAt: string | null;
+  /** The QR card read in the photo (ADR 0018). A card code is never logged or queued. */
+  qr: QrReading;
 }
 
 export type ProcessResult =
@@ -116,7 +120,7 @@ export async function watermarkTile(
     .toBuffer();
 }
 
-function readFacts(meta: Metadata): PhotoFacts {
+function readFacts(meta: Metadata): Omit<PhotoFacts, "qr"> {
   const upright = (meta.orientation ?? 1) >= 5;
   const width = (upright ? meta.height : meta.width) ?? 0;
   const height = (upright ? meta.width : meta.height) ?? 0;
@@ -144,6 +148,28 @@ export const MAX_PROGRESSIVE_PIXELS = 60_000_000;
 const decoder = (input: Buffer, limit: number) =>
   sharp(input, { failOn: "error", limitInputPixels: limit, sequentialRead: true });
 
+/**
+ * The photo is decoded once to this size: big enough to read a QR card held at waist height (about 100 px across, 3 px
+ * per module, ADR 0018), and the previews are made from it.
+ */
+export const QR_DECODE_SIDE = 2048;
+/** The second look, only when a symbol was found but not read: about half a 24-megapixel original. */
+export const QR_RETRY_SIDE = 3072;
+
+/** RGBA for zxing, from upright sRGB pixels. */
+async function rgba(
+  data: Buffer,
+  width: number,
+  height: number,
+  channels: number,
+): Promise<RgbaImage> {
+  const out = await sharp(data, { raw: { width, height, channels: channels as 3 } })
+    .ensureAlpha()
+    .raw()
+    .toBuffer();
+  return { data: out, width, height };
+}
+
 /** Fits a watermark tile inside a preview of `w` × `h` (very wide or tiny photos). */
 async function tileFor(
   cache: Map<number, Buffer>,
@@ -164,9 +190,10 @@ async function tileFor(
 /**
  * Checks an uploaded original and makes its four previews: 400 px and 1600 px plain (the studio's screens) and the
  * same sizes watermarked with the studio's name (parents, later). The original must be the file the browser hashed
- * (SHA-256), JPEG (Seenu, answer 1), at most 50 MB and at most MAX_INPUT_PIXELS. It is decoded once, to the 1600 px
- * size; the other previews are made from that. Previews are upright (EXIF orientation applied), sRGB WebP, with every
- * bit of metadata stripped: no EXIF, XMP, IPTC, GPS or camera serial.
+ * (SHA-256), JPEG (Seenu, answer 1), at most 50 MB and at most MAX_INPUT_PIXELS. It is decoded once, to 2048 px,
+ * where its QR card is read (ADR 0018; a second, larger decode only when a symbol is found but not read); the previews
+ * are made from those pixels. Previews are upright (EXIF orientation applied), sRGB WebP, with every bit of metadata
+ * stripped: no EXIF, XMP, IPTC, GPS or camera serial.
  */
 export async function processOriginal(
   bytes: Uint8Array<ArrayBuffer>,
@@ -174,6 +201,9 @@ export async function processOriginal(
     studioName: string;
     expectedSha256: string;
     fontFile?: string;
+    /** Where zxing's reader .wasm is (bundles ship their own copy); or a reader (tests). */
+    qrWasmFile?: string;
+    qrReader?: QrReader;
     /** Tests only: lower pixel limits. */
     maxPixels?: number;
     maxProgressivePixels?: number;
@@ -187,7 +217,7 @@ export async function processOriginal(
   const maxPixels = options.maxPixels ?? MAX_INPUT_PIXELS;
   const maxProgressive = options.maxProgressivePixels ?? MAX_PROGRESSIVE_PIXELS;
   const input = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let facts: PhotoFacts;
+  let facts: Omit<PhotoFacts, "qr">;
   let limit: number;
   try {
     // The header only: no pixels are decoded here, so the size is read without a limit and checked below.
@@ -200,15 +230,51 @@ export async function processOriginal(
     return { ok: false, reason: "unreadable" };
   }
 
+  // Loaded before decoding: a reader that can't load is the worker's fault, not the photo's, so it throws (and the
+  // message is tried again) instead of failing the photo.
+  if (!options.qrReader && !options.qrWasmFile) throw new Error("A QR reader is needed");
+  const reader = options.qrReader ?? (await loadQrReader(options.qrWasmFile as string));
+
   try {
     const view = DERIVATIVES["view.webp"].longestSide;
     const thumb = DERIVATIVES["thumb.webp"].longestSide;
-    // Decoded once (JPEG shrink-on-load does most of the work), upright, sRGB, to the largest preview's size.
-    const { data, info } = await decoder(input, limit)
-      .autoOrient()
-      .resize({ width: view, height: view, fit: "inside", withoutEnlargement: true })
-      .toColourspace("srgb")
-      .removeAlpha()
+    // Decoded once (JPEG shrink-on-load does most of the work), upright, sRGB, to the size the QR card is read at.
+    const decode = (side: number) =>
+      decoder(input, limit)
+        .autoOrient()
+        .resize({ width: side, height: side, fit: "inside", withoutEnlargement: true })
+        .toColourspace("srgb")
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+    const decoded = await decode(QR_DECODE_SIDE);
+    const longest = Math.max(facts.width, facts.height);
+    const qr = await readCard(
+      reader,
+      await rgba(decoded.data, decoded.info.width, decoded.info.height, decoded.info.channels),
+      longest > QR_DECODE_SIDE
+        ? async () => {
+            const big = await decode(QR_RETRY_SIDE);
+            return rgba(big.data, big.info.width, big.info.height, big.info.channels);
+          }
+        : null,
+    );
+
+    // The previews, from the decoded pixels: the 1600 px view (sized from the original, so two resizes never round it
+    // differently), then the 400 px thumbnail from that.
+    const viewScale = Math.min(1, view / longest);
+    const { data, info } = await sharp(decoded.data, {
+      raw: {
+        width: decoded.info.width,
+        height: decoded.info.height,
+        channels: decoded.info.channels,
+      },
+    })
+      .resize({
+        width: Math.max(1, Math.round(facts.width * viewScale)),
+        height: Math.max(1, Math.round(facts.height * viewScale)),
+        fit: "fill",
+      })
       .raw()
       .toBuffer({ resolveWithObject: true });
     const raw = { raw: { width: info.width, height: info.height, channels: info.channels } };
@@ -240,7 +306,7 @@ export async function processOriginal(
       "proof.webp": proofBuf,
       "proof-thumb.webp": proofThumbBuf,
     };
-    return { ok: true, facts, derivatives };
+    return { ok: true, facts: { ...facts, qr }, derivatives };
   } catch {
     return { ok: false, reason: "unreadable" };
   }

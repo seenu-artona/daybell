@@ -1,10 +1,12 @@
 import { finishBatchInput } from "@daybell/api";
+import { after } from "next/server";
 import { handle, parseBody } from "@/lib/api";
 import { assertCanUpload, loadBatch, photoResult } from "@/lib/photos";
 import { assertFunctionRegion, assertStorageRegion } from "@/lib/region-guard";
 import { pathId } from "@/lib/roster";
 import { studioScope } from "@/lib/studio";
 import { photoWriteRpc } from "@/lib/supabase/service";
+import { tagBatchQuietly } from "@/lib/tagging";
 
 export const runtime = "nodejs";
 export const preferredRegion = "yul1";
@@ -30,5 +32,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
       p_duplicates: input.duplicates,
     }),
   );
+  // Tagged now if every photo is processed; otherwise the last result tags it (ADR 0018).
+  after(() => tagBatchQuietly(studio.region, batchId));
   return new Response(null, { status: 204 });
 });

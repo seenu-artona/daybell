@@ -9,3 +9,4 @@ export * from "./people";
 export * from "./photos";
 export * from "./qr-cards";
 export * from "./roster";
+export * from "./tagging";

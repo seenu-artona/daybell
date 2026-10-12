@@ -5,9 +5,11 @@ import {
   activityQuery,
   childInput,
   childPatch,
+  claimBlankCardInput,
   clientInput,
   clientListQuery,
   clientPatch,
+  confirmPhotosInput,
   finishBatchInput,
   groupInput,
   groupPatch,
@@ -16,6 +18,7 @@ import {
   jobListQuery,
   jobPatch,
   joinSignUpInput,
+  movePhotosInput,
   partUrlsInput,
   passwordResetRequestInput,
   passwordUpdateInput,
@@ -28,11 +31,16 @@ import {
   signInInput,
   signUpInput,
   studioChecklistQuery,
+  taggingChildrenQuery,
+  taggingPhotosQuery,
+  undoCardPhotosInput,
+  uploadBatchInput,
   uploadFilesInput,
   workerResultInput,
 } from "./schemas";
 import {
   activityResponse,
+  cardPhotosUndoneResponse,
   checkEmailResponse,
   childResponse,
   childrenResponse,
@@ -48,9 +56,11 @@ import {
   jobsResponse,
   meResponse,
   nextJobNumberResponse,
+  noPhotosResponse,
   partUrlsResponse,
   photoCountsResponse,
   photoDetailResponse,
+  photosConfirmedResponse,
   photosMovedResponse,
   photosResponse,
   QR_CARD_HEADERS,
@@ -59,6 +69,10 @@ import {
   rosterImportResponse,
   searchResponse,
   studioChecklistResponse,
+  taggedPhotosResponse,
+  taggingChildrenResponse,
+  taggingReviewedResponse,
+  taggingSummaryResponse,
   teamResponse,
   uploadBatchResponse,
   uploadCompleteResponse,
@@ -102,6 +116,8 @@ export interface RouteSpec {
   /** Query string parameters, for lists. */
   query?: z.ZodObject;
   body?: z.ZodType;
+  /** The body may be left out (e.g. an upload of individual photos). */
+  bodyOptional?: boolean;
   success: {
     status: 200 | 201 | 202 | 204;
     schema?: z.ZodType;
@@ -457,10 +473,19 @@ export const ROUTES: RouteSpec[] = [
     group: "Photos",
     summary: "Start an upload",
     description:
-      "One drop of photos (a folder or a selection). Closed jobs refuse uploads (409, photos.jobClosed). Then register the files, upload their parts and finish the batch.",
+      "One drop of photos (a folder or a selection). Closed jobs refuse uploads (409, photos.jobClosed). Then register the files, upload their parts and finish the batch. Individual photos are tagged to children by the QR cards in them; with groupId, every photo goes to that class's Class photo set.",
     access: "uploader",
+    body: uploadBatchInput,
+    bodyOptional: true,
     success: { status: 201, schema: uploadBatchResponse, description: "The batch." },
-    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
   },
   {
     method: "POST",
@@ -612,6 +637,132 @@ export const ROUTES: RouteSpec[] = [
   },
   {
     method: "GET",
+    path: "/jobs/{id}/tagging",
+    group: "Photos",
+    summary: "QR tagging: the review's summary",
+    description:
+      "Counts (Leftovers, flagged photos, blank cards to name, photos still being processed or tagged), whether Mark reviewed is possible and why not, the review state, each class's album (No class last) and the blank cards whose child is still to be named. Owners, admins and photographers fix tags; staff look.",
+    access: "signed-in",
+    success: { status: 200, schema: taggingSummaryResponse, description: "The summary." },
+    errors: ["not_signed_in", "not_found", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}/tagging/photos",
+    group: "Photos",
+    summary: "QR tagging: the photos in one place",
+    description:
+      "Leftovers, flagged photos, a child's photos (with their card photos), a class's Class photo set, or a blank card's photos, in tagging order, in pages (keyset pagination). Card photos and flagged photos are never shown to parents.",
+    access: "signed-in",
+    query: taggingPhotosQuery,
+    success: { status: 200, schema: taggedPhotosResponse, description: "A page of photos." },
+    errors: ["invalid_input", "not_signed_in", "not_found", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}/tagging/children",
+    group: "Photos",
+    summary: "QR tagging: an album's children",
+    description:
+      "The children of a class (groupId) or without one (noGroup=true), by name, each with how many photos they have and the first 12.",
+    access: "signed-in",
+    query: taggingChildrenQuery,
+    success: { status: 200, schema: taggingChildrenResponse, description: "A page of children." },
+    errors: ["invalid_input", "not_signed_in", "not_found", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}/tagging/no-photos",
+    group: "Photos",
+    summary: "QR tagging: children with no photos yet",
+    description:
+      "For a retake day later. Children marked Do not photograph aren't listed. It doesn't block selling.",
+    access: "signed-in",
+    success: { status: 200, schema: noPhotosResponse, description: "The children." },
+    errors: ["not_signed_in", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/photos/move",
+    group: "Photos",
+    summary: "Move photos to a child, a class photo set or Leftovers",
+    description:
+      "Up to 500 of the job's processed photos. Moved photos keep their place: tagging an upload again never changes them, and any flag is cleared. Card photos can't be moved (409, tagging.cardPhoto); nor can photos still processing, failed or in the bin (409, tagging.photoNotReady). Moving to Leftovers reopens the review.",
+    access: "uploader",
+    body: movePhotosInput,
+    success: { status: 200, schema: photosMovedResponse, description: "Moved." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/photos/confirm",
+    group: "Photos",
+    summary: "Confirm flagged photos",
+    description:
+      'Up to 500 of the job\'s photos. asCard false: "Looks right", they stay where they are and may be shown to parents later. asCard true: "This is a card photo", hidden from parents.',
+    access: "uploader",
+    body: confirmPhotosInput,
+    success: { status: 200, schema: photosConfirmedResponse, description: "Confirmed." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/tagging/undo-card",
+    group: "Photos",
+    summary: 'Undo "This is a card photo"',
+    description:
+      "Up to 500 of the job's photos that a person marked as card photos. They go back to Flagged (unreadableCard), where they were before (with the child or blank card they were listed under, else Leftovers), hidden from parents until someone confirms them again; this reopens the review. Owners and admins only. A photo whose card was read stays a card photo (409, tagging.notMarkedCard); photos in the bin can't be changed (409, tagging.photoNotReady); nor can a closed job's.",
+    access: "owner-admin",
+    body: undoCardPhotosInput,
+    success: { status: 200, schema: cardPhotosUndoneResponse, description: "Undone." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/qr-cards/{cardId}/child",
+    group: "Photos",
+    summary: "Name a blank card's child",
+    description:
+      "Adds the child to the roster (in one of the job's classes, or none) with the blank card's own access code, so the card already handed out works; the card's photos go to the child. A card is claimed once (409, tagging.cardClaimed). For a child already on the roster, move the card's photos to them instead.",
+    access: "roster-editor",
+    body: claimBlankCardInput,
+    success: { status: 201, schema: childResponse, description: "The new child." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "conflict"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/tagging/review",
+    group: "Photos",
+    summary: "Mark tagging reviewed",
+    description:
+      "Only when tagging is clean: photos uploaded and processed, no Leftovers, no flagged photos and no blank card still to name (409, tagging.notReady). Ticks the checklist's Review tagging task; new photos, Leftovers or flags reopen it.",
+    access: "uploader",
+    success: { status: 200, schema: taggingReviewedResponse, description: "Reviewed." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict"],
+  },
+  {
+    method: "GET",
     path: "/clients",
     group: "Contacts",
     summary: "The studio's clients",
@@ -693,7 +844,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Daily photo clean-up",
     description:
-      "Not for integrations. Vercel Cron, with CRON_SECRET as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days and finishes batches idle for a day.",
+      "Not for integrations. Vercel Cron, with CRON_SECRET as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
     access: "internal",
     success: { status: 200, schema: cronPhotosResponse, description: "What was cleaned up." },
     errors: ["not_signed_in", "internal"],
@@ -811,7 +962,7 @@ export function buildOpenApi(serverUrl: string) {
       ...(r.body
         ? {
             requestBody: {
-              required: true,
+              required: !r.bodyOptional,
               content: { "application/json": { schema: json(r.body, components) } },
             },
           }

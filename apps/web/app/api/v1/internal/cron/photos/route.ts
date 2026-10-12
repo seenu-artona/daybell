@@ -6,6 +6,7 @@ import { photoStorage } from "@/lib/photo-storage";
 import { photoResult } from "@/lib/photos";
 import { assertFunctionRegion, STORAGE_REGIONS } from "@/lib/region-guard";
 import { photoSystemRpc } from "@/lib/supabase/service";
+import { tagBatchNow } from "@/lib/tagging";
 import { assertCron } from "@/lib/worker-auth";
 
 export const runtime = "nodejs";
@@ -25,14 +26,16 @@ const prefixOf = (r: Row) => photoPrefix({ studioId: r.studio_id, jobId: r.job_i
  * - finishes batches idle for a day (their photos.uploaded event);
  * - drops uploads never finished after 7 days (storage aborts their parts after 7 days too);
  * - deletes photos in the bin for more than 30 days (Seenu, answer 7): every stored version first, then the row, so a
- *   failure never leaves objects without a row. One photos.purged event per job.
+ *   failure never leaves objects without a row. One photos.purged event per job;
+ * - tags upload batches whose photos changed since they were last tagged (ADR 0018), counting photos stuck processing
+ *   as unreadable (the photos after them are flagged for review).
  * Logs photo ids only, and only when something fails.
  */
 export const GET = handle(async (request: Request) => {
   assertCron(request);
   const started = Date.now();
   const inTime = () => Date.now() - started < BUDGET_MS;
-  const totals = { finishedBatches: 0, droppedUploads: 0, purgedPhotos: 0 };
+  const totals = { finishedBatches: 0, droppedUploads: 0, purgedPhotos: 0, taggedBatches: 0 };
 
   for (const region of STORAGE_REGIONS) {
     if (!regionDatabase(region)) continue;
@@ -86,6 +89,22 @@ export const GET = handle(async (request: Request) => {
         await photoSystemRpc(region, "delete_purged_photos", { p_photo_ids: deleted }),
       );
       if (rows.length < PAGE) break;
+    }
+
+    // Batches still to tag: one pass over at most a page a day; a batch still processing waits for its results.
+    if (inTime()) {
+      const due =
+        photoResult<{ id: string }[] | null>(
+          await photoSystemRpc(region, "batches_to_tag", { p_limit: PAGE }),
+        ) ?? [];
+      for (const { id } of due) {
+        if (!inTime()) break;
+        try {
+          if ((await tagBatchNow(region, id, { force: true })) === "tagged") totals.taggedBatches++;
+        } catch {
+          console.error("tagging_failed", id);
+        }
+      }
     }
   }
   return NextResponse.json(totals);

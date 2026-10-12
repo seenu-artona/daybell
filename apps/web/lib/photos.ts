@@ -14,6 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
 import { isLocalDriver, queuePhotoForProcessing } from "./photo-storage";
 import { photoSystemRpc, photoWriteRpc } from "./supabase/service";
+import { tagBatchesOfPhotos } from "./tagging";
 
 /**
  * Server helpers for photos (Phase 1 step 4, ADR 0016). Only IDs go in URLs, keys and logs; a photo's filename is read
@@ -240,40 +241,59 @@ export async function processLocally(
         put: (key, body, contentType, cacheControl) =>
           storage.put(key, body, { contentType, cacheControl }),
         async report(id, result) {
-          photoResult(
+          const recorded = photoResult<boolean>(
             await photoSystemRpc(region, "record_photo_result", {
               p_photo_id: id,
               p_attempt: result.attempt,
               p_result: workerResultRow(result),
             }),
           );
+          // Its batch is tagged once its last photo is processed (ADR 0018).
+          if (recorded) await tagBatchesOfPhotos(region, [id]);
         },
         log: (event, id, reason) => {
           if (event !== "photo_ready") console.error(event, id, reason ?? "");
         },
       },
-      // The same font file as the QR cards' (ADR 0015), read from the app's own folder.
-      { fontFile: resolve(process.cwd(), "assets/fonts/PlusJakartaSans-Bold.ttf") },
+      // The same font file as the QR cards' (ADR 0015), read from the app's own folder; zxing's reader from the app's
+      // node_modules, read from disk (ADR 0018).
+      {
+        fontFile: resolve(process.cwd(), "assets/fonts/PlusJakartaSans-Bold.ttf"),
+        qrWasmFile: resolve(process.cwd(), "node_modules/zxing-wasm/dist/reader/zxing_reader.wasm"),
+      },
     );
   } catch (err) {
     console.error("photo_local_error", photoId, err instanceof Error ? err.name : "unknown");
   }
 }
 
-/** The worker's result as record_photo_result takes it. */
+/**
+ * The worker's result as record_photo_result takes it. What it read of a QR card goes too (ADR 0018): the card code is
+ * looked up in the photo's own job by the database and never logged.
+ */
 export function workerResultRow(
   result:
-    | { status: "ready"; width: number; height: number; capturedAt: string | null }
+    | {
+        status: "ready";
+        width: number;
+        height: number;
+        capturedAt: string | null;
+        qr: { kind: "none" } | { kind: "unreadable" } | { kind: "card"; cardCode: string };
+      }
     | { status: "failed"; failureReason: string },
 ): Record<string, unknown> {
-  return result.status === "ready"
-    ? {
-        status: "ready",
-        width: result.width,
-        height: result.height,
-        captured_at: result.capturedAt,
-      }
-    : { status: "failed", failure_reason: result.failureReason };
+  if (result.status === "failed") return { status: "failed", failure_reason: result.failureReason };
+  return {
+    status: "ready",
+    width: result.width,
+    height: result.height,
+    captured_at: result.capturedAt,
+    // Always sent for a ready photo (security review 2).
+    qr:
+      result.qr.kind === "card"
+        ? { kind: "card", card_code: result.qr.cardCode }
+        : { kind: result.qr.kind },
+  };
 }
 
 /**

@@ -18,7 +18,7 @@ import { useJob } from "./job-context";
 export default function JobOverviewPage() {
   const t = useTranslations("app.job");
   const { version } = useStudio();
-  const { job, summary, canManage } = useJob();
+  const { job, summary, canManage, setTaggingReviewed } = useJob();
   const today = localDay(new Date());
   const days = daysUntil(job.pictureDay, today);
   const [checklist, setChecklist] = useState<JobChecklistData | null>(null);
@@ -32,7 +32,12 @@ export default function JobOverviewPage() {
     if (!summary) return;
     let live = true;
     api<JobDetailResponse>(`/jobs/${job.id}?today=${localDay(new Date())}`).then((res) => {
-      if (live && res.ok) setChecklist(res.data.job.checklist);
+      if (live && res.ok) {
+        setChecklist(res.data.job.checklist);
+        setTaggingReviewed(
+          res.data.job.checklist.tasks.some((task) => task.key === "reviewTagging" && task.done),
+        );
+      }
     });
     return () => {
       live = false;
@@ -57,6 +62,8 @@ export default function JobOverviewPage() {
               rosterSize={summary.children}
               qrCards={summary.qrCards}
               failedPhotos={summary.photos?.failed ?? 0}
+              leftovers={summary.photos?.leftovers ?? 0}
+              flagged={summary.photos?.flagged ?? 0}
             />
           </div>
           {canManage ? (

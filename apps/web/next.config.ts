@@ -20,8 +20,9 @@ const config: NextConfig = {
   ],
   // The QR card PDF (ADR 0015): pdfkit and fontkit load their own files at run time, so they stay plain Node modules
   // rather than being bundled.
-  // sharp (the local storage driver's previews, ADR 0016) loads a native library.
-  serverExternalPackages: ["pdfkit", "fontkit", "sharp"],
+  // sharp (the local storage driver's previews, ADR 0016) loads a native library; zxing-wasm (its QR reading, ADR
+  // 0018) is given its .wasm file from disk.
+  serverExternalPackages: ["pdfkit", "fontkit", "sharp", "zxing-wasm"],
   // The fonts the QR card PDF embeds, read from disk by the route that builds it.
   outputFileTracingIncludes: { "/api/v1/jobs/[id]/qr-cards": ["./assets/fonts/*.ttf"] },
   poweredByHeader: false,

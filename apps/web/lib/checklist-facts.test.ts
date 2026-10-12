@@ -25,6 +25,11 @@ describe("checklistFacts and checklistSummary", () => {
     qr_with_card: 1,
     has_ready_photo: false,
     failed_photos: 0,
+    tagging_pending: true,
+    leftovers: 4,
+    flagged: 2,
+    blank_cards_pending: 1,
+    tagging_reviewed: false,
   };
   const job = { type: "school" as const, status: "draft" as const, pictureDay: "2027-01-01" };
 
@@ -36,11 +41,18 @@ describe("checklistFacts and checklistSummary", () => {
       qrCards: { eligible: 3, withCard: 1 },
       hasReadyPhoto: false,
       failedPhotos: 0,
+      taggingPending: true,
+      leftovers: 4,
+      flagged: 2,
+      blankCardsPending: 1,
+      taggingReviewed: false,
       today: "2026-10-12",
     });
     expect(checklistFacts(job, undefined, "2026-10-12")).toMatchObject({
       children: 0,
       qrCards: null,
+      leftovers: 0,
+      taggingReviewed: false,
     });
   });
 
@@ -48,13 +60,13 @@ describe("checklistFacts and checklistSummary", () => {
     expect(checklistSummary(job, row, "2026-10-12")).toEqual({
       milestone: "setUp",
       done: 2,
-      total: 5,
+      total: 6,
       next: "printQrCards",
     });
     expect(checklistSummary({ ...job, status: "closed" }, row, "2026-10-12")).toEqual({
       milestone: null,
       done: 2,
-      total: 5,
+      total: 6,
       next: null,
     });
   });

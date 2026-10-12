@@ -23,6 +23,13 @@ export interface JobContextValue {
   summary: JobSummary | null;
   /** Call after any roster change or print, so the People count and the Overview numbers stay right. */
   refreshSummary: () => void;
+  /**
+   * The checklist's Review tagging task is done (ADR 0018), for "Before you can sell": from the job as first loaded,
+   * then from whatever loads the job's checklist or tagging summary since (the Overview, Review), so the dialog never
+   * fetches the job again for one flag (code review nice 6).
+   */
+  taggingReviewed: boolean;
+  setTaggingReviewed: (done: boolean) => void;
   /** Owners and admins: edit the job, start selling, see its activity. */
   canManage: boolean;
   /** Owners, admins and photographers: add, import, edit and remove children. */

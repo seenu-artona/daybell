@@ -168,3 +168,32 @@ describe("API description", () => {
     ).toBeUndefined();
   });
 });
+
+describe("QR tagging routes (ADR 0018)", () => {
+  const doc = buildOpenApi("https://daybell.test");
+  it("describes the review's reads for everyone on the team and its writes for photo editors", () => {
+    const paths = doc.paths as Record<string, Record<string, { "x-access": string }>>;
+    expect(paths["/jobs/{id}/tagging"]?.get?.["x-access"]).toBe("signed-in");
+    expect(paths["/jobs/{id}/tagging/photos"]?.get?.["x-access"]).toBe("signed-in");
+    expect(paths["/jobs/{id}/photos/move"]?.post?.["x-access"]).toBe("uploader");
+    expect(paths["/jobs/{id}/photos/confirm"]?.post?.["x-access"]).toBe("uploader");
+    // Undoing a card photo mark is for owners and admins only (Seenu, answer 12).
+    expect(paths["/jobs/{id}/tagging/undo-card"]?.post?.["x-access"]).toBe("owner-admin");
+    expect(paths["/jobs/{id}/tagging/review"]?.post?.["x-access"]).toBe("uploader");
+    expect(paths["/jobs/{id}/qr-cards/{cardId}/child"]?.post?.["x-access"]).toBe("roster-editor");
+  });
+
+  it("documents both path ids of a blank card's child, and an optional upload body", () => {
+    const paths = doc.paths as Record<string, Record<string, Record<string, unknown>>>;
+    const claim = paths["/jobs/{id}/qr-cards/{cardId}/child"]?.post as {
+      parameters: { name: string }[];
+    };
+    expect(claim.parameters.map((p) => p.name)).toEqual(["id", "cardId"]);
+    const upload = paths["/jobs/{id}/upload-batches"]?.post as {
+      requestBody: { required: boolean };
+    };
+    expect(upload.requestBody.required).toBe(false);
+    for (const name of ["TaggedPhoto", "TaggingSummary", "MoveTarget", "PhotoPlace", "PhotoFlag"])
+      expect(doc.components.schemas).toHaveProperty(name);
+  });
+});
