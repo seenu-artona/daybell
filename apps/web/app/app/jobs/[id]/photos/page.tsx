@@ -236,12 +236,6 @@ function PhotosPage() {
             <h2 className="m-0 text-h3">{t("emptyTitle")}</h2>
             <p className="m-0 max-w-120 text-muted">{t("emptyBody")}</p>
             {canEdit ? null : <p className="m-0 text-caption text-muted">{t("emptyReadOnly")}</p>}
-            {canUpload && !sheetOpen ? (
-              <Button variant="primary" shape="pill" onClick={() => setSheetOpen(true)}>
-                <Upload aria-hidden="true" />
-                {t("upload")}
-              </Button>
-            ) : null}
           </div>
         )
       ) : null}
