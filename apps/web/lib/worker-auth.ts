@@ -17,7 +17,11 @@ const REFUSED = () => new ApiError("not_signed_in", "Not allowed.");
 const MAX_WORKER_BODY = 4096;
 
 /** The body as text, reading no more than `max` bytes however much is sent (no Content-Length is trusted). */
-export async function readCapped(request: Request, max: number): Promise<string> {
+export async function readCapped(
+  request: Request,
+  max: number,
+  tooBig: () => Error = REFUSED,
+): Promise<string> {
   if (!request.body) return "";
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -28,7 +32,7 @@ export async function readCapped(request: Request, max: number): Promise<string>
     size += value.byteLength;
     if (size > max) {
       await reader.cancel().catch(() => {});
-      throw REFUSED();
+      throw tooBig();
     }
     chunks.push(value);
   }

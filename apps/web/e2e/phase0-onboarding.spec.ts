@@ -38,18 +38,18 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   await expect(page.getByText(`North Peak ${tag}`).filter({ visible: true }).first()).toBeVisible();
   const setup = page.getByRole("region", { name: "Set up your studio", exact: true });
-  // Account, price list and first job: inviting the team stays in Settings (Seenu, answer 12). Reviewing the price
-  // list comes before the first job (D143; ADR 0019).
-  await expect(setup.getByText("1 of 3 done", { exact: true })).toBeVisible();
+  // Account, payouts, price list and first job: inviting the team stays in Settings (Seenu, answer 12). D143's order:
+  // payouts (ADR 0020), then the price list (ADR 0019), then the first job.
+  await expect(setup.getByText("1 of 4 done", { exact: true })).toBeVisible();
   await expect(
     setup.getByRole("listitem").filter({ hasText: "Create your account" }),
   ).toContainText("Done");
-  await expect(
-    setup.getByRole("listitem").filter({ hasText: "Review your price list" }),
-  ).toContainText("Next");
   // The row's link is named by its label and its state in words ("Next").
   await expect(
-    setup.getByRole("link", { name: "Review your price list Next", exact: true }),
+    setup.getByRole("link", { name: "Set up payouts Next", exact: true }),
+  ).toHaveAttribute("href", "/app/settings/payouts");
+  await expect(
+    setup.getByRole("link", { name: "Review your price list To do", exact: true }),
   ).toHaveAttribute("href", "/app/products");
   await expect(
     setup.getByRole("listitem").filter({ hasText: "Create your first job" }),
@@ -91,7 +91,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
 
   // Inviting doesn't change the setup checklist; the activity log has all three changes (event log, D96).
   await page.goto("/app");
-  await expect(setup.getByText("1 of 3 done", { exact: true })).toBeVisible();
+  await expect(setup.getByText("1 of 4 done", { exact: true })).toBeVisible();
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
 
@@ -125,9 +125,14 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(
     staffTab.getByText(`North Peak ${tag}`).filter({ visible: true }).first(),
   ).toBeVisible();
-  // Photographers see the team but cannot invite.
+  // Photographers see the team but cannot invite, and have no Payouts section (ADR 0020).
   await staffTab.goto("/app/settings");
   await expect(staffTab.getByText("Only owners can invite people.")).toBeVisible();
+  await expect(
+    staffTab
+      .getByRole("navigation", { name: "Settings sections", exact: true })
+      .getByRole("link", { name: "Payouts", exact: true }),
+  ).toHaveCount(0);
   const staffTeam = await (await staffTab.request.get("/api/v1/studio/team")).json();
   expect(staffTeam.team.map((m: { role: string }) => m.role).sort()).toEqual([
     "owner",
@@ -144,10 +149,19 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   });
   expect(shipping.status()).toBe(200);
   await page.goto("/app");
-  await expect(setup.getByText("2 of 3 done", { exact: true })).toBeVisible();
+  await expect(setup.getByText("2 of 4 done", { exact: true })).toBeVisible();
   await expect(
     setup.getByRole("listitem").filter({ hasText: "Review your price list" }),
   ).toContainText("Done");
+
+  // Payouts connected (ADR 0020), through the fake Stripe the end-to-end tests use: the owner's account is created,
+  // "Stripe" finishes onboarding and tells Daybell by its signed webhook. phase1-payouts.spec.ts walks the screens.
+  expect((await page.request.post("/api/v1/studio/payouts/onboarding-link")).status()).toBe(200);
+  expect(
+    (await page.request.post("/api/dev-stripe", { data: { action: "finish" } })).status(),
+  ).toBe(200);
+  await page.goto("/app");
+  await expect(setup.getByText("3 of 4 done", { exact: true })).toBeVisible();
 
   // The first jobs complete the setup for good; Home then shows Up next, most urgent first: the job whose picture day
   // is 3 days away (in the browser's own day) before the one 40 days away (D143).

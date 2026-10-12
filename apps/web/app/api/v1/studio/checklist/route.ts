@@ -1,8 +1,10 @@
 import { type StudioChecklistResponse, studioChecklistQuery, type UpNextItem } from "@daybell/api";
+import type { DataRegion } from "@daybell/config";
 import {
   jobChecklist,
   onboardingChecklist,
   onboardingComplete,
+  payoutsConnected,
   rankUpNext,
   seesOnboarding,
   UP_NEXT_SHOWN,
@@ -14,6 +16,7 @@ import { NextResponse } from "next/server";
 import { check, handle, parseQuery } from "@/lib/api";
 import { checklistFacts, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
 import type { JobRow } from "@/lib/jobs";
+import { PAYOUT_REGIONS } from "@/lib/region-guard";
 import { studioScope } from "@/lib/studio";
 
 /** Up next looks at draft and selling jobs only; a studio has far fewer than this at once. */
@@ -29,8 +32,8 @@ function counted(result: {
 }
 
 /**
- * The studio setup checklist (D143) for owners and admins, until it is first complete: account, price list (ADR 0019)
- * and first job (Seenu, answer 12: the team stays in Settings). The first time it is complete, the server records it on the studio (answer
+ * The studio setup checklist (D143) for owners and admins, until it is first complete: account, payouts (ADR 0020),
+ * price list (ADR 0019) and first job (Seenu, answer 12: the team stays in Settings). The first time it is complete, the server records it on the studio (answer
  * 5); from then on it is never shown again, even if the only job goes. Returns null once it's done. Reads and the one
  * write go through the person's own session, so row-level security applies (only owners and admins may update the
  * studio). This is the one GET with a write: idempotent, since the database keeps the first time (ADR 0017).
@@ -38,6 +41,7 @@ function counted(result: {
 async function onboarding(
   supabase: SupabaseClient,
   studioId: string,
+  region: DataRegion,
 ): Promise<StudioChecklistResponse["onboarding"]> {
   const studio = check(
     await supabase
@@ -51,10 +55,24 @@ async function onboarding(
     .from("jobs")
     .select("id", { count: "exact", head: true })
     .eq("studio_id", studioId);
+  // "Set up payouts" ticks when the payout account is Active (ADR 0020, Seenu Q5); it is left out where payouts
+  // aren't offered yet (US studios, Q3). Owners and admins read the account through row-level security.
+  let payouts: boolean | null = null;
+  if (PAYOUT_REGIONS.includes(region)) {
+    const account = check(
+      await supabase
+        .from("payout_accounts")
+        .select("status")
+        .eq("studio_id", studioId)
+        .maybeSingle(),
+    ) as { status: string } | null;
+    payouts = payoutsConnected(account?.status as Parameters<typeof payoutsConnected>[0]);
+  }
   // "Review your price list" ticks from the database's own stamp of the first price list change (ADR 0019).
   const tasks = onboardingChecklist({
     hasJob: counted(jobs) > 0,
     priceListReviewed: studio.price_list_reviewed_at !== null,
+    payoutsConnected: payouts,
   });
   if (!onboardingComplete(tasks)) return { tasks: tasks.map(({ key, done }) => ({ key, done })) };
   // The database stamps its own time and keeps the first one (ADR 0017); the event carries the studio id only.
@@ -114,7 +132,9 @@ export const GET = handle(async (request: Request) => {
   const { today: todayParam } = parseQuery(request, studioChecklistQuery);
   const today = checklistToday(todayParam);
   const { supabase, studio } = await studioScope();
-  const setup = seesOnboarding(studio.role) ? await onboarding(supabase, studio.id) : null;
+  const setup = seesOnboarding(studio.role)
+    ? await onboarding(supabase, studio.id, studio.region)
+    : null;
   const body: StudioChecklistResponse = {
     onboarding: setup,
     upNext: setup ? null : await upNext(supabase, studio.id, today),

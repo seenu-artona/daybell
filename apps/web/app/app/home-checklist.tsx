@@ -113,6 +113,8 @@ export function HomeChecklist() {
     const tasks = onboardingChecklist({
       hasJob: done.get("firstJob") === true,
       priceListReviewed: done.get("priceList") === true,
+      // Left out where payouts aren't offered yet (ADR 0020).
+      payoutsConnected: done.has("payouts") ? done.get("payouts") === true : null,
     }).filter((task) => done.has(task.key));
     return (
       <Panel title={t("onboarding.title")}>

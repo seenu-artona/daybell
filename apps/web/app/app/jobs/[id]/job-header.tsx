@@ -1,10 +1,13 @@
 "use client";
 
+import type { StudioPayoutsResponse } from "@daybell/api";
+import { payoutsConnected } from "@daybell/core";
 import { Button, IconButton, iconButtonVariants } from "@daybell/ui";
 import { ArrowLeft, Ellipsis, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { api } from "@/lib/client-api";
 import { Dialog } from "../../dialog";
 import { useStudio } from "../../me-context";
 import { MENU_ROW, Popover } from "../../popover";
@@ -28,6 +31,21 @@ export function JobHeader() {
   const [editing, setEditing] = useState(false);
   const [selling, setSelling] = useState(false);
   const [saved, setSaved] = useState(false);
+  // "Payouts connected" (ADR 0020): read when the dialog opens; null where payouts aren't offered yet (US studios).
+  const [payouts, setPayouts] = useState<boolean | null>(false);
+
+  function openSelling() {
+    setSelling(true);
+    void api<StudioPayoutsResponse>("/studio/payouts").then((res) =>
+      setPayouts(
+        res.ok
+          ? payoutsConnected(res.data.account?.status)
+          : res.code === "region_unavailable"
+            ? null
+            : false,
+      ),
+    );
+  }
 
   const details = [
     tj(`types.${job.type}`),
@@ -78,7 +96,7 @@ export function JobHeader() {
             )}
           </Popover>
           {job.status === "draft" ? (
-            <Button shape="pill" onClick={() => setSelling(true)}>
+            <Button shape="pill" onClick={openSelling}>
               {t("startSelling")}
             </Button>
           ) : null}
@@ -105,6 +123,7 @@ export function JobHeader() {
             roster={summary?.children ?? 0}
             taggingReviewed={taggingReviewed}
             hasPriceList={Boolean(job.priceListId)}
+            payoutsConnected={payouts}
           />
           <div className="flex justify-end">
             <Button variant="secondary" onClick={() => setSelling(false)}>

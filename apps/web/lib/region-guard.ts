@@ -41,3 +41,15 @@ export function assertStorageRegion(region: DataRegion): void {
     throw new ApiError("region_unavailable", "Photos can't be stored in this region yet.");
   }
 }
+
+/**
+ * Payouts exist for Canada only in Phase 1 (Seenu, Q3; ADR 0020): Daybell's Stripe platform is Canadian, and D106's US
+ * setup (Daybell as seller and marketplace facilitator) is to be confirmed with Stripe and an adviser before US
+ * launch. Until then US studios are told payouts aren't available in their region yet.
+ */
+export const PAYOUT_REGIONS: readonly DataRegion[] = ["ca"];
+
+export function assertPayoutRegion(region: DataRegion): void {
+  if (!PAYOUT_REGIONS.includes(region))
+    throw new ApiError("region_unavailable", "Payouts aren't available in this region yet.");
+}

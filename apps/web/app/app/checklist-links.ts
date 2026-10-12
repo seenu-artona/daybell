@@ -25,6 +25,8 @@ export function onboardingHref(key: OnboardingTaskKey): string | null {
       return "/app/jobs?new=1";
     case "priceList":
       return "/app/products";
+    case "payouts":
+      return "/app/settings/payouts";
     default:
       return null;
   }

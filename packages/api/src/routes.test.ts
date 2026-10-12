@@ -224,4 +224,35 @@ describe("QR tagging routes (ADR 0018)", () => {
     expect(JSON.stringify(doc.components.schemas.Job)).toContain("priceListId");
     expect(doc.tags.map((t) => t.name)).toContain("Products");
   });
+
+  it("describes payouts (ADR 0020): owner writes, owner-admin reads, the webhook internal", () => {
+    type Op = { "x-access": string; "x-internal"?: boolean; responses: Record<string, unknown> };
+    const op = (path: string, method: string) =>
+      (doc.paths[path] as Record<string, Op> | undefined)?.[method];
+    for (const [path, method, access] of [
+      ["/studio/payouts", "get", "owner-admin"],
+      ["/studio/payouts/onboarding-link", "post", "owner"],
+      ["/studio/payouts/refresh", "post", "owner-admin"],
+      ["/studio/payouts/schedule", "put", "owner"],
+      ["/studio/payouts/dashboard-link", "post", "owner"],
+      ["/webhooks/stripe", "post", "internal"],
+    ] as const)
+      expect(op(path, method)?.["x-access"], `${method} ${path}`).toBe(access);
+    expect(op("/webhooks/stripe", "post")?.["x-internal"]).toBe(true);
+    expect(Object.keys(op("/studio/payouts/refresh", "post")?.responses ?? {})).toContain("409");
+    for (const name of [
+      "StudioPayouts",
+      "PayoutAccount",
+      "Payout",
+      "PayoutFees",
+      "PayoutLink",
+      "PayoutSchedule",
+    ])
+      expect(doc.components.schemas).toHaveProperty(name);
+    const fields = Object.keys(
+      (doc.components.schemas.PayoutAccount as { properties: Record<string, unknown> }).properties,
+    );
+    expect(fields.join(" ")).not.toMatch(/bank|routing|last4|email|name|address/i);
+    expect(doc.tags.map((t) => t.name)).toContain("Payouts");
+  });
 });

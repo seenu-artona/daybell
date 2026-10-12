@@ -53,24 +53,33 @@ export interface SellChecklistItem {
 
 /**
  * "Before you can sell", in the Start selling dialog. "Roster added", "Tagging reviewed" (reviewTaggingDone, ADR
- * 0018: the server refuses selling on it when Start selling is built; plan answer 7) and "Price list chosen" (ADR 0019:
- * every job has one, the studio's default unless changed on its Shop tab) are real today.
+ * 0018: the server refuses selling on it when Start selling is built; plan answer 7), "Price list chosen" (ADR 0019:
+ * every job has one, the studio's default unless changed on its Shop tab) and "Payouts connected" (ADR 0020: the
+ * studio's payout account is Active, Seenu Q5) are real today. Where payouts aren't offered yet (US studios, Q3) the
+ * payouts item stays "Coming soon".
  */
 export function sellChecklist({
   children,
   taggingReviewed,
   hasPriceList,
+  payoutsConnected,
 }: {
   children: number;
   /** The Review tagging task is done (reviewTaggingDone). */
   taggingReviewed: boolean;
   /** The job has a price list. */
   hasPriceList: boolean;
+  /** The studio's payout account is Active; null where payouts aren't offered. */
+  payoutsConnected: boolean | null;
 }): SellChecklistItem[] {
   return SELL_CHECKLIST.map((key) => {
     if (key === "roster") return { key, done: children > 0, soon: false };
     if (key === "tagging") return { key, done: taggingReviewed, soon: false };
     if (key === "priceList") return { key, done: hasPriceList, soon: false };
+    if (key === "payouts")
+      return payoutsConnected === null
+        ? { key, done: false, soon: true }
+        : { key, done: payoutsConnected, soon: false };
     return { key, done: false, soon: true };
   });
 }

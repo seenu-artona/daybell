@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { assertFunctionRegion, assertStorageRegion } from "./region-guard";
+import { assertFunctionRegion, assertPayoutRegion, assertStorageRegion } from "./region-guard";
 
 describe("assertFunctionRegion (D113; ADR 0015, 0016)", () => {
   it("refuses a Canadian studio's work outside Montréal, logging region names only", () => {
@@ -27,5 +27,14 @@ describe("assertStorageRegion (Seenu, answer 8)", () => {
       expect.objectContaining({ code: "region_unavailable" }),
     );
     errors.mockRestore();
+  });
+});
+
+describe("assertPayoutRegion (Seenu, Q3; ADR 0020)", () => {
+  it("offers payouts to Canadian studios and refuses US ones for now", () => {
+    expect(() => assertPayoutRegion("ca")).not.toThrow();
+    expect(() => assertPayoutRegion("us")).toThrow(
+      expect.objectContaining({ code: "region_unavailable" }),
+    );
   });
 });

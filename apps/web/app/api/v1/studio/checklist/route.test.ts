@@ -11,7 +11,7 @@ vi.mock("@/lib/studio", async (original) => ({
 }));
 
 const STUDIO = "studio-a";
-const as = (role: string) => ({ id: STUDIO, name: "A", slug: "a", region: "ca", role });
+const as = (role: string, region = "ca") => ({ id: STUDIO, name: "A", slug: "a", region, role });
 
 type Call = { table: string; ops: [string, unknown[]][] };
 
@@ -82,6 +82,7 @@ describe("GET /studio/checklist", () => {
       onboarding: {
         tasks: [
           { key: "account", done: true },
+          { key: "payouts", done: false },
           { key: "priceList", done: false },
           { key: "firstJob", done: false },
         ],
@@ -90,9 +91,42 @@ describe("GET /studio/checklist", () => {
     });
     expect(db.calls.some((c) => c.ops.some(([op]) => op === "update"))).toBe(false);
     // The team isn't part of onboarding (Seenu, answer 12): neither members nor invites are read.
-    expect(db.calls.map((c) => c.table)).toEqual(["studios", "jobs"]);
+    expect(db.calls.map((c) => c.table)).toEqual(["studios", "jobs", "payout_accounts"]);
     for (const c of db.calls)
       expect(c.ops).toContainEqual(["eq", [c.table === "studios" ? "id" : "studio_id", STUDIO]]);
+  });
+
+  it("ticks Set up payouts only when the payout account is Active, and leaves it out for US studios (ADR 0020)", async () => {
+    const tasksFor = async (studio: ReturnType<typeof as>, account: unknown) => {
+      const db = fakeDatabase(
+        {
+          studios: { onboarded_at: null, price_list_reviewed_at: null },
+          payout_accounts: account,
+        },
+        { jobs: 0 },
+      );
+      scope.mockResolvedValue({ supabase: db.supabase, studio, userId: "u" });
+      return {
+        tasks: (await (await get()).json()).onboarding.tasks,
+        tables: db.calls.map((c) => c.table),
+      };
+    };
+    for (const status of ["needs_info", "pending_verification", "restricted"])
+      expect((await tasksFor(as("owner"), { status })).tasks[1]).toEqual({
+        key: "payouts",
+        done: false,
+      });
+    expect((await tasksFor(as("admin"), { status: "active" })).tasks[1]).toEqual({
+      key: "payouts",
+      done: true,
+    });
+    const us = await tasksFor(as("owner", "us"), null);
+    expect(us.tasks.map((t: { key: string }) => t.key)).toEqual([
+      "account",
+      "priceList",
+      "firstJob",
+    ]);
+    expect(us.tables).not.toContain("payout_accounts");
   });
 
   it("ticks Review your price list from the database's stamp, and stays open without it (ADR 0019)", async () => {
@@ -103,6 +137,7 @@ describe("GET /studio/checklist", () => {
     scope.mockResolvedValue({ supabase: reviewed.supabase, studio: as("owner"), userId: "u" });
     expect((await (await get()).json()).onboarding.tasks).toEqual([
       { key: "account", done: true },
+      { key: "payouts", done: false },
       { key: "priceList", done: true },
       { key: "firstJob", done: false },
     ]);
@@ -114,6 +149,7 @@ describe("GET /studio/checklist", () => {
     scope.mockResolvedValue({ supabase: jobOnly.supabase, studio: as("owner"), userId: "u" });
     expect((await (await get()).json()).onboarding.tasks).toEqual([
       { key: "account", done: true },
+      { key: "payouts", done: false },
       { key: "priceList", done: false },
       { key: "firstJob", done: true },
     ]);
@@ -125,6 +161,7 @@ describe("GET /studio/checklist", () => {
       {
         studios: { onboarded_at: null, price_list_reviewed_at: "2026-10-12T00:00:00Z" },
         jobs: [],
+        payout_accounts: { status: "active" },
       },
       { jobs: 1 },
     );
