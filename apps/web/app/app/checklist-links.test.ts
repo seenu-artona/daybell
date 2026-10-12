@@ -15,7 +15,11 @@ describe("taskHref", () => {
 });
 
 describe("onboardingHref", () => {
-  it("links the first job to the new-job form; the account goes nowhere", () => {
-    expect(ONBOARDING_TASKS.map(onboardingHref)).toEqual([null, "/app/jobs?new=1"]);
+  it("links the price list to Products and the first job to the new-job form; the account goes nowhere", () => {
+    expect(ONBOARDING_TASKS.map(onboardingHref)).toEqual([
+      null,
+      "/app/products",
+      "/app/jobs?new=1",
+    ]);
   });
 });

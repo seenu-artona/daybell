@@ -196,4 +196,32 @@ describe("QR tagging routes (ADR 0018)", () => {
     for (const name of ["TaggedPhoto", "TaggingSummary", "MoveTarget", "PhotoPlace", "PhotoFlag"])
       expect(doc.components.schemas).toHaveProperty(name);
   });
+
+  it("describes products and price lists (ADR 0019): money as cents and a currency", () => {
+    type Op = { "x-access": string; responses: Record<string, unknown> };
+    const op = (path: string, method: string) =>
+      (doc.paths[path] as Record<string, Op> | undefined)?.[method];
+    for (const [path, method, access] of [
+      ["/price-lists", "get", "signed-in"],
+      ["/price-lists", "post", "owner-admin"],
+      ["/price-lists/{id}", "get", "signed-in"],
+      ["/price-lists/{id}", "patch", "owner-admin"],
+      ["/price-lists/{id}", "delete", "owner-admin"],
+      ["/price-lists/{id}/default", "post", "owner-admin"],
+      ["/price-lists/{id}/items", "post", "owner-admin"],
+      ["/price-lists/{id}/items/order", "put", "owner-admin"],
+      ["/price-list-items/{id}", "patch", "owner-admin"],
+      ["/price-list-items/{id}", "delete", "owner-admin"],
+    ] as const)
+      expect(op(path, method)?.["x-access"], `${method} ${path}`).toBe(access);
+    expect(Object.keys(op("/price-lists/{id}", "delete")?.responses ?? {})).toContain("409");
+    expect(Object.keys(op("/jobs/{id}", "patch")?.responses ?? {})).toContain("409");
+    for (const name of ["Money", "PriceList", "PriceListSummary", "PriceListItem", "PackageLine"])
+      expect(doc.components.schemas).toHaveProperty(name);
+    const money = JSON.stringify(doc.components.schemas.Money);
+    expect(money).toContain('"integer"');
+    expect(money).toContain("CAD");
+    expect(JSON.stringify(doc.components.schemas.Job)).toContain("priceListId");
+    expect(doc.tags.map((t) => t.name)).toContain("Products");
+  });
 });

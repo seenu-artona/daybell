@@ -3,6 +3,7 @@ import {
   type JobDetailResponse,
   type JobInput,
   jobPatch,
+  PRICE_LIST_CONFLICTS,
   studioChecklistQuery,
 } from "@daybell/api";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -20,6 +21,7 @@ import {
   toJob,
   validJob,
 } from "@/lib/jobs";
+import { assertPriceListInStudio, priceListError } from "@/lib/price-lists";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -59,7 +61,11 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
   return NextResponse.json(body);
 });
 
-/** PATCH /api/v1/jobs/:id — owners and admins change a job's details. Status changes arrive in step 8. */
+/**
+ * PATCH /api/v1/jobs/:id — owners and admins change a job's details. Status changes arrive in step 8. A draft or
+ * selling job may switch price list or school delivery (new orders only); a closed job's don't change (Claude's call
+ * 4; the database refuses it too).
+ */
 export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const id = await jobId(ctx);
   const patch = await parseBody(request, jobPatch);
@@ -74,9 +80,21 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
     internalNumber: current.internal_number,
     type: current.type,
     subjectsExpected: current.subjects_expected,
+    priceListId: current.price_list_id,
+    deliverToSchool: current.deliver_to_school,
     ...patch,
   });
+  const shopChanged =
+    (patch.priceListId !== undefined && patch.priceListId !== current.price_list_id) ||
+    (patch.deliverToSchool !== undefined && patch.deliverToSchool !== current.deliver_to_school);
+  if (current.status === "closed" && shopChanged)
+    throw new ApiError(
+      "conflict",
+      "This job is closed, so its price list and delivery can't change.",
+      { form: PRICE_LIST_CONFLICTS.jobClosed },
+    );
   await assertClientInStudio(supabase, studio.id, patch.clientId);
+  await assertPriceListInStudio(supabase, studio.id, patch.priceListId);
   const result = await supabase
     .from("jobs")
     .update(jobColumns(next, Object.keys(patch) as (keyof JobInput)[]))
@@ -85,6 +103,8 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
     .select(JOB_COLUMNS)
     .maybeSingle();
   if (isNumberTaken(result.error)) throw NUMBER_TAKEN;
+  // The job closed between the check and the update.
+  if (result.error?.code === "P0001") throw priceListError(result.error);
   const row = check(result) as unknown as JobRow | null;
   if (!row) throw new ApiError("not_found", "Job not found.");
   return NextResponse.json({ job: toJob(row) });

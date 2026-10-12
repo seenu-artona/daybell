@@ -143,39 +143,45 @@ export function TextAreaField({
   );
 }
 
-/** A native checkbox with its label as the 44px click target (D91). The only text under it is its error. */
+/** A native checkbox with its label as the 44px click target (D91). Under it: its error, or else its help. */
 export function CheckboxField({
   label,
   checked,
   onChange,
   error,
+  help,
+  disabled,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   error?: string | undefined;
+  help?: string | undefined;
+  disabled?: boolean | undefined;
 }) {
   const id = useId();
+  const note = error ?? help;
   return (
     <div className="flex flex-col gap-1">
       <label
         htmlFor={id}
-        className="flex min-h-11 cursor-pointer items-center gap-3 self-start text-sm text-ink"
+        className={`flex min-h-11 items-center gap-3 self-start text-sm text-ink ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
       >
         <input
           id={id}
           type="checkbox"
           checked={checked}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
           aria-invalid={error ? true : undefined}
-          aria-describedby={error ? `${id}-note` : undefined}
-          className="size-5 shrink-0 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          aria-describedby={note ? `${id}-note` : undefined}
+          className="size-5 shrink-0 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed"
         />
         {label}
       </label>
-      {error ? (
-        <span id={`${id}-note`} className="text-caption text-danger">
-          {error}
+      {note ? (
+        <span id={`${id}-note`} className={`text-caption ${error ? "text-danger" : "text-muted"}`}>
+          {note}
         </span>
       ) : null}
     </div>

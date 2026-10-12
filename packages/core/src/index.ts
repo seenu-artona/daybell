@@ -7,6 +7,7 @@ export * from "./jobs";
 export * from "./money";
 export * from "./people";
 export * from "./photos";
+export * from "./price-lists";
 export * from "./qr-cards";
 export * from "./roster";
 export * from "./tagging";

@@ -13,6 +13,7 @@ import {
   page,
   toJob,
 } from "@/lib/jobs";
+import { assertPriceListInStudio } from "@/lib/price-lists";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
 /**
@@ -64,13 +65,15 @@ export const GET = handle(async (request: Request) => {
 
 /**
  * POST /api/v1/jobs — owners and admins create a job. New jobs are drafts. Without an internal number the next free
- * one is used; if someone else takes it at the same moment, the next one is tried.
+ * one is used; if someone else takes it at the same moment, the next one is tried. Without a price list, the database
+ * gives the job the studio's default (ADR 0019).
  */
 export const POST = handle(async (request: Request) => {
   const input = await parseBody(request, jobInput);
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
   await assertClientInStudio(supabase, studio.id, input.clientId);
+  await assertPriceListInStudio(supabase, studio.id, input.priceListId);
   for (let attempt = 0; ; attempt++) {
     const internalNumber = input.internalNumber ?? (await nextJobNumber(supabase, studio.id));
     const result = await supabase

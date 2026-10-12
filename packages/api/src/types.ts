@@ -1,11 +1,14 @@
 import { DATA_REGIONS } from "@daybell/config";
 import {
+  CURRENCIES,
   JOB_STATUSES,
   JOB_TYPES,
   MILESTONES,
   ONBOARDING_TASKS,
   PHOTO_FLAGS,
   PHOTO_PLACES,
+  PRICE_ITEM_KINDS,
+  PRINT_SIZES,
   TASK_KEYS,
   UP_NEXT_SHOWN,
 } from "@daybell/core";
@@ -146,6 +149,10 @@ export const job = z
     client: clientRef.nullable(),
     internalNumber: z.string().meta({ description: "Only the studio sees it." }),
     subjectsExpected: z.number().int().nullable(),
+    priceListId: z.uuid().meta({ description: "The price list the job sells from (ADR 0019)." }),
+    deliverToSchool: z.boolean().meta({
+      description: "Parents may choose free delivery to the school as well as paid home shipping.",
+    }),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
   })
@@ -778,3 +785,117 @@ export const studioChecklistResponse = z
   })
   .meta({ id: "StudioChecklist" });
 export type StudioChecklistResponse = z.infer<typeof studioChecklistResponse>;
+
+// ── Products and price lists (Phase 1 step 6, ADR 0019) ───────────────────────────────────────────────────────────
+export const money = z
+  .object({
+    cents: z.number().int().meta({ description: "Whole cents; never a fraction (D96)." }),
+    currency: z
+      .enum(CURRENCIES)
+      .meta({ description: "USD for US studios, CAD for Canadian ones." }),
+  })
+  .meta({ id: "Money", description: "An amount in whole cents with its currency, before tax." });
+export type MoneyAmount = z.infer<typeof money>;
+
+export const packageLine = z
+  .object({
+    kind: z.enum(["print", "digital"]),
+    printSize: z.enum(PRINT_SIZES).nullable().meta({ description: "Prints only." }),
+    quantity: z
+      .number()
+      .int()
+      .meta({ description: "Prints of that size; a digital line is always 1." }),
+  })
+  .meta({
+    id: "PackageLine",
+    description:
+      "What a package holds. The digital line is the download of the one pose the parent picks.",
+  });
+export type PackageLineOut = z.infer<typeof packageLine>;
+
+export const priceListItem = z
+  .object({
+    id: z.uuid(),
+    priceListId: z.uuid(),
+    kind: z.enum(PRICE_ITEM_KINDS).meta({
+      description:
+        "package (prints and at most one digital, one pose), print (one size), digital_single (one photo, full resolution, no watermark) or digital_all (every pose of the child in the job).",
+    }),
+    name: z.string(),
+    description: z.string().nullable(),
+    printSize: z.enum(PRINT_SIZES).nullable().meta({ description: "Prints only." }),
+    price: money,
+    contents: z.array(packageLine).meta({ description: "Packages only; empty otherwise." }),
+    position: z.number().int(),
+  })
+  .meta({ id: "PriceListItem" });
+export type PriceListItem = z.infer<typeof priceListItem>;
+
+const priceListUsage = {
+  isDefault: z.boolean().meta({ description: "New jobs get the studio's default list." }),
+  jobs: z.number().int().meta({ description: "Jobs using the list." }),
+  sellingJobs: z.number().int().meta({
+    description: "Of those, how many are selling: changes apply to their new orders only.",
+  }),
+};
+
+export const priceListSummary = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    currency: z.enum(CURRENCIES),
+    ...priceListUsage,
+    counts: z.object({
+      packages: z.number().int(),
+      prints: z.number().int(),
+      digitals: z.number().int(),
+    }),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({ id: "PriceListSummary", description: "A price list in the studio's list of them." });
+export type PriceListSummary = z.infer<typeof priceListSummary>;
+
+export const priceList = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    currency: z.enum(CURRENCIES),
+    homeShipping: money.meta({
+      description: "The flat home shipping fee. Delivery to school is free.",
+    }),
+    ...priceListUsage,
+    items: z.array(priceListItem).meta({ description: "Every item, in position order." }),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({
+    id: "PriceList",
+    description: "Packages, prints and digital downloads with their prices, before tax (D36).",
+  });
+export type PriceList = z.infer<typeof priceList>;
+
+export const priceListsResponse = z.object({
+  priceLists: z.array(priceListSummary).meta({ description: "The default first, then by name." }),
+});
+export type PriceListsResponse = z.infer<typeof priceListsResponse>;
+export const priceListResponse = z.object({ priceList });
+export type PriceListResponse = z.infer<typeof priceListResponse>;
+export const priceListItemResponse = z.object({ item: priceListItem });
+export type PriceListItemResponse = z.infer<typeof priceListItemResponse>;
+
+/** Why a price list request was refused with 409, in the error's `fields.form`. */
+export const PRICE_LIST_CONFLICTS = {
+  /** The studio's default list can't be deleted; make another the default first. */
+  isDefault: "priceLists.isDefault",
+  /** A list some job uses can't be deleted. */
+  inUse: "priceLists.inUse",
+  /** At most 50 lists per studio. */
+  limit: "priceLists.limit",
+  /** At most 100 items per list. */
+  itemLimit: "priceLists.itemLimit",
+  /** A list has one single digital and one "all digitals" at most. */
+  digitalTaken: "priceLists.digitalTaken",
+  /** A closed job's price list and delivery don't change. */
+  jobClosed: "priceLists.jobClosed",
+} as const;
+export type PriceListConflict = (typeof PRICE_LIST_CONFLICTS)[keyof typeof PRICE_LIST_CONFLICTS];

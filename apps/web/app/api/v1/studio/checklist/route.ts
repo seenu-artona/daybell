@@ -29,8 +29,8 @@ function counted(result: {
 }
 
 /**
- * The studio setup checklist (D143) for owners and admins, until it is first complete: account and first job (Seenu,
- * answer 12: the team stays in Settings). The first time it is complete, the server records it on the studio (answer
+ * The studio setup checklist (D143) for owners and admins, until it is first complete: account, price list (ADR 0019)
+ * and first job (Seenu, answer 12: the team stays in Settings). The first time it is complete, the server records it on the studio (answer
  * 5); from then on it is never shown again, even if the only job goes. Returns null once it's done. Reads and the one
  * write go through the person's own session, so row-level security applies (only owners and admins may update the
  * studio). This is the one GET with a write: idempotent, since the database keeps the first time (ADR 0017).
@@ -40,14 +40,22 @@ async function onboarding(
   studioId: string,
 ): Promise<StudioChecklistResponse["onboarding"]> {
   const studio = check(
-    await supabase.from("studios").select("onboarded_at").eq("id", studioId).maybeSingle(),
-  ) as { onboarded_at: string | null } | null;
+    await supabase
+      .from("studios")
+      .select("onboarded_at, price_list_reviewed_at")
+      .eq("id", studioId)
+      .maybeSingle(),
+  ) as { onboarded_at: string | null; price_list_reviewed_at: string | null } | null;
   if (!studio || studio.onboarded_at) return null;
   const jobs = await supabase
     .from("jobs")
     .select("id", { count: "exact", head: true })
     .eq("studio_id", studioId);
-  const tasks = onboardingChecklist({ hasJob: counted(jobs) > 0 });
+  // "Review your price list" ticks from the database's own stamp of the first price list change (ADR 0019).
+  const tasks = onboardingChecklist({
+    hasJob: counted(jobs) > 0,
+    priceListReviewed: studio.price_list_reviewed_at !== null,
+  });
   if (!onboardingComplete(tasks)) return { tasks: tasks.map(({ key, done }) => ({ key, done })) };
   // The database stamps its own time and keeps the first one (ADR 0017); the event carries the studio id only.
   check(

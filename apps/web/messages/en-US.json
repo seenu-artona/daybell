@@ -176,7 +176,18 @@
     "photoName": "Each photo needs its file's name, at most 255 characters.",
     "photoSize": "Photos must be JPEG files of at most 50 MB.",
     "photoHash": "A photo's fingerprint is missing or wrong. Choose the photos again.",
-    "photoFiles": "Send 1 to 500 photos at a time."
+    "photoFiles": "Send 1 to 500 photos at a time.",
+    "priceListName": "Enter a name of up to 80 characters.",
+    "priceList": "Choose one of your price lists.",
+    "itemName": "Enter a name of up to 80 characters.",
+    "price": "Enter a price from $0 to $10,000, like 25 or 25.00.",
+    "shipping": "Enter a fee from $0 to $1,000, like 8.95.",
+    "printSize": "Choose a print size.",
+    "quantity": "Enter a whole number from 1 to 99.",
+    "packageEmpty": "Add at least one print or the digital download.",
+    "packageLines": "A package can hold up to 20 lines.",
+    "packageDigitals": "A package can include the digital download only once.",
+    "itemOrder": "This price list changed. Reload the page and try again."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -401,6 +412,7 @@
         "title": "Set up your studio",
         "tasks": {
           "account": "Create your account",
+          "priceList": "Review your price list",
           "firstJob": "Create your first job"
         }
       },
@@ -549,6 +561,139 @@
           "regionPlaceholder": "e.g. ON"
         }
       }
+    },
+    "products": {
+      "title": "Price lists",
+      "beforeTax": "Prices before tax",
+      "intro": "Each job sells from one price list. New jobs get the default.",
+      "loading": "Loading price lists…",
+      "default": "Default",
+      "columns": {
+        "name": "Name",
+        "items": "Items",
+        "usedBy": "Used by",
+        "actions": "Actions"
+      },
+      "itemCounts": "{packages, plural, one {# package} other {# packages}} · {prints, plural, one {# print} other {# prints}} · {digitals, plural, one {# digital} other {# digitals}}",
+      "usedBy": "{count, plural, =0 {No jobs} one {# job} other {# jobs}}",
+      "add": "New price list",
+      "makeDefault": "Make default",
+      "makeDefaultLabel": "Make {name} the default",
+      "delete": "Delete",
+      "deleteLabel": "Delete {name}",
+      "madeDefault": "{name} is now the default for new jobs.",
+      "deleted": "{name} was deleted.",
+      "newForm": {
+        "name": "Name",
+        "startFrom": "Start from",
+        "blank": "An empty list",
+        "copyOf": "A copy of {name}",
+        "create": "Create price list",
+        "cancel": "Cancel"
+      },
+      "deleteDialog": {
+        "title": "Delete this price list?",
+        "body": "{name} will be deleted. Orders already placed keep what they sold.",
+        "confirm": "Delete price list",
+        "cancel": "Cancel"
+      },
+      "conflicts": {
+        "isDefault": "This is the default price list. Make another list the default first.",
+        "inUse": "Jobs use this price list. Give them another list on their Shop tab first.",
+        "limit": "A studio can have up to 50 price lists. Delete one you no longer use.",
+        "itemLimit": "A price list can have up to 100 items.",
+        "digitalTaken": "This price list already has that digital download.",
+        "jobClosed": "This job is closed, so its price list and delivery can't change."
+      },
+      "editor": {
+        "back": "All price lists",
+        "notFound": "We couldn't find that price list.",
+        "live": "{count, plural, one {# selling job uses this list.} other {# selling jobs use this list.}} Changes apply to new orders only; orders already placed keep their prices.",
+        "readOnly": "Only owners and admins can change price lists.",
+        "settings": "Settings",
+        "name": "Name",
+        "homeShipping": "Home shipping fee",
+        "homeShippingHelp": "One flat fee per order. Delivery to school is free, and digital-only orders pay no shipping.",
+        "homeShippingValue": "Home shipping: {fee} per order",
+        "save": "Save settings",
+        "saved": "Settings saved.",
+        "groups": {
+          "packages": "Packages",
+          "prints": "Prints",
+          "digitals": "Digital downloads"
+        },
+        "empty": {
+          "packages": "No packages yet.",
+          "prints": "No prints yet.",
+          "digitals": "No digital downloads yet."
+        },
+        "addKind": {
+          "package": "Add package",
+          "print": "Add print",
+          "digital_single": "Add single digital download",
+          "digital_all": "Add all digitals"
+        },
+        "edit": "Edit",
+        "editLabel": "Edit {name}",
+        "moveUp": "Move up",
+        "moveUpLabel": "Move {name} up",
+        "moveDown": "Move down",
+        "moveDownLabel": "Move {name} down",
+        "remove": "Remove",
+        "removeLabel": "Remove {name}",
+        "removed": "{name} was removed.",
+        "moved": "{name} moved.",
+        "itemSaved": "{name} saved.",
+        "removeDialog": {
+          "title": "Remove this item?",
+          "body": "{name} will be removed from this price list. Orders already placed keep what they sold.",
+          "confirm": "Remove item",
+          "cancel": "Cancel"
+        }
+      },
+      "item": {
+        "addTitle": {
+          "package": "Add a package",
+          "print": "Add a print",
+          "digital_single": "Add the single digital download",
+          "digital_all": "Add all digitals"
+        },
+        "editTitle": "Edit {name}",
+        "name": "Name",
+        "description": "Description",
+        "descriptionHelp": "Parents see this.",
+        "price": "Price",
+        "printSize": "Print size",
+        "contents": "What's in the package",
+        "contentsHelp": "Parents choose one pose for the whole package.",
+        "lineSize": "Print size, line {number}",
+        "lineQuantity": "How many, line {number}",
+        "removeLine": "Remove line {number}",
+        "addLine": "Add prints",
+        "includesDigital": "Includes the digital download of the chosen pose",
+        "add": "Add item",
+        "save": "Save item",
+        "cancel": "Cancel",
+        "about": {
+          "package": "Prints and, if you like, the digital download, all of one pose.",
+          "print": "One print of the pose the parent chooses.",
+          "digital_single": "One photo the parent chooses, full resolution, no watermark.",
+          "digital_all": "Every photo of the child in this job, full resolution, no watermark."
+        }
+      },
+      "sizes": {
+        "4x6": "4×6",
+        "5x7": "5×7",
+        "8x10": "8×10",
+        "11x14": "11×14",
+        "wallets_8": "Wallets (sheet of 8)"
+      },
+      "contents": {
+        "print": "{quantity} × {size}",
+        "digital": "Digital download"
+      },
+      "currency": "Amount in {currency}",
+      "symbol": "$"
     },
     "optionalLabel": "{label} (optional)",
     "roster": {
@@ -740,6 +885,26 @@
           "priceList": "Price list chosen",
           "payouts": "Payouts connected"
         }
+      },
+      "shop": {
+        "priceList": "Price list",
+        "chooseLabel": "Price list for this job",
+        "defaultOption": "{name} (default)",
+        "saved": "Price list saved.",
+        "edit": "Edit this price list",
+        "view": "View this price list",
+        "readOnly": "Only owners and admins can change the job's price list and delivery.",
+        "closed": "This job is closed, so its price list and delivery can't change.",
+        "live": "This job is selling. Changes apply to new orders only.",
+        "items": "What parents can buy",
+        "loading": "Loading…",
+        "delivery": "Delivery",
+        "homeShipping": "Home shipping",
+        "homeShippingNote": "{fee} per order, set on the price list. Digital-only orders pay no shipping.",
+        "toSchool": "Free delivery to school",
+        "toSchoolHelp": "Parents choose free delivery to the school or paid home shipping.",
+        "toSchoolOn": "Free delivery to school is on.",
+        "toSchoolOff": "Free delivery to school is off."
       }
     },
     "people": {
@@ -1077,6 +1242,7 @@
       "Jobs": "Jobs",
       "Roster": "Roster",
       "Photos": "Photos",
+      "Products": "Products",
       "Contacts": "Contacts",
       "Search": "Search",
       "Internal": "Internal"
