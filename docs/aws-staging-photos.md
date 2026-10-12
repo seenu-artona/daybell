@@ -177,14 +177,15 @@ Then, on the function:
   GitHub workflow in step 11.)
 - **Configuration › General configuration** › Edit: Memory **2048 MB**, Ephemeral storage **512 MB**, Timeout **1 min
   0 sec**. Save.
-- **Configuration › Concurrency** › Edit › Reserve concurrency **10**. Save.
+- Concurrency: don't reserve any. A new account's limit is 10 and AWS keeps 10 unreserved, so a reservation is
+  refused. The trigger's **Maximum concurrency** (below) caps the worker at 5 instead.
 - **Configuration › Environment variables** › Edit, add (no secrets here; they are in Secrets Manager):
   - `CALLBACK_BASE_URL`: `https://daybell-git-main-artona-tech-team.vercel.app`
   - `PHOTO_WORKER_SECRETS_ARN`: the secret's ARN (step 6)
   - `DATA_REGION`: `ca`
   - `PHOTO_BUCKET`: `daybell-staging-ca-photos`
-- **Configuration › Triggers** › Add trigger › **SQS** › `daybell-staging-ca-photo-events`; Batch size **1**; tick
-  **Report batch item failures**; Activate trigger. Add.
+- **Configuration › Triggers** › Add trigger › **SQS** › `daybell-staging-ca-photo-events`; Batch size **1**; Maximum
+  concurrency **5**; tick **Report batch item failures**; Activate trigger. Add.
 - **Configuration › Monitoring and operations tools** › Logging: open the CloudWatch log group
   `/aws/lambda/daybell-staging-ca-image-worker` › Actions › Edit retention setting › **1 month (30 days)**.
 
@@ -308,7 +309,9 @@ policy `deploy-image-worker`:
 ```
 
 GitHub › the repository › Settings › **Environments** › New environment **`staging`**:
-- **Required reviewers**: Seenu. **Deployment branches**: Selected branches › `main`.
+- **Required reviewers**: Seenu, where the plan offers it (private repositories on GitHub's free plan don't; then the
+  deploy runs only when someone with write access starts it by hand). **Deployment branches**: Selected branches ›
+  `main`.
 - **Environment variables** › Add `AWS_IMAGE_WORKER_DEPLOY_ROLE_ARN` = the role's ARN (not a secret).
 
 To deploy: Actions › **Deploy image worker (staging)** › Run workflow (branch `main`). The `build` job tests and
