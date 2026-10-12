@@ -47,7 +47,7 @@ jobs:
           unzip -l apps/image-worker/image-worker.zip > /tmp/zip.txt
           grep -q ' lib/index.mjs$' /tmp/zip.txt
           grep -q ' assets/PlusJakartaSans-Bold.ttf$' /tmp/zip.txt
-          grep -q 'node_modules/@img/sharp-linux-arm64/' /tmp/zip.txt
+          grep -q 'node_modules/@img/sharp-linux-arm64/lib/.*\.node$' /tmp/zip.txt
 
   database:
     # Row-level security and cross-studio leak tests against the real Supabase Postgres (D96, D113).

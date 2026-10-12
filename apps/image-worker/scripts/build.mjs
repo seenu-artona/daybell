@@ -7,9 +7,9 @@
 // Layout of the zip (handler "lib/index.handler"):
 //   lib/index.mjs                    the bundle (our code, @daybell/*, the AWS SDK, exif-reader)
 //   assets/PlusJakartaSans-Bold.ttf  the watermark font, found at ../assets from lib/ as in the source tree
-//   node_modules/sharp, @img/*       sharp and libvips for linux-arm64, exactly the version the repo pins
+//   node_modules/sharp, @img/*       sharp and libvips for linux-arm64, from lambda/package-lock.json
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -41,30 +41,39 @@ await build({
 cpSync(join(pipeline, "assets"), join(dist, "assets"), { recursive: true });
 
 if (process.argv.includes("--package")) {
-  const sharpVersion = JSON.parse(readFileSync(join(pipeline, "package.json"), "utf8")).dependencies
+  // sharp for Lambda (Linux, arm64), from the committed lockfile: exact versions, integrity checked by npm ci, and no
+  // install scripts run (sharp's prebuilt @img packages need none).
+  for (const file of ["package.json", "package-lock.json"])
+    cpSync(join(app, "lambda", file), join(dist, file));
+  const pinned = JSON.parse(readFileSync(join(pipeline, "package.json"), "utf8")).dependencies
     .sharp;
-  writeFileSync(
-    join(dist, "package.json"),
-    `${JSON.stringify({ name: "daybell-image-worker", private: true, type: "module", dependencies: { sharp: sharpVersion } }, null, 2)}\n`,
-  );
-  // Dependencies must be at least two weeks old (CLAUDE.md): sharp is pinned, and npm resolves its few ranged
-  // dependencies as they were 14 days ago.
-  const before = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const locked = JSON.parse(readFileSync(join(dist, "package-lock.json"), "utf8")).packages[
+    "node_modules/sharp"
+  ];
+  if (locked?.version !== pinned)
+    throw new Error("lambda/package-lock.json must pin the same sharp as the pipeline");
   execFileSync(
     "npm",
     [
-      "install",
+      "ci",
       "--omit=dev",
+      "--ignore-scripts",
       "--no-audit",
       "--no-fund",
-      "--no-package-lock",
       "--os=linux",
       "--cpu=arm64",
       "--libc=glibc",
-      `--before=${before}`,
     ],
     { cwd: dist, stdio: "inherit" },
   );
+  // The native parts must be there, since no install script fetched or built them.
+  const img = join(dist, "node_modules", "@img");
+  const files = (dir) =>
+    existsSync(join(img, dir, "lib")) ? readdirSync(join(img, dir, "lib")) : [];
+  const native = files("sharp-linux-arm64").filter((f) => f.endsWith(".node"));
+  const vips = files("sharp-libvips-linux-arm64").filter((f) => f.startsWith("libvips-cpp.so"));
+  if (native.length === 0 || vips.length === 0)
+    throw new Error("sharp's Linux arm64 binaries are missing");
   rmSync(join(app, "image-worker.zip"), { force: true });
   execFileSync("zip", ["-qr", join(app, "image-worker.zip"), "."], { cwd: dist, stdio: "inherit" });
   process.stdout.write("image-worker.zip ready\n");

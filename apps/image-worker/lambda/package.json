@@ -1,0 +1,9 @@
+{
+  "name": "daybell-image-worker",
+  "private": true,
+  "description": "What the image worker's Lambda zip installs next to its bundle: sharp, exactly as the repo pins it (ADR 0016).",
+  "type": "module",
+  "dependencies": {
+    "sharp": "0.35.5"
+  }
+}
