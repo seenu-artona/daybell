@@ -208,8 +208,9 @@ export function PrintQrCardsDialog({
           <p className="m-0 text-caption text-muted">{t("dnpNote")}</p>
         </div>
 
-        {/* Always rendered so screen readers announce the result when it appears (WCAG 4.1.3). */}
-        <div role="status" className="flex flex-col gap-2 empty:hidden">
+        {/* Always rendered so screen readers announce the result when it appears (WCAG 4.1.3); while empty, the
+        negative margin cancels the form's gap. */}
+        <div role="status" className="flex flex-col gap-2 empty:-mb-5">
           {printed ? (
             <p className="m-0 font-semibold">{t("done", { count: printed.cards })}</p>
           ) : null}
