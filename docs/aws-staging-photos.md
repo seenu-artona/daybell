@@ -284,13 +284,17 @@ IAM › Roles › Create role › **Custom trust policy**, paste:
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:seenu-artona/daybell:environment:staging"
+          "token.actions.githubusercontent.com:sub": "repo:seenu-artona@292234898/daybell@1413886255:environment:staging"
         }
       }
     }
   ]
 }
 ```
+
+GitHub's `sub` for repositories created after July 15, 2026 includes the owner and repository ids
+(`owner@id/repo@id`); this repository was created on Oct 11, 2026, so the old `repo:seenu-artona/daybell:…` form is
+refused. The ids come from `GET /repos/seenu-artona/daybell` (`owner.id`, `id`).
 
 Next (no managed policies) › Name **`daybell-staging-github-image-worker-deploy`** › Create. Then add an inline
 policy `deploy-image-worker`:
