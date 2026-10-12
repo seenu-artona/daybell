@@ -8,3 +8,8 @@ minimumReleaseAge: 20160
 minimumReleaseAgeExclude:
   - "@swc/core"
   - "@swc/core-*"
+
+# vite comes in through vitest and @vitejs/plugin-react; pinned exactly so the lockfile never holds a release younger
+# than two weeks (CLAUDE.md).
+overrides:
+  vite: "8.3.1"
