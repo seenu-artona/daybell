@@ -55,14 +55,15 @@ describe("sellChecklist", () => {
     });
   });
 
-  it("keeps Payouts connected coming soon where payouts aren't offered yet (US, Seenu Q3)", () => {
-    expect(
-      sellChecklist({ ...none, payoutsConnected: null }).find((i) => i.key === "payouts"),
-    ).toEqual({
-      key: "payouts",
-      done: false,
-      soon: true,
-    });
+  it("treats Payouts connected the same for every studio: real, never coming soon (Seenu, Oct 12)", () => {
+    for (const payoutsConnected of [true, false])
+      expect(sellChecklist({ ...none, payoutsConnected }).find((i) => i.key === "payouts")).toEqual(
+        {
+          key: "payouts",
+          done: payoutsConnected,
+          soon: false,
+        },
+      );
   });
 });
 

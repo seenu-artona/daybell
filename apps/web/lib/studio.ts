@@ -97,7 +97,10 @@ export function assertCanSeePayouts(studio: StudioSummary): void {
   if (!canSeePayouts(studio.role)) throw new ApiError("forbidden", "Owners and admins only.");
 }
 
-/** Only the owner connects or changes payouts (Seenu, answer 1). The database checks it again. */
-export function assertOwner(studio: StudioSummary): void {
+/**
+ * Payout management (connecting, the schedule, Stripe links): only the owner today (Seenu, answer 1). Named for the
+ * payouts rule, not for "owner", so other owner-only checks never borrow it by accident. The database checks it again.
+ */
+export function assertCanManagePayouts(studio: StudioSummary): void {
   if (!canManagePayouts(studio.role)) throw new ApiError("forbidden", "The studio owner only.");
 }

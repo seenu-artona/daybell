@@ -18,7 +18,7 @@ export type PayoutAccountStatus = (typeof PAYOUT_ACCOUNT_STATUSES)[number];
 
 /**
  * How often Stripe pays out, as Stripe names it. `manual` is mirrored only so a copy never fails: Daybell never
- * offers it (the screens call it "Paused by Stripe").
+ * offers it (the screens call it "Manual payouts").
  */
 export const PAYOUT_INTERVALS = ["daily", "weekly", "monthly", "manual"] as const;
 export type PayoutInterval = (typeof PAYOUT_INTERVALS)[number];

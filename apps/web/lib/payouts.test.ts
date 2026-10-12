@@ -88,6 +88,23 @@ describe("accountFacts and accountForDatabase (ADR 0020)", () => {
       }),
     ).toThrow("payout_schedule_unknown");
   });
+
+  it("refuses a monthly schedule with no day (code review N8): it could never be saved", () => {
+    expect(() =>
+      accountSchedule({
+        ...base,
+        settings: { payouts: { schedule: { interval: "monthly", delay_days: 2 } } },
+      }),
+    ).toThrow("payout_schedule_unknown");
+    expect(() =>
+      accountSchedule({
+        ...base,
+        settings: {
+          payouts: { schedule: { interval: "monthly", monthly_payout_days: [], delay_days: 2 } },
+        },
+      }),
+    ).toThrow("payout_schedule_unknown");
+  });
 });
 
 describe("payoutForDatabase", () => {

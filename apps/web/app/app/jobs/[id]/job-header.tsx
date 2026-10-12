@@ -6,7 +6,7 @@ import { Button, IconButton, iconButtonVariants } from "@daybell/ui";
 import { ArrowLeft, Ellipsis, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "@/lib/client-api";
 import { Dialog } from "../../dialog";
 import { useStudio } from "../../me-context";
@@ -31,20 +31,26 @@ export function JobHeader() {
   const [editing, setEditing] = useState(false);
   const [selling, setSelling] = useState(false);
   const [saved, setSaved] = useState(false);
-  // "Payouts connected" (ADR 0020): read when the dialog opens; null where payouts aren't offered yet (US studios).
-  const [payouts, setPayouts] = useState<boolean | null>(false);
+  // "Payouts connected" (ADR 0020): read each time the dialog opens; undefined while it's being checked, so the item
+  // says "Checking…" rather than a state it may not be in. The same for every studio (Seenu, Oct 12): where payouts
+  // aren't offered (the API refuses), it is simply not connected.
+  const [payouts, setPayouts] = useState<boolean | undefined>(undefined);
+  // Which opening of the dialog a reply belongs to: one that arrives after the dialog closed (or reopened) is ignored.
+  const opening = useRef(0);
 
   function openSelling() {
+    const current = ++opening.current;
+    setPayouts(undefined);
     setSelling(true);
-    void api<StudioPayoutsResponse>("/studio/payouts").then((res) =>
-      setPayouts(
-        res.ok
-          ? payoutsConnected(res.data.account?.status)
-          : res.code === "region_unavailable"
-            ? null
-            : false,
-      ),
-    );
+    void api<StudioPayoutsResponse>("/studio/payouts").then((res) => {
+      if (opening.current !== current) return;
+      setPayouts(res.ok ? payoutsConnected(res.data.account?.status) : false);
+    });
+  }
+
+  function closeSelling() {
+    opening.current += 1;
+    setSelling(false);
   }
 
   const details = [
@@ -116,7 +122,7 @@ export function JobHeader() {
         />
       </Dialog>
 
-      <Dialog open={selling} onClose={() => setSelling(false)} title={t("checklist.title")}>
+      <Dialog open={selling} onClose={closeSelling} title={t("checklist.title")}>
         <div className="flex flex-col gap-4">
           <p className="m-0 text-muted">{t("sellIntro")}</p>
           <SellChecklist
@@ -126,7 +132,7 @@ export function JobHeader() {
             payoutsConnected={payouts}
           />
           <div className="flex justify-end">
-            <Button variant="secondary" onClick={() => setSelling(false)}>
+            <Button variant="secondary" onClick={closeSelling}>
               {t("close")}
             </Button>
           </div>

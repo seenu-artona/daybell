@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Payout routes (ADR 0020): who may call them and in what order (the person and their role before the body or Stripe;
 // the region before Stripe), every read filtered by the caller's studio, Stripe's account made once with an
 // idempotency key and only the country and Daybell's ids, return addresses from siteUrl() never the request, the
-// schedule saved as Stripe answered it, and named 409s. Stripe and the database are faked; row-level security is
-// covered by 015_payouts.test.sql.
+// schedule saved as Stripe answered it with the time Stripe was asked, named 409s, a per-studio budget of Stripe calls
+// (429), Stripe links that must be Stripe's own, and an alert when Stripe made an account Daybell couldn't record.
+// Stripe and the database are faked; row-level security is covered by 015_payouts.test.sql.
 vi.mock("server-only", () => ({}));
 const { scope, writeRpc, systemRpc, provider } = vi.hoisted(() => ({
   scope: vi.fn(),
@@ -136,7 +137,9 @@ const stripeCalls = () =>
 beforeEach(() => {
   vi.stubEnv("SITE_URL", "https://staging.daybell.test");
   writeRpc.mockResolvedValue({ data: "row-1", error: null });
-  systemRpc.mockResolvedValue({ data: STUDIO, error: null });
+  systemRpc.mockImplementation(async (_region: string, fn: string) =>
+    fn === "take_stripe_call" ? { data: true, error: null } : { data: STUDIO, error: null },
+  );
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -286,6 +289,7 @@ describe("POST /studio/payouts/onboarding-link", () => {
         delay_days: 2,
       },
       p_status: "needs_info",
+      p_fetched_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
     expect(provider.createAccountLink).toHaveBeenCalledWith({
       accountId: ACCOUNT,
@@ -347,6 +351,7 @@ describe("POST /studio/payouts/refresh", () => {
         p_facts: expect.objectContaining({ charges_enabled: true, payouts_enabled: true }),
         p_schedule: expect.objectContaining({ payout_interval: "weekly" }),
         p_status: "active",
+        p_fetched_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
       });
     }
   });
@@ -396,6 +401,7 @@ describe("PUT /studio/payouts/schedule", () => {
         monthly_anchor: 15,
         delay_days: 7,
       },
+      p_fetched_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
   });
 
@@ -423,5 +429,80 @@ describe("POST /studio/payouts/dashboard-link", () => {
       expiresAt: null,
     });
     expect(provider.createLoginLink).toHaveBeenCalledWith(ACCOUNT);
+  });
+});
+
+describe("Stripe call budget (security review N1)", () => {
+  const limited = () =>
+    systemRpc.mockImplementation(async (_region: string, fn: string) =>
+      fn === "take_stripe_call" ? { data: false, error: null } : { data: STUDIO, error: null },
+    );
+
+  it("answers 429 rate_limited on every route that calls Stripe once the studio's minute is used up", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const [name, run] of [
+      ["onboarding", () => routes.onboarding()],
+      ["refresh", () => routes.refresh()],
+      ["schedule", () => routes.schedule(JSON.stringify({ interval: "daily" }))],
+      ["dashboard", () => routes.dashboard()],
+    ] as const) {
+      signIn("owner", { payout_accounts: accountRow() });
+      limited();
+      const res = await run();
+      expect(res.status, name).toBe(429);
+      expect((await res.json()).error.code).toBe("rate_limited");
+    }
+    expect(stripeCalls()).toBe(0);
+    expect(writeRpc).not.toHaveBeenCalled();
+    // Counted for the caller's own studio, 10 a minute.
+    for (const c of systemRpc.mock.calls.filter((c) => c[1] === "take_stripe_call"))
+      expect(c).toEqual(["ca", "take_stripe_call", { p_studio_id: STUDIO, p_limit: 10 }]);
+    // A fixed name only.
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(STUDIO);
+    warn.mockRestore();
+  });
+
+  it("isn't spent by people the route refuses, or on reads", async () => {
+    signIn("admin", { payout_accounts: accountRow() });
+    expect((await routes.onboarding()).status).toBe(403);
+    signIn("owner", { payout_accounts: accountRow() }, "us");
+    expect((await routes.refresh()).status).toBe(422);
+    signIn("owner", { payout_accounts: accountRow() });
+    expect((await routes.get()).status).toBe(200);
+    expect(systemRpc.mock.calls.map((c) => c[1])).not.toContain("take_stripe_call");
+  });
+});
+
+describe("Stripe links (security review N5)", () => {
+  it("are returned only when they are Stripe's own Connect pages", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    signIn("owner", { payout_accounts: accountRow({ status: "needs_info" }) });
+    provider.createAccountLink.mockResolvedValue({
+      url: "https://connect.stripe.com.evil.example/setup",
+      expiresAt: 1,
+    });
+    const onboarding = await routes.onboarding();
+    expect(onboarding.status).toBe(500);
+    expect(JSON.stringify(await onboarding.json())).not.toContain("evil");
+    signIn("owner", { payout_accounts: accountRow() });
+    provider.createLoginLink.mockResolvedValue({ url: "http://connect.stripe.com/express/x" });
+    expect((await routes.dashboard()).status).toBe(500);
+    expect(errors).toHaveBeenCalledWith("stripe_link_unexpected", "stripe");
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("evil");
+    errors.mockRestore();
+  });
+});
+
+describe("an account Stripe made but Daybell couldn't record (security review N4)", () => {
+  it("is logged with the studio id only, so support can find it on Stripe by its metadata", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    signIn("owner", {});
+    provider.createAccount.mockResolvedValue(stripeAccount());
+    writeRpc.mockResolvedValue({ data: null, error: { code: "08006", message: "connection" } });
+    expect((await routes.onboarding()).status).toBe(500);
+    expect(errors).toHaveBeenCalledWith("stripe_account_unrecorded", STUDIO);
+    expect(JSON.stringify(errors.mock.calls)).not.toContain(ACCOUNT);
+    expect(provider.createAccountLink).not.toHaveBeenCalled();
+    errors.mockRestore();
   });
 });

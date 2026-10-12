@@ -382,13 +382,12 @@ describe("onboarding", () => {
     expect(ONBOARDING_TASKS).toEqual(["account", "payouts", "priceList", "firstJob"]);
   });
 
-  it("leaves Set up payouts out where payouts aren't offered yet (US studios, Seenu Q3; ADR 0020)", () => {
-    const us = { ...none, payoutsConnected: null };
-    expect(onboardingChecklist(us).map((t) => t.key)).toEqual(["account", "priceList", "firstJob"]);
-    expect(onboardingChecklist(us)[1]?.state).toBe("next");
+  it("is the same for every studio: Set up payouts stays until the account is Active (Seenu, Oct 12; ADR 0020)", () => {
+    // No regional variant: a studio whose region has no payouts yet keeps the task open, and onboarding isn't done.
+    expect(onboardingChecklist(none).map((t) => t.key)).toEqual(ONBOARDING_TASKS);
     expect(
-      onboardingComplete(onboardingChecklist({ ...us, hasJob: true, priceListReviewed: true })),
-    ).toBe(true);
+      onboardingComplete(onboardingChecklist({ ...none, hasJob: true, priceListReviewed: true })),
+    ).toBe(false);
   });
 
   it("ticks Set up payouts only when the account is Active (Seenu Q5)", () => {

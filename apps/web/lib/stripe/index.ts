@@ -1,5 +1,6 @@
 import "server-only";
-import { ApiError } from "@daybell/api";
+import { ApiError, PAYOUT_NOT_CONFIGURED } from "@daybell/api";
+import { siteUrl } from "@daybell/config";
 import { type StripeSettings, stripeSettings, stripeWebhookSecrets } from "@daybell/config/server";
 import Stripe from "stripe";
 import { fakeDriver } from "./fake-driver";
@@ -26,8 +27,11 @@ function settings(): StripeSettings | null {
 
 export function payments(): PaymentsProvider {
   const current = settings();
+  // Its own form code, so the screen says "not set up in this environment", not "not available in this region".
   if (!current)
-    throw new ApiError("region_unavailable", "Payouts aren't set up in this environment yet.");
+    throw new ApiError("region_unavailable", "Payouts aren't set up in this environment.", {
+      form: PAYOUT_NOT_CONFIGURED,
+    });
   if (cached && JSON.stringify(cached.settings) === JSON.stringify(current)) return cached.provider;
   const provider =
     current.driver === "fake" ? fakeDriver() : stripeDriver(current.secretKey, current.livemode);
@@ -42,6 +46,20 @@ export function isFakeStripe(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Where a Stripe link may send the owner (security review N5): Stripe's own Connect pages for the real driver, this
+ * deployment's fake pages for the fake one. Anything else is refused before it reaches the browser (logged by a fixed
+ * name only, never the address).
+ */
+export function assertStripeLink(url: string, driver: PaymentsProvider["driver"]): string {
+  const allowed = driver === "stripe" ? "https://connect.stripe.com/" : `${siteUrl()}/`;
+  if (!url.startsWith(allowed)) {
+    console.error("stripe_link_unexpected", driver);
+    throw new ApiError("internal", "Something went wrong on our side. Please try again.");
+  }
+  return url;
 }
 
 /** The webhook's signing secrets; misconfiguration logged by name only. */

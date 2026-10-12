@@ -53,3 +53,23 @@ export function assertPayoutRegion(region: DataRegion): void {
   if (!PAYOUT_REGIONS.includes(region))
     throw new ApiError("region_unavailable", "Payouts aren't available in this region yet.");
 }
+
+/**
+ * For work on payout data before the studio's region is known (Stripe's webhook, security review M1; D113): refuses to
+ * run outside the function regions of the payout regions, before anything is asked of Stripe. Locally and in CI
+ * (VERCEL_REGION unset) it allows everything, like assertFunctionRegion.
+ */
+export function assertPayoutFunctionRegion(
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const running = env.VERCEL_REGION;
+  if (!running) return;
+  const required = PAYOUT_REGIONS.map((region) => FUNCTION_REGION[region]);
+  // A payout region with no function region of its own may run anywhere.
+  if (required.some((r) => r === null || r === running)) return;
+  console.error("wrong_function_region", "payouts", running);
+  throw new ApiError(
+    "region_unavailable",
+    "This can't be done from here right now. Please try again.",
+  );
+}

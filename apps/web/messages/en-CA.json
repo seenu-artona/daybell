@@ -888,6 +888,7 @@
         "done": "Done",
         "todo": "To do",
         "soon": "Coming soon",
+        "checking": "Checking…",
         "items": {
           "roster": "Roster added",
           "photos": "Photos uploaded",
@@ -1228,9 +1229,9 @@
       "loading": "Loading payouts…",
       "notForRole": "Only the studio’s owner and admins can see payouts.",
       "unavailable": "Payouts aren’t available in this region yet.",
+      "notConfigured": "Payouts aren’t set up in this environment.",
       "status": {
         "title": "Connection",
-        "label": "Status: {status}",
         "notStarted": "Not started",
         "needs_info": "Needs info",
         "pending_verification": "Pending verification",
@@ -1241,6 +1242,7 @@
         "notStarted": "Connect a Stripe account so parents’ payments are paid out to your bank. Stripe asks for your business and bank details.",
         "needs_info": "{count, plural, =0 {Stripe needs a few more details before you can be paid.} one {Stripe needs # more detail before you can be paid.} other {Stripe needs # more details before you can be paid.}}",
         "deadline": "Please add them by {date}.",
+        "deadlineOwner": "The studio owner needs to add them by {date}.",
         "pending_verification": "Stripe is checking your details. This usually takes minutes, sometimes a few days.",
         "active": "Card payments and payouts are on.",
         "restricted": "Stripe has paused card payments or payouts for this account. Update your details on Stripe to turn them back on."
@@ -1276,7 +1278,7 @@
           "weekly": "Weekly, every {day}",
           "daily": "Every business day",
           "monthly": "Monthly, on day {day}",
-          "manual": "Paused by Stripe"
+          "manual": "Manual payouts"
         },
         "days": {
           "monday": "Monday",
@@ -1292,7 +1294,7 @@
         "title": "Next payout",
         "date": "{date}, if there’s money to pay out",
         "daily": "Every business day, if there’s money to pay out",
-        "manual": "Payouts are paused by Stripe.",
+        "manual": "Manual payouts: none are scheduled.",
         "notActive": "Once payouts are active.",
         "onItsWay": "{amount} on its way, arriving {date}"
       },

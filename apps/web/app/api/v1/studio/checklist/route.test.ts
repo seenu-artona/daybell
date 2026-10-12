@@ -96,7 +96,7 @@ describe("GET /studio/checklist", () => {
       expect(c.ops).toContainEqual(["eq", [c.table === "studios" ? "id" : "studio_id", STUDIO]]);
   });
 
-  it("ticks Set up payouts only when the payout account is Active, and leaves it out for US studios (ADR 0020)", async () => {
+  it("ticks Set up payouts only when the payout account is Active, the same for every studio (ADR 0020; Seenu, Oct 12)", async () => {
     const tasksFor = async (studio: ReturnType<typeof as>, account: unknown) => {
       const db = fakeDatabase(
         {
@@ -120,13 +120,20 @@ describe("GET /studio/checklist", () => {
       key: "payouts",
       done: true,
     });
+    // A US studio (no payouts in its region yet) gets the same task, read the same way; it stays open.
     const us = await tasksFor(as("owner", "us"), null);
     expect(us.tasks.map((t: { key: string }) => t.key)).toEqual([
       "account",
+      "payouts",
       "priceList",
       "firstJob",
     ]);
-    expect(us.tables).not.toContain("payout_accounts");
+    expect(us.tasks[1]).toEqual({ key: "payouts", done: false });
+    expect(us.tables).toContain("payout_accounts");
+    expect((await tasksFor(as("owner", "us"), { status: "active" })).tasks[1]).toEqual({
+      key: "payouts",
+      done: true,
+    });
   });
 
   it("ticks Review your price list from the database's stamp, and stays open without it (ADR 0019)", async () => {

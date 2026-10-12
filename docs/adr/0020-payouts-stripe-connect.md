@@ -7,8 +7,9 @@
   - 0019: the onboarding order becomes account, payouts, price list, first job (D143).
 - Decisions implemented: D56, D98, D106, D143, D96, D113, D92.
 - Decisions touched: D104, D59, D125, D91, D112, D10.
-- Inputs: Seenu's answers 1–4 to the step 7 brief, his answers Q1, Q2, Q3, Q5 and Q6, and Claude's calls Q0, Q4 and
-  Q7–Q17 (Oct 12, 2026; for Seenu to review).
+- Inputs: Seenu's answers 1–4 to the step 7 brief, his answers Q1, Q2, Q3, Q5 and Q6, Claude's calls Q0, Q4 and
+  Q7–Q17 (Oct 12, 2026; for Seenu to review), Seenu's answer to code review MF1 (Oct 12: one checklist for every
+  studio), and the step 7 security and code reviews.
 
 ## Context
 
@@ -79,9 +80,11 @@ TypeScript declarations and JSDoc shipped in stripe-node 22.6.2, which are gener
 ## 2. Canada only in Phase 1 (Q3)
 
 - `PAYOUT_REGIONS = ["ca"]`. `assertPayoutRegion` refuses US studios with `region_unavailable` ("Payouts aren't
-  available in this region yet").
-- For US studios, "Set up payouts" is left out of onboarding (so onboarding can still complete), and "Payouts
-  connected" in Start selling stays "Coming soon".
+  available in this region yet"). That refusal is the **only** regional difference.
+- **One checklist for every studio** (Seenu, Oct 12, answering code review MF1: "keep it same for everyone, I do not
+  want to maintain two codes"). "Set up payouts" is in every studio's onboarding and "Payouts connected" behaves the
+  same everywhere. A US studio's "Set up payouts" links to Settings › Payouts, which shows the region message, so its
+  onboarding stays open until US payouts exist; its Start selling dialog shows "Payouts connected: To do".
 - Follow-up: confirm D106's US setup with Stripe and an adviser before US launch.
 
 ## 3. Data
@@ -95,53 +98,72 @@ Forward migration `20261012300000_payouts.sql`.
 - Flags: details submitted, charges enabled, payouts enabled.
 - Stripe's `disabled_reason` code, the counts of currently due, past due and pending verification, and the deadline.
 - `status`, plus the schedule: interval, `weekly_anchor`, `monthly_anchor`, `delay_days`.
+- `stripe_fetched_at`: when Daybell asked Stripe for the copy (taken just before the call).
 - A composite key `(studio_id, id)` for payouts.
 
 **`payouts`**:
 - `stripe_payout_id` (unique, `po_…`) and a composite FK to the studio's own account.
 - `amount_cents bigint` (≥ 0) and `currency`, which must be the region's currency (CAD for Canada, D106).
-- `status`, `method`, `automatic`, `arrival_date`, `failure_code`, `stripe_created_at`.
+- `status`, `method`, `automatic`, `arrival_date`, `failure_code`, `stripe_created_at`, `stripe_fetched_at`.
 
 **`stripe_events`** (the webhook inbox, D96):
 - The event id (unique), type, account, studio, livemode and times.
-- A two-minute processing lease, `attempts`, and `last_error` (a code name only).
+- A two-minute processing lease with a `lease_token`, `attempts`, and `last_error` (a code name only).
 - Never the payload.
+
+**`stripe_call_budget`** (the per-studio rate limit, security review N1): one row per studio with the current
+minute's start and its count of calls to Stripe. Ids and counts only; no policy and no grant.
 
 **Never kept anywhere:** bank details, last-4 digits, external account ids, names, emails, addresses, descriptions,
 statement descriptors or trace ids.
 
 **Enums** mirror Stripe:
-- `payout_interval` includes `manual`. It is never offered; the screens say "Paused by Stripe".
+- `payout_interval` includes `manual` (Stripe pays out only when asked, not on a schedule). It is never offered; the
+  screens call it neutrally "Manual payouts" (code review N7), not "Paused by Stripe": Stripe pausing an account shows
+  as Restricted or Pending verification through `payouts_enabled`.
 - `payout_weekday` has all seven days, so a sync can never fail on a weekend. Studios pick Monday to Friday.
 - A test keeps core's lists equal to the SQL enums.
 
 **Access:**
 - Row-level security: owners and admins read `payout_accounts` and `payouts`. Nobody else reads anything.
-- `stripe_events` has no policy and no grant.
+- `stripe_events` and `stripe_call_budget` have no policy and no grant.
 - Browsers have no insert, update or delete on any of the three tables.
 
 **Functions** are SECURITY DEFINER with an empty `search_path`, and only the service role may execute them.
 
 Owner actions (`app.act_for_owner` = `app.act_for` plus an owner check, refusing with 42501 before anything is read):
 - `create_payout_account`: idempotent for the same account; `already_connected` for another one.
-- `set_payout_schedule`: `not_connected` if there is no account.
+- `set_payout_schedule`: `not_connected` if there is no account; skipped if a newer copy was saved meanwhile.
 
-System functions (the webhook, and the refresh after the route's role check):
-- `record_stripe_event`: inserts once; returns null for an unknown account; claims a two-minute lease.
-- `finish_stripe_event`.
-- `sync_payout_account`: writes nothing when nothing changed.
-- `sync_payout`: upserts in the account's own studio and refuses a payout id that moves to another account.
+System functions (the webhook, and the routes after their own role checks):
+- `record_stripe_event`: inserts once; returns null for an unknown account; claims a two-minute lease and returns its
+  `lease` token.
+- `finish_stripe_event(inbox, lease, code, permanent)`: only the delivery holding the lease can finish the event, so a
+  delivery whose lease ran out can't clear the lease of the one that took over (security review N2). It returns false
+  when the lease isn't its own. `permanent` marks an event that can never succeed as processed, with its code.
+- `sync_payout_account` and `sync_payout`: each takes `p_fetched_at`. **An answer older than the saved copy is
+  skipped** (security review N2), so two events processed at once can't leave `in_transit` after `paid`: the row is
+  updated only where `stripe_fetched_at <= p_fetched_at`. A sync that changes nothing still moves
+  `stripe_fetched_at` on (so a later stale answer is skipped too), but writes no event.
+- `sync_payout` upserts in the account's own studio and refuses a payout id that moves to another account.
+- `take_stripe_call(studio, limit)`: counts one call to Stripe in the studio's current minute; false over the limit.
 
-**Deviation from the plan.** The plan locked the inbox row with `for update skip locked`. That lock would end with
-`record_stripe_event`'s own transaction, because each RPC is its own transaction. The lease column does what the plan
-meant. The plan's `stripe_synced_at` was dropped, because a sync that changes nothing writes nothing.
+**Deviations from the plan.**
+- The plan locked the inbox row with `for update skip locked`. That lock would end with `record_stripe_event`'s own
+  transaction, because each RPC is its own transaction. The lease column (with its token) does what the plan meant.
+- The plan's `stripe_synced_at` is back as `stripe_fetched_at`, for skip-older writes. A per-account advisory lock
+  was not used: Stripe is read outside the database transaction, so a lock can't order two answers; comparing the
+  time each was asked for can.
 
-**Tests.** pgTAP `015_payouts` (98 tests) and `016_payouts_canada` (5 tests) cover:
+**Tests.** pgTAP `015_payouts` (121 tests) and `016_payouts_canada` (5 tests) cover:
 - reads by every role and by anon
 - grants and execute rights
 - the owner-only functions (admins, photographers, staff, another studio's owner and nobody get 42501)
 - unique ids and format checks, the composite FK, country and currency
-- duplicate events, leases, failures and retries
+- duplicate events, leases and their tokens (a lapsed delivery can't finish or clear the new lease), failures,
+  permanent failures and retries
+- older answers skipped for accounts, payouts and the schedule
+- the Stripe call budget (per studio, per minute, limit checked, browsers can't spend it)
 - syncs that change nothing, events with ids only, and studio deletion restricted
 
 ## 4. Webhooks (`POST /api/v1/webhooks/stripe`)
@@ -151,16 +173,28 @@ The steps, in order:
 2. Verify `Stripe-Signature` against one or two `STRIPE_WEBHOOK_SECRET`s.
 3. Refuse a mode (live or test) that doesn't match the key.
 4. Acknowledge other types and platform events (no `account`) with 200, storing nothing.
-5. **Read the account from Stripe again.**
-6. Route by `metadata.daybell_region` if it is a payout region, otherwise Canada (Q11).
-7. Run `assertFunctionRegion`.
-8. Call `record_stripe_event`:
+5. **Check the function region before any Stripe call** (security review M1; D113): `assertPayoutFunctionRegion`
+   refuses with `region_unavailable` unless `VERCEL_REGION` is a payout region's function region (yul1 in Phase 1).
+   `accounts.retrieve` returns the whole account, which can hold the owner's personal data, so it must never be
+   fetched into a US function.
+6. **Read the account from Stripe again**, noting the time it was asked.
+7. Route by `metadata.daybell_region` if it is a payout region, otherwise Canada (Q11).
+8. Run `assertFunctionRegion` for that region as well.
+9. Call `record_stripe_event`:
    - unknown account: 404, so Stripe retries (this covers the race with account creation)
    - lease held by another delivery: 409
    - already processed: 200
-9. Read the payout from Stripe again (for payout events), then sync.
-10. Call `finish_stripe_event`.
-11. On failure, record `sync_failed` / `stripe_unavailable` / `unexpected_object` and answer 500, so Stripe retries.
+10. **Backstop** (security review N3): if `metadata.daybell_studio_id` isn't the studio the database maps the account
+    to, nothing is copied and the fixed line `stripe_webhook_studio_mismatch` is logged. The database's mapping is what
+    is used either way.
+11. Read the payout from Stripe again (for payout events), then sync with the time each object was asked for.
+12. Call `finish_stripe_event` with the lease. If the lease was taken over meanwhile: 409.
+13. Failures (security review N6):
+    - **Retryable** (`stripe_unavailable`, `sync_failed`): recorded and answered 500, so Stripe retries.
+    - **Permanent** (`payout_currency`, `payout_mismatch`, `payout_fixed`, `payout_account_fixed`, `payout_country`,
+      `unexpected_object` such as an unknown interval or monthly with no day, `studio_mismatch`): marked processed
+      with the code, answered 200 so Stripe stops retrying, and logged as `stripe_webhook_permanent_failure` with the
+      event type and code, for an alert.
 
 Handled events: `account.updated`, `capability.updated`, `payout.created`, `payout.updated`, `payout.paid`,
 `payout.failed`, `payout.canceled`.
@@ -170,10 +204,31 @@ Logs hold fixed names and the event type only. No cron and no Trigger.dev: Strip
 ## 5. Return-and-refresh
 
 `POST /studio/payouts/refresh` (owners and admins) reads the account from Stripe and syncs it. The page calls it on
-`?stripe=return`, so the status is right on PR previews without webhooks, and when a webhook is late.
+`?stripe=return`, so the status is right when a webhook is late.
 
 `?stripe=refresh` (an expired link) shows a note. The owner continues with the same button. There is no automatic
-redirect, so focus stays predictable.
+redirect, so focus stays predictable. The e2e test covers it (code review MF3).
+
+Coming Back from Stripe can restore the page from the browser's back-forward cache with "Opening Stripe…" still
+showing; a persisted `pageshow` resets it (code review N2).
+
+**Deployments without Stripe** (PR previews, `STRIPE_DRIVER` unset; Q13): the Stripe routes answer
+`region_unavailable` with `fields.form = "payouts.notConfigured"`, and the page says "Payouts aren't set up in this
+environment", not the region message (code review N12).
+
+## 5a. Limits on calls to Stripe (security review N1)
+
+`refresh`, `onboarding-link`, `dashboard-link` and `schedule` each make one or two Stripe calls. Together they may run
+at most **10 times a minute per studio** (`STRIPE_CALLS_PER_MINUTE`); the next answers 429 `rate_limited` and calls
+nothing. The count is kept in the studio's own regional database (`take_stripe_call`, fixed one-minute windows), so it
+holds across serverless instances with no extra service. It is taken after the role and region checks, so refused
+requests don't spend it, and the GET never does. Stripe's own webhooks aren't limited.
+
+## 5b. Stripe links (security review N5)
+
+The API returns a link only if it starts with `https://connect.stripe.com/` (real driver) or with this deployment's
+`siteUrl()` (fake driver). Anything else is refused with a fixed log line, so the browser never follows an unexpected
+address.
 
 ## 6. Status rule (`payoutAccountStatus`, pure, in core)
 
@@ -214,8 +269,10 @@ sets a reason or something is past due.
 - Onboarding is now account, **Set up payouts**, price list, first job.
 - "Set up payouts" links to Settings › Payouts for the owner and is plain text for admins.
 - It ticks only when the account is Active.
-- The Start selling dialog's "Payouts connected" is real (it fetches `GET /studio/payouts` when opened). Only "Photos
-  uploaded" stays "Coming soon".
+- The Start selling dialog's "Payouts connected" is real (it fetches `GET /studio/payouts` each time it opens, says
+  "Checking…" until the answer arrives, and ignores an answer that comes after the dialog closed; code review N3).
+  Any refusal, including a US studio's, counts as not connected. Only "Photos uploaded" stays "Coming soon".
+- The same for every studio (Seenu, Oct 12; section 2).
 - No job checklist task, because photographers would see it.
 - Studios already onboarded never see the new task.
 
@@ -238,8 +295,10 @@ sets a reason or something is past due.
 - Data stays in the studio's regional database.
 - Stripe is the payment processor (already decided). Only the country and Daybell's ids are sent when an account is
   created.
-- Account Link and login link URLs are never logged or stored.
+- The webhook checks the function region before any Stripe call (section 4, step 5).
+- Account Link and login link URLs are never logged or stored, and must be Stripe's own (section 5b).
 - Stripe errors are logged by error type only.
+- `stripe_account_unrecorded` logs the studio id only (section 14, orphans).
 
 ## 12. The fake driver
 
@@ -256,7 +315,8 @@ It tells Daybell through the real webhook handler, with a correctly signed event
 Refused on Vercel three ways:
 - `next.config.ts` fails the build.
 - `stripeSettings()` throws at run time.
-- The dev page and route answer 404.
+- The dev page and route answer 404. Tests check both answer 404 (the route before sign-in or the webhook) on Vercel,
+  with `STRIPE_DRIVER=stripe` and with it unset (security review M2).
 
 CI and e2e use it only (Q12): there is no Stripe key in CI.
 
@@ -287,8 +347,17 @@ Setup steps are in `docs/stripe-staging.md`.
 - Confirming the unchecked Stripe facts above.
 - Disconnecting or replacing an account (support only, Q16).
 - Aligning the webhook destination's API version with the pinned one.
-- Orphans: if a create succeeds at Stripe but the database write fails, the retry uses the same idempotency key, but
-  only within Stripe's idempotency window.
+- Orphans (security review N4): if a create succeeds at Stripe but the database write fails, the retry uses the same
+  idempotency key, but only within Stripe's 24-hour idempotency window. The route now logs the fixed line
+  `stripe_account_unrecorded` with the studio id (never the Stripe id), which support matches to the account's
+  `daybell_studio_id` metadata on Stripe. A runbook step to record or close such accounts is a follow-up.
+- US studios: onboarding stays open until US payouts exist (Seenu, Oct 12). When they launch, nothing else is needed:
+  the same task ticks once the account is Active.
+- Before Phase 3 (security review, info 8): decide whether production (`VERCEL_ENV=production`) should refuse a
+  test-mode key. Today `stripeSettings` accepts either there; harmless while production has no Stripe variables.
+- Rotation runbook (security review, info 9): the Vercel deployment-protection bypass token is part of the Stripe
+  webhook endpoint's URL (docs/stripe-staging.md, section 3), as for the image worker. Add it to the rotation runbook:
+  rotating the token means updating the endpoint URL in the Stripe Dashboard.
 
 ## 15. Rejected
 

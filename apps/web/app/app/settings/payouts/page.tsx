@@ -1,14 +1,19 @@
 "use client";
 
-import type { PayoutLinkResponse, StudioPayoutsResponse } from "@daybell/api";
+import {
+  PAYOUT_NOT_CONFIGURED,
+  type PayoutLinkResponse,
+  type StudioPayoutsResponse,
+} from "@daybell/api";
 import { canSeePayouts } from "@daybell/core";
 import { Banner } from "@daybell/ui";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { onRestoredFromCache } from "@/lib/page-restored";
 import { useStudio } from "../../me-context";
-import { FeesCard, PayoutsCard, ScheduleCard, StatusCard } from "./payout-cards";
+import { FeesCard, PayoutsCard, ScheduleCard, StatusCard, scheduleFormKey } from "./payout-cards";
 
 /**
  * Settings › Payouts (Phase 1 step 7; D56, D98, D106; Seenu, answers 1–4; ADR 0020): connection status, the payout
@@ -16,7 +21,8 @@ import { FeesCard, PayoutsCard, ScheduleCard, StatusCard } from "./payout-cards"
  * changes the schedule; admins see everything read-only; photographers and staff get a plain refusal (the API answers
  * 403 too). Coming back from Stripe (?stripe=return) checks the status with Stripe at once; an expired link
  * (?stripe=refresh) asks the owner to continue, with no automatic redirect, so focus stays put. Every result is
- * announced in a status region.
+ * announced in a status region; a new attempt clears the last problem. Coming Back from Stripe (the browser's
+ * back-forward cache) resets "Opening Stripe…" so the buttons work again.
  */
 export default function PayoutsPage() {
   const t = useTranslations("app.payouts");
@@ -38,7 +44,9 @@ export default function PayoutsPage() {
         ? t("conflicts.alreadyConnected")
         : fields.form === "payouts.notConnected"
           ? t("conflicts.notConnected")
-          : text.error(code),
+          : fields.form === PAYOUT_NOT_CONFIGURED
+            ? t("notConfigured")
+            : text.error(code),
     [t, text],
   );
 
@@ -88,6 +96,16 @@ export default function PayoutsPage() {
     };
   }, [allowed, text, t, statusWord, conflictText]);
 
+  // Back from Stripe without finishing: the page may be the one left behind, still "Opening Stripe…".
+  useEffect(
+    () =>
+      onRestoredFromCache(window, () => {
+        setBusy(false);
+        setStatus("");
+      }),
+    [],
+  );
+
   async function goToStripe(
     path: "/studio/payouts/onboarding-link" | "/studio/payouts/dashboard-link",
   ) {
@@ -110,6 +128,8 @@ export default function PayoutsPage() {
 
   return (
     <div className="flex flex-col gap-6" aria-busy={busy}>
+      {/* The section's heading, between Settings (h1) and the cards (h3), so headings don't skip a level. */}
+      <h2 className="sr-only">{t("title")}</h2>
       <p className="m-0 text-muted">{t("intro")}</p>
       {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
       <p role="status" aria-live="polite" className="m-0 empty:sr-only">
@@ -123,9 +143,13 @@ export default function PayoutsPage() {
         <>
           <StatusCard data={data} onStripe={goToStripe} />
           <ScheduleCard
+            // A new form when Stripe's schedule changes (e.g. the check on coming back), so it never shows a stale one.
+            key={scheduleFormKey(data)}
             data={data}
+            onSaving={() => setProblem(null)}
             onSaved={(next, summary) => {
               setData(next);
+              setProblem(null);
               setStatus(t("schedule.saved", { schedule: summary }));
             }}
             onProblem={(fields, code) => setProblem(conflictText(fields, code))}

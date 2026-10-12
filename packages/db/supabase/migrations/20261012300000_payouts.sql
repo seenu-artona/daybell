@@ -12,7 +12,8 @@
 -- Owners and admins read; photographers, staff and anon read nothing.
 --
 -- Events carry ids, Stripe's status words and intervals only; never Stripe ids or amounts (D96). A sync that changes
--- nothing writes nothing. Payouts write no ledger entries in this step (Q10): they move the studio's own Stripe
+-- nothing writes no event. Each copy remembers when Daybell asked Stripe for it (stripe_fetched_at), and an older
+-- answer never overwrites a newer one, whatever order concurrent webhooks and refreshes finish in. Payouts write no ledger entries in this step (Q10): they move the studio's own Stripe
 -- balance to its bank; the ledger starts with sales in Phase 3 (ADR 0006).
 
 create type public.payout_account_status as enum ('needs_info', 'pending_verification', 'active', 'restricted');
@@ -50,6 +51,8 @@ create table public.payout_accounts (
   weekly_anchor public.payout_weekday,
   monthly_anchor smallint check (monthly_anchor between 1 and 31),
   delay_days smallint not null check (delay_days between 0 and 365),
+  -- When Daybell asked Stripe for the copy above (just before the call): an older answer is never written over it.
+  stripe_fetched_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   -- Lets payouts reference an account together with its studio (ADR 0008).
@@ -78,6 +81,8 @@ create table public.payouts (
   -- Stripe's failure code (e.g. account_closed), never its message.
   failure_code text check (failure_code ~ '^[a-z_]{1,100}$'),
   stripe_created_at timestamptz not null,
+  -- When Daybell asked Stripe for this copy: an older answer (in_transit after paid) is never written over it.
+  stripe_fetched_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   -- A payout belongs to its studio's own account.
@@ -97,8 +102,9 @@ for each row execute function app.touch_updated_at();
 -- ── Stripe webhook inbox (D96: "Stripe events queued with duplicate protection") ─────────────────────────────────
 -- One row per Stripe event that belongs to a studio in this database, written once its account is known. Only the
 -- event's id, type, account and times: never its payload (the API fetches the object from Stripe again instead).
--- processing_started_at is a short lease, so two deliveries of one event never process at the same time. Processed
--- rows are kept 90 days (Claude's call Q17; pruning is a follow-up).
+-- processing_started_at is a short lease, so two deliveries of one event never process at the same time; lease_token
+-- names the delivery holding it, and only that delivery can finish the event (one whose lease ran out can't clear
+-- another's). Processed rows are kept 90 days (Claude's call Q17; pruning is a follow-up).
 create table public.stripe_events (
   id bigint generated always as identity primary key,
   stripe_event_id text not null unique
@@ -111,6 +117,7 @@ create table public.stripe_events (
   stripe_created_at timestamptz not null,
   received_at timestamptz not null default now(),
   processing_started_at timestamptz,
+  lease_token uuid,
   processed_at timestamptz,
   attempts integer not null default 0 check (attempts >= 0),
   -- An error code name only, never a message.
@@ -120,6 +127,18 @@ create index stripe_events_studio_idx on public.stripe_events (studio_id);
 create index stripe_events_processed_idx on public.stripe_events (processed_at) where processed_at is not null;
 comment on table public.stripe_events is
   'Stripe webhook inbox: event ids and times only, never payloads. Service role only.';
+
+-- ── Stripe call budget (ADR 0020) ─────────────────────────────────────────────────────────────────────────────────
+-- Requests that call Stripe for a studio (refresh, onboarding and dashboard links, the schedule) are counted per
+-- studio in one-minute windows, so one session looping on a button can't use up the platform's shared Stripe rate
+-- limit for every studio. In the database (no extra service), one row per studio; ids and counts only.
+create table public.stripe_call_budget (
+  studio_id uuid primary key references public.studios (id) on delete cascade,
+  window_start timestamptz not null,
+  calls integer not null check (calls between 0 and 1000000)
+);
+comment on table public.stripe_call_budget is
+  'Calls to Stripe per studio in the current minute (rate limit, ADR 0020). Service role only.';
 
 -- ── Guards ────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- The account's country is the studio's region's, and an account's studio, Stripe id, country and mode never change.
@@ -210,12 +229,14 @@ for each row execute function app.on_payout_change();
 alter table public.payout_accounts enable row level security;
 alter table public.payouts enable row level security;
 alter table public.stripe_events enable row level security;
+alter table public.stripe_call_budget enable row level security;
 create policy "owners and admins read their studio's payout account" on public.payout_accounts
   for select to authenticated using (app.has_role(studio_id, '{owner,admin}'));
 create policy "owners and admins read their studio's payouts" on public.payouts
   for select to authenticated using (app.has_role(studio_id, '{owner,admin}'));
--- stripe_events: no policy at all; only the service role uses it.
-revoke all on public.payout_accounts, public.payouts, public.stripe_events from anon, authenticated;
+-- stripe_events and stripe_call_budget: no policy at all; only the service role uses them.
+revoke all on public.payout_accounts, public.payouts, public.stripe_events, public.stripe_call_budget
+  from anon, authenticated;
 grant select on public.payout_accounts, public.payouts to authenticated;
 
 -- ── Writes (service role only) ────────────────────────────────────────────────────────────────────────────────────
@@ -249,7 +270,8 @@ $$;
 -- Records the studio's Stripe account once it exists at Stripe. Calling it again with the same account is harmless;
 -- another account for the same studio is refused (already_connected): no disconnect or replace in Phase 1 (Q16).
 create function public.create_payout_account(p_actor uuid, p_studio_id uuid, p_stripe_account_id text,
-  p_livemode boolean, p_facts jsonb, p_schedule jsonb, p_status public.payout_account_status)
+  p_livemode boolean, p_facts jsonb, p_schedule jsonb, p_status public.payout_account_status,
+  p_fetched_at timestamptz default now())
 returns uuid
 language plpgsql security definer
 set search_path = ''
@@ -279,13 +301,13 @@ begin
   insert into public.payout_accounts (studio_id, stripe_account_id, country, livemode, details_submitted,
     charges_enabled, payouts_enabled, disabled_reason, currently_due_count, past_due_count,
     pending_verification_count, requirements_deadline, status, payout_interval, weekly_anchor, monthly_anchor,
-    delay_days)
+    delay_days, stripe_fetched_at)
   select p_studio_id, p_stripe_account_id, case s.data_region when 'us' then 'US' else 'CA' end, p_livemode,
     coalesce(v_facts.details_submitted, false), coalesce(v_facts.charges_enabled, false),
     coalesce(v_facts.payouts_enabled, false), v_facts.disabled_reason, coalesce(v_facts.currently_due_count, 0),
     coalesce(v_facts.past_due_count, 0), coalesce(v_facts.pending_verification_count, 0),
     v_facts.requirements_deadline, p_status, v_schedule.payout_interval, v_schedule.weekly_anchor,
-    v_schedule.monthly_anchor, v_schedule.delay_days
+    v_schedule.monthly_anchor, v_schedule.delay_days, p_fetched_at
   from public.studios s where s.id = p_studio_id
   returning id into v_id;
   perform app.end_act_for(v_previous);
@@ -293,8 +315,10 @@ begin
 end;
 $$;
 
--- Saves the schedule Stripe answered with after the owner changed it (Stripe first, then here).
-create function public.set_payout_schedule(p_actor uuid, p_studio_id uuid, p_schedule jsonb) returns void
+-- Saves the schedule Stripe answered with after the owner changed it (Stripe first, then here), unless a newer copy
+-- of the account has been saved meanwhile.
+create function public.set_payout_schedule(p_actor uuid, p_studio_id uuid, p_schedule jsonb,
+  p_fetched_at timestamptz default now()) returns void
 language plpgsql security definer
 set search_path = ''
 as $$
@@ -311,17 +335,16 @@ begin
   v_schedule := jsonb_populate_record(null::app.payout_schedule, p_schedule);
   update public.payout_accounts a
   set payout_interval = v_schedule.payout_interval, weekly_anchor = v_schedule.weekly_anchor,
-    monthly_anchor = v_schedule.monthly_anchor, delay_days = v_schedule.delay_days
-  where a.studio_id = p_studio_id
-    and (a.payout_interval, a.weekly_anchor, a.monthly_anchor, a.delay_days) is distinct from
-      (v_schedule.payout_interval, v_schedule.weekly_anchor, v_schedule.monthly_anchor, v_schedule.delay_days);
+    monthly_anchor = v_schedule.monthly_anchor, delay_days = v_schedule.delay_days, stripe_fetched_at = p_fetched_at
+  where a.studio_id = p_studio_id and a.stripe_fetched_at <= p_fetched_at;
   perform app.end_act_for(v_previous);
 end;
 $$;
 
 -- The webhook's inbox: records the event once (duplicates add nothing) and claims it for processing. Null when the
 -- account isn't one of this database's studios' (the webhook answers 404 so Stripe tries again: the account may be
--- being created this very moment). claimed is false while another delivery holds the two-minute lease.
+-- being created this very moment). claimed is false while another delivery holds the two-minute lease; when true,
+-- lease is the token finish_stripe_event needs.
 create function public.record_stripe_event(p_event_id text, p_type text, p_stripe_account_id text,
   p_livemode boolean, p_created timestamptz)
 returns jsonb
@@ -331,6 +354,7 @@ as $$
 declare
   v_studio uuid := (select a.studio_id from public.payout_accounts a where a.stripe_account_id = p_stripe_account_id);
   v_claimed bigint;
+  v_lease uuid;
   v_row record;
 begin
   if v_studio is null then
@@ -346,30 +370,37 @@ begin
     raise exception 'event_mismatch' using errcode = '22023';
   end if;
   update public.stripe_events e
-  set processing_started_at = now(), attempts = e.attempts + 1
+  set processing_started_at = now(), attempts = e.attempts + 1, lease_token = gen_random_uuid()
   where e.id = v_row.id and e.processed_at is null
     and (e.processing_started_at is null or e.processing_started_at < now() - interval '2 minutes')
-  returning e.id into v_claimed;
+  returning e.id, e.lease_token into v_claimed, v_lease;
   return jsonb_build_object('inbox_id', v_row.id, 'studio_id', v_studio,
-    'processed', v_row.processed_at is not null, 'claimed', v_claimed is not null);
+    'processed', v_row.processed_at is not null, 'claimed', v_claimed is not null, 'lease', v_lease);
 end;
 $$;
 
--- Ends processing: done (no error) or failed with an error code name, freeing the lease for Stripe's next try.
-create function public.finish_stripe_event(p_inbox_id bigint, p_error_code text) returns void
-language sql security definer
+-- Ends processing, by the delivery holding the lease only: done (no error); failed with an error code name, freeing
+-- the lease for Stripe's next try; or failed for good (p_permanent: an object that can never be copied), recorded and
+-- not tried again. False when the lease isn't (or is no longer) this delivery's: nothing is changed.
+create function public.finish_stripe_event(p_inbox_id bigint, p_lease uuid, p_error_code text,
+  p_permanent boolean default false) returns boolean
+language plpgsql security definer
 set search_path = ''
 as $$
+begin
   update public.stripe_events e
-  set processed_at = case when p_error_code is null then now() else e.processed_at end,
-    last_error = p_error_code, processing_started_at = null
-  where e.id = p_inbox_id;
+  set processed_at = case when p_error_code is null or p_permanent then now() else e.processed_at end,
+    last_error = p_error_code, processing_started_at = null, lease_token = null
+  where e.id = p_inbox_id and e.lease_token = p_lease and e.processed_at is null;
+  return found;
+end;
 $$;
 
--- Copies an account's facts, status and schedule as Stripe has them now. Writes nothing (and no event) when nothing
--- changed. Returns the studio, or null for an account this database doesn't know.
+-- Copies an account's facts, status and schedule as Stripe had them at p_fetched_at. An answer older than the saved
+-- copy is skipped; one that changes nothing only moves stripe_fetched_at on (no event). Returns the studio, or null
+-- for an account this database doesn't know.
 create function public.sync_payout_account(p_stripe_account_id text, p_facts jsonb, p_schedule jsonb,
-  p_status public.payout_account_status)
+  p_status public.payout_account_status, p_fetched_at timestamptz default now())
 returns uuid
 language plpgsql security definer
 set search_path = ''
@@ -394,24 +425,17 @@ begin
     requirements_deadline = v_facts.requirements_deadline,
     status = p_status,
     payout_interval = v_schedule.payout_interval, weekly_anchor = v_schedule.weekly_anchor,
-    monthly_anchor = v_schedule.monthly_anchor, delay_days = v_schedule.delay_days
-  where a.stripe_account_id = p_stripe_account_id
-    and (a.details_submitted, a.charges_enabled, a.payouts_enabled, a.disabled_reason, a.currently_due_count,
-         a.past_due_count, a.pending_verification_count, a.requirements_deadline, a.status, a.payout_interval,
-         a.weekly_anchor, a.monthly_anchor, a.delay_days)
-      is distinct from
-        (coalesce(v_facts.details_submitted, false), coalesce(v_facts.charges_enabled, false),
-         coalesce(v_facts.payouts_enabled, false), v_facts.disabled_reason, coalesce(v_facts.currently_due_count, 0),
-         coalesce(v_facts.past_due_count, 0), coalesce(v_facts.pending_verification_count, 0),
-         v_facts.requirements_deadline, p_status, v_schedule.payout_interval, v_schedule.weekly_anchor,
-         v_schedule.monthly_anchor, v_schedule.delay_days);
+    monthly_anchor = v_schedule.monthly_anchor, delay_days = v_schedule.delay_days, stripe_fetched_at = p_fetched_at
+  where a.stripe_account_id = p_stripe_account_id and a.stripe_fetched_at <= p_fetched_at;
   return (select a.studio_id from public.payout_accounts a where a.stripe_account_id = p_stripe_account_id);
 end;
 $$;
 
--- Copies one payout as Stripe has it now, in the account's studio (never one the caller names). Returns the payout's
--- id, or null for an account this database doesn't know. A payout id never moves to another account.
-create function public.sync_payout(p_stripe_account_id text, p_payout jsonb) returns uuid
+-- Copies one payout as Stripe had it at p_fetched_at, in the account's studio (never one the caller names); an answer
+-- older than the saved copy is skipped. Returns the payout's id, or null for an account this database doesn't know. A
+-- payout id never moves to another account.
+create function public.sync_payout(p_stripe_account_id text, p_payout jsonb,
+  p_fetched_at timestamptz default now()) returns uuid
 language plpgsql security definer
 set search_path = ''
 as $$
@@ -429,17 +453,15 @@ begin
   end if;
   v_payout := jsonb_populate_record(null::app.payout_row, p_payout);
   insert into public.payouts as p (studio_id, payout_account_id, stripe_payout_id, amount_cents, currency, status,
-    method, automatic, arrival_date, failure_code, stripe_created_at)
+    method, automatic, arrival_date, failure_code, stripe_created_at, stripe_fetched_at)
   values (v_account.studio_id, v_account.id, v_payout.stripe_payout_id, v_payout.amount_cents,
     upper(v_payout.currency), v_payout.status, v_payout.method, v_payout.automatic, v_payout.arrival_date,
-    v_payout.failure_code, v_payout.stripe_created_at)
+    v_payout.failure_code, v_payout.stripe_created_at, p_fetched_at)
   on conflict (stripe_payout_id) do update
   set amount_cents = excluded.amount_cents, status = excluded.status, automatic = excluded.automatic,
-    arrival_date = excluded.arrival_date, failure_code = excluded.failure_code
-  where p.payout_account_id = excluded.payout_account_id
-    and (p.amount_cents, p.status, p.automatic, p.arrival_date, p.failure_code)
-      is distinct from (excluded.amount_cents, excluded.status, excluded.automatic, excluded.arrival_date,
-        excluded.failure_code);
+    arrival_date = excluded.arrival_date, failure_code = excluded.failure_code,
+    stripe_fetched_at = excluded.stripe_fetched_at
+  where p.payout_account_id = excluded.payout_account_id and p.stripe_fetched_at <= excluded.stripe_fetched_at;
   v_id := (select p.id from public.payouts p
            where p.stripe_payout_id = v_payout.stripe_payout_id and p.payout_account_id = v_account.id);
   if v_id is null then
@@ -449,26 +471,50 @@ begin
 end;
 $$;
 
+-- Counts one call to Stripe for the studio in the current minute; false once the minute's p_limit is used up (the
+-- route answers 429 and calls nothing). Fixed one-minute windows.
+create function public.take_stripe_call(p_studio_id uuid, p_limit integer) returns boolean
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_calls integer;
+begin
+  if p_limit is null or p_limit not between 1 and 1000 then
+    raise exception 'The limit must be 1 to 1000' using errcode = '22023';
+  end if;
+  insert into public.stripe_call_budget as b (studio_id, window_start, calls)
+  values (p_studio_id, date_trunc('minute', now()), 1)
+  on conflict (studio_id) do update
+  set calls = case when b.window_start = excluded.window_start then least(b.calls + 1, 1000000) else 1 end,
+    window_start = excluded.window_start
+  returning b.calls into v_calls;
+  return v_calls <= p_limit;
+end;
+$$;
+
 -- ── Grants ────────────────────────────────────────────────────────────────────────────────────────────────────────
 revoke all on function app.guard_payout_account(), app.guard_payout(), app.on_payout_account_change(),
   app.on_payout_change(), app.act_for_owner(uuid, uuid) from public;
 revoke all on type app.payout_facts, app.payout_schedule, app.payout_row from public;
 -- Writes: the service role only (route handlers), never browsers (ADR 0020).
 revoke all on function
-  public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status),
-  public.set_payout_schedule(uuid, uuid, jsonb),
+  public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status, timestamptz),
+  public.set_payout_schedule(uuid, uuid, jsonb, timestamptz),
   public.record_stripe_event(text, text, text, boolean, timestamptz),
-  public.finish_stripe_event(bigint, text),
-  public.sync_payout_account(text, jsonb, jsonb, public.payout_account_status),
-  public.sync_payout(text, jsonb)
+  public.finish_stripe_event(bigint, uuid, text, boolean),
+  public.sync_payout_account(text, jsonb, jsonb, public.payout_account_status, timestamptz),
+  public.sync_payout(text, jsonb, timestamptz),
+  public.take_stripe_call(uuid, integer)
   from public, anon, authenticated;
 grant execute on function
-  public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status),
-  public.set_payout_schedule(uuid, uuid, jsonb),
+  public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status, timestamptz),
+  public.set_payout_schedule(uuid, uuid, jsonb, timestamptz),
   public.record_stripe_event(text, text, text, boolean, timestamptz),
-  public.finish_stripe_event(bigint, text),
-  public.sync_payout_account(text, jsonb, jsonb, public.payout_account_status),
-  public.sync_payout(text, jsonb)
+  public.finish_stripe_event(bigint, uuid, text, boolean),
+  public.sync_payout_account(text, jsonb, jsonb, public.payout_account_status, timestamptz),
+  public.sync_payout(text, jsonb, timestamptz),
+  public.take_stripe_call(uuid, integer)
   to service_role;
 
 notify pgrst, 'reload schema';

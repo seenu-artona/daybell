@@ -12,7 +12,7 @@ import {
   isFakeAccount,
 } from "@/lib/stripe/fake-driver";
 import { handleStripeWebhook } from "@/lib/stripe-webhook";
-import { assertOwner, studioScope } from "@/lib/studio";
+import { assertCanManagePayouts, studioScope } from "@/lib/studio";
 
 export const runtime = "nodejs";
 
@@ -54,7 +54,7 @@ async function sendEvent(type: string, account: string, object: { id: string }):
 export const POST = handle(async (request: Request) => {
   if (process.env.VERCEL || !isFakeStripe()) return new Response(null, { status: 404 });
   const { supabase, studio } = await studioScope();
-  assertOwner(studio);
+  assertCanManagePayouts(studio);
   const { action } = await parseBody(request, input);
   const row = await loadPayoutAccountRow(supabase, studio.id);
   if (!row || !isFakeAccount(row.stripe_account_id))

@@ -1,9 +1,9 @@
 import { type StudioChecklistResponse, studioChecklistQuery, type UpNextItem } from "@daybell/api";
-import type { DataRegion } from "@daybell/config";
 import {
   jobChecklist,
   onboardingChecklist,
   onboardingComplete,
+  type PayoutAccountStatus,
   payoutsConnected,
   rankUpNext,
   seesOnboarding,
@@ -16,7 +16,6 @@ import { NextResponse } from "next/server";
 import { check, handle, parseQuery } from "@/lib/api";
 import { checklistFacts, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
 import type { JobRow } from "@/lib/jobs";
-import { PAYOUT_REGIONS } from "@/lib/region-guard";
 import { studioScope } from "@/lib/studio";
 
 /** Up next looks at draft and selling jobs only; a studio has far fewer than this at once. */
@@ -41,7 +40,6 @@ function counted(result: {
 async function onboarding(
   supabase: SupabaseClient,
   studioId: string,
-  region: DataRegion,
 ): Promise<StudioChecklistResponse["onboarding"]> {
   const studio = check(
     await supabase
@@ -55,24 +53,16 @@ async function onboarding(
     .from("jobs")
     .select("id", { count: "exact", head: true })
     .eq("studio_id", studioId);
-  // "Set up payouts" ticks when the payout account is Active (ADR 0020, Seenu Q5); it is left out where payouts
-  // aren't offered yet (US studios, Q3). Owners and admins read the account through row-level security.
-  let payouts: boolean | null = null;
-  if (PAYOUT_REGIONS.includes(region)) {
-    const account = check(
-      await supabase
-        .from("payout_accounts")
-        .select("status")
-        .eq("studio_id", studioId)
-        .maybeSingle(),
-    ) as { status: string } | null;
-    payouts = payoutsConnected(account?.status as Parameters<typeof payoutsConnected>[0]);
-  }
+  // "Set up payouts" ticks when the payout account is Active (ADR 0020, Seenu Q5), the same for every studio (Seenu,
+  // Oct 12: one checklist). Owners and admins read the account through row-level security.
+  const account = check(
+    await supabase.from("payout_accounts").select("status").eq("studio_id", studioId).maybeSingle(),
+  ) as { status: PayoutAccountStatus } | null;
   // "Review your price list" ticks from the database's own stamp of the first price list change (ADR 0019).
   const tasks = onboardingChecklist({
     hasJob: counted(jobs) > 0,
     priceListReviewed: studio.price_list_reviewed_at !== null,
-    payoutsConnected: payouts,
+    payoutsConnected: payoutsConnected(account?.status),
   });
   if (!onboardingComplete(tasks)) return { tasks: tasks.map(({ key, done }) => ({ key, done })) };
   // The database stamps its own time and keeps the first one (ADR 0017); the event carries the studio id only.
@@ -132,9 +122,7 @@ export const GET = handle(async (request: Request) => {
   const { today: todayParam } = parseQuery(request, studioChecklistQuery);
   const today = checklistToday(todayParam);
   const { supabase, studio } = await studioScope();
-  const setup = seesOnboarding(studio.role)
-    ? await onboarding(supabase, studio.id, studio.region)
-    : null;
+  const setup = seesOnboarding(studio.role) ? await onboarding(supabase, studio.id) : null;
   const body: StudioChecklistResponse = {
     onboarding: setup,
     upNext: setup ? null : await upNext(supabase, studio.id, today),

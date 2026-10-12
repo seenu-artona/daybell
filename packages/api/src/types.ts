@@ -910,7 +910,7 @@ export const payoutSchedule = z
   .object({
     interval: z.enum(PAYOUT_INTERVALS).meta({
       description:
-        "As Stripe has it. Studios choose weekly (the default), daily or monthly; manual means Stripe paused payouts.",
+        "As Stripe has it. Studios choose weekly (the default), daily or monthly; manual means payouts are made only when requested, not on a schedule.",
     }),
     weeklyAnchor: z
       .enum(PAYOUT_WEEKDAYS)
@@ -922,7 +922,7 @@ export const payoutSchedule = z
     }),
   })
   .meta({ id: "PayoutSchedule" });
-export type PayoutScheduleOut = z.infer<typeof payoutSchedule>;
+export type PayoutScheduleResponse = z.infer<typeof payoutSchedule>;
 
 export const payoutAccount = z
   .object({
@@ -1032,3 +1032,9 @@ export const PAYOUT_CONFLICTS = {
   alreadyConnected: "payouts.alreadyConnected",
 } as const;
 export type PayoutConflict = (typeof PAYOUT_CONFLICTS)[keyof typeof PAYOUT_CONFLICTS];
+
+/**
+ * In the error's `fields.form` when payouts are refused with region_unavailable because Stripe isn't set up in this
+ * deployment at all (e.g. PR previews), as opposed to the studio's region not having payouts yet.
+ */
+export const PAYOUT_NOT_CONFIGURED = "payouts.notConfigured";

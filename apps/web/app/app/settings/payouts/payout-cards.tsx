@@ -1,6 +1,6 @@
 "use client";
 
-import type { PayoutFees, PayoutScheduleOut, StudioPayoutsResponse } from "@daybell/api";
+import type { PayoutFees, PayoutScheduleResponse, StudioPayoutsResponse } from "@daybell/api";
 import {
   DEFAULT_MONTHLY_ANCHOR,
   DEFAULT_WEEKLY_ANCHOR,
@@ -47,7 +47,7 @@ const money = (m: Money) => formatMoney(m, localeForCurrency(m.currency));
 /** The schedule in words, e.g. "Weekly, every Friday". */
 function useScheduleText() {
   const t = useTranslations("app.payouts.schedule");
-  return (s: PayoutScheduleOut) =>
+  return (s: PayoutScheduleResponse) =>
     s.interval === "weekly"
       ? t("summary.weekly", { day: t(`days.${s.weeklyAnchor ?? "friday"}`) })
       : s.interval === "monthly"
@@ -69,6 +69,12 @@ function CardSection({ title, children }: { title: string; children: React.React
 
 type StripePath = "/studio/payouts/onboarding-link" | "/studio/payouts/dashboard-link";
 
+/** The schedule form's identity: a different schedule from Stripe gives a new form with its values (code review N5). */
+export function scheduleFormKey(data: StudioPayoutsResponse): string {
+  const s = data.account?.schedule;
+  return s ? `${s.interval}:${s.weeklyAnchor ?? ""}:${s.monthlyAnchor ?? ""}` : "none";
+}
+
 /** Connection: Seenu's five states in words, what they mean, and (owner only) the way to Stripe. */
 export function StatusCard({
   data,
@@ -79,6 +85,7 @@ export function StatusCard({
 }) {
   const t = useTranslations("app.payouts");
   const formatDay = useFormatDay();
+  const ids = { go: useId(), manage: useId() };
   const account = data.account;
   const state = account?.status ?? "notStarted";
   const action =
@@ -101,28 +108,39 @@ export function StatusCard({
       </p>
       {account?.deadline && (state === "needs_info" || state === "restricted") ? (
         <p className="m-0">
-          {t("explain.deadline", { date: formatDay(account.deadline.slice(0, 10)) })}
+          {/* Admins can't add anything themselves (Seenu, answer 1): they're told the owner needs to. */}
+          {t(data.canManage ? "explain.deadline" : "explain.deadlineOwner", {
+            date: formatDay(account.deadline.slice(0, 10)),
+          })}
         </p>
       ) : null}
       {data.canManage ? (
         <div className="flex flex-col gap-3">
           {action ? (
             <div className="flex flex-col items-start gap-1">
-              <Button onClick={() => onStripe("/studio/payouts/onboarding-link")}>
+              <Button
+                aria-describedby={ids.go}
+                onClick={() => onStripe("/studio/payouts/onboarding-link")}
+              >
                 {t(`actions.${action}`)}
               </Button>
-              <p className="m-0 text-caption text-muted">{t("goToStripe")}</p>
+              <p id={ids.go} className="m-0 text-caption text-muted">
+                {t("goToStripe")}
+              </p>
             </div>
           ) : null}
           {account?.detailsSubmitted ? (
             <div className="flex flex-col items-start gap-1">
               <Button
                 variant="secondary"
+                aria-describedby={ids.manage}
                 onClick={() => onStripe("/studio/payouts/dashboard-link")}
               >
                 {t("actions.manage")}
               </Button>
-              <p className="m-0 text-caption text-muted">{t("actions.manageHelp")}</p>
+              <p id={ids.manage} className="m-0 text-caption text-muted">
+                {t("actions.manageHelp")}
+              </p>
             </div>
           ) : null}
         </div>
@@ -136,10 +154,13 @@ export function StatusCard({
 /** Weekly on a weekday (Friday by default), daily, or monthly on a date (the 1st by default); Seenu, answer 3 and Q6. */
 export function ScheduleCard({
   data,
+  onSaving,
   onSaved,
   onProblem,
 }: {
   data: StudioPayoutsResponse;
+  /** A save starts: the page clears the last problem. */
+  onSaving: () => void;
   onSaved: (next: StudioPayoutsResponse, summary: string) => void;
   onProblem: (fields: Record<string, string>, code: string) => void;
 }) {
@@ -163,6 +184,7 @@ export function ScheduleCard({
     // Nothing is disabled while saving (focus stays put, WCAG 2.4.3); repeated submits are ignored instead.
     if (saving) return;
     setSaving(true);
+    onSaving();
     const body =
       interval === "weekly"
         ? { interval, weeklyAnchor: weekday }

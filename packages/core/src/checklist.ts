@@ -309,7 +309,8 @@ export const UP_NEXT_SHOWN = 3;
  * (Seenu, answer 12): it stays in Settings. "Review your price list" (step 6, ADR 0019) ticks itself the first time an
  * owner or admin saves a price list change or creates a list (Claude's call 3): every studio starts with the starter
  * list, so having one proves nothing. "Set up payouts" (step 7, ADR 0020) ticks only when the studio's payout account
- * is Active (Seenu, Q5), and is left out where payouts aren't offered yet (US studios, Q3).
+ * is Active (Seenu, Q5). It is the same for every studio (Seenu, Oct 12: one checklist, no regional variant): where
+ * payouts aren't offered yet (US studios, Q3) the task simply stays open until they are.
  */
 export const ONBOARDING_TASKS = ["account", "payouts", "priceList", "firstJob"] as const;
 export type OnboardingTaskKey = (typeof ONBOARDING_TASKS)[number];
@@ -319,8 +320,8 @@ export interface OnboardingFacts {
   hasJob: boolean;
   /** An owner or admin has saved a price list change (studios.price_list_reviewed_at is set). */
   priceListReviewed: boolean;
-  /** The payout account is Active; null where payouts aren't offered (the task is left out). */
-  payoutsConnected: boolean | null;
+  /** The studio's payout account is Active. */
+  payoutsConnected: boolean;
 }
 
 export interface OnboardingTask {
@@ -332,15 +333,12 @@ export interface OnboardingTask {
 export function onboardingChecklist(facts: OnboardingFacts): OnboardingTask[] {
   const done: Record<OnboardingTaskKey, boolean> = {
     account: true,
-    payouts: facts.payoutsConnected === true,
+    payouts: facts.payoutsConnected,
     priceList: facts.priceListReviewed,
     firstJob: facts.hasJob,
   };
-  const keys = ONBOARDING_TASKS.filter(
-    (key) => key !== "payouts" || facts.payoutsConnected !== null,
-  );
-  const next = keys.find((key) => !done[key]);
-  return keys.map((key) => ({
+  const next = ONBOARDING_TASKS.find((key) => !done[key]);
+  return ONBOARDING_TASKS.map((key) => ({
     key,
     done: done[key],
     state: done[key] ? "done" : key === next ? "next" : "todo",

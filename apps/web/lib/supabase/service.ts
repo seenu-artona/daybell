@@ -113,7 +113,7 @@ export function photoSystemRpc(
 
 /**
  * Payout writes (ADR 0020): browsers never write payout accounts (Stripe ids and status must never be chosen by a
- * browser). Only from route handlers after studioScope() and assertOwner(); each acts for the person and checks again
+ * browser). Only from route handlers after studioScope() and assertCanManagePayouts(); each acts for the person and checks again
  * that they are the owner.
  */
 export type PayoutWriteRpc = "create_payout_account" | "set_payout_schedule";
@@ -135,7 +135,9 @@ export type PayoutSystemRpc =
   | "record_stripe_event"
   | "finish_stripe_event"
   | "sync_payout_account"
-  | "sync_payout";
+  | "sync_payout"
+  // The per-studio budget of calls to Stripe (rate limit), after the route's own role check.
+  | "take_stripe_call";
 
 export function payoutSystemRpc(
   region: DataRegion,

@@ -1,11 +1,13 @@
 -- Payouts with Stripe Connect (D56, D98, D106, D143, D96, D113; Seenu's answers 1–4 and Q1–Q6, Claude's calls of Oct
 -- 12 2026; ADR 0020): only the owner connects and changes the schedule; owners and admins read; photographers, staff,
 -- outsiders, removed members and anon read nothing; nobody signed in writes; another studio sees and changes nothing
--- (accounts, payouts, the inbox, the functions); Stripe events are recorded once; syncs that change nothing write
--- nothing; events carry ids and status words only; a studio with a Stripe account can't be deleted.
+-- (accounts, payouts, the inbox, the functions); Stripe events are recorded once and finished only by the delivery
+-- holding the lease; permanent failures aren't retried; an older answer from Stripe never overwrites a newer copy;
+-- syncs that change nothing write no event; calls to Stripe are budgeted per studio per minute; events carry ids and
+-- status words only; a studio with a Stripe account can't be deleted.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(98);
+select plan(121);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -52,34 +54,39 @@ select is((select data_type from information_schema.columns
 select hasnt_column('public', 'payout_accounts', 'external_account', 'no bank details are kept');
 select ok((select bool_and(prosecdef and proconfig @> array['search_path=""']) from pg_proc
   where proname in ('create_payout_account', 'set_payout_schedule', 'record_stripe_event', 'finish_stripe_event',
-    'sync_payout_account', 'sync_payout', 'act_for_owner', 'guard_payout_account', 'guard_payout')),
+    'sync_payout_account', 'sync_payout', 'take_stripe_call', 'act_for_owner', 'guard_payout_account',
+    'guard_payout')),
   'the functions are SECURITY DEFINER with an empty search_path');
 select is((select count(*) from unnest(array[
-    'public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status)',
-    'public.set_payout_schedule(uuid, uuid, jsonb)',
+    'public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status, timestamptz)',
+    'public.set_payout_schedule(uuid, uuid, jsonb, timestamptz)',
     'public.record_stripe_event(text, text, text, boolean, timestamptz)',
-    'public.finish_stripe_event(bigint, text)',
-    'public.sync_payout_account(text, jsonb, jsonb, public.payout_account_status)',
-    'public.sync_payout(text, jsonb)']) f
+    'public.finish_stripe_event(bigint, uuid, text, boolean)',
+    'public.sync_payout_account(text, jsonb, jsonb, public.payout_account_status, timestamptz)',
+    'public.sync_payout(text, jsonb, timestamptz)',
+    'public.take_stripe_call(uuid, integer)']) f
   where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
   0::bigint, 'browsers and logged-out visitors can run none of the write functions');
 select ok(not exists (select 1 from pg_proc p, aclexplode(p.proacl) a
   where p.proname in ('create_payout_account', 'set_payout_schedule', 'record_stripe_event', 'finish_stripe_event',
-    'sync_payout_account', 'sync_payout') and a.grantee = 0 and a.privilege_type = 'EXECUTE'),
+    'sync_payout_account', 'sync_payout', 'take_stripe_call') and a.grantee = 0 and a.privilege_type = 'EXECUTE'),
   'PUBLIC can run none of them');
 select ok((select bool_and(has_function_privilege('service_role', f, 'execute')) from unnest(array[
-    'public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status)',
-    'public.sync_payout(text, jsonb)', 'public.record_stripe_event(text, text, text, boolean, timestamptz)']) f),
+    'public.create_payout_account(uuid, uuid, text, boolean, jsonb, jsonb, public.payout_account_status, timestamptz)',
+    'public.sync_payout(text, jsonb, timestamptz)', 'public.record_stripe_event(text, text, text, boolean, timestamptz)',
+    'public.finish_stripe_event(bigint, uuid, text, boolean)', 'public.take_stripe_call(uuid, integer)']) f),
   'the service role runs them');
 select is((select count(*) from unnest(array['app.act_for_owner(uuid, uuid)', 'app.guard_payout_account()',
     'app.on_payout_change()']) f where has_function_privilege('authenticated', f, 'execute')), 0::bigint,
   'browsers can run no app helper');
-select is((select count(*) from (values ('payout_accounts'), ('payouts'), ('stripe_events')) t (n),
+select is((select count(*) from (values ('payout_accounts'), ('payouts'), ('stripe_events'), ('stripe_call_budget')) t (n),
     unnest(array['insert', 'update', 'delete', 'truncate']) p
   where has_table_privilege('authenticated', 'public.' || n, p)), 0::bigint,
-  'signed-in people can''t insert, update, delete or truncate any of the three tables');
+  'signed-in people can''t insert, update, delete or truncate any of the four tables');
 select ok(not has_table_privilege('authenticated', 'public.stripe_events', 'select'),
   'signed-in people can''t read the webhook inbox');
+select ok(not has_table_privilege('authenticated', 'public.stripe_call_budget', 'select'),
+  'nor the Stripe call budget');
 
 -- ── The owner connects (acted for by the API as the service role) ─────────────────────────────────────────────────
 select lives_ok($$ select public.create_payout_account('11111111-1111-4111-8111-111111111111',
@@ -165,6 +172,11 @@ select throws_ok($$ select public.set_payout_schedule('22222222-2222-4222-8222-2
 select throws_ok($$ select public.set_payout_schedule('66666666-6666-4666-8666-666666666666',
   'cccccccc-cccc-4ccc-8ccc-cccccccccccc', (select weekly from facts)) $$, 'P0001', 'not_connected',
   'a studio without an account has no schedule to change');
+select lives_ok($$ select public.set_payout_schedule('11111111-1111-4111-8111-111111111111',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select weekly from facts), now() - interval '1 minute') $$,
+  'Stripe''s answer to an older schedule change arrives late');
+select is((select payout_interval::text from public.payout_accounts where stripe_account_id = 'acct_A1'), 'monthly',
+  'and doesn''t overwrite the newer copy');
 
 -- ── Syncs from Stripe (webhooks and refresh) ──────────────────────────────────────────────────────────────────────
 select is(public.sync_payout_account('acct_A1', (select active from facts), (select monthly from facts), 'active'),
@@ -174,13 +186,16 @@ select results_eq($$ select status::text, charges_enabled, payouts_enabled, curr
 select results_eq($$ select actor_id, data from public.events where type = 'payout_account.status_changed' $$,
   $$ values (null::uuid, '{"from": "needs_info", "to": "active"}'::jsonb) $$,
   'payout_account.status_changed has no actor when Stripe caused it');
-create temp table before_sync as select updated_at from public.payout_accounts where stripe_account_id = 'acct_A1';
 select is(public.sync_payout_account('acct_A1', (select active from facts), (select monthly from facts), 'active'),
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, 'the same facts again');
 select is((select count(*) from public.events where type like 'payout_account.%'), 4::bigint,
   'write no event (created twice, schedule once, status once)');
-select is((select updated_at from public.payout_accounts where stripe_account_id = 'acct_A1'),
-  (select updated_at from before_sync), 'and don''t touch the row');
+select is(public.sync_payout_account('acct_A1', (select fresh from facts), (select weekly from facts), 'needs_info',
+  now() - interval '1 minute'), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid,
+  'an older answer from Stripe (fetched before the saved copy) arrives late');
+select results_eq($$ select status::text, payout_interval::text from public.payout_accounts
+  where stripe_account_id = 'acct_A1' $$, $$ values ('active', 'monthly') $$,
+  'and never overwrites the newer copy (concurrent webhooks finish in any order)');
 select is(public.sync_payout_account('acct_Unknown', (select active from facts), (select weekly from facts), 'active'),
   null, 'an account this database doesn''t know syncs nothing');
 select is((select status::text from public.payout_accounts where stripe_account_id = 'acct_B1'), 'active',
@@ -205,6 +220,12 @@ select lives_ok($$ select public.sync_payout('acct_A1', '{"stripe_payout_id": "p
   "failure_code": null, "stripe_created_at": "2026-10-12T12:00:00Z"}') $$, 'Stripe paid it');
 select results_eq($$ select data from public.events where type = 'payout.status_changed' $$,
   $$ values ('{"from": "pending", "to": "paid"}'::jsonb) $$, 'payout.status_changed');
+select lives_ok($$ select public.sync_payout('acct_A1', '{"stripe_payout_id": "po_A1", "amount_cents": 12345,
+  "currency": "usd", "status": "in_transit", "method": "standard", "automatic": true, "arrival_date": "2026-10-16",
+  "failure_code": null, "stripe_created_at": "2026-10-12T12:00:00Z"}', now() - interval '1 minute') $$,
+  'an older in_transit answer arrives after paid');
+select is((select status::text from public.payouts where stripe_payout_id = 'po_A1'), 'paid',
+  'and is skipped: paid stays paid');
 select throws_ok($$ select public.sync_payout('acct_B1', '{"stripe_payout_id": "po_A1", "amount_cents": 1,
   "currency": "usd", "status": "failed", "method": "standard", "automatic": true, "arrival_date": "2026-10-16",
   "failure_code": null, "stripe_created_at": "2026-10-12T12:00:00Z"}') $$, '22023', 'payout_mismatch',
@@ -233,29 +254,64 @@ select isnt(public.sync_payout('acct_B1', '{"stripe_payout_id": "po_B1", "amount
   "failure_code": null, "stripe_created_at": "2026-10-12T12:00:00Z"}'), null, 'B gets a payout of its own');
 
 -- ── The webhook inbox ─────────────────────────────────────────────────────────────────────────────────────────────
-select results_eq($$ select (r ->> 'studio_id')::uuid, (r ->> 'processed')::boolean, (r ->> 'claimed')::boolean
-  from public.record_stripe_event('evt_A1', 'account.updated', 'acct_A1', false, now()) r $$,
-  $$ values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, false, true) $$,
-  'an event for A is recorded in A and claimed for processing');
-select results_eq($$ select (r ->> 'processed')::boolean, (r ->> 'claimed')::boolean
-  from public.record_stripe_event('evt_A1', 'account.updated', 'acct_A1', false, now()) r $$,
-  $$ values (false, false) $$, 'a second delivery during processing doesn''t claim it');
+create temp table claims (n int primary key, r jsonb);
+create function pg_temp.lease(p_n int) returns uuid language sql as $$
+  select (r ->> 'lease')::uuid from claims where n = p_n $$;
+create function pg_temp.inbox(p_event text) returns bigint language sql as $$
+  select id from public.stripe_events where stripe_event_id = p_event $$;
+insert into claims select 1, public.record_stripe_event('evt_A1', 'account.updated', 'acct_A1', false, now());
+select results_eq($$ select (r ->> 'studio_id')::uuid, (r ->> 'processed')::boolean, (r ->> 'claimed')::boolean,
+  r ->> 'lease' is not null from claims where n = 1 $$,
+  $$ values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, false, true, true) $$,
+  'an event for A is recorded in A and claimed for processing, with a lease token');
+insert into claims select 2, public.record_stripe_event('evt_A1', 'account.updated', 'acct_A1', false, now());
+select results_eq($$ select (r ->> 'processed')::boolean, (r ->> 'claimed')::boolean, r ->> 'lease' from claims
+  where n = 2 $$, $$ values (false, false, null::text) $$,
+  'a second delivery during processing doesn''t claim it and gets no lease');
 select is((select count(*) from public.stripe_events where stripe_event_id = 'evt_A1'), 1::bigint,
   'duplicates add no rows');
-select lives_ok($$ select public.finish_stripe_event((select id from public.stripe_events where stripe_event_id = 'evt_A1'),
-  'stripe_unavailable') $$, 'a failure is recorded by its code');
-select results_eq($$ select processed_at is null, last_error, processing_started_at is null from public.stripe_events
-  where stripe_event_id = 'evt_A1' $$, $$ values (true, 'stripe_unavailable', true) $$,
+select is(public.finish_stripe_event(pg_temp.inbox('evt_A1'), gen_random_uuid(), null), false,
+  'a delivery without the lease can''t finish the event');
+select results_eq($$ select processed_at is null, processing_started_at is not null from public.stripe_events
+  where stripe_event_id = 'evt_A1' $$, $$ values (true, true) $$, 'which stays unprocessed and leased');
+select is(public.finish_stripe_event(pg_temp.inbox('evt_A1'), pg_temp.lease(1), 'stripe_unavailable'), true,
+  'a failure is recorded by its code, by the lease holder');
+select results_eq($$ select processed_at is null, last_error, processing_started_at is null, lease_token is null
+  from public.stripe_events where stripe_event_id = 'evt_A1' $$, $$ values (true, 'stripe_unavailable', true, true) $$,
   'and frees the event for Stripe''s next try');
-select results_eq($$ select (r ->> 'claimed')::boolean from public.record_stripe_event('evt_A1', 'account.updated',
-  'acct_A1', false, now()) r $$, $$ values (true) $$, 'the retry claims it again');
-select lives_ok($$ select public.finish_stripe_event((select id from public.stripe_events where stripe_event_id = 'evt_A1'),
-  null) $$, 'and finishes it');
+insert into claims select 3, public.record_stripe_event('evt_A1', 'account.updated', 'acct_A1', false, now());
+select results_eq($$ select (r ->> 'claimed')::boolean, pg_temp.lease(3) is distinct from pg_temp.lease(1)
+  from claims where n = 3 $$, $$ values (true, true) $$, 'the retry claims it again with a new lease');
+select is(public.finish_stripe_event(pg_temp.inbox('evt_A1'), pg_temp.lease(1), null), false,
+  'the earlier delivery''s lease can no longer finish it');
+select is(public.finish_stripe_event(pg_temp.inbox('evt_A1'), pg_temp.lease(3), null), true, 'the retry finishes it');
 select results_eq($$ select (r ->> 'processed')::boolean, (r ->> 'claimed')::boolean
   from public.record_stripe_event('evt_A1', 'account.updated', 'acct_A1', false, now()) r $$,
   $$ values (true, false) $$, 'a processed event is never processed again');
 select results_eq($$ select attempts, last_error from public.stripe_events where stripe_event_id = 'evt_A1' $$,
   $$ values (2, null::text) $$, 'after two attempts, with the error cleared');
+select is(public.finish_stripe_event(pg_temp.inbox('evt_A1'), pg_temp.lease(3), 'sync_failed'), false,
+  'and a finished event can''t be finished again');
+-- A delivery whose lease ran out (it took over two minutes) can't clear the lease of the delivery that took over.
+insert into claims select 4, public.record_stripe_event('evt_A2', 'account.updated', 'acct_A1', false, now());
+update public.stripe_events set processing_started_at = now() - interval '3 minutes' where stripe_event_id = 'evt_A2';
+insert into claims select 5, public.record_stripe_event('evt_A2', 'account.updated', 'acct_A1', false, now());
+select is((select (r ->> 'claimed')::boolean from claims where n = 5), true,
+  'a lapsed lease is taken over by the next delivery');
+select is(public.finish_stripe_event(pg_temp.inbox('evt_A2'), pg_temp.lease(4), 'sync_failed'), false,
+  'the lapsed delivery can''t finish it or clear the new lease');
+select results_eq($$ select processing_started_at is not null, lease_token = pg_temp.lease(5), last_error
+  from public.stripe_events where stripe_event_id = 'evt_A2' $$, $$ values (true, true, null::text) $$,
+  'which stays with the delivery that took over');
+-- An object that can never be copied (e.g. a payout in the wrong currency) fails for good and isn't retried.
+insert into claims select 6, public.record_stripe_event('evt_A3', 'payout.paid', 'acct_A1', false, now());
+select is(public.finish_stripe_event(pg_temp.inbox('evt_A3'), pg_temp.lease(6), 'payout_currency', true), true,
+  'a permanent failure is recorded by its code');
+select results_eq($$ select processed_at is not null, last_error from public.stripe_events
+  where stripe_event_id = 'evt_A3' $$, $$ values (true, 'payout_currency') $$, 'and marked processed');
+select results_eq($$ select (r ->> 'processed')::boolean, (r ->> 'claimed')::boolean
+  from public.record_stripe_event('evt_A3', 'payout.paid', 'acct_A1', false, now()) r $$,
+  $$ values (true, false) $$, 'so Stripe''s retries are acknowledged, not processed again');
 select is(public.record_stripe_event('evt_X1', 'account.updated', 'acct_Unknown', false, now()), null,
   'an unknown account''s event is not recorded');
 select is((select count(*) from public.stripe_events where stripe_event_id = 'evt_X1'), 0::bigint, 'nothing is stored');
@@ -263,10 +319,23 @@ select throws_ok($$ select public.record_stripe_event('evt_A1', 'account.updated
   '22023', 'event_mismatch', 'an event id never moves to another studio''s account');
 select throws_ok($$ select public.record_stripe_event('event-1', 'account.updated', 'acct_A1', false, now()) $$,
   '23514', null, 'Stripe event ids are checked');
-select throws_ok($$ select public.finish_stripe_event((select id from public.stripe_events where stripe_event_id = 'evt_A1'),
+select throws_ok($$ select public.finish_stripe_event(pg_temp.inbox('evt_A2'), pg_temp.lease(5),
   'Something went wrong for maya@example.test') $$, '23514', null, 'errors are code names, never messages');
 select is((select studio_id from public.stripe_events where stripe_event_id = 'evt_A1'),
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, 'the inbox row is A''s');
+
+-- ── Stripe call budget (rate limit per studio per minute) ─────────────────────────────────────────────────────────
+select is(public.take_stripe_call('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 2), true, 'a studio''s first call this minute');
+select is(public.take_stripe_call('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 2), true, 'its second');
+select is(public.take_stripe_call('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 2), false,
+  'a third over a limit of two is refused');
+select is(public.take_stripe_call('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 2), true,
+  'another studio has a budget of its own');
+update public.stripe_call_budget set window_start = window_start - interval '1 minute'
+  where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+select is(public.take_stripe_call('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 2), true, 'a new minute starts again');
+select throws_ok($$ select public.take_stripe_call('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 0) $$, '22023', null,
+  'the limit is checked');
 
 -- ── Events carry ids and words only (D96) ─────────────────────────────────────────────────────────────────────────
 select is((select count(*) from public.events where type like 'payout%'
@@ -291,6 +360,8 @@ select throws_ok($$ select public.create_payout_account('11111111-1111-4111-8111
   'nor run the write functions');
 select throws_ok($$ select public.sync_payout_account('acct_B1', '{}'::jsonb, '{}'::jsonb, 'restricted') $$, '42501', null,
   'nor the system sync, on anyone''s account');
+select throws_ok($$ select public.take_stripe_call('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 1000) $$, '42501', null,
+  'nor spend or reset any studio''s Stripe budget');
 select pg_temp.as_user('55555555-5555-4555-8555-555555555555') as signed_in;
 select results_eq($$ select stripe_account_id from public.payout_accounts $$, $$ values ('acct_A1') $$,
   'an admin reads the account (read-only, answer 1)');

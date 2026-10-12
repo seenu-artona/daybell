@@ -30,6 +30,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
 import { PAYOUT_REGIONS } from "./region-guard";
 import type { StripeAccountData, StripePayoutData } from "./stripe";
+import { payoutSystemRpc } from "./supabase/service";
 
 /**
  * Payouts (Phase 1 step 7; ADR 0020): Stripe's objects turned into the few facts Daybell keeps (ids, flags, counts,
@@ -40,7 +41,8 @@ import type { StripeAccountData, StripePayoutData } from "./stripe";
 
 type DbError = { code?: string; message?: string } | null;
 
-const CODE = /^[a-z_.]{1,100}$/;
+/** Stripe's reason codes look like this; anything else is kept as "other", never as free text. */
+const STRIPE_CODE = /^[a-z_.]{1,100}$/;
 const count = (list: readonly unknown[] | null | undefined) => Math.min(list?.length ?? 0, 1000);
 const isOneOf = <T extends string>(list: readonly T[], value: unknown): value is T =>
   typeof value === "string" && (list as readonly string[]).includes(value);
@@ -55,7 +57,7 @@ export function accountFacts(
     detailsSubmitted: account.details_submitted,
     chargesEnabled: account.charges_enabled,
     payoutsEnabled: account.payouts_enabled,
-    disabledReason: reason === null ? null : CODE.test(reason) ? reason : "other",
+    disabledReason: reason === null ? null : STRIPE_CODE.test(reason) ? reason : "other",
     currentlyDue: count(r?.currently_due),
     pastDue: count(r?.past_due),
     pendingVerification: count(r?.pending_verification),
@@ -63,7 +65,10 @@ export function accountFacts(
   };
 }
 
-/** The schedule as Stripe has it. Several weekly days or monthly dates are kept as the first one. */
+/**
+ * The schedule as Stripe has it. Several weekly days or monthly dates are kept as the first one. A schedule Daybell
+ * can't read (an unknown interval, or monthly with no day) is an error, so the webhook records it as permanent.
+ */
 export function accountSchedule(
   account: StripeAccountData,
 ): PayoutSchedule & { delayDays: number } {
@@ -72,6 +77,7 @@ export function accountSchedule(
   const interval: PayoutInterval = s.interval;
   const weekday = s.weekly_anchor ?? s.weekly_payout_days?.[0] ?? null;
   const monthDay = s.monthly_anchor ?? s.monthly_payout_days?.[0] ?? null;
+  if (interval === "monthly" && monthDay === null) throw new Error("payout_schedule_unknown");
   return {
     interval,
     weeklyAnchor:
@@ -150,6 +156,30 @@ export function countryForRegion(region: DataRegion): "CA" | "US" {
 /** Where Stripe sends the owner back to: always this deployment's own address, never one from the request. */
 export const payoutsReturnUrl = (kind: "return" | "refresh") =>
   `${siteUrl()}/app/settings/payouts?stripe=${kind}`;
+
+/**
+ * At most this many requests that call Stripe, per studio per minute, across refresh, the onboarding and dashboard
+ * links and the schedule (security review N1): one session looping on a button can't use up the platform's shared
+ * Stripe rate limit for every studio. Counted in the studio's own database (stripe_call_budget).
+ */
+export const STRIPE_CALLS_PER_MINUTE = 10;
+
+/** Counts one call to Stripe for the studio; 429 rate_limited once the minute's budget is spent. */
+export async function takeStripeCall(studio: Pick<StudioSummary, "id" | "region">): Promise<void> {
+  const { data, error } = await payoutSystemRpc(studio.region, "take_stripe_call", {
+    p_studio_id: studio.id,
+    p_limit: STRIPE_CALLS_PER_MINUTE,
+  });
+  if (error) throw fromDatabaseError(error);
+  if (data !== true) {
+    // A fixed name only: never the studio or the person.
+    console.warn("stripe_rate_limited");
+    throw new ApiError("rate_limited", "Too many requests to Stripe. Please wait a minute.");
+  }
+}
+
+/** When Daybell asks Stripe: taken just before the call, saved with the copy (an older answer never overwrites it). */
+export const stripeFetchTime = () => new Date().toISOString();
 
 const conflict = (message: string, form: string) => new ApiError("conflict", message, { form });
 
