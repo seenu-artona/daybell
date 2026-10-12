@@ -16,7 +16,7 @@ import {
 } from "@/lib/roster";
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
 import { codeWriteRpc } from "@/lib/supabase/service";
-import { CARD_CODE_UNREADABLE, taggingResult } from "@/lib/tagging";
+import { CARD_CODE_UNREADABLE, tagDueBatchesOfJob, taggingResult } from "@/lib/tagging";
 
 export const runtime = "nodejs";
 // Access codes are decrypted here, in memory, in the studio's region (D113; ADR 0015).
@@ -73,6 +73,10 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
       },
     }),
   );
+
+  // The claim moved the round of the card's batches on (code review M2): tag them again now, so the review is clean
+  // (Mark reviewed) without waiting for the daily sweep. Never fails the claim.
+  await tagDueBatchesOfJob(supabase, studio.region, studio.id, jobId);
 
   // Read back as the signed-in person, through row-level security.
   const row = check(

@@ -25,8 +25,8 @@ export interface ReviewContextValue {
   openMove: (photoIds: string[]) => void;
   /** A section's photos loaded again: drop ticked photos that left it, refresh the rest (reconcileChecked). */
   reconcile: (before: readonly TaggedPhoto[] | null, after: readonly TaggedPhoto[]) => void;
-  /** A section starts (+1) or ends (-1) loading; the selection bar waits while any is loading. */
-  trackLoad: (delta: 1 | -1) => void;
+  /** A section starts loading; call the returned function when it ends (load-tracker.ts). The selection bar waits. */
+  startLoad: () => () => void;
 }
 
 export const ReviewContext = createContext<ReviewContextValue | null>(null);
@@ -104,7 +104,7 @@ export function usePlacePhotos(
   const [photos, setPhotos] = useState<TaggedPhoto[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const trackLoad = useContext(ReviewContext)?.trackLoad;
+  const startLoad = useContext(ReviewContext)?.startLoad;
   const base = query
     ? `/jobs/${encodeURIComponent(jobId)}/tagging/photos?${query}&limit=${pageSize}`
     : null;
@@ -113,26 +113,23 @@ export function usePlacePhotos(
   useEffect(() => {
     if (!base) return;
     let live = true;
-    let loading = true;
-    trackLoad?.(1);
-    const done = () => {
-      if (loading) trackLoad?.(-1);
-      loading = false;
-    };
-    void api<TaggedPhotosResponse>(base).then((res) => {
-      if (!live) return;
-      done();
-      setFailed(!res.ok);
-      if (res.ok) {
-        setPhotos(res.data.photos);
-        setNext(res.data.nextCursor);
-      }
-    });
+    // Ended however the load ends: settled, failed, superseded or unmounted (ending twice is harmless).
+    const end = startLoad?.();
+    void api<TaggedPhotosResponse>(base)
+      .then((res) => {
+        if (!live) return;
+        setFailed(!res.ok);
+        if (res.ok) {
+          setPhotos(res.data.photos);
+          setNext(res.data.nextCursor);
+        }
+      })
+      .finally(() => end?.());
     return () => {
       live = false;
-      done();
+      end?.();
     };
-  }, [base, version, trackLoad]);
+  }, [base, version, startLoad]);
 
   useReconcileSelection(photos, base ?? "");
 

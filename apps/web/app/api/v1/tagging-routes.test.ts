@@ -41,6 +41,7 @@ const JOB = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
 const PHOTO = "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f";
 const CHILD = "2d8b9e3a-4c9f-4e77-9f2a-5b3c4d5e6f70";
 const CARD = "3e9c0f4b-5d0a-4f88-8a3b-6c4d5e6f7081";
+const BATCH = "4fad1a5c-6e1b-4a99-9b4c-7d5e6f708192";
 const owner = { id: STUDIO, name: "North Peak", slug: "np", region: "ca", role: "owner" };
 const staff = { ...owner, role: "staff" };
 const ctx = (id: string, cardId?: string) => ({
@@ -384,6 +385,7 @@ describe("naming a blank card's child (answer 2; ADR 0015's order)", () => {
     const code = generateAccessCode("ca");
     const cardCopy = await encryptCardAccessCode(code, CARD, k.encryption);
     let childCopy = "";
+    systemRpc.mockResolvedValue({ data: null, error: null });
     codeRpc.mockImplementation(async (_r, fn, _u, args) => {
       if (fn === "blank_card_code") return { data: cardCopy, error: null };
       childCopy = args.p_child.access_code_ciphertext;
@@ -410,7 +412,12 @@ describe("naming a blank card's child (answer 2; ADR 0015's order)", () => {
                   ? single
                     ? { ...row, access_code_ciphertext: childCopy }
                     : []
-                  : null;
+                  : name === "upload_batches"
+                    ? [
+                        { id: BATCH, tag_round: 3, tagged_round: 2 },
+                        { id: PHOTO, tag_round: 1, tagged_round: 1 },
+                      ]
+                    : null;
             return (resolve: (v: unknown) => void) => resolve({ data, error: null });
           },
         },
@@ -429,6 +436,8 @@ describe("naming a blank card's child (answer 2; ADR 0015's order)", () => {
     });
     expect(childCopy).not.toBe(cardCopy);
     expect(JSON.stringify(log.mock.calls)).not.toContain(code);
+    // The card's batches are due again (code review M2): tagged now, so Mark reviewed doesn't wait for the sweep.
+    expect(systemRpc.mock.calls).toEqual([["ca", "tagging_inputs", { p_batch_id: BATCH }]]);
   });
 
   it("refuses a card already claimed, by name", async () => {

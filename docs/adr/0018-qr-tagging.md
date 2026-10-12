@@ -179,7 +179,8 @@ in yul1, logging only the card id if it can't. New children only go into existin
 already on the roster, the card's photos are moved to them (every page of them, code review S4) and the card's code
 stays unused. A claim moves the round of every batch with the card's photos on, and `apply_batch_tags` refuses
 (`tagging_stale`) any write holding a photo for a card that has its child, so a run that read the batch before the
-claim can't leave photos stuck under a named card (code review M2).
+claim can't leave photos stuck under a named card (code review M2). The API then tags the job's due batches before it
+answers, so the review isn't left "pending" (Mark reviewed disabled) until the daily sweep.
 
 ## API (`/api/v1`, D92)
 

@@ -22,6 +22,7 @@ import {
   tagBatch,
 } from "@daybell/core";
 import type { PhotoStorage } from "@daybell/storage";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { photoError, photoResult, previewUrl } from "./photos";
 import { photoSystemRpc } from "./supabase/service";
 
@@ -247,6 +248,31 @@ export async function tagBatchesOfPhotos(region: DataRegion, photoIds: readonly 
   } catch (err) {
     console.error("tagging_failed", err instanceof Error ? err.name : "unknown");
   }
+}
+
+/**
+ * Tags every batch of a job whose round has moved on (e.g. after a blank card's child is named, ADR 0018), read through
+ * row-level security. Failures are logged by batch id only and never thrown; the daily sweep tries again.
+ */
+export async function tagDueBatchesOfJob(
+  supabase: SupabaseClient,
+  region: DataRegion,
+  studioId: string,
+  jobId: string,
+) {
+  const { data, error } = await supabase
+    .from("upload_batches")
+    .select("id, tag_round, tagged_round")
+    .eq("studio_id", studioId)
+    .eq("job_id", jobId);
+  if (error) {
+    console.error("tagging_failed", jobId);
+    return;
+  }
+  const due = ((data ?? []) as { id: string; tag_round: number; tagged_round: number }[]).filter(
+    (b) => Number(b.tag_round) > Number(b.tagged_round),
+  );
+  for (const { id } of due) await tagBatchQuietly(region, id);
 }
 
 /** Tags one batch, logging a failure by its id only. For after() callbacks, which must never throw. */

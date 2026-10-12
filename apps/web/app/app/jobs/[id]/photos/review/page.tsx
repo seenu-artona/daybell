@@ -23,6 +23,7 @@ import { JobSection } from "../../job-section";
 import { PhotosViews } from "../photos-views";
 import { Albums } from "./albums";
 import { BlankCards } from "./blank-cards";
+import { createLoadTracker } from "./load-tracker";
 import { MoveDialog } from "./move-dialog";
 import { NoPhotos } from "./no-photos";
 import { DROP_TARGET, PhotoStrip, useDropTarget } from "./photo-strip";
@@ -68,14 +69,20 @@ export default function ReviewPage() {
   const [moving, setMoving] = useState<string[] | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  // Sections loading again; while any is (or a request is in flight) the selection bar waits.
-  const [loads, setLoads] = useState(0);
-  const waiting = busy || loads > 0;
+  // Sections loading again (load-tracker.ts); while any is, or a request is in flight, the selection bar waits. Mark
+  // reviewed only waits for requests: it acts on the job, not on the ticked photos.
+  const [loading, setLoading] = useState(false);
+  const [tracker] = useState(() => createLoadTracker(setLoading));
+  const waiting = busy || loading;
   const last = useRef("");
+  // Only the newest summary request may set the summary, so a slow, older answer can't undo a newer one.
+  const summaryRequest = useRef(0);
   const base = `/jobs/${encodeURIComponent(job.id)}`;
 
   const loadSummary = useCallback(async () => {
+    const request = ++summaryRequest.current;
     const res = await api<TaggingSummaryResponse>(`${base}/tagging`);
+    if (request !== summaryRequest.current) return;
     setFailed(!res.ok);
     if (!res.ok) return;
     setSummary(res.data.tagging);
@@ -118,24 +125,26 @@ export default function ReviewPage() {
   const move = useCallback(
     async (photoIds: string[], target: MoveTarget, targetName: string) => {
       setBusy(true);
-      setStatus("");
-      let moved = 0;
-      for (let i = 0; i < photoIds.length; i += MAX_PHOTOS_PER_MOVE) {
-        const res = await api<PhotosMovedResponse>(`${base}/photos/move`, {
-          method: "POST",
-          body: { photoIds: photoIds.slice(i, i + MAX_PHOTOS_PER_MOVE), target },
-        });
-        if (!res.ok) {
-          setStatus(problem(res));
-          await changed();
-          setBusy(false);
-          return;
+      try {
+        setStatus("");
+        let moved = 0;
+        for (let i = 0; i < photoIds.length; i += MAX_PHOTOS_PER_MOVE) {
+          const res = await api<PhotosMovedResponse>(`${base}/photos/move`, {
+            method: "POST",
+            body: { photoIds: photoIds.slice(i, i + MAX_PHOTOS_PER_MOVE), target },
+          });
+          if (!res.ok) {
+            setStatus(problem(res));
+            await changed();
+            return;
+          }
+          moved += res.data.moved;
         }
-        moved += res.data.moved;
+        setStatus(t("announce.moved", { count: moved, target: targetName }));
+        await changed();
+      } finally {
+        setBusy(false);
       }
-      setStatus(t("announce.moved", { count: moved, target: targetName }));
-      await changed();
-      setBusy(false);
     },
     [base, changed, problem, t],
   );
@@ -145,89 +154,94 @@ export default function ReviewPage() {
       setChecked((current) => reconcileChecked(current, before, after)),
     [],
   );
-  const trackLoad = useCallback((delta: 1 | -1) => setLoads((n) => Math.max(0, n + delta)), []);
+  /** Runs a request with the screen busy, and always ends busy, even if it throws. */
+  async function whileBusy(work: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await work();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function confirm(asCard: boolean) {
     if (waiting) return;
-    setBusy(true);
-    setStatus("");
-    const ids = [...checked.keys()];
-    let confirmed = 0;
-    for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_MOVE) {
-      const res = await api<PhotosConfirmedResponse>(`${base}/photos/confirm`, {
-        method: "POST",
-        body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_MOVE), asCard },
-      });
-      if (!res.ok) {
-        setStatus(problem(res));
-        await changed();
-        setBusy(false);
-        return;
+    await whileBusy(async () => {
+      setStatus("");
+      const ids = [...checked.keys()];
+      let confirmed = 0;
+      for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_MOVE) {
+        const res = await api<PhotosConfirmedResponse>(`${base}/photos/confirm`, {
+          method: "POST",
+          body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_MOVE), asCard },
+        });
+        if (!res.ok) {
+          setStatus(problem(res));
+          await changed();
+          return;
+        }
+        confirmed += res.data.confirmed;
       }
-      confirmed += res.data.confirmed;
-    }
-    setStatus(t(asCard ? "announce.cards" : "announce.confirmed", { count: confirmed }));
-    await changed();
-    setBusy(false);
+      setStatus(t(asCard ? "announce.cards" : "announce.confirmed", { count: confirmed }));
+      await changed();
+    });
   }
 
   /** Undo "This is a card photo" (answer 12): back to Flagged, hidden from parents until checked again. */
   async function undoCard() {
     if (waiting) return;
-    setBusy(true);
-    setStatus("");
-    const ids = [...checked.keys()];
-    let undone = 0;
-    for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_MOVE) {
-      const res = await api<CardPhotosUndoneResponse>(`${base}/tagging/undo-card`, {
-        method: "POST",
-        body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_MOVE) },
-      });
-      if (!res.ok) {
-        setStatus(problem(res));
-        await changed();
-        setBusy(false);
-        return;
+    await whileBusy(async () => {
+      setStatus("");
+      const ids = [...checked.keys()];
+      let undone = 0;
+      for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_MOVE) {
+        const res = await api<CardPhotosUndoneResponse>(`${base}/tagging/undo-card`, {
+          method: "POST",
+          body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_MOVE) },
+        });
+        if (!res.ok) {
+          setStatus(problem(res));
+          await changed();
+          return;
+        }
+        undone += res.data.undone;
       }
-      undone += res.data.undone;
-    }
-    setStatus(t("announce.undoneCards", { count: undone }));
-    await changed();
-    setBusy(false);
+      setStatus(t("announce.undoneCards", { count: undone }));
+      await changed();
+    });
   }
 
   /** Junk goes to the bin (plan answer 4), from where it can be restored for 30 days; its upload is tagged again. */
   async function moveToBin() {
     if (waiting) return;
-    setBusy(true);
-    setStatus("");
-    const ids = [...checked.keys()];
-    let moved = 0;
-    for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_BIN_REQUEST) {
-      const res = await api<PhotosMovedResponse>(`${base}/photos/bin`, {
-        method: "POST",
-        body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_BIN_REQUEST) },
-      });
-      if (!res.ok) {
-        setStatus(problem(res));
-        await changed();
-        setBusy(false);
-        return;
+    await whileBusy(async () => {
+      setStatus("");
+      const ids = [...checked.keys()];
+      let moved = 0;
+      for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_BIN_REQUEST) {
+        const res = await api<PhotosMovedResponse>(`${base}/photos/bin`, {
+          method: "POST",
+          body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_BIN_REQUEST) },
+        });
+        if (!res.ok) {
+          setStatus(problem(res));
+          await changed();
+          return;
+        }
+        moved += res.data.moved;
       }
-      moved += res.data.moved;
-    }
-    setStatus(tp("binned", { count: moved }));
-    await changed();
-    setBusy(false);
+      setStatus(tp("binned", { count: moved }));
+      await changed();
+    });
   }
 
   async function markReviewed() {
-    setBusy(true);
-    setStatus("");
-    const res = await api(`${base}/tagging/review`, { method: "POST" });
-    setStatus(res.ok ? t("announce.reviewed") : problem(res));
-    await changed();
-    setBusy(false);
+    await whileBusy(async () => {
+      setStatus("");
+      const res = await api(`${base}/tagging/review`, { method: "POST" });
+      setStatus(res.ok ? t("announce.reviewed") : problem(res));
+      await changed();
+    });
   }
 
   const context = useMemo<ReviewContextValue>(
@@ -247,9 +261,9 @@ export default function ReviewPage() {
       move,
       openMove: (photoIds) => setMoving(photoIds),
       reconcile,
-      trackLoad,
+      startLoad: tracker.start,
     }),
-    [job.id, canEdit, canUndoCard, version, checked, move, reconcile, trackLoad],
+    [job.id, canEdit, canUndoCard, version, checked, move, reconcile, tracker],
   );
 
   // What every ticked photo allows; "It's a normal photo" when one of them may be a card (Seenu, plan answer 1).
