@@ -38,19 +38,29 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   await expect(page.getByText(`North Peak ${tag}`).filter({ visible: true }).first()).toBeVisible();
   const setup = page.getByRole("region", { name: "Set up your studio", exact: true });
-  // Account and first job only: inviting the team stays in Settings (Seenu, answer 12).
-  await expect(setup.getByText("1 of 2 done", { exact: true })).toBeVisible();
+  // Account, price list and first job: inviting the team stays in Settings (Seenu, answer 12). Reviewing the price
+  // list comes before the first job (D143; ADR 0019).
+  await expect(setup.getByText("1 of 3 done", { exact: true })).toBeVisible();
   await expect(
     setup.getByRole("listitem").filter({ hasText: "Create your account" }),
   ).toContainText("Done");
   await expect(
-    setup.getByRole("listitem").filter({ hasText: "Create your first job" }),
+    setup.getByRole("listitem").filter({ hasText: "Review your price list" }),
   ).toContainText("Next");
+  // The row's link is named by its label and its state in words ("Next").
+  await expect(
+    setup.getByRole("link", { name: "Review your price list Next", exact: true }),
+  ).toHaveAttribute("href", "/app/products");
+  await expect(
+    setup.getByRole("listitem").filter({ hasText: "Create your first job" }),
+  ).toContainText("To do");
   await expect(setup.getByText("Invite your team")).toHaveCount(0);
 
-  // Every section is in the one dark menu; unbuilt ones say "Soon" (D126, D128). There is no top bar (D137).
+  // Every section is in the one dark menu; unbuilt ones say "Soon" (D126, D128). Products is built since step 6
+  // (ADR 0019). There is no top bar (D137).
   const menu = page.getByRole("navigation", { name: "Main" });
   await expect(menu.getByRole("link", { name: "Contacts", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Products", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Orders Soon" })).toBeVisible();
   await expect(page.getByRole("banner")).toHaveCount(0);
   await page
@@ -81,7 +91,7 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
 
   // Inviting doesn't change the setup checklist; the activity log has all three changes (event log, D96).
   await page.goto("/app");
-  await expect(setup.getByText("1 of 2 done", { exact: true })).toBeVisible();
+  await expect(setup.getByText("1 of 3 done", { exact: true })).toBeVisible();
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
 
@@ -123,6 +133,21 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
     "owner",
     "photographer",
   ]);
+
+  // Saving a price list change ticks "Review your price list" (ADR 0019): the owner changes the home shipping fee.
+  const lists = await (await page.request.get("/api/v1/price-lists")).json();
+  const starter = lists.priceLists[0];
+  // The local stack is the Canadian database (D122), so the list is in CAD (ADR 0006, 0019).
+  expect(starter).toMatchObject({ name: "Starter price list", isDefault: true, currency: "CAD" });
+  const shipping = await page.request.patch(`/api/v1/price-lists/${starter.id}`, {
+    data: { homeShippingCents: 995 },
+  });
+  expect(shipping.status()).toBe(200);
+  await page.goto("/app");
+  await expect(setup.getByText("2 of 3 done", { exact: true })).toBeVisible();
+  await expect(
+    setup.getByRole("listitem").filter({ hasText: "Review your price list" }),
+  ).toContainText("Done");
 
   // The first jobs complete the setup for good; Home then shows Up next, most urgent first: the job whose picture day
   // is 3 days away (in the browser's own day) before the one 40 days away (D143).

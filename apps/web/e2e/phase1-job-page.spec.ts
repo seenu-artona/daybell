@@ -38,7 +38,11 @@ test("job page layout, menu search and studio separation", async ({
     },
   });
   expect(created.status()).toBe(201);
-  const job = (await created.json()).job as { id: string; internalNumber: string };
+  const job = (await created.json()).job as {
+    id: string;
+    internalNumber: string;
+    priceListId: string;
+  };
   const otherName = `Unrelated Spring ${tag}`;
   expect(
     (
@@ -187,6 +191,10 @@ test("job page layout, menu search and studio separation", async ({
   await expect(sell.getByRole("listitem").filter({ hasText: "Photos uploaded" })).toContainText(
     "Coming soon",
   );
+  // Every job has a price list (the studio's default), so that item is done (ADR 0019).
+  await expect(sell.getByRole("listitem").filter({ hasText: "Price list chosen" })).toContainText(
+    "Done",
+  );
   await sell.getByRole("button", { name: "Close" }).last().click();
   await row("Add the roster").getByRole("link").click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
@@ -214,14 +222,24 @@ test("job page layout, menu search and studio separation", async ({
   ).toHaveAttribute("href", `/app/jobs/${job.id}/people?print=qr`);
   await page.goto(`/app/jobs/${job.id}`);
 
-  // 6. Photos is real since step 4 (ADR 0016); the other tabs show coming soon inside the job's frame; an unknown tab
-  // is a 404.
+  // 6. Photos is real since step 4 (ADR 0016) and Shop since step 6 (ADR 0019); the other tabs show coming soon
+  // inside the job's frame; an unknown tab is a 404.
   await main
     .getByRole("navigation", { name: "Job sections" })
     .getByRole("link", { name: "Photos", exact: true })
     .click();
   await expect(main.getByRole("heading", { name: "No photos yet", level: 2 })).toBeVisible();
-  for (const name of ["Shop", "Messages", "Orders", "Settings"]) {
+  await main
+    .getByRole("navigation", { name: "Job sections" })
+    .getByRole("link", { name: "Shop", exact: true })
+    .click();
+  await expect(main.getByRole("heading", { name: "Shop", level: 2 })).toBeVisible();
+  await expect(
+    main
+      .getByRole("region", { name: "Price list", exact: true })
+      .getByLabel("Price list for this job", { exact: true }),
+  ).toHaveValue(job.priceListId);
+  for (const name of ["Messages", "Orders", "Settings"]) {
     await main
       .getByRole("navigation", { name: "Job sections" })
       .getByRole("link", { name, exact: true })

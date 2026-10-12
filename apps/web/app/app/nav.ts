@@ -15,7 +15,7 @@ export const SECTIONS = [
   { key: "home", href: "/app", icon: House, built: true },
   { key: "jobs", href: "/app/jobs", icon: Camera, built: true },
   { key: "orders", href: "/app/orders", icon: ShoppingBag, built: false },
-  { key: "products", href: "/app/products", icon: Package, built: false },
+  { key: "products", href: "/app/products", icon: Package, built: true },
   { key: "contacts", href: "/app/contacts", icon: Users, built: true },
   { key: "marketing", href: "/app/marketing", icon: Megaphone, built: false },
   { key: "money", href: "/app/money", icon: CircleDollarSign, built: false },

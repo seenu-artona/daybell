@@ -112,6 +112,7 @@ export function HomeChecklist() {
     const done = new Map(data.onboarding.tasks.map((task) => [task.key, task.done]));
     const tasks = onboardingChecklist({
       hasJob: done.get("firstJob") === true,
+      priceListReviewed: done.get("priceList") === true,
     }).filter((task) => done.has(task.key));
     return (
       <Panel title={t("onboarding.title")}>

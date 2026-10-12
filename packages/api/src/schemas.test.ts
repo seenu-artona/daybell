@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ACCESS_CODE_ALPHABET, JOB_STATUSES, JOB_TYPES } from "@daybell/core";
+import {
+  ACCESS_CODE_ALPHABET,
+  JOB_STATUSES,
+  JOB_TYPES,
+  PRICE_ITEM_KINDS,
+  PRINT_SIZES,
+  STARTER_PRICE_LIST,
+} from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import { fromDatabaseError } from "./errors";
 import {
@@ -14,11 +21,18 @@ import {
   fieldErrors,
   groupInput,
   inviteInput,
+  isPriceText,
+  itemKindIssues,
+  itemOrderInput,
   jobInput,
   jobPatch,
   listQuery,
   movePhotosInput,
   passwordUpdateInput,
+  priceListInput,
+  priceListItemInput,
+  priceListItemPatch,
+  priceListPatch,
   qrCardsInput,
   rosterImportInput,
   rosterQuery,
@@ -523,5 +537,202 @@ describe("QR tagging and review (ADR 0018)", () => {
     expect(uploadBatchInput.parse({})).toEqual({});
     expect(uploadBatchInput.parse({ groupId: child })).toEqual({ groupId: child });
     expect(uploadBatchInput.safeParse({ groupId: "Room 4" }).success).toBe(false);
+  });
+});
+
+describe("price lists (ADR 0019)", () => {
+  const ID = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
+  const errors = (r: { success: boolean; error?: unknown }) =>
+    r.success ? {} : fieldErrors(r.error as Parameters<typeof fieldErrors>[0]);
+
+  it("names a new list, blank or copied, and never takes a currency", () => {
+    expect(priceListInput.parse({ name: " Spring " })).toEqual({ name: "Spring" });
+    expect(priceListInput.parse({ name: "Copy", copyFromId: ID }).copyFromId).toBe(ID);
+    expect(errors(priceListInput.safeParse({ name: "" }))).toEqual({
+      name: "validation.priceListName",
+    });
+    expect(priceListInput.safeParse({ name: "x".repeat(81) }).success).toBe(false);
+    expect(priceListInput.safeParse({ name: "Spring", currency: "CAD" }).success).toBe(false);
+    expect(errors(priceListInput.safeParse({ name: "S", copyFromId: "x" }))).toEqual({
+      copyFromId: "validation.priceList",
+    });
+  });
+
+  it("takes whole cents only: never 12.5, a string, a negative or too much (D96)", () => {
+    expect(priceListPatch.parse({ homeShippingCents: 895 })).toEqual({ homeShippingCents: 895 });
+    expect(priceListPatch.parse({ homeShippingCents: 0 })).toEqual({ homeShippingCents: 0 });
+    for (const bad of [12.5, "1250", -1, 100001, Number.NaN, null])
+      expect(errors(priceListPatch.safeParse({ homeShippingCents: bad })), String(bad)).toEqual({
+        homeShippingCents: "validation.shipping",
+      });
+    const item = { kind: "print", name: "8×10", printSize: "8x10" } as const;
+    expect(priceListItemInput.parse({ ...item, priceCents: 0 }).priceCents).toBe(0);
+    expect(priceListItemInput.parse({ ...item, priceCents: 1_000_000 }).priceCents).toBe(1_000_000);
+    for (const bad of [12.5, "2500", -1, 1_000_001])
+      expect(
+        errors(priceListItemInput.safeParse({ ...item, priceCents: bad })),
+        String(bad),
+      ).toEqual({
+        priceCents: "validation.price",
+      });
+  });
+
+  it("patches need a known field and never change the kind or the currency", () => {
+    expect(priceListPatch.safeParse({}).success).toBe(false);
+    expect(priceListPatch.safeParse({ currency: "USD" }).success).toBe(false);
+    expect(priceListItemPatch.safeParse({}).success).toBe(false);
+    expect(priceListItemPatch.safeParse({ kind: "package" }).success).toBe(false);
+    expect(priceListItemPatch.parse({ name: " B ", priceCents: 1 })).toEqual({
+      name: "B",
+      priceCents: 1,
+    });
+    expect(priceListItemPatch.parse({ description: null })).toEqual({ description: null });
+  });
+
+  it("needs a size for a print and contents for a package, and neither on anything else", () => {
+    const base = { name: "X", priceCents: 100 };
+    expect(errors(priceListItemInput.safeParse({ ...base, kind: "print" }))).toEqual({
+      printSize: "validation.printSize",
+    });
+    expect(
+      errors(priceListItemInput.safeParse({ ...base, kind: "print", printSize: "9x12" })),
+    ).toEqual({ printSize: "validation.printSize" });
+    expect(errors(priceListItemInput.safeParse({ ...base, kind: "package" }))).toEqual({
+      contents: "validation.packageEmpty",
+    });
+    expect(
+      errors(priceListItemInput.safeParse({ ...base, kind: "digital_single", printSize: "4x6" })),
+    ).toEqual({ printSize: "validation.printSize" });
+    expect(
+      errors(
+        priceListItemInput.safeParse({
+          ...base,
+          kind: "digital_all",
+          contents: [{ kind: "digital" }],
+        }),
+      ),
+    ).toEqual({ contents: "validation.invalid" });
+    expect(priceListItemInput.safeParse({ ...base, kind: "digital_all" }).success).toBe(true);
+    // A patch is checked against the stored kind by the server.
+    expect(itemKindIssues("print", { contents: [] }, false)).toEqual([
+      { path: "contents", message: "validation.invalid" },
+    ]);
+    expect(itemKindIssues("print", {}, false)).toEqual([]);
+    expect(itemKindIssues("package", { printSize: "4x6" }, false)).toEqual([
+      { path: "printSize", message: "validation.printSize" },
+    ]);
+  });
+
+  it("takes 1 to 20 package lines, with one digital at most and 1 to 99 prints a line (answer 3)", () => {
+    const pkg = { kind: "package", name: "A", priceCents: 6400 } as const;
+    const ok = priceListItemInput.parse({
+      ...pkg,
+      contents: [{ kind: "print", printSize: "8x10", quantity: 1 }, { kind: "digital" }],
+    });
+    expect(ok.contents).toHaveLength(2);
+    expect(errors(priceListItemInput.safeParse({ ...pkg, contents: [] }))).toEqual({
+      contents: "validation.packageEmpty",
+    });
+    expect(
+      errors(
+        priceListItemInput.safeParse({
+          ...pkg,
+          contents: [{ kind: "digital" }, { kind: "digital" }],
+        }),
+      ),
+    ).toEqual({ contents: "validation.packageDigitals" });
+    expect(
+      priceListItemInput.safeParse({
+        ...pkg,
+        contents: Array.from({ length: 21 }, () => ({
+          kind: "print",
+          printSize: "4x6",
+          quantity: 1,
+        })),
+      }).success,
+    ).toBe(false);
+    for (const quantity of [0, 100, 1.5])
+      expect(
+        errors(
+          priceListItemInput.safeParse({
+            ...pkg,
+            contents: [{ kind: "print", printSize: "4x6", quantity }],
+          }),
+        ),
+      ).toEqual({ "contents.0.quantity": "validation.quantity" });
+    // A digital line has no quantity or size of its own.
+    expect(
+      priceListItemInput.safeParse({ ...pkg, contents: [{ kind: "digital", quantity: 2 }] })
+        .success,
+    ).toBe(false);
+  });
+
+  it("orders every item once", () => {
+    expect(itemOrderInput.parse({ itemIds: [ID] })).toEqual({ itemIds: [ID] });
+    expect(itemOrderInput.safeParse({ itemIds: [ID, ID] }).success).toBe(false);
+    expect(itemOrderInput.safeParse({ itemIds: ["x"] }).success).toBe(false);
+    // Unknown fields are refused, not silently dropped, like every other input.
+    expect(errors(itemOrderInput.safeParse({ itemIds: [ID], position: 3 }))).toEqual({
+      form: "validation.unknownField",
+    });
+  });
+
+  it("refuses control characters and bidi overrides in names and descriptions (as the database does)", () => {
+    for (const bad of ["Spring\u0007", "Spring\u0085", "Spring \u202Egnirps", "A\u2066B\u2069"]) {
+      expect(errors(priceListInput.safeParse({ name: bad })), JSON.stringify(bad)).toEqual({
+        name: "validation.priceListName",
+      });
+      expect(errors(priceListItemPatch.safeParse({ name: bad })), JSON.stringify(bad)).toEqual({
+        name: "validation.itemName",
+      });
+      expect(
+        errors(priceListItemPatch.safeParse({ description: bad })),
+        JSON.stringify(bad),
+      ).toEqual({ description: "validation.invalid" });
+    }
+    expect(isPriceText("8×10 print — café, 日本")).toBe(true);
+    expect(priceListItemPatch.parse({ name: "Ünïcode ✓" })).toEqual({ name: "Ünïcode ✓" });
+  });
+
+  it("lets a job name its price list and school delivery", () => {
+    const ok = { name: "Fall", type: "school", pictureDay: "2026-10-14" };
+    expect(jobInput.parse({ ...ok, priceListId: ID, deliverToSchool: true })).toMatchObject({
+      priceListId: ID,
+      deliverToSchool: true,
+    });
+    expect(errors(jobPatch.safeParse({ priceListId: "nope" }))).toEqual({
+      priceListId: "validation.priceList",
+    });
+    expect(jobPatch.safeParse({ priceListId: null }).success).toBe(false);
+    expect(jobPatch.parse({ deliverToSchool: false })).toEqual({ deliverToSchool: false });
+  });
+});
+
+describe("price lists match the database", () => {
+  const sql = readFileSync(
+    join(__dirname, "../../db/supabase/migrations/20261012200000_price_lists.sql"),
+    "utf8",
+  );
+  const values = (name: string) =>
+    [
+      ...(sql.match(new RegExp(`${name} as enum \\(([^)]*)\\)`))?.[1] ?? "").matchAll(/'(\w+)'/g),
+    ].map((m) => m[1]);
+
+  it("has the same kinds and print sizes", () => {
+    expect(values("price_item_kind")).toEqual([...PRICE_ITEM_KINDS]);
+    expect(values("print_size")).toEqual([...PRINT_SIZES]);
+  });
+
+  it("has the same bounds", () => {
+    expect(sql).toContain("price_cents between 0 and 1000000");
+    expect(sql).toContain("home_shipping_cents between 0 and 100000");
+    expect(sql).toContain("quantity between 1 and 99");
+    expect(sql).toContain("char_length(name) between 1 and 80");
+  });
+
+  it("seeds the same starter list as core (Claude's call 9)", () => {
+    const json = sql.match(/\$starter\$([\s\S]*?)\$starter\$/)?.[1];
+    expect(json).toBeDefined();
+    expect(JSON.parse(json as string)).toEqual(STARTER_PRICE_LIST);
   });
 });

@@ -39,8 +39,16 @@ describe("sectionForPath", () => {
     expect(sectionForPath("/app/jobs/0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e/import")).toBe("jobs");
   });
 
-  it("has jobs and contacts built (Phase 1 step 1)", () => {
+  it("has jobs and contacts built (Phase 1 step 1), and products (step 6, ADR 0019)", () => {
     expect(SOON_SECTIONS).not.toContain("jobs");
     expect(SOON_SECTIONS).not.toContain("contacts");
+    expect(SOON_SECTIONS).not.toContain("products");
+  });
+
+  it("highlights Products on its price list pages", () => {
+    expect(sectionForPath("/app/products")).toBe("products");
+    expect(sectionForPath("/app/products/price-lists/0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e")).toBe(
+      "products",
+    );
   });
 });

@@ -12,6 +12,8 @@ export const badgeVariants = cva(
         money: "bg-lime text-ink",
         warning: "bg-warning-soft text-warning-text",
         danger: "bg-danger-soft text-danger",
+        /** A neutral note that isn't a job status, e.g. a studio's default price list. */
+        info: "bg-info-soft text-info",
       },
     },
     defaultVariants: { tone: "draft" },

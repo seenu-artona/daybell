@@ -14,7 +14,7 @@ import { check } from "./api";
 
 /** Columns the API reads; the client is embedded through the composite studio FK (ADR 0008). */
 export const JOB_COLUMNS =
-  "id, name, type, status, picture_day, internal_number, subjects_expected, created_at, updated_at, client:clients (id, name, city)";
+  "id, name, type, status, picture_day, internal_number, subjects_expected, price_list_id, deliver_to_school, created_at, updated_at, client:clients (id, name, city)";
 export const CLIENT_COLUMNS =
   "id, name, address_line1, address_line2, postal_code, city, region_code, country, contact_first_name, contact_last_name, contact_phone, contact_email, notes, created_at, updated_at";
 
@@ -26,6 +26,8 @@ export interface JobRow {
   picture_day: string;
   internal_number: string;
   subjects_expected: number | null;
+  price_list_id: string;
+  deliver_to_school: boolean;
   created_at: string;
   updated_at: string;
   client: { id: string; name: string; city: string | null } | null;
@@ -59,6 +61,8 @@ export function toJob(row: JobRow): Job {
     client: row.client,
     internalNumber: row.internal_number,
     subjectsExpected: row.subjects_expected,
+    priceListId: row.price_list_id,
+    deliverToSchool: row.deliver_to_school,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -106,6 +110,8 @@ const JOB_COLUMN_FOR: Record<keyof JobInput, string> = {
   internalNumber: "internal_number",
   type: "type",
   subjectsExpected: "subjects_expected",
+  priceListId: "price_list_id",
+  deliverToSchool: "deliver_to_school",
 };
 
 /** Database columns for the given API fields (only those present), from an already validated input. */
@@ -116,11 +122,16 @@ export function clientColumns(
   return Object.fromEntries(keys.map((k) => [CLIENT_COLUMN_FOR[k], input[k] ?? null]));
 }
 
+/** A new job without a price list gets the studio's default from the database, so it is never sent as null. */
 export function jobColumns(
   input: JobInput,
   keys: (keyof JobInput)[] = Object.keys(input) as (keyof JobInput)[],
 ): Record<string, unknown> {
-  return Object.fromEntries(keys.map((k) => [JOB_COLUMN_FOR[k], input[k] ?? null]));
+  return Object.fromEntries(
+    keys
+      .filter((k) => !(k === "priceListId" && input[k] === undefined))
+      .map((k) => [JOB_COLUMN_FOR[k], input[k] ?? null]),
+  );
 }
 
 function valid<T>(

@@ -370,29 +370,55 @@ describe("rankUpNext", () => {
 });
 
 describe("onboarding", () => {
-  it("lists the built tasks only: account and first job (Seenu, answers 4 and 12: no team task)", () => {
-    expect(onboardingChecklist({ hasJob: false })).toEqual([
+  const none = { hasJob: false, priceListReviewed: false };
+
+  it("lists the built tasks only: account, price list and first job (Seenu, answers 4 and 12: no team task)", () => {
+    expect(onboardingChecklist(none)).toEqual([
       { key: "account", done: true, state: "done" },
-      { key: "firstJob", done: false, state: "next" },
+      { key: "priceList", done: false, state: "next" },
+      { key: "firstJob", done: false, state: "todo" },
     ]);
-    expect(ONBOARDING_TASKS).toEqual(["account", "firstJob"]);
+    expect(ONBOARDING_TASKS).toEqual(["account", "priceList", "firstJob"]);
+  });
+
+  it("ticks Review your price list from the studio's first price list save, never by hand (ADR 0019)", () => {
+    expect(onboardingChecklist({ ...none, priceListReviewed: true }).map((t) => t.state)).toEqual([
+      "done",
+      "done",
+      "next",
+    ]);
+    // A first job before the price list: the price list is still next.
+    expect(onboardingChecklist({ ...none, hasJob: true }).map((t) => t.state)).toEqual([
+      "done",
+      "next",
+      "done",
+    ]);
   });
 
   it("is complete only when every built task is done", () => {
-    expect(onboardingComplete(onboardingChecklist({ hasJob: false }))).toBe(false);
-    expect(onboardingComplete(onboardingChecklist({ hasJob: true }))).toBe(true);
+    expect(onboardingComplete(onboardingChecklist(none))).toBe(false);
+    expect(onboardingComplete(onboardingChecklist({ ...none, hasJob: true }))).toBe(false);
+    expect(onboardingComplete(onboardingChecklist({ ...none, priceListReviewed: true }))).toBe(
+      false,
+    );
+    expect(onboardingComplete(onboardingChecklist({ hasJob: true, priceListReviewed: true }))).toBe(
+      true,
+    );
   });
 
-  it("is seen by owners and admins, who create jobs", () => {
+  it("is seen by owners and admins, who create jobs and edit price lists", () => {
     expect(["owner", "admin", "photographer", "staff"].map(seesOnboarding)).toEqual([
       true,
       true,
       false,
       false,
     ]);
-    expect(canDoOnboardingTask("owner", "firstJob")).toBe(true);
-    expect(canDoOnboardingTask("admin", "firstJob")).toBe(true);
-    expect(canDoOnboardingTask("photographer", "firstJob")).toBe(false);
+    for (const key of ["firstJob", "priceList"] as const) {
+      expect(canDoOnboardingTask("owner", key)).toBe(true);
+      expect(canDoOnboardingTask("admin", key)).toBe(true);
+      expect(canDoOnboardingTask("photographer", key)).toBe(false);
+      expect(canDoOnboardingTask("staff", key)).toBe(false);
+    }
     expect(canDoOnboardingTask("owner", "account")).toBe(false);
   });
 });

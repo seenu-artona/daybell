@@ -1,13 +1,23 @@
 import { DATA_REGIONS } from "@daybell/config";
 import {
+  ITEM_DESCRIPTION_MAX,
+  ITEM_NAME_MAX,
   JOB_TYPES,
   MAX_BLANK_CARDS,
   MAX_FILES_PER_REQUEST,
+  MAX_ITEM_PRICE_CENTS,
+  MAX_LINE_QUANTITY,
+  MAX_PACKAGE_LINES,
   MAX_PART_URLS_PER_REQUEST,
   MAX_PHOTO_BYTES,
   MAX_PHOTOS_PER_BIN_REQUEST,
   MAX_PHOTOS_PER_MOVE,
+  MAX_PRICE_LIST_ITEMS,
+  MAX_SHIPPING_CENTS,
   PHOTO_PAGE_SIZE,
+  PRICE_ITEM_KINDS,
+  PRICE_LIST_NAME_MAX,
+  PRINT_SIZES,
   planParts,
   REVIEW_CHILDREN_PAGE,
 } from "@daybell/core";
@@ -198,6 +208,14 @@ const jobFields = {
     .nullable()
     .optional()
     .meta({ description: "How many people are expected to be photographed, e.g. 120." }),
+  priceListId: z.uuid({ error: "validation.priceList" }).optional().meta({
+    description:
+      "One of the studio's price lists (ADR 0019). Left out of a new job, the studio's default is used. A closed job's can't change.",
+  }),
+  deliverToSchool: z.boolean({ error: "validation.invalid" }).optional().meta({
+    description:
+      "Parents may choose free delivery to the school as well as paid home shipping. Off unless turned on; a closed job's can't change.",
+  }),
 };
 
 export const jobInput = z.object(jobFields);
@@ -708,6 +726,164 @@ export const taggingChildrenQuery = z
     path: ["groupId"],
   });
 export type TaggingChildrenQuery = z.infer<typeof taggingChildrenQuery>;
+
+// ── Products and price lists (Phase 1 step 6, ADR 0019) ───────────────────────────────────────────────────────────
+// Money is whole cents only (D96): 12.5, "1250" and negatives are refused, never rounded. The currency is never sent:
+// it is always the studio's region's.
+
+const cents = (error: string, max: number) =>
+  z.number({ error }).int({ error }).min(0, { error }).max(max, { error });
+
+// Names and descriptions parents see: besides C0 controls and lone surrogates (isCleanText), no C1 controls and no
+// bidi overrides or isolates, which can make a name read differently from what it is. The database refuses the same
+// characters (price_lists and price_list_items checks), so this only gives the person a field error first.
+const PRICE_TEXT_FORBIDDEN = /[\u0080-\u009F\u202A-\u202E\u2066-\u2069]/;
+
+/** Text for a price list or item: clean text without C1 controls or bidi overrides and isolates. */
+export function isPriceText(value: string): boolean {
+  return isCleanText(value) && !PRICE_TEXT_FORBIDDEN.test(value);
+}
+
+const priceListName = z
+  .string({ error: "validation.priceListName" })
+  .trim()
+  .min(1, { error: "validation.priceListName" })
+  .max(PRICE_LIST_NAME_MAX, { error: "validation.priceListName" })
+  .refine(isPriceText, { error: "validation.priceListName" });
+
+/** A new price list: blank, or a copy of one of the studio's lists (Claude's call 2). */
+export const priceListInput = z.strictObject(
+  {
+    name: priceListName,
+    copyFromId: z.uuid({ error: "validation.priceList" }).optional().meta({
+      description:
+        "Copy this list's shipping fee, items and package contents. Left out, the list starts empty.",
+    }),
+  },
+  { error: "validation.unknownField" },
+);
+export type PriceListInput = z.infer<typeof priceListInput>;
+
+export const priceListPatch = z
+  .strictObject(
+    {
+      name: priceListName.optional(),
+      homeShippingCents: cents("validation.shipping", MAX_SHIPPING_CENTS).optional().meta({
+        description: "The flat home shipping fee in whole cents, 0–100000 ($1,000).",
+      }),
+    },
+    { error: "validation.unknownField" },
+  )
+  .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
+export type PriceListPatch = z.infer<typeof priceListPatch>;
+
+export const packageLineInput = z.discriminatedUnion(
+  "kind",
+  [
+    z.strictObject({
+      kind: z.literal("print"),
+      printSize: z.enum(PRINT_SIZES, { error: "validation.printSize" }),
+      quantity: z
+        .number({ error: "validation.quantity" })
+        .int({ error: "validation.quantity" })
+        .min(1, { error: "validation.quantity" })
+        .max(MAX_LINE_QUANTITY, { error: "validation.quantity" }),
+    }),
+    z.strictObject({ kind: z.literal("digital") }),
+  ],
+  { error: "validation.invalid" },
+);
+export type PackageLineInput = z.infer<typeof packageLineInput>;
+
+/** A package's whole contents (answer 3): 1 to 20 lines, at most one digital download (one pose). */
+const packageContents = z
+  .array(packageLineInput, { error: "validation.invalid" })
+  .min(1, { error: "validation.packageEmpty" })
+  .max(MAX_PACKAGE_LINES, { error: "validation.packageLines" })
+  .refine((lines) => lines.filter((l) => l.kind === "digital").length <= 1, {
+    error: "validation.packageDigitals",
+  })
+  .meta({ description: "Packages only: replaces all of the package's contents." });
+
+const itemFields = {
+  name: z
+    .string({ error: "validation.itemName" })
+    .trim()
+    .min(1, { error: "validation.itemName" })
+    .max(ITEM_NAME_MAX, { error: "validation.itemName" })
+    .refine(isPriceText, { error: "validation.itemName" }),
+  description: z
+    .string({ error: "validation.invalid" })
+    .trim()
+    .min(1, { error: "validation.invalid" })
+    .max(ITEM_DESCRIPTION_MAX, { error: "validation.tooLong" })
+    .refine(isPriceText, { error: "validation.invalid" })
+    .nullable()
+    .optional()
+    .meta({ description: "Shown to parents. Send null to clear it." }),
+  priceCents: cents("validation.price", MAX_ITEM_PRICE_CENTS).meta({
+    description: "Whole cents, before tax, 0–1000000 ($10,000). $0 is allowed.",
+  }),
+  printSize: z
+    .enum(PRINT_SIZES, { error: "validation.printSize" })
+    .optional()
+    .meta({ description: "Prints only." }),
+  contents: packageContents.optional(),
+};
+
+type ItemShape = {
+  kind?: (typeof PRICE_ITEM_KINDS)[number];
+  printSize?: unknown;
+  contents?: unknown;
+};
+
+/** The rules that depend on the kind: a print has a size, a package has contents, nothing else has either. */
+export function itemKindIssues(
+  kind: (typeof PRICE_ITEM_KINDS)[number],
+  value: ItemShape,
+  isNew: boolean,
+): { path: string; message: string }[] {
+  const issues: { path: string; message: string }[] = [];
+  if (kind === "print" && isNew && value.printSize === undefined)
+    issues.push({ path: "printSize", message: "validation.printSize" });
+  if (kind !== "print" && value.printSize !== undefined)
+    issues.push({ path: "printSize", message: "validation.printSize" });
+  if (kind === "package" && isNew && value.contents === undefined)
+    issues.push({ path: "contents", message: "validation.packageEmpty" });
+  if (kind !== "package" && value.contents !== undefined)
+    issues.push({ path: "contents", message: "validation.invalid" });
+  return issues;
+}
+
+/** A new item: a package, a single print, the single digital download or "all digitals". */
+export const priceListItemInput = z
+  .strictObject(
+    { kind: z.enum(PRICE_ITEM_KINDS, { error: "validation.invalid" }), ...itemFields },
+    { error: "validation.unknownField" },
+  )
+  .superRefine((value, ctx) => {
+    for (const issue of itemKindIssues(value.kind, value, true))
+      ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
+  });
+export type PriceListItemInput = z.infer<typeof priceListItemInput>;
+
+/** Change some fields of an item. Its kind never changes; size and contents must suit it (checked by the server). */
+export const priceListItemPatch = z
+  .strictObject(z.object(itemFields).partial().shape, { error: "validation.unknownField" })
+  .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
+export type PriceListItemPatch = z.infer<typeof priceListItemPatch>;
+
+/** Every item of the list, each once, in the new order (Move up / Move down; no drag, WCAG 2.5.7). */
+export const itemOrderInput = z.strictObject(
+  {
+    itemIds: z
+      .array(z.uuid({ error: "validation.itemOrder" }), { error: "validation.itemOrder" })
+      .max(MAX_PRICE_LIST_ITEMS, { error: "validation.itemOrder" })
+      .refine((ids) => new Set(ids).size === ids.length, { error: "validation.itemOrder" }),
+  },
+  { error: "validation.unknownField" },
+);
+export type ItemOrderInput = z.infer<typeof itemOrderInput>;
 
 /** Turns zod issues into `{ field: messageKey }` for forms. */
 export function fieldErrors(error: z.ZodError): Record<string, string> {

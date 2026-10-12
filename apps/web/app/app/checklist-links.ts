@@ -23,6 +23,8 @@ export function onboardingHref(key: OnboardingTaskKey): string | null {
   switch (key) {
     case "firstJob":
       return "/app/jobs?new=1";
+    case "priceList":
+      return "/app/products";
     default:
       return null;
   }

@@ -123,6 +123,13 @@ describe("components", () => {
     expect(screen.getAllByText("$48,260")).toHaveLength(2);
   });
 
+  it("has an info badge tone, apart from the job status tones", () => {
+    render(<Badge tone="info">Default</Badge>);
+    const badge = screen.getByText("Default", { exact: true });
+    expect(badge.className).toMatch(/\bbg-info-soft\b/);
+    expect(badge.className).toMatch(/\btext-info\b/);
+  });
+
   it("clamps progress", () => {
     expect(clampPercent(140)).toBe(100);
     expect(clampPercent(-5)).toBe(0);

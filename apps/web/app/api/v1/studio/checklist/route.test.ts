@@ -71,7 +71,10 @@ const fact = (job_id: string, over: Record<string, unknown> = {}) => ({
 
 describe("GET /studio/checklist", () => {
   it("shows owners the setup checklist while it isn't complete, and writes nothing", async () => {
-    const db = fakeDatabase({ studios: { onboarded_at: null } }, { jobs: 0 });
+    const db = fakeDatabase(
+      { studios: { onboarded_at: null, price_list_reviewed_at: null } },
+      { jobs: 0 },
+    );
     scope.mockResolvedValue({ supabase: db.supabase, studio: as("owner"), userId: "u" });
     const res = await get();
     expect(res.status).toBe(200);
@@ -79,6 +82,7 @@ describe("GET /studio/checklist", () => {
       onboarding: {
         tasks: [
           { key: "account", done: true },
+          { key: "priceList", done: false },
           { key: "firstJob", done: false },
         ],
       },
@@ -91,8 +95,39 @@ describe("GET /studio/checklist", () => {
       expect(c.ops).toContainEqual(["eq", [c.table === "studios" ? "id" : "studio_id", STUDIO]]);
   });
 
+  it("ticks Review your price list from the database's stamp, and stays open without it (ADR 0019)", async () => {
+    const reviewed = fakeDatabase(
+      { studios: { onboarded_at: null, price_list_reviewed_at: "2026-10-12T00:00:00Z" } },
+      { jobs: 0 },
+    );
+    scope.mockResolvedValue({ supabase: reviewed.supabase, studio: as("owner"), userId: "u" });
+    expect((await (await get()).json()).onboarding.tasks).toEqual([
+      { key: "account", done: true },
+      { key: "priceList", done: true },
+      { key: "firstJob", done: false },
+    ]);
+    // A job without a reviewed price list doesn't complete onboarding.
+    const jobOnly = fakeDatabase(
+      { studios: { onboarded_at: null, price_list_reviewed_at: null } },
+      { jobs: 1 },
+    );
+    scope.mockResolvedValue({ supabase: jobOnly.supabase, studio: as("owner"), userId: "u" });
+    expect((await (await get()).json()).onboarding.tasks).toEqual([
+      { key: "account", done: true },
+      { key: "priceList", done: false },
+      { key: "firstJob", done: true },
+    ]);
+    expect(jobOnly.calls.some((c) => c.ops.some(([op]) => op === "update"))).toBe(false);
+  });
+
   it("records the first completion once, then answers with Up next", async () => {
-    const db = fakeDatabase({ studios: { onboarded_at: null }, jobs: [] }, { jobs: 1 });
+    const db = fakeDatabase(
+      {
+        studios: { onboarded_at: null, price_list_reviewed_at: "2026-10-12T00:00:00Z" },
+        jobs: [],
+      },
+      { jobs: 1 },
+    );
     scope.mockResolvedValue({ supabase: db.supabase, studio: as("admin"), userId: "u" });
     const body = await (await get()).json();
     expect(body).toEqual({ onboarding: null, upNext: { items: [], total: 0 } });

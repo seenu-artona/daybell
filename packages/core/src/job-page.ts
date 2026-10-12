@@ -52,20 +52,25 @@ export interface SellChecklistItem {
 }
 
 /**
- * "Before you can sell", in the Start selling dialog. "Roster added" and "Tagging reviewed" (reviewTaggingDone, ADR
- * 0018: the server refuses selling on it when Start selling is built; plan answer 7) are real today.
+ * "Before you can sell", in the Start selling dialog. "Roster added", "Tagging reviewed" (reviewTaggingDone, ADR
+ * 0018: the server refuses selling on it when Start selling is built; plan answer 7) and "Price list chosen" (ADR 0019:
+ * every job has one, the studio's default unless changed on its Shop tab) are real today.
  */
 export function sellChecklist({
   children,
   taggingReviewed,
+  hasPriceList,
 }: {
   children: number;
   /** The Review tagging task is done (reviewTaggingDone). */
   taggingReviewed: boolean;
+  /** The job has a price list. */
+  hasPriceList: boolean;
 }): SellChecklistItem[] {
   return SELL_CHECKLIST.map((key) => {
     if (key === "roster") return { key, done: children > 0, soon: false };
     if (key === "tagging") return { key, done: taggingReviewed, soon: false };
+    if (key === "priceList") return { key, done: hasPriceList, soon: false };
     return { key, done: false, soon: true };
   });
 }
