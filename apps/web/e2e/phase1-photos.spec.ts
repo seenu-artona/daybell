@@ -45,7 +45,9 @@ async function newJob(page: Page, tag: string, pictureDay: string): Promise<stri
   return (await created.json()).job.id as string;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Yesterday in UTC: already past in every time zone, so the job is at Picture day wherever the browser runs (the app
+// counts days in the browser's own zone).
+const today = () => new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
 test("Photos: a folder upload, previews, the Overview to-do, the bin, and nothing for another studio", async ({
   page: firstTab,
@@ -87,7 +89,9 @@ test("Photos: a folder upload, previews, the Overview to-do, the bin, and nothin
   const one = await jpeg(1);
   writeFileSync(join(day, "IMG_0001.JPG"), one);
   writeFileSync(join(day, "IMG_0002.jpg"), await jpeg(2));
-  writeFileSync(join(day, "copy of IMG_0001.JPG"), one);
+  // Which of two identical files is kept depends on the order the browser lists the folder; either name sorts before
+  // IMG_0002, so the order of the photos below doesn't.
+  writeFileSync(join(day, "IMG_0001 copy.JPG"), one);
   writeFileSync(
     join(day, "notes.png"),
     await sharp({ create: { width: 4, height: 4, channels: 3, background: "#fff" } })
@@ -119,9 +123,9 @@ test("Photos: a folder upload, previews, the Overview to-do, the bin, and nothin
   });
 
   // 4. The panel: the 1600 px preview, the file's name, and the photo's id (never its name) in the URL.
-  await main.getByRole("button", { name: "Open photo 1", exact: true }).click();
-  const panel = main.getByRole("complementary", { name: "IMG_0001.JPG", exact: true });
-  await expect(panel.getByRole("img", { name: "Photo 1", exact: true })).toBeVisible();
+  await main.getByRole("button", { name: "Open photo 2", exact: true }).click();
+  const panel = main.getByRole("complementary", { name: "IMG_0002.jpg", exact: true });
+  await expect(panel.getByRole("img", { name: "Photo 2", exact: true })).toBeVisible();
   await expect(panel.getByText("Ready", { exact: true }).first()).toBeVisible();
   expect(page.url()).toMatch(/\?photo=[0-9a-f-]{36}$/);
   expect(page.url()).not.toContain("IMG_");
@@ -218,28 +222,32 @@ test("Photos: an upload waits out a dropped connection, and a reload resumes wit
     timeout: 90_000,
   });
 
-  // 2. A second photo: part 1 arrives, the others are held back, and the page is reloaded mid-upload.
+  // 2. A second photo: part 1 arrives; parts 2 and 3 never do (each try fails at once, as on a dead connection, so
+  // the upload keeps retrying them), and the page is reloaded mid-upload. They are refused, not held: removing a route
+  // that is holding requests lets the browser send them on, and the "interrupted" upload would quietly complete.
   const second = await jpeg(8, { width: 3000, height: 2600, noise: true });
   const secondPath = join(folder, "BIG_0002.JPG");
   writeFileSync(secondPath, second);
-  await page.route("**/api/dev-storage/**", async (route) => {
-    const part = new URL(route.request().url()).searchParams.get("partNumber");
-    if (route.request().method() === "PUT" && part !== "1") {
-      await new Promise((ok) => setTimeout(ok, 30_000));
-      return route.abort().catch(() => {});
-    }
-    return route.continue();
-  });
+  const laterPart = (r: { method(): string; url(): string }) =>
+    r.method() === "PUT" &&
+    r.url().includes("/api/dev-storage/") &&
+    new URL(r.url()).searchParams.get("partNumber") !== "1";
+  await page.route("**/api/dev-storage/**", (route) =>
+    laterPart(route.request()) ? route.abort("internetdisconnected") : route.continue(),
+  );
   const partOne = page.waitForResponse(
     (r) =>
       r.request().method() === "PUT" && new URL(r.url()).searchParams.get("partNumber") === "1",
   );
+  const laterRefused = page.waitForEvent("requestfailed", laterPart);
   await sheet.locator('input[type="file"][accept]').setInputFiles(secondPath);
   expect((await partOne).status()).toBe(200);
-  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await laterRefused;
   // Leaving mid-upload asks first (beforeunload); leave.
   page.once("dialog", (d) => d.accept());
   await page.reload();
+  // The route stays across the reload until here, so nothing of the old page's upload gets through.
+  await page.unrouteAll({ behavior: "wait" });
 
   // 3. Dropping the same file again resumes: the server knows part 1 arrived, so only the rest are sent.
   const puts: string[] = [];

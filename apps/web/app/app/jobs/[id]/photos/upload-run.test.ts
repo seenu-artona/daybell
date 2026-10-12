@@ -191,6 +191,16 @@ describe("UploadRun", () => {
     expect(progress).toMatchObject({ uploaded: 1, failed: 0 });
   });
 
+  it("only completes a resumed file whose parts storage already has, sending no bytes", async () => {
+    const big = file("big.jpg", PART_BYTES * 2 + 10);
+    const hash = await sha(big.file);
+    const server = fakeServer({ existing: new Map([[hash, { id: "p-old", parts: [1, 2, 3] }]]) });
+    const progress = await run([big], deps(server));
+    expect(server.put).not.toHaveBeenCalled();
+    expect(server.calls).toContain("POST /photos/p-old/upload-complete");
+    expect(progress).toMatchObject({ uploaded: 1, failed: 0 });
+  });
+
   it("tries a part again after a dropped connection, with growing pauses", async () => {
     const server = fakeServer();
     const real = server.put.getMockImplementation() as (url: string) => Promise<number>;
