@@ -221,6 +221,14 @@ export const listQuery = z.object({
     .optional()
     .meta({ description: "The nextCursor from the previous page." }),
 });
+/** Today's date where the person is (D143): picture day tasks tick and Up next counts days in their own day. */
+const todayParam = z.iso.date({ error: "validation.invalid" }).optional().meta({
+  description:
+    "Today's date in the person's time zone, YYYY-MM-DD; within a day of the server's UTC date. Defaults to the UTC date.",
+});
+export const jobListQuery = listQuery.extend({ today: todayParam });
+export const studioChecklistQuery = z.object({ today: todayParam });
+
 export const clientListQuery = listQuery.extend({
   q: z
     .string()

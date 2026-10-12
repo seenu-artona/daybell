@@ -13,7 +13,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/v1/jobs/:id/photos/summary — the job's photo counts, for the Photos tab and the Overview's Upload photos
- * to-do (done once a photo is ready). Counts only; row-level security keeps it to the caller's studio.
+ * checklist task (done once a photo is ready). Counts only; row-level security keeps it to the caller's studio.
  */
 export const GET = handle(async (_request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");

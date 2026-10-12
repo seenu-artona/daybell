@@ -1,5 +1,12 @@
 import { DATA_REGIONS } from "@daybell/config";
-import { JOB_STATUSES, JOB_TYPES } from "@daybell/core";
+import {
+  JOB_STATUSES,
+  JOB_TYPES,
+  MILESTONES,
+  ONBOARDING_TASKS,
+  TASK_KEYS,
+  UP_NEXT_SHOWN,
+} from "@daybell/core";
 import { z } from "zod";
 
 /**
@@ -143,7 +150,36 @@ export const job = z
   .meta({ id: "Job", description: "A shoot or season the studio photographs and sells." });
 export type Job = z.infer<typeof job>;
 
-export const jobsResponse = z.object({ jobs: z.array(job), nextCursor });
+// ── One checklist (Phase 1 step 2d, D143, ADR 0017) ───────────────────────────────────────────────────────────────
+export const milestone = z.enum(MILESTONES).meta({
+  id: "Milestone",
+  description: "Set up, Picture day, Photos in, Selling, Fulfilment, in that order.",
+});
+export const taskKey = z.enum(TASK_KEYS).meta({
+  id: "TaskKey",
+  description:
+    "A job checklist task. Only built tasks are listed; tasks tick themselves from the job's data.",
+});
+
+export const jobChecklistSummary = z
+  .object({
+    milestone: milestone.nullable().meta({
+      description:
+        "The group of the next unfinished task (Selling while the job sells); null once the job is closed (all done).",
+    }),
+    done: z.number().int(),
+    total: z.number().int().meta({ description: "Built tasks in the job type's checklist." }),
+    next: taskKey.nullable().meta({ description: "The next unfinished task, if any." }),
+  })
+  .meta({ id: "JobChecklistSummary", description: "Where the job is on its checklist (D143)." });
+export type JobChecklistSummary = z.infer<typeof jobChecklistSummary>;
+
+export const jobListItem = job
+  .extend({ checklist: jobChecklistSummary })
+  .meta({ id: "JobListItem", description: "A job in the Jobs list, with its checklist progress." });
+export type JobListItem = z.infer<typeof jobListItem>;
+
+export const jobsResponse = z.object({ jobs: z.array(jobListItem), nextCursor });
 export type JobsResponse = z.infer<typeof jobsResponse>;
 export const jobResponse = z.object({ job });
 export const nextJobNumberResponse = z.object({
@@ -353,7 +389,7 @@ export const photoCounts = z
   })
   .meta({
     id: "PhotoCounts",
-    description: "The Overview's Upload photos to-do is done once ready > 0.",
+    description: "The checklist's Upload photos task is done once ready > 0.",
   });
 export type PhotoCounts = z.infer<typeof photoCounts>;
 export const photoCountsResponse = z.object({ counts: photoCounts });
@@ -455,3 +491,66 @@ export const PHOTO_CONFLICTS = {
   notRetryable: "photos.notRetryable",
 } as const;
 export type PhotoConflict = (typeof PHOTO_CONFLICTS)[keyof typeof PHOTO_CONFLICTS];
+
+// ── Studio checklist: onboarding and Up next (Phase 1 step 2d, D143, ADR 0017) ──────────────────────────────────────
+export const onboardingTask = z
+  .object({
+    key: z.enum(ONBOARDING_TASKS),
+    done: z.boolean(),
+  })
+  .meta({ id: "OnboardingTask", description: "A built studio setup task, in order." });
+
+export const upNextReason = z
+  .discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("photosOverdue"),
+      days: z.number().int().meta({ description: "Days since picture day." }),
+    }),
+    z.object({
+      kind: z.literal("dateClose"),
+      days: z.number().int().meta({ description: "Days until picture day (0 = today)." }),
+    }),
+    z.object({
+      kind: z.literal("brokenPhotos"),
+      count: z.number().int().meta({ description: "Failed photos, not in the bin." }),
+    }),
+    z.object({ kind: z.literal("nextStep") }),
+  ])
+  .meta({
+    id: "UpNextReason",
+    description:
+      "Why the task was picked: a date is close (a past picture day without photos first), something is broken, the next step.",
+  });
+export type UpNextReason = z.infer<typeof upNextReason>;
+
+export const upNextItem = z
+  .object({
+    jobId: z.uuid(),
+    jobName: z.string(),
+    task: z.union([taskKey, z.literal("reviewFailedPhotos")]),
+    reason: upNextReason,
+  })
+  .meta({ id: "UpNextItem", description: "One task, at most one per job." });
+export type UpNextItem = z.infer<typeof upNextItem>;
+
+export const studioChecklistResponse = z
+  .object({
+    onboarding: z
+      .object({ tasks: z.array(onboardingTask) })
+      .nullable()
+      .meta({
+        description:
+          "The studio setup checklist, for owners and admins until it is first complete; then null for good.",
+      }),
+    upNext: z
+      .object({
+        items: z
+          .array(upNextItem)
+          .meta({ description: `The ${UP_NEXT_SHOWN} most urgent, most urgent first.` }),
+        total: z.number().int().meta({ description: "Jobs with something to do." }),
+      })
+      .nullable()
+      .meta({ description: "Null while onboarding is shown." }),
+  })
+  .meta({ id: "StudioChecklist" });
+export type StudioChecklistResponse = z.infer<typeof studioChecklistResponse>;

@@ -1,6 +1,7 @@
-import { jobInput, listQuery } from "@daybell/api";
+import { type JobsResponse, jobInput, jobListQuery } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { check, filterValue, handle, parseBody, parseQuery } from "@/lib/api";
+import { checklistSummary, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
 import {
   assertClientInStudio,
   isNumberTaken,
@@ -14,9 +15,13 @@ import {
 } from "@/lib/jobs";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
-/** GET /api/v1/jobs — the studio's jobs, newest first, in pages (D92, D96). */
+/**
+ * GET /api/v1/jobs — the studio's jobs, newest first, in pages (D92, D96), each with its checklist progress (D143; ADR
+ * 0017): the page's counts come from one query, never one per job.
+ */
 export const GET = handle(async (request: Request) => {
-  const { limit, cursor } = parseQuery(request, listQuery);
+  const { limit, cursor, today: todayParam } = parseQuery(request, jobListQuery);
+  const today = checklistToday(todayParam);
   const { supabase, studio } = await studioScope();
   let query = supabase
     .from("jobs")
@@ -41,7 +46,20 @@ export const GET = handle(async (request: Request) => {
   }
   const rows = (check(await query) ?? []) as unknown as JobRow[];
   const { items, nextCursor } = page(rows, limit);
-  return NextResponse.json({ jobs: items.map(toJob), nextCursor });
+  const jobs = items.map(toJob);
+  const facts = await loadChecklistFacts(
+    supabase,
+    studio.id,
+    jobs.map((j) => j.id),
+  );
+  const body: JobsResponse = {
+    jobs: jobs.map((job) => ({
+      ...job,
+      checklist: checklistSummary(job, facts.get(job.id), today),
+    })),
+    nextCursor,
+  };
+  return NextResponse.json(body);
 });
 
 /**
