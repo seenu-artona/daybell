@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChecklistFacts, daysUntil, localDay } from "@daybell/core";
+import { daysUntil, localDay } from "@daybell/core";
 import { useTranslations } from "next-intl";
 import { ActivityCard } from "../../activity-card";
 import { useStudio } from "../../me-context";
@@ -26,25 +26,18 @@ export default function JobOverviewPage() {
         ? t("hero.countdown", { days })
         : t("hero.ago", { days: -days });
 
-  const facts: ChecklistFacts | null = summary
-    ? {
-        status: job.status,
-        pictureDay: job.pictureDay,
-        children: summary.children,
-        qrCards: summary.qrCards,
-        hasReadyPhoto: (summary.photos?.ready ?? 0) > 0,
-        failedPhotos: summary.photos?.failed ?? 0,
-        today,
-      }
-    : null;
-
   return (
     <div className="flex flex-col gap-5">
       <p className="m-0 mt-1 text-hero">{hero}</p>
-      {facts ? (
+      {summary?.checklist ? (
         <div className="flex items-start gap-5">
           <div className="min-w-0 flex-1">
-            <JobChecklist facts={facts} />
+            <JobChecklist
+              checklist={summary.checklist}
+              rosterSize={summary.children}
+              qrCards={summary.qrCards}
+              failedPhotos={summary.photos?.failed ?? 0}
+            />
           </div>
           {canManage ? (
             <div className="min-w-0 flex-1">

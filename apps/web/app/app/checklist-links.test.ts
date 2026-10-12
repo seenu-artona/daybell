@@ -14,11 +14,7 @@ describe("taskHref", () => {
 });
 
 describe("onboardingHref", () => {
-  it("links the team to Settings and the first job to the new-job form; the account goes nowhere", () => {
-    expect(ONBOARDING_TASKS.map(onboardingHref)).toEqual([
-      null,
-      "/app/settings",
-      "/app/jobs?new=1",
-    ]);
+  it("links the first job to the new-job form; the account goes nowhere", () => {
+    expect(ONBOARDING_TASKS.map(onboardingHref)).toEqual([null, "/app/jobs?new=1"]);
   });
 });

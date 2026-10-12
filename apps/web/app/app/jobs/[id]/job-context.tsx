@@ -1,6 +1,6 @@
 "use client";
 
-import type { Job, PhotoCounts, QrCardStatus } from "@daybell/api";
+import type { Job, JobChecklist, PhotoCounts, QrCardStatus } from "@daybell/api";
 import { createContext, useContext } from "react";
 
 export interface JobSummary {
@@ -14,6 +14,8 @@ export interface JobSummary {
   qrCards: QrCardStatus | null;
   /** Photos (ADR 0016): the job's photo counts; null if they couldn't be loaded. */
   photos: PhotoCounts | null;
+  /** The job's checklist from GET /jobs/:id (D143; ADR 0017); null if it couldn't be loaded. */
+  checklist: JobChecklist | null;
 }
 
 export interface JobContextValue {

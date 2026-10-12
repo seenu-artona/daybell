@@ -19,8 +19,6 @@ export function taskHref(jobId: string, target: TaskTarget): string {
 /** Where a studio setup task's work happens; the account row has nowhere to go. */
 export function onboardingHref(key: OnboardingTaskKey): string | null {
   switch (key) {
-    case "team":
-      return "/app/settings";
     case "firstJob":
       return "/app/jobs?new=1";
     default:

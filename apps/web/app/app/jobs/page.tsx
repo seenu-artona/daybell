@@ -31,7 +31,7 @@ function ProgressCell({ job, role }: { job: JobListItem; role: string }) {
   return (
     <div className="flex flex-col items-start gap-0.5">
       <span className="flex flex-wrap items-center gap-2">
-        <Badge tone={milestone ? "selling" : "draft"} className="before:hidden">
+        <Badge tone="draft" className="before:hidden">
           {milestone ? t(`milestones.${milestone}`) : t("allDone")}
         </Badge>
         <span className="text-caption whitespace-nowrap text-muted">

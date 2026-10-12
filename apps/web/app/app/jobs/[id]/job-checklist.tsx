@@ -1,6 +1,7 @@
 "use client";
 
-import { type ChecklistFacts, canDoTask, isOnTrack, jobChecklist, type Task } from "@daybell/core";
+import type { JobChecklist as JobChecklistData, QrCardStatus } from "@daybell/api";
+import { canDoTask, MILESTONES, type TaskKey, type TaskState, taskTarget } from "@daybell/core";
 import { Badge, Card } from "@daybell/ui";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -18,31 +19,44 @@ const LINK =
  * The job's checklist on its Overview (D143, amending D140; ADR 0017): the milestone, "N of M done" and every built
  * task, grouped by milestone. Tasks tick themselves; each row is a plain link to the page where the work happens (or
  * plain text when there is no other page, or the person's role can't do it). While the job is on track the list is
- * collapsed to its progress and the next task, with a toggle to show it all.
+ * collapsed to its progress and the next task, with a toggle to show it all. The checklist comes from GET /jobs/:id
+ * (the same facts and rules as the Jobs list); the notes come from the job's summary counts.
  */
-export function JobChecklist({ facts }: { facts: ChecklistFacts }) {
+export function JobChecklist({
+  checklist,
+  rosterSize,
+  qrCards,
+  failedPhotos,
+}: {
+  checklist: JobChecklistData;
+  /** Children on the roster. */
+  rosterSize: number;
+  qrCards: QrCardStatus | null;
+  failedPhotos: number;
+}) {
   const t = useTranslations("app.checklist");
   const formatDay = useFormatDay();
   const { me } = useStudio();
   const { job } = useJob();
   const titleId = useId();
   const listId = useId();
-  const checklist = jobChecklist(job.type, facts);
   const [open, setOpen] = useState<boolean | null>(null);
-  const expanded = open ?? !isOnTrack(checklist, facts);
+  const expanded = open ?? !checklist.onTrack;
   const role = me.studio.role;
 
   // A link only when the work is on another page and this person can do it (Seenu, answer 10).
-  const href = (task: Task) =>
-    task.target !== "overview" && canDoTask(role, task.key) ? taskHref(job.id, task.target) : null;
+  const href = (key: TaskKey) => {
+    const target = taskTarget(key);
+    return target !== "overview" && canDoTask(role, key) ? taskHref(job.id, target) : null;
+  };
 
-  const note = (task: Task): string | null => {
+  const note = (task: { key: TaskKey; done: boolean }): string | null => {
     switch (task.key) {
       case "addRoster":
-        return task.done ? t("notes.children", { count: facts.children }) : null;
+        return task.done ? t("notes.children", { count: rosterSize }) : null;
       case "printQrCards": {
-        const missing = facts.qrCards ? facts.qrCards.eligible - facts.qrCards.withCard : 0;
-        return !task.done && facts.qrCards && facts.qrCards.withCard > 0 && missing > 0
+        const missing = qrCards ? qrCards.eligible - qrCards.withCard : 0;
+        return !task.done && qrCards && qrCards.withCard > 0 && missing > 0
           ? t("notes.withoutCard", { count: missing })
           : null;
       }
@@ -50,26 +64,28 @@ export function JobChecklist({ facts }: { facts: ChecklistFacts }) {
         return formatDay(job.pictureDay);
       case "uploadPhotos":
         // Problems are marked inline where they are (D143): failed photos on their own row.
-        return facts.failedPhotos > 0
-          ? t("notes.photosFailed", { count: facts.failedPhotos })
-          : null;
+        return failedPhotos > 0 ? t("notes.photosFailed", { count: failedPhotos }) : null;
       default:
         return null;
     }
   };
 
-  const groups: ChecklistRowGroup[] = checklist.groups.map((g) => ({
-    key: g.milestone,
-    title: t(`milestones.${g.milestone}`),
-    current: g.milestone === checklist.milestone,
-    rows: g.tasks.map((task) => ({
-      key: task.key,
-      label: t(`tasks.${task.key}`),
-      state: task.state,
-      href: href(task),
-      note: note(task),
-    })),
-  }));
+  const state = (task: { key: TaskKey; done: boolean }): TaskState =>
+    task.done ? "done" : task.key === checklist.next ? "next" : "todo";
+  const groups: ChecklistRowGroup[] = MILESTONES.map((milestone) => ({
+    key: milestone,
+    title: t(`milestones.${milestone}`),
+    current: milestone === checklist.milestone,
+    rows: checklist.tasks
+      .filter((task) => task.milestone === milestone)
+      .map((task) => ({
+        key: task.key,
+        label: t(`tasks.${task.key}`),
+        state: state(task),
+        href: href(task.key),
+        note: note(task),
+      })),
+  })).filter((g) => g.rows.length > 0);
 
   const next = checklist.next;
   const nextHref = next ? href(next) : null;
@@ -81,7 +97,8 @@ export function JobChecklist({ facts }: { facts: ChecklistFacts }) {
           <h2 id={titleId} className="m-0 flex-1 text-h3 font-bold">
             {t("title")}
           </h2>
-          <Badge tone={checklist.milestone ? "selling" : "draft"} className="before:hidden">
+          {/* Neutral, never the Selling green: the header pill alone shows the shop state (code review S5). */}
+          <Badge tone="draft" className="before:hidden">
             {checklist.milestone ? t(`milestones.${checklist.milestone}`) : t("allDone")}
           </Badge>
         </div>
@@ -93,11 +110,11 @@ export function JobChecklist({ facts }: { facts: ChecklistFacts }) {
             ) : next ? (
               nextHref ? (
                 <Link href={nextHref} className={LINK}>
-                  {t("nextTask", { task: t(`tasks.${next.key}`) })}
+                  {t("nextTask", { task: t(`tasks.${next}`) })}
                 </Link>
               ) : (
                 <span className="inline-flex min-h-11 items-center font-semibold">
-                  {t("nextTask", { task: t(`tasks.${next.key}`) })}
+                  {t("nextTask", { task: t(`tasks.${next}`) })}
                 </span>
               )
             ) : (

@@ -122,9 +122,7 @@ export function ChecklistGroups({
             <Heading className="m-0 flex items-center gap-2 pt-3 pb-1 text-micro tracking-wide text-muted uppercase">
               {group.title}
               {group.current ? (
-                <span className="rounded-full bg-primary-soft px-2 text-primary-hover normal-case">
-                  {t("now")}
-                </span>
+                <span className="rounded-full bg-subtle px-2 text-ink normal-case">{t("now")}</span>
               ) : null}
             </Heading>
           ) : null}

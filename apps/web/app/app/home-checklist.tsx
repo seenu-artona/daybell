@@ -82,7 +82,7 @@ export function HomeChecklist() {
   const [data, setData] = useState<StudioChecklistResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: version re-checks after team and job changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: version re-checks after job changes.
   useEffect(() => {
     api<StudioChecklistResponse>(`/studio/checklist?today=${localDay(new Date())}`).then((res) => {
       if (res.ok) setData(res.data);
@@ -90,15 +90,16 @@ export function HomeChecklist() {
     });
   }, [version, text]);
 
+  // Until the answer arrives, a neutral title: it may be either the setup checklist or Up next (code review N6).
   if (error)
     return (
-      <Panel title={t("upNext.title")}>
+      <Panel title={t("checklistTitle")}>
         <p className="m-0 text-muted">{error}</p>
       </Panel>
     );
   if (!data)
     return (
-      <Panel title={t("upNext.title")}>
+      <Panel title={t("checklistTitle")}>
         <p className="m-0 text-muted">{t("checking")}</p>
       </Panel>
     );
@@ -107,7 +108,6 @@ export function HomeChecklist() {
     // The server sends what is done; the order and "next" come from the same core rule.
     const done = new Map(data.onboarding.tasks.map((task) => [task.key, task.done]));
     const tasks = onboardingChecklist({
-      hasTeam: done.get("team") === true,
       hasJob: done.get("firstJob") === true,
     }).filter((task) => done.has(task.key));
     return (

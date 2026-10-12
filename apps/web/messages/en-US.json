@@ -349,7 +349,7 @@
       "todo": "To do",
       "now": "Now",
       "allDone": "All done",
-      "allDoneForNow": "Everything built so far is done",
+      "allDoneForNow": "All done for now",
       "showAll": "Show all tasks",
       "hideAll": "Hide tasks",
       "milestones": {
@@ -370,7 +370,6 @@
       "notes": {
         "children": "{count, plural, one {# child} other {# children}}",
         "withoutCard": "{count, plural, one {# child without a card} other {# children without a card}}",
-        "photosReady": "{count, plural, one {# photo ready} other {# photos ready}}",
         "photosFailed": "{count, plural, one {# photo failed} other {# photos failed}}"
       }
     },
@@ -400,7 +399,6 @@
         "title": "Set up your studio",
         "tasks": {
           "account": "Create your account",
-          "team": "Invite your team",
           "firstJob": "Create your first job"
         }
       },
@@ -416,7 +414,8 @@
           "brokenPhotos": "{count, plural, one {# photo failed} other {# photos failed}}",
           "nextStep": "Next step"
         }
-      }
+      },
+      "checklistTitle": "Your next steps"
     },
     "signOutFailed": "We couldn't sign you out. Check your connection and try again.",
     "dialog": {
