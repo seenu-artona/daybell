@@ -214,7 +214,7 @@ export function isRpcError(
 
 const PAGE = 1000; // Supabase returns at most 1,000 rows per request by default.
 
-async function allRows<T>(
+export async function allRows<T>(
   fetchPage: (from: number, to: number) => PromiseLike<{ data: unknown; error: DbError }>,
 ): Promise<T[]> {
   const out: T[] = [];

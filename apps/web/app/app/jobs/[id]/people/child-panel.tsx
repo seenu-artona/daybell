@@ -3,8 +3,9 @@
 import type { Child, Job } from "@daybell/api";
 import type { GroupLabel } from "@daybell/core";
 import { Badge, Button, IconChip, iconButtonVariants } from "@daybell/ui";
-import { Ellipsis, Pencil, Trash2 } from "lucide-react";
+import { Ellipsis, Pencil, QrCode, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { MENU_ROW, Popover } from "../../../popover";
 import { FloatingPanel } from "../floating-panel";
 import { avatarTone, childInitials } from "./avatar";
@@ -12,7 +13,9 @@ import { avatarTone, childInitials } from "./avatar";
 /**
  * One child in People's floating panel (D140): their avatar and name, the access code large on a dark card, then
  * their details as hairline rows. Roster editors get Edit (the existing child form) and, while the job is a draft,
- * ⋯ › Remove child. Staff only read. The parent's email is not shown here (Seenu, answer 8); it is in the form.
+ * ⋯ › Remove child, and Print QR card (one card, the same on every print; ADR 0015). A child marked Do not photograph
+ * gets no card, and the panel says so. Staff only read. The parent's email is not shown here (Seenu, answer 8); it is
+ * in the form.
  */
 export function ChildPanel({
   child,
@@ -23,6 +26,7 @@ export function ChildPanel({
   onClose,
   onEdit,
   onRemove,
+  onPrintCard,
 }: {
   child: Child;
   job: Pick<Job, "status">;
@@ -32,6 +36,8 @@ export function ChildPanel({
   onClose: () => void;
   onEdit: () => void;
   onRemove: () => void;
+  /** Downloads this child's card; resolves when done. */
+  onPrintCard: () => Promise<void>;
 }) {
   const t = useTranslations("app.people.panel");
   const tr = useTranslations("app.roster");
@@ -50,6 +56,7 @@ export function ChildPanel({
     { key: "duplicate", label: t("duplicate"), value: yesNo(child.duplicate) },
   ];
   const draft = job.status === "draft";
+  const [printing, setPrinting] = useState(false);
 
   return (
     <FloatingPanel
@@ -98,6 +105,24 @@ export function ChildPanel({
               <Pencil aria-hidden="true" />
               {t("edit")}
             </Button>
+            {child.doNotPhotograph ? null : (
+              <Button
+                variant="secondary"
+                shape="pill"
+                // aria-disabled, not disabled: focus stays on the button while the card downloads.
+                aria-disabled={printing || undefined}
+                className="aria-disabled:opacity-60"
+                onClick={async () => {
+                  if (printing) return;
+                  setPrinting(true);
+                  await onPrintCard();
+                  setPrinting(false);
+                }}
+              >
+                <QrCode aria-hidden="true" />
+                {t("printCard")}
+              </Button>
+            )}
             {draft ? (
               <Popover
                 label={t("moreActions", { name })}
@@ -123,6 +148,9 @@ export function ChildPanel({
               </Popover>
             ) : null}
           </div>
+          {child.doNotPhotograph ? (
+            <p className="m-0 text-caption text-muted">{t("noCard")}</p>
+          ) : null}
           {draft ? null : <p className="m-0 text-caption text-muted">{tr("lockedNote")}</p>}
         </div>
       ) : null}

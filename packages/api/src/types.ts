@@ -57,6 +57,7 @@ export const ACTIVITY_TYPES = [
   "job.created",
   "job.updated",
   "roster.imported",
+  "qr_cards.printed",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -71,7 +72,8 @@ export const activityItem = z
       .meta({ description: "Who it was about, for member events." }),
     role: studioRole.nullable(),
     subjectName: z.string().nullable().meta({
-      description: "The job's or client's current name, for job, client and roster events.",
+      description:
+        "The job's or client's current name, for job, client, roster and QR card events.",
     }),
     occurredAt: z.iso.datetime({ offset: true }),
   })
@@ -235,3 +237,37 @@ export const rosterImportResponse = z
   })
   .meta({ id: "RosterImport" });
 export type RosterImportResponse = z.infer<typeof rosterImportResponse>;
+
+// ── QR cards (Phase 1 step 3, ADR 0015) ───────────────────────────────────────────────────────────────────────────
+export const qrCardStatus = z
+  .object({
+    eligible: z.number().int().meta({ description: "Children not marked Do not photograph." }),
+    withCard: z.number().int().meta({ description: "Of those, how many have a card." }),
+    blankCards: z.number().int().meta({ description: "Blank cards printed for the job." }),
+  })
+  .meta({
+    id: "QrCardStatus",
+    description:
+      "Print QR cards is done when every child who may be photographed has a card (eligible > 0 and withCard = eligible).",
+  });
+export type QrCardStatus = z.infer<typeof qrCardStatus>;
+export const qrCardStatusResponse = z.object({ qrCards: qrCardStatus });
+export type QrCardStatusResponse = z.infer<typeof qrCardStatusResponse>;
+
+/** Response headers of the QR card PDF: counts only, so the dialog can say what happened (never names or codes). */
+export const QR_CARD_HEADERS = {
+  cards: "Daybell-Cards",
+  skipped: "Daybell-Cards-Skipped",
+  replaced: "Daybell-Cards-Replaced-Characters",
+} as const;
+
+/**
+ * Why a print was refused with 409, in the error's `fields.form` (stable keys; screens show their own words). With
+ * codesUnreadable, the Daybell-Cards-Skipped header says how many cards were left out.
+ */
+export const QR_CARD_CONFLICTS = {
+  nothingToPrint: "qrCards.nothingToPrint",
+  doNotPhotograph: "qrCards.doNotPhotograph",
+  codesUnreadable: "qrCards.codesUnreadable",
+} as const;
+export type QrCardConflict = (typeof QR_CARD_CONFLICTS)[keyof typeof QR_CARD_CONFLICTS];

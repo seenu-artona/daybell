@@ -95,4 +95,32 @@ describe("API description", () => {
     const activity = doc.paths["/studio/activity"]?.get as { parameters: { name: string }[] };
     expect(activity.parameters.map((p) => p.name)).toEqual(["jobId"]);
   });
+
+  it("describes QR cards: a PDF from a POST body, and the Overview's card counts", () => {
+    type Op = {
+      "x-access": string;
+      requestBody?: { content: Record<string, unknown> };
+      responses: Record<
+        string,
+        { content?: Record<string, { schema: unknown }>; headers?: object }
+      >;
+    };
+    const paths = doc.paths["/jobs/{id}/qr-cards"] as Record<string, Op> | undefined;
+    const print = paths?.post;
+    expect(print?.["x-access"]).toBe("roster-editor");
+    expect(print?.requestBody?.content).toHaveProperty("application/json");
+    expect(print?.responses["200"]?.content).toEqual({
+      "application/pdf": { schema: { type: "string", format: "binary" } },
+    });
+    expect(Object.keys(print?.responses["200"]?.headers ?? {})).toEqual([
+      "Daybell-Cards",
+      "Daybell-Cards-Skipped",
+      "Daybell-Cards-Replaced-Characters",
+    ]);
+    expect(Object.keys(print?.responses ?? {})).toEqual(
+      expect.arrayContaining(["400", "401", "403", "404", "409"]),
+    );
+    expect(paths?.get?.["x-access"]).toBe("signed-in");
+    expect(doc.components.schemas).toHaveProperty("QrCardStatus");
+  });
 });

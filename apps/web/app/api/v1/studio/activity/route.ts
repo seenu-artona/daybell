@@ -1,12 +1,18 @@
 import { type ActivityItem, ApiError, activityQuery, type StudioRole } from "@daybell/api";
 import { NextResponse } from "next/server";
-import { activityType, JOB_ACTIVITY_TYPES, STORED_ACTIVITY_TYPES } from "@/lib/activity";
+import {
+  activityType,
+  JOB_ACTIVITY_TYPES,
+  JOB_SUBJECT_PREFIXES,
+  STORED_ACTIVITY_TYPES,
+} from "@/lib/activity";
 import { check, handle, parseQuery } from "@/lib/api";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
 /**
  * GET /api/v1/studio/activity — the latest 50 things that happened in the studio (owners and admins, D96).
- * ?jobId= narrows it to one job of the caller's studio: its own changes and roster imports (D138; ADR 0013).
+ * ?jobId= narrows it to one job of the caller's studio: its own changes, roster imports and QR card prints (D138;
+ * ADR 0013, 0015).
  * Names (people, jobs, clients) are resolved when read, never stored in events.
  */
 export const GET = handle(async (request: Request) => {
@@ -50,9 +56,9 @@ export const GET = handle(async (request: Request) => {
       rows.filter((e) => e.type.startsWith(prefix) && e.subject_id).map((e) => e.subject_id),
     ),
   ];
-  // Roster imports point at their job (counts only in the event, D96).
+  // Roster imports and QR card prints point at their job (counts only in the event, D96).
   const [jobIds, clientIds] = [
-    [...subjectsOf("job."), ...subjectsOf("roster.")],
+    [...new Set(JOB_SUBJECT_PREFIXES.flatMap((prefix) => subjectsOf(prefix)))],
     [...subjectsOf("client."), ...subjectsOf("organization.")],
   ];
   const [jobs, clients] = await Promise.all([

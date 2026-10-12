@@ -16,6 +16,7 @@ import {
   jobPatch,
   listQuery,
   passwordUpdateInput,
+  qrCardsInput,
   rosterImportInput,
   rosterQuery,
   rosterRow,
@@ -394,5 +395,40 @@ describe("menu search (ADR 0013)", () => {
     const id = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
     expect(activityQuery.parse({ jobId: id })).toEqual({ jobId: id });
     expect(activityQuery.safeParse({ jobId: "Lincoln" }).success).toBe(false);
+  });
+});
+
+describe("QR cards (ADR 0015)", () => {
+  const id = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
+  const other = "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f";
+  const errors = (value: unknown) => {
+    const result = qrCardsInput.safeParse(value);
+    return result.success ? null : fieldErrors(result.error);
+  };
+
+  it("prints the whole job by default, with no blank cards", () => {
+    expect(qrCardsInput.parse({})).toEqual({ blankCards: 0 });
+  });
+
+  it('takes chosen classes (and "none" for no class), once each', () => {
+    expect(qrCardsInput.parse({ groupIds: [id, "none"], blankCards: 3 })).toEqual({
+      groupIds: [id, "none"],
+      blankCards: 3,
+    });
+    expect(errors({ groupIds: [] })?.groupIds).toBe("validation.qrCardsGroups");
+    expect(errors({ groupIds: [id, id] })?.groupIds).toBe("validation.group");
+    expect(errors({ groupIds: ["Room 4"] })).not.toBeNull();
+  });
+
+  it("allows 0 to 100 whole blank cards (Seenu, answer 3)", () => {
+    expect(qrCardsInput.parse({ blankCards: 100 }).blankCards).toBe(100);
+    for (const blankCards of [-1, 101, 1.5, "3"])
+      expect(errors({ blankCards })?.blankCards).toBe("validation.blankCards");
+  });
+
+  it("prints one child's card alone: no classes and no blank cards with it", () => {
+    expect(qrCardsInput.parse({ childId: id })).toEqual({ childId: id, blankCards: 0 });
+    expect(errors({ childId: id, groupIds: [other] })?.groupIds).toBe("validation.invalid");
+    expect(errors({ childId: id, blankCards: 2 })?.blankCards).toBe("validation.blankCards");
   });
 });

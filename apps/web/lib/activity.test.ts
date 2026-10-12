@@ -48,15 +48,17 @@ describe("unnamedSubject", () => {
   it("calls a job or roster import's missing subject a job, and a client event's a client", () => {
     expect(unnamedSubject("job.created")).toBe("aJob");
     expect(unnamedSubject("roster.imported")).toBe("aJob");
+    expect(unnamedSubject("qr_cards.printed")).toBe("aJob");
     expect(unnamedSubject("client.updated")).toBe("aClient");
   });
 });
 
 describe("JOB_ACTIVITY_TYPES", () => {
-  it("is the job's own changes and roster imports, nothing about children, classes or the team", () => {
+  it("is the job's own changes, roster imports and QR card prints, nothing about children, classes or the team", () => {
     expect([...JOB_ACTIVITY_TYPES].sort()).toEqual([
       "job.created",
       "job.updated",
+      "qr_cards.printed",
       "roster.imported",
     ]);
     for (const type of JOB_ACTIVITY_TYPES) expect(STORED_ACTIVITY_TYPES).toContain(type);
@@ -72,6 +74,7 @@ describe("activityChip", () => {
     expect(activityChip("job.created")).toEqual({ tone: "primary", icon: "created" });
     expect(activityChip("job.updated")).toEqual({ tone: "warning", icon: "edited" });
     expect(activityChip("roster.imported")).toEqual({ tone: "info", icon: "imported" });
+    expect(activityChip("qr_cards.printed")).toEqual({ tone: "info", icon: "printed" });
     expect(activityChip("member.joined").icon).toBe("team");
     expect(activityChip("studio.updated").icon).toBe("studio");
   });

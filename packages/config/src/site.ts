@@ -13,3 +13,23 @@ export function siteUrl(env: Record<string, string | undefined> = process.env): 
   if (vercel) return `https://${vercel}`;
   return "http://127.0.0.1:3000";
 }
+
+/**
+ * The parent shop's address, printed on QR cards as "Go to …, enter your code" (D138; Seenu, answer 1 to the step 3
+ * brief). SHOP_URL if set (the shop's own domain, once it exists); otherwise this deployment's address, so staging
+ * prints its Vercel address. Never hard-coded. A SHOP_URL that isn't an http(s) address is refused (by name, never
+ * by value), so a typo can't be printed on thousands of cards.
+ */
+export function shopUrl(env: Record<string, string | undefined> = process.env): string {
+  const explicit = env.SHOP_URL?.trim().replace(/\/+$/, "");
+  if (!explicit) return siteUrl(env);
+  let url: URL;
+  try {
+    url = new URL(explicit);
+  } catch {
+    throw new Error("SHOP_URL must be an http(s) address");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:")
+    throw new Error("SHOP_URL must be an http(s) address");
+  return explicit;
+}

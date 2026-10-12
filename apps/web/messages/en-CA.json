@@ -170,7 +170,9 @@
     "grade": "Use up to 20 characters.",
     "rosterEmpty": "There are no rows to import.",
     "rosterTooLarge": "Import up to 5,000 rows at a time.",
-    "searchShort": "Type at least 2 characters."
+    "searchShort": "Type at least 2 characters.",
+    "blankCards": "Enter a whole number of blank cards from 0 to 100.",
+    "qrCardsGroups": "Choose at least one."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -299,7 +301,10 @@
       "roster": {
         "imported": "{actor} imported a roster into {name}"
       },
-      "jobTitle": "Recent activity"
+      "jobTitle": "Recent activity",
+      "qr_cards": {
+        "printed": "{actor} printed QR cards for {name}"
+      }
     },
     "nav": {
       "label": "Main",
@@ -734,8 +739,11 @@
           "choosePriceList": "What parents can buy",
           "connectPayouts": "Where your sales are paid",
           "startSelling": "Open the shop to parents",
-          "sendToLab": "Print and ship orders"
-        }
+          "sendToLab": "Print and ship orders",
+          "printQrCardsDone": "Every child who may be photographed has a card",
+          "printQrCardsMissing": "{count, plural, one {# child without a card} other {# children without a card}}"
+        },
+        "printCards": "Print cards"
       },
       "checklist": {
         "title": "Before you can sell",
@@ -789,8 +797,33 @@
         "duplicate": "Possible duplicate",
         "yes": "Yes",
         "no": "No",
-        "none": "–"
+        "none": "–",
+        "printCard": "Print QR card",
+        "noCard": "No QR card: marked Do not photograph"
       }
+    },
+    "qrCards": {
+      "button": "Print QR cards",
+      "title": "Print QR cards",
+      "which": "Which cards",
+      "allGroups": "{group, select, class {All classes} team {All teams} other {All groups}}",
+      "chooseGroups": "{group, select, class {Choose classes} team {Choose teams} other {Choose groups}}",
+      "groupsLegend": "{group, select, class {Classes} team {Teams} other {Groups}}",
+      "groupOption": "{name} ({count, plural, one {# card} other {# cards}})",
+      "noGroupOption": "{group, select, class {No class} team {No team} other {No group}} ({count, plural, one {# card} other {# cards}})",
+      "blankCards": "Blank cards",
+      "blankCardsHelp": "Extra cards with a line for the name and their own access code, for children not on the roster. Up to {max}.",
+      "summary": "{cards, plural, one {# card} other {# cards}} on {pages, plural, one {# page} other {# pages}} of US Letter",
+      "dnpNote": "Children marked Do not photograph get no card. Each child keeps the same card on every print.",
+      "download": "Download PDF",
+      "preparing": "Preparing the PDF…",
+      "close": "Close",
+      "done": "Downloaded {count, plural, one {# card} other {# cards}}.",
+      "skipped": "{count, plural, one {# card was left out} other {# cards were left out}}: the access code can't be read. Contact support.",
+      "replaced": "{count, plural, one {# card has} other {# cards have}} characters the card font can't print. They show as ?.",
+      "nothing": "Nothing to print. Choose at least one card.",
+      "printedCard": "Downloaded the QR card.",
+      "doNotPhotograph": "This child is marked Do not photograph, so they get no card."
     }
   },
   "invite": {
@@ -834,5 +867,15 @@
     },
     "englishOnly": "Endpoint descriptions are in English, for developers.",
     "query": "Query parameters"
+  },
+  "pdf": {
+    "qrCards": {
+      "title": "QR cards",
+      "groupLine": "{group, select, class {Class} team {Team} other {Group}}: {name}",
+      "groupLabel": "{group, select, class {Class} team {Team} other {Group}}",
+      "nameLabel": "Name",
+      "accessCode": "Access code",
+      "instructions": "Go to {link}, enter your code"
+    }
   }
 }

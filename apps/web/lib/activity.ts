@@ -24,29 +24,33 @@ export const STORED_ACTIVITY_TYPES: readonly string[] = [
   ...Object.keys(RENAMED),
 ];
 
-/**
- * The stored types a job's own activity shows (GET /studio/activity?jobId=): changes to the job and its roster imports.
- * Each child and class change stays hidden, as on the studio-wide log.
- */
-export const JOB_ACTIVITY_TYPES: readonly string[] = STORED_ACTIVITY_TYPES.filter(
-  (type) => type.startsWith("job.") || type.startsWith("roster."),
-);
+/** Event types whose subject is a job: the job's own changes, roster imports and QR card prints (ADR 0015). */
+export const JOB_SUBJECT_PREFIXES = ["job.", "roster.", "qr_cards."] as const;
 
-/** What a nameless subject is called when its name can't be looked up (e.g. it was deleted): jobs and roster imports
- * point at a job; client events (and legacy organization ones) at a client. */
+const aboutJob = (type: string) => JOB_SUBJECT_PREFIXES.some((prefix) => type.startsWith(prefix));
+
+/**
+ * The stored types a job's own activity shows (GET /studio/activity?jobId=): changes to the job, its roster imports
+ * and QR card prints (Seenu, answer 6). Each child and class change stays hidden, as on the studio-wide log.
+ */
+export const JOB_ACTIVITY_TYPES: readonly string[] = STORED_ACTIVITY_TYPES.filter(aboutJob);
+
+/** What a nameless subject is called when its name can't be looked up (e.g. it was deleted): jobs, roster imports
+ * and QR card prints point at a job; client events (and legacy organization ones) at a client. */
 export function unnamedSubject(type: ActivityType): "aJob" | "aClient" {
-  return type.startsWith("job.") || type.startsWith("roster.") ? "aJob" : "aClient";
+  return aboutJob(type) ? "aJob" : "aClient";
 }
 
 /** The icon on an activity row's chip; the component maps each to a lucide icon. */
-export type ActivityIcon = "created" | "edited" | "imported" | "team" | "studio";
+export type ActivityIcon = "created" | "edited" | "imported" | "printed" | "team" | "studio";
 
 /**
- * The pastel chip at the start of an activity row (D140): new things green, edits amber, imports blue, team changes
- * lime, studio changes grey. Decorative only: the sentence says what happened.
+ * The pastel chip at the start of an activity row (D140): new things green, edits amber, imports and QR card prints
+ * blue, team changes lime, studio changes grey. Decorative only: the sentence says what happened.
  */
 export function activityChip(type: ActivityType): { tone: IconChipTone; icon: ActivityIcon } {
   if (type === "roster.imported") return { tone: "info", icon: "imported" };
+  if (type === "qr_cards.printed") return { tone: "info", icon: "printed" };
   if (type.startsWith("member.") || type.startsWith("invite."))
     return { tone: "lime", icon: "team" };
   if (type.startsWith("studio.")) return { tone: "neutral", icon: "studio" };

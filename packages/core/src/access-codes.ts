@@ -127,20 +127,23 @@ function fromBase64Url(text: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-const associatedData = (childId: string) => encoder.encode(`daybell:child:${childId}`);
-
 /**
- * The studio's readable copy: "v1." + base64url(IV | ciphertext | tag), 48 characters after the prefix. The child's id
- * is the associated data, so a copy moved to another child's row fails to decrypt.
+ * What an encrypted copy is bound to: a child, or a blank QR card (ADR 0015) until the card is tagged and its code
+ * moves to the new child. The two never share associated data, so a card's copy can't be read as a child's.
  */
-export async function encryptAccessCode(
+export type AccessCodeOwner = { child: string } | { card: string };
+
+const associatedData = (owner: AccessCodeOwner) =>
+  encoder.encode("child" in owner ? `daybell:child:${owner.child}` : `daybell:card:${owner.card}`);
+
+async function seal(
   code: string,
-  childId: string,
+  owner: AccessCodeOwner,
   encryptionKey: CryptoKey,
 ): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const sealed = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: associatedData(childId) },
+    { name: "AES-GCM", iv, additionalData: associatedData(owner) },
     encryptionKey,
     encoder.encode(code),
   );
@@ -150,10 +153,9 @@ export async function encryptAccessCode(
   return PREFIX + toBase64Url(out);
 }
 
-/** The code from its encrypted copy. Throws (without saying why) if the copy, key or child doesn't match. */
-export async function decryptAccessCode(
+async function open(
   ciphertext: string,
-  childId: string,
+  owner: AccessCodeOwner,
   encryptionKey: CryptoKey,
 ): Promise<string> {
   if (!ciphertext.startsWith(PREFIX)) throw new Error("Unreadable access code");
@@ -161,7 +163,7 @@ export async function decryptAccessCode(
   let opened: ArrayBuffer;
   try {
     opened = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: bytes.slice(0, IV_BYTES), additionalData: associatedData(childId) },
+      { name: "AES-GCM", iv: bytes.slice(0, IV_BYTES), additionalData: associatedData(owner) },
       encryptionKey,
       bytes.slice(IV_BYTES),
     );
@@ -171,4 +173,46 @@ export async function decryptAccessCode(
   const code = new TextDecoder().decode(opened);
   if (!CODE.test(code)) throw new Error("Unreadable access code");
   return code;
+}
+
+/**
+ * The studio's readable copy: "v1." + base64url(IV | ciphertext | tag), 48 characters after the prefix. The child's id
+ * is the associated data, so a copy moved to another child's row fails to decrypt.
+ */
+export function encryptAccessCode(
+  code: string,
+  childId: string,
+  encryptionKey: CryptoKey,
+): Promise<string> {
+  return seal(code, { child: childId }, encryptionKey);
+}
+
+/** The code from its encrypted copy. Throws (without saying why) if the copy, key or child doesn't match. */
+export function decryptAccessCode(
+  ciphertext: string,
+  childId: string,
+  encryptionKey: CryptoKey,
+): Promise<string> {
+  return open(ciphertext, { child: childId }, encryptionKey);
+}
+
+/** A blank QR card's copy of its pre-made code, bound to the card's id (ADR 0015). Same format as a child's. */
+export function encryptCardAccessCode(
+  code: string,
+  cardId: string,
+  encryptionKey: CryptoKey,
+): Promise<string> {
+  return seal(code, { card: cardId }, encryptionKey);
+}
+
+/**
+ * A blank card's code from its encrypted copy. Throws if the copy, key or card doesn't match. Not used yet: tagging
+ * (step 4) reads it to move the code to the new child.
+ */
+export function decryptCardAccessCode(
+  ciphertext: string,
+  cardId: string,
+  encryptionKey: CryptoKey,
+): Promise<string> {
+  return open(ciphertext, { card: cardId }, encryptionKey);
 }

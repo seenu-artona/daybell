@@ -142,8 +142,8 @@ test("job page layout, menu search and studio separation", async ({
   await expect(todos.getByText("1 of 3 done", { exact: true })).toBeVisible();
   await expect(todo("Job created")).toContainText("Done");
   await expect(todo("Roster added")).toContainText("To do");
-  // QR cards ship in step 3: Soon, with nothing to click.
-  await expect(todo("Print QR cards")).toContainText("Soon");
+  // QR cards (step 3, ADR 0015): to do, with nothing to print (or click) until the roster has children.
+  await expect(todo("Print QR cards")).toContainText("To do");
   await expect(todo("Print QR cards").getByRole("link")).toHaveCount(0);
   await expect(todo("Print QR cards").getByRole("button")).toHaveCount(0);
   // The job's own activity only, not the other job's, beside the to-dos.

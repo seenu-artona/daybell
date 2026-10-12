@@ -1,8 +1,8 @@
 import { ApiError } from "@daybell/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Every roster write checks who is asking, and their role, before it reads the body (S4). The scope is faked here;
-// nothing reaches a database.
+// Every roster write (QR card prints included, ADR 0015) checks who is asking, and their role, before it reads the
+// body (S4). The scope is faked here; nothing reaches a database.
 vi.mock("server-only", () => ({}));
 const { scope, rpc } = vi.hoisted(() => ({ scope: vi.fn(), rpc: vi.fn() }));
 vi.mock("@/lib/studio", async (original) => ({
@@ -35,6 +35,11 @@ const routes = [
   ["PATCH /children/:id", async () => (await import("./children/[id]/route")).PATCH, "PATCH"],
   ["POST /jobs/:id/groups", async () => (await import("./jobs/[id]/groups/route")).POST, "POST"],
   ["PATCH /groups/:id", async () => (await import("./groups/[id]/route")).PATCH, "PATCH"],
+  [
+    "POST /jobs/:id/qr-cards",
+    async () => (await import("./jobs/[id]/qr-cards/route")).POST,
+    "POST",
+  ],
 ] as const;
 
 afterEach(() => {
