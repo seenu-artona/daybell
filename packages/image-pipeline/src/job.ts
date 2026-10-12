@@ -65,7 +65,8 @@ export type PhotoJobOutcome = "ready" | "failed" | "skipped";
 export async function runPhotoJob(
   photoId: string,
   deps: PhotoJobDeps,
-  options: { fontFile?: string } = {},
+  /** The watermark font and zxing's reader .wasm, where a bundle keeps its own copies. */
+  options: { fontFile?: string; qrWasmFile?: string } = {},
 ): Promise<PhotoJobOutcome> {
   let photo = await deps.photo(photoId);
   for (let check = 1; photo?.status === "uploading"; check++) {
@@ -104,6 +105,7 @@ export async function runPhotoJob(
     studioName: photo.studioName,
     expectedSha256: photo.sha256,
     ...(options.fontFile ? { fontFile: options.fontFile } : {}),
+    ...(options.qrWasmFile ? { qrWasmFile: options.qrWasmFile } : {}),
   });
   if (!result.ok) return fail(result.reason);
   await Promise.all(

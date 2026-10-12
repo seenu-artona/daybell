@@ -7,14 +7,17 @@ import {
   activityQuery,
   childInput,
   childPatch,
+  claimBlankCardInput,
   clientInput,
   clientPatch,
+  confirmPhotosInput,
   fieldErrors,
   groupInput,
   inviteInput,
   jobInput,
   jobPatch,
   listQuery,
+  movePhotosInput,
   passwordUpdateInput,
   qrCardsInput,
   rosterImportInput,
@@ -23,6 +26,10 @@ import {
   searchInput,
   signUpInput,
   suggestSlug,
+  taggingChildrenQuery,
+  taggingPhotosQuery,
+  uploadBatchInput,
+  workerResultInput,
 } from "./schemas";
 
 describe("sign-up input", () => {
@@ -430,5 +437,78 @@ describe("QR cards (ADR 0015)", () => {
     expect(qrCardsInput.parse({ childId: id })).toEqual({ childId: id, blankCards: 0 });
     expect(errors({ childId: id, groupIds: [other] })?.groupIds).toBe("validation.invalid");
     expect(errors({ childId: id, blankCards: 2 })?.blankCards).toBe("validation.blankCards");
+  });
+});
+
+describe("QR tagging and review (ADR 0018)", () => {
+  const photo = "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f";
+  const child = "2d8b9e3a-4c9f-4e77-9f2a-5b3c4d5e6f70";
+
+  it("moves 1 to 500 distinct photos to a child, a class photo set or Leftovers", () => {
+    expect(
+      movePhotosInput.parse({ photoIds: [photo], target: { kind: "child", childId: child } }),
+    ).toEqual({ photoIds: [photo], target: { kind: "child", childId: child } });
+    expect(
+      movePhotosInput.safeParse({ photoIds: [photo], target: { kind: "leftovers" } }).success,
+    ).toBe(true);
+    for (const bad of [
+      { photoIds: [], target: { kind: "leftovers" } },
+      { photoIds: [photo, photo], target: { kind: "leftovers" } },
+      { photoIds: [photo], target: { kind: "card" } },
+      { photoIds: [photo], target: { kind: "child" } },
+      { photoIds: ["Maya Johnson.jpg"], target: { kind: "leftovers" } },
+    ])
+      expect(movePhotosInput.safeParse(bad).success).toBe(false);
+  });
+
+  it("confirms photos as they are by default, or as card photos", () => {
+    expect(confirmPhotosInput.parse({ photoIds: [photo] })).toEqual({
+      photoIds: [photo],
+      asCard: false,
+    });
+    expect(confirmPhotosInput.parse({ photoIds: [photo], asCard: true }).asCard).toBe(true);
+  });
+
+  it("names a blank card's child with the roster's own name rules", () => {
+    expect(claimBlankCardInput.parse({ firstName: " Zoe ", lastName: "New" })).toMatchObject({
+      firstName: "Zoe",
+      lastName: "New",
+    });
+    expect(claimBlankCardInput.safeParse({ firstName: "", lastName: "New" }).success).toBe(false);
+  });
+
+  it("lists photos by place, with an id only for a child, a class or a blank card", () => {
+    expect(taggingPhotosQuery.safeParse({ place: "leftovers" }).success).toBe(true);
+    expect(taggingPhotosQuery.safeParse({ place: "child", id: child }).success).toBe(true);
+    expect(taggingPhotosQuery.safeParse({ place: "child" }).success).toBe(false);
+    expect(taggingPhotosQuery.safeParse({ place: "flagged", id: child }).success).toBe(false);
+    expect(taggingChildrenQuery.parse({ noGroup: "true" }).noGroup).toBe(true);
+    expect(taggingChildrenQuery.safeParse({}).success).toBe(false);
+    expect(taggingChildrenQuery.safeParse({ groupId: child, noGroup: "true" }).success).toBe(false);
+  });
+
+  it("takes the worker's reading of a card: a code only for a card, never anything else", () => {
+    const ready = { status: "ready", attempt: 1, width: 1, height: 1, capturedAt: null };
+    expect(workerResultInput.safeParse(ready).success).toBe(true);
+    expect(
+      workerResultInput.safeParse({
+        ...ready,
+        qr: { kind: "card", cardCode: "0123456789ABCDEFGHJK" },
+      }).success,
+    ).toBe(true);
+    expect(workerResultInput.safeParse({ ...ready, qr: { kind: "card" } }).success).toBe(false);
+    expect(
+      workerResultInput.safeParse({ ...ready, qr: { kind: "card", cardCode: "Maya Johnson" } })
+        .success,
+    ).toBe(false);
+    expect(workerResultInput.safeParse({ ...ready, qr: { kind: "unreadable" } }).success).toBe(
+      true,
+    );
+  });
+
+  it("starts a class-photo upload with one class, or an individual upload with nothing", () => {
+    expect(uploadBatchInput.parse({})).toEqual({});
+    expect(uploadBatchInput.parse({ groupId: child })).toEqual({ groupId: child });
+    expect(uploadBatchInput.safeParse({ groupId: "Room 4" }).success).toBe(false);
   });
 });

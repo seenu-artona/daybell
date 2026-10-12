@@ -51,9 +51,21 @@ export interface SellChecklistItem {
   soon: boolean;
 }
 
-/** "Before you can sell", in the Start selling dialog. Only "Roster added" is real today. */
-export function sellChecklist({ children }: { children: number }): SellChecklistItem[] {
-  return SELL_CHECKLIST.map((key) =>
-    key === "roster" ? { key, done: children > 0, soon: false } : { key, done: false, soon: true },
-  );
+/**
+ * "Before you can sell", in the Start selling dialog. "Roster added" and "Tagging reviewed" (reviewTaggingDone, ADR
+ * 0018: the server refuses selling on it when Start selling is built; plan answer 7) are real today.
+ */
+export function sellChecklist({
+  children,
+  taggingReviewed,
+}: {
+  children: number;
+  /** The Review tagging task is done (reviewTaggingDone). */
+  taggingReviewed: boolean;
+}): SellChecklistItem[] {
+  return SELL_CHECKLIST.map((key) => {
+    if (key === "roster") return { key, done: children > 0, soon: false };
+    if (key === "tagging") return { key, done: taggingReviewed, soon: false };
+    return { key, done: false, soon: true };
+  });
 }

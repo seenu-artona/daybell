@@ -12,7 +12,13 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  * role (photo writes and the image worker's and cron's photo work below are the only other uses): it bypasses
  * row-level security.
  */
-export type CodeWriteRpc = "add_child" | "import_roster" | "prepare_qr_cards";
+export type CodeWriteRpc =
+  | "add_child"
+  | "import_roster"
+  | "prepare_qr_cards"
+  // Naming a blank QR card's child moves the card's code to them (ADR 0018).
+  | "blank_card_code"
+  | "claim_blank_card";
 
 const clients = new Map<DataRegion, SupabaseClient>();
 
@@ -62,7 +68,11 @@ export type PhotoWriteRpc =
   | "finish_upload_batch"
   | "retry_photo"
   | "bin_photos"
-  | "restore_photos";
+  | "restore_photos"
+  // Review (ADR 0018): moves, confirmations and Mark reviewed.
+  | "move_photos"
+  | "confirm_photos"
+  | "mark_tagging_reviewed";
 
 export function photoWriteRpc(
   region: DataRegion,
@@ -74,8 +84,9 @@ export function photoWriteRpc(
 }
 
 /**
- * Photo work nobody signed in does: the image worker's read and result (only from the HMAC-checked internal routes)
- * and the daily clean-up (only from the CRON_SECRET-checked cron route).
+ * Photo work nobody signed in does: the image worker's read and result (only from the HMAC-checked internal routes),
+ * the daily clean-up (only from the CRON_SECRET-checked cron route), and tagging upload batches (ADR 0018), which runs
+ * after those and after a signed-in person's own checked write (finishing an upload, the bin), for that batch only.
  */
 export type PhotoSystemRpc =
   | "photo_for_worker"
@@ -84,7 +95,12 @@ export type PhotoSystemRpc =
   | "delete_purged_photos"
   | "abandoned_uploads"
   | "delete_abandoned_uploads"
-  | "finish_idle_batches";
+  | "finish_idle_batches"
+  // Tagging upload batches (ADR 0018), after a result, a finished upload, the bin and in the daily sweep.
+  | "tagging_inputs"
+  | "apply_batch_tags"
+  | "batches_of_photos"
+  | "batches_to_tag";
 
 export function photoSystemRpc(
   region: DataRegion,

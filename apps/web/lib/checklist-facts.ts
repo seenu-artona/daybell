@@ -19,6 +19,12 @@ export interface FactsRow {
   qr_with_card: number;
   has_ready_photo: boolean;
   failed_photos: number;
+  /** QR tagging (ADR 0018). */
+  tagging_pending: boolean;
+  leftovers: number;
+  flagged: number;
+  blank_cards_pending: number;
+  tagging_reviewed: boolean;
 }
 
 /**
@@ -50,6 +56,11 @@ export function checklistFacts(
     qrCards: row ? { eligible: Number(row.qr_eligible), withCard: Number(row.qr_with_card) } : null,
     hasReadyPhoto: row?.has_ready_photo === true,
     failedPhotos: Number(row?.failed_photos ?? 0),
+    taggingPending: row?.tagging_pending === true,
+    leftovers: Number(row?.leftovers ?? 0),
+    flagged: Number(row?.flagged ?? 0),
+    blankCardsPending: Number(row?.blank_cards_pending ?? 0),
+    taggingReviewed: row?.tagging_reviewed === true,
     today,
   };
 }

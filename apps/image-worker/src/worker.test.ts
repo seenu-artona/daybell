@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { photoKey, verifyWorkerRequest } from "@daybell/core";
+import { cardQrPayload, photoKey, verifyWorkerRequest } from "@daybell/core";
 import { localPhotoStorage, type PhotoStorage } from "@daybell/storage";
 import type { SQSEvent } from "aws-lambda";
+import QRCode from "qrcode";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -21,6 +23,10 @@ const ids = {
   photoId: "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f",
 };
 const BUCKET = "daybell-staging-ca-photos";
+/** zxing's reader from the pipeline's node_modules; the Lambda passes the copy next to its bundle (ADR 0018). */
+const qrWasmFile = createRequire(
+  join(__dirname, "../../../packages/image-pipeline/package.json"),
+).resolve("zxing-wasm/reader/zxing_reader.wasm");
 const SECRET = "w".repeat(40);
 const config: WorkerConfig = {
   callbackBaseUrl: "https://daybell-git-main-artona-tech-team.vercel.app",
@@ -160,6 +166,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
   it("makes the previews and reports the result over signed calls", async () => {
     const logs: unknown[][] = [];
     const handler = createHandler({
+      qrWasmFile,
       config,
       storage,
       fetch: fetchFake as typeof fetch,
@@ -169,7 +176,14 @@ describe("the Lambda handler (S3 and the API faked)", () => {
       batchItemFailures: [],
     });
     expect(reports).toEqual([
-      { status: "ready", width: 900, height: 600, capturedAt: null, attempt: 2 },
+      {
+        status: "ready",
+        width: 900,
+        height: 600,
+        capturedAt: null,
+        qr: { kind: "none" },
+        attempt: 2,
+      },
     ]);
     for (const variant of ["thumb.webp", "view.webp", "proof-thumb.webp", "proof.webp"] as const)
       expect(await storage.head(photoKey(ids, variant))).not.toBeNull();
@@ -183,6 +197,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
   it("acknowledges a repeated message without doing the work again", async () => {
     status = "ready";
     const handler = createHandler({
+      qrWasmFile,
       config,
       storage,
       fetch: fetchFake as typeof fetch,
@@ -201,6 +216,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
       throw new TypeError("fetch failed for https://secret.example/?token=abc");
     });
     const handler = createHandler({
+      qrWasmFile,
       config,
       storage,
       fetch: down as unknown as typeof fetch,
@@ -219,6 +235,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     status = "uploading";
     const sleep = vi.fn(async (_ms: number) => {});
     const handler = createHandler({
+      qrWasmFile,
       config,
       storage,
       fetch: fetchFake as typeof fetch,
@@ -239,6 +256,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
           new Response(body, { status: 404, headers: { "content-type": "application/json" } }),
       );
     const gone = createHandler({
+      qrWasmFile,
       config,
       storage,
       fetch: answer('{"error":{"code":"not_found","message":"x"}}') as unknown as typeof fetch,
@@ -246,6 +264,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     });
     expect(await gone(sqs(s3Event(photoKey(ids, "original"))))).toEqual({ batchItemFailures: [] });
     const proxy = createHandler({
+      qrWasmFile,
       config,
       storage,
       fetch: answer("<html>Not Found</html>") as unknown as typeof fetch,
@@ -256,8 +275,56 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     );
   });
 
+  it("reads a photo's QR card and sends the code only in the signed body, never in a log or a URL (ADR 0018)", async () => {
+    const code = "0123456789ABCDEFGHJK";
+    const card = await QRCode.toBuffer(cardQrPayload(code), { margin: 4, width: 300 });
+    original = await sharp({
+      create: { width: 6000, height: 4000, channels: 3, background: "#5c6e80" },
+    })
+      .composite([{ input: card, left: 2600, top: 2300 }])
+      .jpeg()
+      .toBuffer();
+    await storage.put(photoKey(ids, "original"), original, { contentType: "image/jpeg" });
+    const logs: unknown[][] = [];
+    const consoleLines: unknown[][] = [];
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation((...args) => void consoleLines.push(args)),
+    );
+    try {
+      const handler = createHandler({
+        qrWasmFile,
+        config,
+        storage,
+        fetch: fetchFake as typeof fetch,
+        log: (...args) => void logs.push(args),
+      });
+      expect(await handler(sqs(s3Event(photoKey(ids, "original"))))).toEqual({
+        batchItemFailures: [],
+      });
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+    expect(reports).toEqual([
+      {
+        status: "ready",
+        width: 6000,
+        height: 4000,
+        capturedAt: null,
+        qr: { kind: "card", cardCode: code },
+        attempt: 2,
+      },
+    ]);
+    expect(logs).toEqual([["photo_ready", ids.photoId]]);
+    expect(JSON.stringify([logs, consoleLines])).not.toContain(code);
+    for (const [url, init] of fetchFake.mock.calls) {
+      expect(String(url)).not.toContain(code);
+      expect(JSON.stringify((init as RequestInit | undefined)?.headers ?? {})).not.toContain(code);
+    }
+  }, 30_000);
+
   it("refuses to trust an API that rejects its signature", async () => {
     const handler = createHandler({
+      qrWasmFile,
       config: { ...config, secret: "x".repeat(40) },
       storage,
       fetch: fetchFake as typeof fetch,

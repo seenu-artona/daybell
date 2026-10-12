@@ -14,6 +14,7 @@ import { JobSection } from "../job-section";
 import { tabHref } from "../tabs";
 import { PhotoGrid, tileId } from "./photo-grid";
 import { PhotoPanel } from "./photo-panel";
+import { PhotosViews } from "./photos-views";
 import { useRuns } from "./runs-store";
 import { isActive, UploadSheet, useLeaveWarning } from "./upload-sheet";
 import { usePhotos } from "./use-photos";
@@ -173,6 +174,7 @@ function PhotosPage() {
       }
       below={
         <>
+          {bin ? null : <PhotosViews jobId={job.id} current="all" />}
           {closed && !bin ? <Banner tone="info" title={t("closed")} /> : null}
           {bin ? <p className="m-0 text-sm text-muted">{t("binNote")}</p> : null}
           {(sheetOpen || uploading) && canUpload && !bin ? (

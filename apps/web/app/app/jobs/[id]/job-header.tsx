@@ -101,7 +101,7 @@ export function JobHeader() {
       <Dialog open={selling} onClose={() => setSelling(false)} title={t("checklist.title")}>
         <div className="flex flex-col gap-4">
           <p className="m-0 text-muted">{t("sellIntro")}</p>
-          <SellChecklist roster={summary?.children ?? 0} />
+          <SellChecklist jobId={job.id} roster={summary?.children ?? 0} />
           <div className="flex justify-end">
             <Button variant="secondary" onClick={() => setSelling(false)}>
               {t("close")}

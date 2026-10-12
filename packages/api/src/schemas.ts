@@ -6,8 +6,10 @@ import {
   MAX_PART_URLS_PER_REQUEST,
   MAX_PHOTO_BYTES,
   MAX_PHOTOS_PER_BIN_REQUEST,
+  MAX_PHOTOS_PER_MOVE,
   PHOTO_PAGE_SIZE,
   planParts,
+  REVIEW_CHILDREN_PAGE,
 } from "@daybell/core";
 import { z } from "zod";
 
@@ -552,6 +554,24 @@ export const photoListQuery = z.object({
 });
 export type PhotoListQuery = z.infer<typeof photoListQuery>;
 
+/**
+ * What the image worker read in a ready photo (ADR 0018). Optional: results from a worker that doesn't read cards yet
+ * count as plain photos. The card code travels only in this signed body: never in a URL, a log or a queue message.
+ */
+const workerQr = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("none") }),
+    z.object({ kind: z.literal("unreadable") }),
+    z.object({
+      kind: z.literal("card"),
+      cardCode: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{20}$/),
+    }),
+  ])
+  .meta({
+    description:
+      "none: no Daybell card; card: a card was read (its code); unreadable: something that looks like a card couldn't be read.",
+  });
+
 /** The image worker's result for a photo (internal route). */
 const attempt = z.number().int().min(1).meta({
   description:
@@ -567,6 +587,7 @@ export const workerResultInput = z.discriminatedUnion("status", [
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/)
       .nullable(),
+    qr: workerQr.optional(),
   }),
   z.object({
     status: z.literal("failed"),
@@ -575,6 +596,103 @@ export const workerResultInput = z.discriminatedUnion("status", [
   }),
 ]);
 export type WorkerResultInput = z.infer<typeof workerResultInput>;
+
+// ── QR tagging and review (Phase 1 step 5, ADR 0018) ─────────────────────────────────────────────────────────────
+
+/** An upload: individual photos (tagged by their QR cards), or a class's "Class photo" set (Seenu, answer 3). */
+export const uploadBatchInput = z.object({
+  groupId: z.uuid({ error: "validation.group" }).nullable().optional().meta({
+    description:
+      "One of the job's classes: every photo of this upload goes to its Class photo set, and QR cards in it are ignored. Leave out for individual photos.",
+  }),
+});
+export type UploadBatchInput = z.infer<typeof uploadBatchInput>;
+
+const reviewPhotoIds = z
+  .array(z.uuid({ error: "validation.invalid" }), { error: "validation.invalid" })
+  .min(1, { error: "validation.invalid" })
+  .max(MAX_PHOTOS_PER_MOVE, { error: "validation.invalid" })
+  .refine((ids) => new Set(ids).size === ids.length, { error: "validation.invalid" });
+
+export const moveTarget = z
+  .discriminatedUnion(
+    "kind",
+    [
+      z.object({ kind: z.literal("child"), childId: z.uuid({ error: "validation.invalid" }) }),
+      z.object({ kind: z.literal("classSet"), groupId: z.uuid({ error: "validation.invalid" }) }),
+      z.object({ kind: z.literal("leftovers") }),
+    ],
+    { error: "validation.invalid" },
+  )
+  .meta({ id: "MoveTarget", description: "A child, a class's Class photo set, or Leftovers." });
+export type MoveTarget = z.infer<typeof moveTarget>;
+
+/** Move up to 500 of a job's photos by hand (drag, or Move to…). Card photos can't be moved. */
+export const movePhotosInput = z.object({ photoIds: reviewPhotoIds, target: moveTarget });
+export type MovePhotosInput = z.infer<typeof movePhotosInput>;
+
+/** Confirm flagged photos: keep them where they are, or (asCard) mark them card photos, hidden from parents. */
+export const confirmPhotosInput = z.object({
+  photoIds: reviewPhotoIds,
+  asCard: z.boolean({ error: "validation.invalid" }).default(false).meta({
+    description:
+      "true: these are card photos (hidden from parents). false: they look right where they are.",
+  }),
+});
+export type ConfirmPhotosInput = z.infer<typeof confirmPhotosInput>;
+
+/** Name a blank card's child (Seenu, answer 2): a new child in one of the job's classes, with the card's access code. */
+export const claimBlankCardInput = z.object({
+  firstName: childFields.firstName,
+  lastName: childFields.lastName,
+  groupId: childFields.groupId,
+});
+export type ClaimBlankCardInput = z.infer<typeof claimBlankCardInput>;
+
+export const TAGGING_PLACES = ["leftovers", "flagged", "child", "classSet", "blankCard"] as const;
+
+/** A page of the photos in one place on the review screen. Ids only in the URL (D96). */
+export const taggingPhotosQuery = z
+  .object({
+    place: z.enum(TAGGING_PLACES, { error: "validation.invalid" }).meta({
+      description:
+        "leftovers, flagged, a child's photos (with their card photos), a class's Class photo set, or a blank card's photos.",
+    }),
+    id: z
+      .uuid({ error: "validation.invalid" })
+      .optional()
+      .meta({ description: "The child, class or blank card, for those places." }),
+    cursor: z
+      .uuid({ error: "validation.cursor" })
+      .optional()
+      .meta({ description: "The nextCursor from the previous page (a photo's id)." }),
+    limit: z.coerce.number().int().min(1).max(500).default(PHOTO_PAGE_SIZE),
+  })
+  .refine((q) => ["leftovers", "flagged"].includes(q.place) === (q.id === undefined), {
+    error: "validation.invalid",
+    path: ["id"],
+  });
+export type TaggingPhotosQuery = z.infer<typeof taggingPhotosQuery>;
+
+/** An album's children: a class (groupId), or children without one (noGroup=true). */
+export const taggingChildrenQuery = z
+  .object({
+    groupId: z.uuid({ error: "validation.invalid" }).optional(),
+    noGroup: z
+      .enum(["true", "false"], { error: "validation.invalid" })
+      .default("false")
+      .transform((v) => v === "true"),
+    cursor: z
+      .uuid({ error: "validation.cursor" })
+      .optional()
+      .meta({ description: "The nextCursor from the previous page (a child's id)." }),
+    limit: z.coerce.number().int().min(1).max(500).default(REVIEW_CHILDREN_PAGE),
+  })
+  .refine((q) => (q.groupId !== undefined) !== q.noGroup, {
+    error: "validation.invalid",
+    path: ["groupId"],
+  });
+export type TaggingChildrenQuery = z.infer<typeof taggingChildrenQuery>;
 
 /** Turns zod issues into `{ field: messageKey }` for forms. */
 export function fieldErrors(error: z.ZodError): Record<string, string> {

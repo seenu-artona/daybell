@@ -17,8 +17,10 @@ import type { SQSBatchResponse, SQSEvent } from "aws-lambda";
 /**
  * The image worker (ADR 0016): an AWS Lambda in the studio's region (ca-central-1 for Canada, D113). S3 tells the
  * photo-events queue when an original lands; each message runs here once (batch size 1). The worker asks the API what
- * it needs over a signed call (ids, the expected hash, the studio's name for the watermark), makes the previews and
- * reports back to the API (D92). It never touches the database and never logs anything but photo ids and reasons.
+ * it needs over a signed call (ids, the expected hash, the studio's name for the watermark), makes the previews, reads
+ * the photo's QR card (ADR 0018) and reports back to the API (D92). The card code it reads travels only in the signed
+ * result's body: never in a log line or a queue message. It never touches the database and never logs anything but
+ * photo ids and reasons.
  */
 
 export interface WorkerConfig {
@@ -178,6 +180,8 @@ export function createHandler(parts: {
   fetch?: typeof fetch;
   log?: Log;
   sleep?: (ms: number) => Promise<void>;
+  /** zxing's reader .wasm next to the bundle (ADR 0018); tests use the one in node_modules. */
+  qrWasmFile: string;
 }) {
   const api = workerApi(parts.config, parts.fetch);
   const write = parts.log ?? log;
@@ -199,7 +203,7 @@ export function createHandler(parts: {
       if (ids.length === 0) write("message_ignored", record.messageId);
       for (const id of ids) {
         try {
-          await runPhotoJob(id, deps);
+          await runPhotoJob(id, deps, { qrWasmFile: parts.qrWasmFile });
         } catch (err) {
           // The error's name only: messages from libraries can quote URLs or bodies.
           write("photo_error", id, err instanceof Error ? err.name : "unknown");

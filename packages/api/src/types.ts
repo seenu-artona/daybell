@@ -4,6 +4,8 @@ import {
   JOB_TYPES,
   MILESTONES,
   ONBOARDING_TASKS,
+  PHOTO_FLAGS,
+  PHOTO_PLACES,
   TASK_KEYS,
   UP_NEXT_SHOWN,
 } from "@daybell/core";
@@ -401,6 +403,11 @@ export const photoCounts = z
     binned: z.number().int(),
     uploads: z.number().int().meta({ description: "Upload batches (drops of photos)." }),
     duplicatesSkipped: z.number().int(),
+    leftovers: z
+      .number()
+      .int()
+      .meta({ description: "Photos in Leftovers after QR tagging (not in the bin)." }),
+    flagged: z.number().int().meta({ description: "Photos flagged for checking at review." }),
   })
   .meta({
     id: "PhotoCounts",
@@ -490,7 +497,175 @@ export const cronPhotosResponse = z.object({
   finishedBatches: z.number().int(),
   droppedUploads: z.number().int(),
   purgedPhotos: z.number().int(),
+  taggedBatches: z
+    .number()
+    .int()
+    .meta({ description: "Upload batches tagged by the sweep (ADR 0018)." }),
 });
+
+// ── QR tagging and review (Phase 1 step 5, ADR 0018) ─────────────────────────────────────────────────────────────
+export const photoPlace = z.enum(PHOTO_PLACES).meta({
+  id: "PhotoPlace",
+  description:
+    "child, classSet (a class's Class photo set), leftovers, card (a card photo, never shown to parents), blankCard (waiting for the studio to name a blank card's child).",
+});
+export const photoFlag = z.enum(PHOTO_FLAGS).meta({
+  id: "PhotoFlag",
+  description:
+    "Why to check a photo: unreadableCard (looks like a card, couldn't be read), otherCard (another job's card), afterUnreadable or afterFailed (after one of those, or after a photo that couldn't be processed). Flagged photos are hidden from parents until confirmed.",
+});
+
+export const taggedPhoto = z
+  .object({
+    id: z.uuid(),
+    status: z.enum(PHOTO_STATUSES),
+    place: photoPlace,
+    flag: photoFlag.nullable(),
+    childId: z.uuid().nullable().meta({ description: "Where tagging (or a person) put it." }),
+    groupId: z.uuid().nullable(),
+    cardId: z.uuid().nullable(),
+    manual: z
+      .boolean()
+      .meta({ description: "Moved or confirmed by a person: tagging never changes it." }),
+    cardRead: z.boolean().meta({
+      description: "Its QR card was read: a card photo, which can't be moved.",
+    }),
+    thumbUrl: z.url().nullable().meta({
+      description: "A 400 px preview (studio only), signed for up to an hour; null until ready.",
+    }),
+  })
+  .meta({ id: "TaggedPhoto", description: "A photo on the review screen. Never its filename." });
+export type TaggedPhoto = z.infer<typeof taggedPhoto>;
+
+export const NOT_REVIEWABLE_REASONS = [
+  "noPhotos",
+  "pending",
+  "leftovers",
+  "flagged",
+  "blankCards",
+] as const;
+
+export const taggingAlbum = z
+  .object({
+    groupId: z.uuid().nullable().meta({ description: "Null for children without a class." }),
+    name: z.string().nullable(),
+    children: z.number().int(),
+    childrenWithPhotos: z.number().int(),
+    photos: z.number().int().meta({ description: "Photos tagged to its children." }),
+    classPhotos: z.number().int().meta({ description: "Photos in its Class photo set." }),
+  })
+  .meta({ id: "TaggingAlbum", description: "A class (or No class) on the review screen." });
+export type TaggingAlbum = z.infer<typeof taggingAlbum>;
+
+export const blankCardGroup = z
+  .object({
+    cardId: z.uuid(),
+    photos: z
+      .number()
+      .int()
+      .meta({ description: "Photos waiting for this card's child to be named." }),
+    cardPhotoId: z.uuid().nullable().meta({ description: "The photo of the card itself." }),
+    cardPhotoUrl: z.url().nullable().meta({
+      description: "Its 400 px preview (studio only), signed for up to an hour.",
+    }),
+  })
+  .meta({ id: "BlankCardGroup" });
+export type BlankCardGroup = z.infer<typeof blankCardGroup>;
+
+export const taggingSummary = z
+  .object({
+    photos: z.number().int().meta({ description: "Uploaded, not in the bin." }),
+    processing: z.number().int(),
+    failed: z.number().int(),
+    pending: z.boolean().meta({
+      description: "Photos are still processing, or an upload hasn't been tagged since it changed.",
+    }),
+    leftovers: z.number().int(),
+    flagged: z.number().int(),
+    blankCards: z
+      .number()
+      .int()
+      .meta({ description: "Blank cards whose child is still to be named." }),
+    cardPhotos: z.number().int(),
+    noPhotos: z.number().int().meta({
+      description:
+        "Children with no photos yet (not counting Do not photograph). Doesn't block selling.",
+    }),
+    reviewedAt: z.iso.datetime({ offset: true }).nullable(),
+    canMarkReviewed: z.boolean(),
+    notReviewable: z.enum(NOT_REVIEWABLE_REASONS).nullable().meta({
+      description: "Why Mark reviewed is disabled, first reason first.",
+    }),
+    done: z.boolean().meta({ description: "The checklist's Review tagging task is done." }),
+    albums: z.array(taggingAlbum).meta({ description: "Each class, then No class." }),
+    blankCardGroups: z.array(blankCardGroup),
+  })
+  .meta({
+    id: "TaggingSummary",
+    description: "The review screen's header, albums and blank cards.",
+  });
+export type TaggingSummary = z.infer<typeof taggingSummary>;
+export const taggingSummaryResponse = z.object({ tagging: taggingSummary });
+export type TaggingSummaryResponse = z.infer<typeof taggingSummaryResponse>;
+
+export const taggedPhotosResponse = z.object({
+  photos: z.array(taggedPhoto).meta({ description: "In tagging order." }),
+  nextCursor: z
+    .uuid()
+    .nullable()
+    .meta({ description: "Pass as ?cursor= for the next page; null on the last page." }),
+});
+export type TaggedPhotosResponse = z.infer<typeof taggedPhotosResponse>;
+
+export const taggingChild = z
+  .object({
+    id: z.uuid(),
+    firstName: z.string(),
+    lastName: z.string(),
+    groupId: z.uuid().nullable(),
+    doNotPhotograph: z.boolean(),
+    photos: z
+      .number()
+      .int()
+      .meta({ description: "Photos tagged to the child (card photos not counted)." }),
+    strip: z
+      .array(taggedPhoto)
+      .meta({ description: "The first 12, card photos included, in tagging order." }),
+  })
+  .meta({ id: "TaggingChild", description: "A child in an album on the review screen." });
+export type TaggingChild = z.infer<typeof taggingChild>;
+export const taggingChildrenResponse = z.object({
+  children: z.array(taggingChild),
+  nextCursor: z.uuid().nullable(),
+});
+export type TaggingChildrenResponse = z.infer<typeof taggingChildrenResponse>;
+
+export const noPhotosChild = z
+  .object({
+    id: z.uuid(),
+    firstName: z.string(),
+    lastName: z.string(),
+    group: z.object({ id: z.uuid(), name: z.string() }).nullable(),
+  })
+  .meta({ id: "NoPhotosChild" });
+export const noPhotosResponse = z.object({ children: z.array(noPhotosChild) });
+export type NoPhotosResponse = z.infer<typeof noPhotosResponse>;
+
+export const photosConfirmedResponse = z.object({
+  confirmed: z.number().int().meta({ description: "Photos that changed." }),
+});
+export type PhotosConfirmedResponse = z.infer<typeof photosConfirmedResponse>;
+export const taggingReviewedResponse = z.object({ reviewedAt: z.iso.datetime({ offset: true }) });
+export type TaggingReviewedResponse = z.infer<typeof taggingReviewedResponse>;
+
+/** Why a tagging request was refused with 409, in the error's `fields.form`. */
+export const TAGGING_CONFLICTS = {
+  cardPhoto: "tagging.cardPhoto",
+  photoNotReady: "tagging.photoNotReady",
+  cardClaimed: "tagging.cardClaimed",
+  notReady: "tagging.notReady",
+} as const;
+export type TaggingConflict = (typeof TAGGING_CONFLICTS)[keyof typeof TAGGING_CONFLICTS];
 
 /**
  * Why a photo request was refused with 409, in the error's `fields.form` (stable keys; screens show their own words).
@@ -529,12 +704,17 @@ export const upNextReason = z
       kind: z.literal("brokenPhotos"),
       count: z.number().int().meta({ description: "Failed photos, not in the bin." }),
     }),
+    z.object({
+      kind: z.literal("taggingProblems"),
+      leftovers: z.number().int().meta({ description: "Photos in Leftovers." }),
+      flagged: z.number().int().meta({ description: "Photos flagged for checking." }),
+    }),
     z.object({ kind: z.literal("nextStep") }),
   ])
   .meta({
     id: "UpNextReason",
     description:
-      "Why the task was picked: a date is close (a past picture day without photos first), something is broken, the next step.",
+      "Why the task was picked: a date is close (a past picture day without photos first), something is broken (failed photos, Leftovers or flagged photos), the next step.",
   });
 export type UpNextReason = z.infer<typeof upNextReason>;
 

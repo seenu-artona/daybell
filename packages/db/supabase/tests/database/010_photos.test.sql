@@ -64,7 +64,7 @@ select throws_ok($$ select public.create_upload_batch('11111111-1111-4111-8111-1
 select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1, '{"status":"failed","failure_reason":"unreadable"}') $$,
   '42501', null, 'nobody signed in can record a worker result');
 select is((select count(*) from unnest(array[
-    'public.create_upload_batch(uuid, uuid)', 'public.register_photos(uuid, uuid, jsonb)',
+    'public.create_upload_batch(uuid, uuid, uuid)', 'public.register_photos(uuid, uuid, jsonb)',
     'public.set_photo_upload_id(uuid, uuid, text)', 'public.mark_photo_uploaded(uuid, uuid, text)',
     'public.cancel_photo_upload(uuid, uuid)', 'public.photos_uploading(uuid, uuid[])', 'public.finish_upload_batch(uuid, uuid, int, int)',
     'public.photo_for_worker(uuid)', 'public.record_photo_result(uuid, int, jsonb)', 'public.retry_photo(uuid, uuid)',
@@ -360,7 +360,7 @@ select is((select count(*) from public.job_photos_page('a0000000-0000-4000-8000-
 -- ── Studio A's photographer, signed in: counts and tagging order ──────────────────────────────────────────────────
 select pg_temp.as_user('33333333-3333-4333-8333-333333333333') as signed_in_a;
 select is(public.job_photo_counts('a0000000-0000-4000-8000-000000000001'),
-  '{"photos": 3, "ready": 1, "processing": 1, "failed": 1, "uploading": 0, "binned": 0, "uploads": 1, "duplicates_skipped": 4}'::jsonb,
+  '{"photos": 3, "ready": 1, "processing": 1, "failed": 1, "uploading": 0, "binned": 0, "uploads": 1, "duplicates_skipped": 4, "leftovers": 0, "flagged": 0}'::jsonb,
   'the Photos tab''s counts');
 reset role;
 -- Order: a second batch, untimed photos and a tie on time.

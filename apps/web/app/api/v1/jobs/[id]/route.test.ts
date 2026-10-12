@@ -71,7 +71,7 @@ describe("GET /jobs/:id", () => {
     expect((await res.json()).job.checklist).toEqual({
       milestone: "pictureDay",
       done: 3,
-      total: 5,
+      total: 6,
       next: "pictureDay",
       tasks: [
         { key: "createJob", milestone: "setUp", done: true },
@@ -79,6 +79,7 @@ describe("GET /jobs/:id", () => {
         { key: "printQrCards", milestone: "setUp", done: true },
         { key: "pictureDay", milestone: "pictureDay", done: false },
         { key: "uploadPhotos", milestone: "photosIn", done: false },
+        { key: "reviewTagging", milestone: "photosIn", done: false },
       ],
       onTrack: true,
     });

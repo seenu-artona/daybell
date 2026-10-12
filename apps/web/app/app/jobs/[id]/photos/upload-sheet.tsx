@@ -1,5 +1,6 @@
 "use client";
 
+import type { Group, GroupsResponse } from "@daybell/api";
 import { Button, Card, CardRow, IconButton } from "@daybell/ui";
 import { FolderOpen, Images, RotateCcw, Square, X } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -37,6 +38,8 @@ const ANNOUNCE_MS = 5000;
  * The Photos tab's upload sheet (D39, D91, D140; ADR 0016): a drop zone that takes whole folders, and two buttons for
  * people who don't drag (Choose folder, Choose photos). Each drop becomes an upload with its progress in words and a
  * bar, read out politely and not too often. Uploads keep going while the sheet is closed; leaving the page warns.
+ * First, what the photos are (ADR 0018; Seenu, answer 3): individual photos, tagged to children by their QR cards, or a
+ * class photo for one of the job's classes, which every child of that class will see.
  */
 export function UploadSheet({
   jobId,
@@ -62,9 +65,28 @@ export function UploadSheet({
   const [announcement, setAnnouncement] = useState("");
   const lastAnnounced = useRef(0);
   const nextId = useRef(1);
+  const kindName = useId();
+  const classSelect = useId();
+  const [kind, setKind] = useState<"individual" | "classPhoto">("individual");
+  const [groupId, setGroupId] = useState("");
+  const [groups, setGroups] = useState<Group[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    void api<GroupsResponse>(`/jobs/${encodeURIComponent(jobId)}/groups`).then((res) => {
+      if (live && res.ok) setGroups(res.data.groups);
+    });
+    return () => {
+      live = false;
+    };
+  }, [jobId]);
 
   function start(files: DropFile[]) {
     setNotice("");
+    if (kind === "classPhoto" && !groupId) {
+      setNotice(t("chooseClassFirst"));
+      return;
+    }
     const hasher = workerHasher();
     const id = nextId.current++;
     const run = new UploadRun(
@@ -86,6 +108,7 @@ export function UploadSheet({
           setAnnouncement(t("announce", { uploaded: progress.uploaded, total: progress.total }));
         }
       },
+      kind === "classPhoto" ? { groupId } : {},
     );
     if (run.progress.total === 0) {
       setNotice(t("nothing"));
@@ -121,6 +144,54 @@ export function UploadSheet({
             <X aria-hidden="true" />
           </IconButton>
         </div>
+
+        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+          <legend className="mb-1 p-0 text-sm font-semibold text-ink">{t("kind.legend")}</legend>
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+            <input
+              type="radio"
+              name={kindName}
+              checked={kind === "individual"}
+              onChange={() => setKind("individual")}
+              className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            />
+            {t("kind.individual")}
+          </label>
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+            <input
+              type="radio"
+              name={kindName}
+              checked={kind === "classPhoto"}
+              disabled={groups.length === 0}
+              onChange={() => setKind("classPhoto")}
+              className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            />
+            {t("kind.classPhoto")}
+          </label>
+          {groups.length === 0 ? (
+            <p className="m-0 text-caption text-muted">{t("kind.noClasses")}</p>
+          ) : null}
+          {kind === "classPhoto" ? (
+            <div className="flex flex-col gap-1 pl-8">
+              <label htmlFor={classSelect} className="text-label font-semibold text-ink">
+                {t("kind.class")}
+              </label>
+              <select
+                id={classSelect}
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                className="min-h-11 max-w-80 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <option value="">{t("kind.chooseClass")}</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+        </fieldset>
 
         <section
           aria-label={t("drop")}

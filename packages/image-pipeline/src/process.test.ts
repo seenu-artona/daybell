@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { MAX_PHOTO_BYTES, photoKey } from "@daybell/core";
 import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +13,8 @@ import {
   type WorkerPhoto,
 } from "./index";
 
+/** zxing's reader, from node_modules (the Lambda passes its own copy; ADR 0018). */
+const WASM = createRequire(import.meta.url).resolve("zxing-wasm/reader/zxing_reader.wasm");
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const asBytes = (b: Buffer): Uint8Array<ArrayBuffer> => {
   const out = new Uint8Array(b.byteLength);
@@ -47,12 +50,17 @@ const studioName = "North Peak & <Co>";
 describe("processOriginal (D60, D100)", () => {
   it("makes four upright WebP previews, 400 and 1600 px, and reads the capture time to the hundredth", async () => {
     const bytes = await jpeg(2400, 1600, { exif: true });
-    const result = await processOriginal(bytes, { studioName, expectedSha256: sha(bytes) });
+    const result = await processOriginal(bytes, {
+      qrWasmFile: WASM,
+      studioName,
+      expectedSha256: sha(bytes),
+    });
     if (!result.ok) throw new Error(result.reason);
     expect(result.facts).toEqual({
       width: 2400,
       height: 1600,
       capturedAt: "2026-10-01T09:30:05.47",
+      qr: { kind: "none" },
     });
     const sizes: Record<string, [number, number]> = {};
     for (const [variant, body] of Object.entries(result.derivatives)) {
@@ -75,7 +83,11 @@ describe("processOriginal (D60, D100)", () => {
 
   it("turns photos upright by their EXIF orientation", async () => {
     const bytes = await jpeg(600, 300, { orientation: 6 });
-    const result = await processOriginal(bytes, { studioName, expectedSha256: sha(bytes) });
+    const result = await processOriginal(bytes, {
+      qrWasmFile: WASM,
+      studioName,
+      expectedSha256: sha(bytes),
+    });
     if (!result.ok) throw new Error(result.reason);
     expect([result.facts.width, result.facts.height]).toEqual([300, 600]);
     const thumb = await sharp(result.derivatives["thumb.webp"]).metadata();
@@ -84,7 +96,11 @@ describe("processOriginal (D60, D100)", () => {
 
   it("never enlarges small photos, and leaves untimed photos untimed", async () => {
     const bytes = await jpeg(120, 30);
-    const result = await processOriginal(bytes, { studioName, expectedSha256: sha(bytes) });
+    const result = await processOriginal(bytes, {
+      qrWasmFile: WASM,
+      studioName,
+      expectedSha256: sha(bytes),
+    });
     if (!result.ok) throw new Error(result.reason);
     expect(result.facts.capturedAt).toBeNull();
     const proof = await sharp(result.derivatives["proof.webp"]).metadata();
@@ -93,7 +109,11 @@ describe("processOriginal (D60, D100)", () => {
 
   it("watermarks only the parents' previews", async () => {
     const bytes = await jpeg(1600, 1200);
-    const result = await processOriginal(bytes, { studioName, expectedSha256: sha(bytes) });
+    const result = await processOriginal(bytes, {
+      qrWasmFile: WASM,
+      studioName,
+      expectedSha256: sha(bytes),
+    });
     if (!result.ok) throw new Error(result.reason);
     const pixels = async (b: Buffer) => sharp(b).raw().toBuffer();
     const [plain, proof] = await Promise.all([
@@ -110,7 +130,13 @@ describe("processOriginal (D60, D100)", () => {
 
   it("refuses a file that isn't what the browser hashed", async () => {
     const bytes = await jpeg(10, 10);
-    expect(await processOriginal(bytes, { studioName, expectedSha256: "0".repeat(64) })).toEqual({
+    expect(
+      await processOriginal(bytes, {
+        qrWasmFile: WASM,
+        studioName,
+        expectedSha256: "0".repeat(64),
+      }),
+    ).toEqual({
       ok: false,
       reason: "hash_mismatch",
     });
@@ -122,12 +148,16 @@ describe("processOriginal (D60, D100)", () => {
         .png()
         .toBuffer(),
     );
-    expect(await processOriginal(png, { studioName, expectedSha256: sha(png) })).toEqual({
+    expect(
+      await processOriginal(png, { qrWasmFile: WASM, studioName, expectedSha256: sha(png) }),
+    ).toEqual({
       ok: false,
       reason: "not_jpeg",
     });
     const broken = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5]);
-    expect(await processOriginal(broken, { studioName, expectedSha256: sha(broken) })).toEqual({
+    expect(
+      await processOriginal(broken, { qrWasmFile: WASM, studioName, expectedSha256: sha(broken) }),
+    ).toEqual({
       ok: false,
       reason: "unreadable",
     });
@@ -142,7 +172,9 @@ describe("processOriginal (D60, D100)", () => {
     );
     expect(bomb.length).toBeLessThan(5_000_000);
     const started = Date.now();
-    expect(await processOriginal(bomb, { studioName, expectedSha256: sha(bomb) })).toEqual({
+    expect(
+      await processOriginal(bomb, { qrWasmFile: WASM, studioName, expectedSha256: sha(bomb) }),
+    ).toEqual({
       ok: false,
       reason: "too_large",
     });
@@ -152,17 +184,21 @@ describe("processOriginal (D60, D100)", () => {
   it("refuses originals over the pixel limit, baseline or progressive", async () => {
     const baseline = await jpeg(200, 100);
     const options = { studioName, expectedSha256: sha(baseline) };
-    expect(await processOriginal(baseline, { ...options, maxPixels: 19_999 })).toEqual({
+    expect(
+      await processOriginal(baseline, { qrWasmFile: WASM, ...options, maxPixels: 19_999 }),
+    ).toEqual({
       ok: false,
       reason: "too_large",
     });
-    expect((await processOriginal(baseline, { ...options, maxPixels: 20_000 })).ok).toBe(true);
+    expect(
+      (await processOriginal(baseline, { qrWasmFile: WASM, ...options, maxPixels: 20_000 })).ok,
+    ).toBe(true);
     const progressive = asBytes(
       await sharp({ create: { width: 200, height: 100, channels: 3, background: "#468" } })
         .jpeg({ progressive: true })
         .toBuffer(),
     );
-    const p = { studioName, expectedSha256: sha(progressive) };
+    const p = { studioName, expectedSha256: sha(progressive), qrWasmFile: WASM };
     expect(await processOriginal(progressive, { ...p, maxProgressivePixels: 19_999 })).toEqual({
       ok: false,
       reason: "too_large",
@@ -172,7 +208,9 @@ describe("processOriginal (D60, D100)", () => {
 
   it("refuses files over 50 MB before hashing them", async () => {
     const big = new Uint8Array(MAX_PHOTO_BYTES + 1);
-    expect(await processOriginal(big, { studioName, expectedSha256: "0".repeat(64) })).toEqual({
+    expect(
+      await processOriginal(big, { qrWasmFile: WASM, studioName, expectedSha256: "0".repeat(64) }),
+    ).toEqual({
       ok: false,
       reason: "too_large",
     });
@@ -232,7 +270,7 @@ describe("runPhotoJob", () => {
 
   it("stores the four previews under ID-only keys and reports the facts", async () => {
     const { deps, stored } = await setup({});
-    expect(await runPhotoJob(ids.photoId, deps)).toBe("ready");
+    expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("ready");
     expect([...stored.keys()].sort()).toEqual(
       ["original", "proof-thumb.webp", "proof.webp", "thumb.webp", "view.webp"].map(
         (v) => `${ids.studioId}/${ids.jobId}/${ids.photoId}/${v}`,
@@ -249,6 +287,7 @@ describe("runPhotoJob", () => {
       width: 800,
       height: 600,
       capturedAt: "2026-10-01T09:30:05.47",
+      qr: { kind: "none" },
       attempt: 1,
     });
     // Logs carry the photo's id and a reason only, never the studio's name.
@@ -258,7 +297,7 @@ describe("runPhotoJob", () => {
   it("does nothing for a photo that isn't processing (a repeated message) or is gone", async () => {
     for (const photo of [{ status: "ready" as const }, null]) {
       const { deps } = await setup(photo);
-      expect(await runPhotoJob(ids.photoId, deps)).toBe("skipped");
+      expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("skipped");
       expect(deps.get).not.toHaveBeenCalled();
       expect(deps.report).not.toHaveBeenCalled();
     }
@@ -266,7 +305,7 @@ describe("runPhotoJob", () => {
 
   it("fails a photo whose stored size isn't the declared one, without reading it", async () => {
     const { deps } = await setup({ byteSize: 1 });
-    expect(await runPhotoJob(ids.photoId, deps)).toBe("failed");
+    expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("failed");
     expect(deps.get).not.toHaveBeenCalled();
     expect(deps.report).toHaveBeenCalledWith(ids.photoId, {
       status: "failed",
@@ -277,7 +316,9 @@ describe("runPhotoJob", () => {
 
   it("waits for a photo S3 announced before the API marked it uploaded, then hands it back to the queue", async () => {
     const { deps } = await setup({ status: "uploading" });
-    await expect(runPhotoJob(ids.photoId, deps)).rejects.toThrow("photo_not_uploaded_yet");
+    await expect(runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).rejects.toThrow(
+      "photo_not_uploaded_yet",
+    );
     expect(deps.photo).toHaveBeenCalledTimes(4);
     expect(deps.sleep).toHaveBeenCalledTimes(3);
     expect(deps.report).not.toHaveBeenCalled();
@@ -287,14 +328,14 @@ describe("runPhotoJob", () => {
     const { deps } = await setup({});
     const processing = await deps.photo(ids.photoId);
     deps.photo.mockResolvedValueOnce({ ...(processing as WorkerPhoto), status: "uploading" });
-    expect(await runPhotoJob(ids.photoId, deps)).toBe("ready");
+    expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("ready");
     expect(deps.sleep).toHaveBeenCalledTimes(1);
   });
 
   it("fails a photo over 50 MB without reading it", async () => {
     const { deps } = await setup({});
     deps.head.mockResolvedValueOnce({ size: MAX_PHOTO_BYTES + 1 });
-    expect(await runPhotoJob(ids.photoId, deps)).toBe("failed");
+    expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("failed");
     expect(deps.get).not.toHaveBeenCalled();
   });
 });

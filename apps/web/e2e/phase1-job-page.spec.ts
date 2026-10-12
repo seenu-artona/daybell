@@ -139,7 +139,7 @@ test("job page layout, menu search and studio separation", async ({
   await expect(main.getByText(/^Step \d of 5/)).toHaveCount(0);
   const checklist = main.getByRole("region", { name: "Checklist", exact: true });
   const row = (name: string) => checklist.getByRole("listitem").filter({ hasText: name });
-  await expect(checklist.getByText("1 of 5 done", { exact: true })).toBeVisible();
+  await expect(checklist.getByText("1 of 6 done", { exact: true })).toBeVisible();
   await expect(checklist.getByRole("heading", { name: /^Set up/, level: 3 })).toContainText("Now");
   // During Set up the whole list shows: Set up, Picture day and Photos in; Selling and Fulfilment tasks aren't built.
   await expect(checklist.getByRole("heading", { level: 3 })).toHaveCount(3);
@@ -202,13 +202,13 @@ test("job page layout, menu search and studio separation", async ({
   await expect(row("Add the roster")).toContainText("Done");
   await expect(row("Add the roster")).toContainText("1 child");
   await expect(row("Print QR cards")).toContainText("Next");
-  await expect(checklist.getByText("2 of 5 done", { exact: true })).toBeVisible();
+  await expect(checklist.getByText("2 of 6 done", { exact: true })).toBeVisible();
 
   // The Jobs list shows the same progress per row (D143).
   await page.goto("/app/jobs");
   const jobRow = main.getByRole("row").filter({ hasText: jobName });
   await expect(jobRow.getByText("Set up", { exact: true })).toBeVisible();
-  await expect(jobRow.getByText("2 of 5 done", { exact: true })).toBeVisible();
+  await expect(jobRow.getByText("2 of 6 done", { exact: true })).toBeVisible();
   await expect(
     jobRow.getByRole("link", { name: `Next: Print QR cards, ${jobName}`, exact: true }),
   ).toHaveAttribute("href", `/app/jobs/${job.id}/people?print=qr`);

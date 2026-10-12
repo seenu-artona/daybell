@@ -97,6 +97,8 @@ export class UploadRun {
     files: readonly DropFile[],
     private readonly deps: UploadDeps,
     private readonly onProgress: (progress: UploadProgress) => void,
+    /** A class-photo upload (ADR 0018): every photo goes to this class's Class photo set. */
+    private readonly options: { groupId?: string | null } = {},
   ) {
     const { accepted, skipped } = filterUploadFiles(
       files.map((f) => ({ name: f.path, size: f.file.size, drop: f })),
@@ -186,7 +188,9 @@ export class UploadRun {
     }
     const batch = await this.call<UploadBatchResponse>(
       `/jobs/${encodeURIComponent(this.jobId)}/upload-batches`,
-      { method: "POST" },
+      this.options.groupId
+        ? { method: "POST", body: { groupId: this.options.groupId } }
+        : { method: "POST" },
     );
     if (!batch.ok) return this.fail(batch.fields.form ?? batch.code);
     this.batchId = batch.data.batchId;

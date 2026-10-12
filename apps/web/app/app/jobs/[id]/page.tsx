@@ -57,6 +57,8 @@ export default function JobOverviewPage() {
               rosterSize={summary.children}
               qrCards={summary.qrCards}
               failedPhotos={summary.photos?.failed ?? 0}
+              leftovers={summary.photos?.leftovers ?? 0}
+              flagged={summary.photos?.flagged ?? 0}
             />
           </div>
           {canManage ? (
