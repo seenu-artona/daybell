@@ -123,11 +123,11 @@ describe("timeline", () => {
 });
 
 describe("milestoneTodos", () => {
-  it("sets up with Job created (always done), Roster added and Print QR cards (Soon)", () => {
+  it("sets up with Job created (always done), Roster added and Print QR cards", () => {
     expect(milestoneTodos("setUp", { status: "draft", children: 0 })).toEqual([
       { key: "jobCreated", done: true, soon: false },
       { key: "rosterAdded", done: false, soon: false },
-      { key: "printQrCards", done: false, soon: true },
+      { key: "printQrCards", done: false, soon: false },
     ]);
     expect(
       milestoneTodos("setUp", { status: "draft", children: 4 }).find(
@@ -143,18 +143,32 @@ describe("milestoneTodos", () => {
     expect(keys("photosIn")).toEqual(["tagPhotos"]);
     expect(keys("selling")).toEqual(["choosePriceList", "connectPayouts", "startSelling"]);
     expect(keys("fulfilment")).toEqual(["sendToLab"]);
-    for (const m of ["pictureDay", "photosIn", "selling", "fulfilment"] as const)
+    expect(
+      milestoneTodos("pictureDay", { status: "draft", children: 3 }).find(
+        (t) => t.key === "uploadPhotos",
+      ),
+    ).toEqual({ key: "uploadPhotos", done: false, soon: true });
+    for (const m of ["photosIn", "selling", "fulfilment"] as const)
       expect(
         milestoneTodos(m, { status: "draft", children: 3 }).every((t) => t.soon && !t.done),
       ).toBe(true);
   });
 
-  it("never marks Print QR cards done: QR cards ship in step 3", () => {
-    for (const status of JOB_STATUSES)
-      for (const m of ["setUp", "pictureDay"] as const)
-        expect(
-          milestoneTodos(m, { status, children: 10 }).find((t) => t.key === "printQrCards"),
-        ).toEqual({ key: "printQrCards", done: false, soon: true });
+  it("marks Print QR cards done only when every child who may be photographed has a card (step 3)", () => {
+    const qr = (qrCards: JobFacts["qrCards"]) =>
+      milestoneTodos("pictureDay", { status: "draft", children: 10, qrCards }).find(
+        (t) => t.key === "printQrCards",
+      );
+    expect(qr({ eligible: 9, withCard: 9 })).toEqual({
+      key: "printQrCards",
+      done: true,
+      soon: false,
+    });
+    // A child added after printing reopens it.
+    expect(qr({ eligible: 10, withCard: 9 })?.done).toBe(false);
+    expect(qr({ eligible: 0, withCard: 0 })?.done).toBe(false);
+    expect(qr(null)?.done).toBe(false);
+    expect(qr(undefined)?.done).toBe(false);
   });
 
   it("marks the price list, payouts and Start selling done once the job sells, and Soon before", () => {
@@ -175,7 +189,11 @@ describe("milestoneTodos", () => {
     for (const status of JOB_STATUSES)
       for (const m of MILESTONES)
         for (const children of [0, 2])
-          expect(milestoneTodos(m, { status, children }).some((t) => t.done && t.soon)).toBe(false);
+          expect(
+            milestoneTodos(m, { status, children, qrCards: { eligible: 2, withCard: 2 } }).some(
+              (t) => t.done && t.soon,
+            ),
+          ).toBe(false);
   });
 });
 

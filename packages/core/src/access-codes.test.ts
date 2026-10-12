@@ -4,7 +4,9 @@ import {
   ACCESS_CODE_FIRST,
   accessCodeRegion,
   decryptAccessCode,
+  decryptCardAccessCode,
   encryptAccessCode,
+  encryptCardAccessCode,
   formatAccessCode,
   generateAccessCode,
   hashAccessCode,
@@ -149,5 +151,23 @@ describe("encrypting codes", () => {
     const { encryption } = await keys();
     const sealed = await encryptAccessCode("K7QM4XPA", CHILD, encryption);
     await expect(decryptAccessCode(sealed, OTHER_CHILD, encryption)).rejects.not.toThrow(/K7QM/);
+  });
+});
+
+describe("blank QR card codes (ADR 0015)", () => {
+  it("round-trip bound to the card, in the same v1 format", async () => {
+    const { encryption } = await keys();
+    const sealed = await encryptCardAccessCode("K7QM4XPA", CHILD, encryption);
+    expect(sealed).toMatch(/^v1\.[A-Za-z0-9_-]{48}$/);
+    expect(await decryptCardAccessCode(sealed, CHILD, encryption)).toBe("K7QM4XPA");
+    await expect(decryptCardAccessCode(sealed, OTHER_CHILD, encryption)).rejects.toThrow();
+  });
+
+  it("a card's copy is never readable as a child's with the same id, nor the other way round", async () => {
+    const { encryption } = await keys();
+    const card = await encryptCardAccessCode("K7QM4XPA", CHILD, encryption);
+    const child = await encryptAccessCode("K7QM4XPA", CHILD, encryption);
+    await expect(decryptAccessCode(card, CHILD, encryption)).rejects.toThrow();
+    await expect(decryptCardAccessCode(child, CHILD, encryption)).rejects.toThrow();
   });
 });
