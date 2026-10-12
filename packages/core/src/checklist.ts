@@ -220,7 +220,8 @@ export interface UpNextPick {
 
 /**
  * The one task Up next would pick for a job (Seenu, answer 8: at most one per job), or null if it needs nothing.
- * Closed jobs need nothing.
+ * Closed jobs need nothing. Tasks whose page is the job's Overview itself (Create the job, Picture day) are skipped:
+ * there is nothing to go and do (code review N1), so the next step is the first unfinished task that has a page.
  */
 export function upNextForJob(checklist: Checklist, facts: ChecklistFacts): UpNextPick | null {
   if (facts.status === "closed") return null;
@@ -237,8 +238,8 @@ export function upNextForJob(checklist: Checklist, facts: ChecklistFacts): UpNex
       task: "reviewFailedPhotos",
       reason: { kind: "brokenPhotos", count: facts.failedPhotos },
     };
-  if (checklist.next) return { task: checklist.next.key, reason: { kind: "nextStep" } };
-  return null;
+  const step = tasks.find((t) => !t.done && t.target !== "overview");
+  return step ? { task: step.key, reason: { kind: "nextStep" } } : null;
 }
 
 /**
@@ -277,16 +278,14 @@ export const UP_NEXT_SHOWN = 3;
 // ── Studio onboarding (Home during onboarding) ──────────────────────────────────────────────────────────────────────
 
 /**
- * The studio setup checklist (D143): account, studio name and logo, payouts, price list, team, first job. Only the
- * built ones are listed (Seenu, answer 4: "Studio name and logo" waits for branding; payouts and price lists come
- * later).
+ * The studio setup checklist (D143): account, studio name and logo, payouts, price list, first job. Only the built
+ * ones are listed (Seenu, answer 4: "Studio name and logo" waits for branding; payouts and price lists come later).
+ * Inviting the team is not part of it (Seenu, answer 12): it stays in Settings.
  */
-export const ONBOARDING_TASKS = ["account", "team", "firstJob"] as const;
+export const ONBOARDING_TASKS = ["account", "firstJob"] as const;
 export type OnboardingTaskKey = (typeof ONBOARDING_TASKS)[number];
 
 export interface OnboardingFacts {
-  /** Someone else is on the team, or has an open invite. */
-  hasTeam: boolean;
   /** The studio has a job. */
   hasJob: boolean;
 }
@@ -300,7 +299,6 @@ export interface OnboardingTask {
 export function onboardingChecklist(facts: OnboardingFacts): OnboardingTask[] {
   const done: Record<OnboardingTaskKey, boolean> = {
     account: true,
-    team: facts.hasTeam,
     firstJob: facts.hasJob,
   };
   const next = ONBOARDING_TASKS.find((key) => !done[key]);
@@ -316,9 +314,8 @@ export function onboardingComplete(tasks: readonly OnboardingTask[]): boolean {
   return tasks.every((t) => t.done);
 }
 
-/** Owners invite the team; owners and admins create jobs. The account row has nowhere to go. */
+/** Owners and admins create jobs. The account row has nowhere to go. */
 export function canDoOnboardingTask(role: string, key: OnboardingTaskKey): boolean {
-  if (key === "team") return role === "owner";
   if (key === "firstJob") return role === "owner" || role === "admin";
   return false;
 }

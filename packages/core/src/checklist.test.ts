@@ -209,11 +209,20 @@ describe("upNextForJob", () => {
       days: DATE_CLOSE_DAYS,
     });
     expect(pick(facts({ pictureDay: "2026-10-27" }))?.reason).toEqual({ kind: "nextStep" });
-    // Set up done: Picture day itself is a next step, not a close date.
+    // Set up done: no close date, and Picture day (no page of its own) is skipped for the next task with one.
     expect(pick(setUpDone({ pictureDay: "2026-10-13" }))).toEqual({
-      task: "pictureDay",
+      task: "uploadPhotos",
       reason: { kind: "nextStep" },
     });
+  });
+
+  it("never picks a task whose page is the Overview itself (Create the job, Picture day)", () => {
+    for (const f of everyFacts()) {
+      const p = pick(f);
+      if (p) expect(["createJob", "pictureDay"]).not.toContain(p.task);
+    }
+    // Photos already uploaded before picture day: only Picture day is left, so nothing to do.
+    expect(pick(setUpDone({ hasReadyPhoto: true }))).toBeNull();
   });
 
   it("flags failed photos as broken, after dates", () => {
@@ -308,33 +317,29 @@ describe("rankUpNext", () => {
 });
 
 describe("onboarding", () => {
-  it("lists the built tasks only: account, team, first job (Seenu, answer 4)", () => {
-    expect(onboardingChecklist({ hasTeam: false, hasJob: false })).toEqual([
+  it("lists the built tasks only: account and first job (Seenu, answers 4 and 12: no team task)", () => {
+    expect(onboardingChecklist({ hasJob: false })).toEqual([
       { key: "account", done: true, state: "done" },
-      { key: "team", done: false, state: "next" },
-      { key: "firstJob", done: false, state: "todo" },
+      { key: "firstJob", done: false, state: "next" },
     ]);
-    expect(ONBOARDING_TASKS).toEqual(["account", "team", "firstJob"]);
+    expect(ONBOARDING_TASKS).toEqual(["account", "firstJob"]);
   });
 
   it("is complete only when every built task is done", () => {
-    for (const hasTeam of [false, true])
-      for (const hasJob of [false, true])
-        expect(onboardingComplete(onboardingChecklist({ hasTeam, hasJob }))).toBe(
-          hasTeam && hasJob,
-        );
+    expect(onboardingComplete(onboardingChecklist({ hasJob: false }))).toBe(false);
+    expect(onboardingComplete(onboardingChecklist({ hasJob: true }))).toBe(true);
   });
 
-  it("is seen by owners and admins; only owners invite, owners and admins create jobs", () => {
+  it("is seen by owners and admins, who create jobs", () => {
     expect(["owner", "admin", "photographer", "staff"].map(seesOnboarding)).toEqual([
       true,
       true,
       false,
       false,
     ]);
-    expect(canDoOnboardingTask("owner", "team")).toBe(true);
-    expect(canDoOnboardingTask("admin", "team")).toBe(false);
+    expect(canDoOnboardingTask("owner", "firstJob")).toBe(true);
     expect(canDoOnboardingTask("admin", "firstJob")).toBe(true);
+    expect(canDoOnboardingTask("photographer", "firstJob")).toBe(false);
     expect(canDoOnboardingTask("owner", "account")).toBe(false);
   });
 });
