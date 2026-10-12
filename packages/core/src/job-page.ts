@@ -1,9 +1,9 @@
 /**
  * The job page's Overview (D140, amending D138; ADR 0014): one job timeline of five milestones, the current
  * milestone's to-dos and the picture day countdown. Only data that exists today is used: the job's status, its
- * picture day, how many children are on its roster and how many of them have a QR card (step 3). Photos, the shop,
- * payouts and the lab arrive in later steps, so "Photos in" and "Fulfilment" are never current yet and the to-dos
- * that need them are "Soon", never done.
+ * picture day, how many children are on its roster, how many of them have a QR card (step 3) and how many photos are
+ * ready (step 4). Tagging, the shop, payouts and the lab arrive in later steps, so "Photos in" and "Fulfilment" are
+ * never current yet and the to-dos that need them are "Soon", never done.
  */
 import type { JobStatus } from "./jobs";
 
@@ -15,6 +15,8 @@ export interface JobFacts {
   children: number;
   /** QR cards (step 3; ADR 0015): children who may be photographed, and how many of them have a card. */
   qrCards?: QrCardProgress | null | undefined;
+  /** Photos (step 4; ADR 0016): how many of the job's photos are ready (previews made, not in the bin). */
+  readyPhotos?: number | null | undefined;
   /** Today's calendar date in the browser, YYYY-MM-DD (see localDay). */
   today: string;
 }
@@ -111,14 +113,19 @@ export interface Todo {
 }
 
 /**
- * A milestone's to-dos. Print QR cards is real since step 3 (see qrCardsDone). Photos and tagging ship in step 4,
- * the shop, payouts and selling in later steps, so those are "Soon". A job can only be selling once it has a price
+ * A milestone's to-dos. Print QR cards is real since step 3 (see qrCardsDone); Upload photos since step 4, done once
+ * the job has a ready photo. Tagging (step 5), the shop, payouts and selling come in later steps, so those are "Soon". A job can only be selling once it has a price
  * list and payouts, so once it sells (or has closed) "Choose a price list", "Connect payouts" and "Start selling" are
  * done; before that they are Soon.
  */
 export function milestoneTodos(
   m: Milestone,
-  { status, children, qrCards }: Pick<JobFacts, "status" | "children" | "qrCards">,
+  {
+    status,
+    children,
+    qrCards,
+    readyPhotos,
+  }: Pick<JobFacts, "status" | "children" | "qrCards" | "readyPhotos">,
 ): Todo[] {
   return MILESTONE_TODOS[m].map((key): Todo => {
     switch (key) {
@@ -128,6 +135,8 @@ export function milestoneTodos(
         return { key, done: children > 0, soon: false };
       case "printQrCards":
         return { key, done: qrCardsDone(qrCards, children), soon: false };
+      case "uploadPhotos":
+        return { key, done: (readyPhotos ?? 0) > 0, soon: false };
       case "choosePriceList":
       case "connectPayouts":
       case "startSelling": {

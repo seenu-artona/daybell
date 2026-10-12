@@ -147,11 +147,22 @@ describe("milestoneTodos", () => {
       milestoneTodos("pictureDay", { status: "draft", children: 3 }).find(
         (t) => t.key === "uploadPhotos",
       ),
-    ).toEqual({ key: "uploadPhotos", done: false, soon: true });
+    ).toEqual({ key: "uploadPhotos", done: false, soon: false });
     for (const m of ["photosIn", "selling", "fulfilment"] as const)
       expect(
         milestoneTodos(m, { status: "draft", children: 3 }).every((t) => t.soon && !t.done),
       ).toBe(true);
+  });
+
+  it("marks Upload photos done once the job has a ready photo (step 4)", () => {
+    const upload = (readyPhotos: JobFacts["readyPhotos"]) =>
+      milestoneTodos("pictureDay", { status: "draft", children: 3, readyPhotos }).find(
+        (t) => t.key === "uploadPhotos",
+      );
+    expect(upload(1)).toEqual({ key: "uploadPhotos", done: true, soon: false });
+    expect(upload(0)?.done).toBe(false);
+    expect(upload(null)?.done).toBe(false);
+    expect(upload(undefined)?.done).toBe(false);
   });
 
   it("marks Print QR cards done only when every child who may be photographed has a card (step 3)", () => {

@@ -22,7 +22,7 @@ Layout choices (half page, 2 per page, editing) are deferred.
   keeps a card's child in the card's own job. It cascades: children are removed only while the job is a draft, and a
   child's card must never become a blank card.
 - A blank card carries `access_code_hash` and `access_code_ciphertext`; a child's card never does (check constraint).
-  When the tagging step (4) tags a blank card, in one transaction it must first clear the card's code columns (which
+  When the tagging step (5) tags a blank card, in one transaction it must first clear the card's code columns (which
   releases the hash), then make the child with the same code (re-encrypted for the child's id, which claims the hash
   again), then set the card's `child_id`. Claiming before releasing would be refused as a collision.
 - Members read `id, studio_id, job_id, child_id, card_code, created_at`. Nobody signed in can read the code columns,
@@ -141,7 +141,7 @@ check. **Follow-up:** when a US database exists, US studios need their own funct
 - A rate limit on prints, and one print per job at a time across requests (today prints of a job queue on an advisory
   lock in the database, but nothing limits how often a person prints).
 - US function region and region guard (above).
-- Tagging (step 4) uses `parseCardQrPayload` and `decryptCardAccessCode`, defined and tested now.
+- Tagging (step 5) uses `parseCardQrPayload` and `decryptCardAccessCode`, defined and tested now.
 
 ## Dependencies
 
