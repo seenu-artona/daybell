@@ -4,6 +4,9 @@ import { check, handle } from "@/lib/api";
 import { loadRosterJob, pathId } from "@/lib/roster";
 import { studioScope } from "@/lib/studio";
 
+// Canadian studios' photos are handled in Montréal (D113; ADR 0016).
+export const preferredRegion = "yul1";
+
 type Ctx = { params: Promise<{ id: string }> };
 
 /**

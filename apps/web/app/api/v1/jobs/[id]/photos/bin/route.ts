@@ -6,6 +6,9 @@ import { loadRosterJob, pathId } from "@/lib/roster";
 import { studioScope } from "@/lib/studio";
 import { photoWriteRpc } from "@/lib/supabase/service";
 
+// Canadian studios' photos are handled in Montréal (D113; ADR 0016).
+export const preferredRegion = "yul1";
+
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
