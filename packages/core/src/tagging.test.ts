@@ -329,14 +329,20 @@ describe("tagBatch: photos purged from the bin leave their step on the next phot
     ]);
   });
 
-  it("a purged card that was deleted since counts as another job's card", () => {
+  it("a purged card removed since flags the photos after it, until the next card (answer 13)", () => {
     const photos = [
       photo("A", 1),
       { ...photo("p", 3), before: { card: { cardId: null, childId: null }, flag: null } },
+      photo("p", 4),
+      photo("B", 5),
+      photo("p", 6),
     ];
     expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag)).toEqual([
       { place: "card", cardId: "card-a", flag: null },
-      { place: "child", childId: "child-a", flag: "afterUnreadable" },
+      { place: "child", childId: "child-a", flag: "afterPurge" },
+      { place: "child", childId: "child-a", flag: "afterPurge" },
+      { place: "card", cardId: "card-b", flag: null },
+      { place: "child", childId: "child-b", flag: null },
     ]);
   });
 
@@ -349,6 +355,93 @@ describe("tagBatch: photos purged from the bin leave their step on the next phot
     expect(isLegacyBatch(batch("ooFo"))).toBe(true);
     expect(isLegacyBatch(batch("oAo"))).toBe(false);
     expect(isLegacyBatch([])).toBe(true);
+  });
+});
+
+describe("tagBatch: purge edge cases are flagged, never guessed (Seenu, answer 13)", () => {
+  const purged = (spec: string, n: number) => tagStep(photo(spec, n), false);
+  const late = (c: string, n: number): TaggingPhoto => ({ ...photo(c, n), afterPurge: true });
+  const flags = (photos: TaggingPhoto[], purgeTail = false) =>
+    tagBatch(photos, { classGroupId: null, purgeTail }).map(({ tag }) =>
+      tag
+        ? `${tag.place === "child" ? tag.childId : tag.place}${tag.flag ? `!${tag.flag}` : ""}`
+        : "-",
+    );
+
+  it("flags a photo that sorts after purged photos that were last in their batch", () => {
+    // Photo 3 (card B) was purged with nothing after it; photo 4 arrived later.
+    expect(flags([photo("A", 1), photo("p", 2), late("p", 4)], true)).toEqual([
+      "card",
+      "child-a",
+      "child-a!afterPurge",
+    ]);
+  });
+
+  it("leaves the batch alone when nothing came after a purge", () => {
+    expect(flags([photo("A", 1), photo("p", 2)], true)).toEqual(["card", "child-a"]);
+    // A late photo before the last photo that was there at the purge can't be after the purged ones.
+    expect(flags([photo("A", 1), late("p", 2), photo("p", 3)], true)).toEqual([
+      "card",
+      "child-a",
+      "child-a",
+    ]);
+  });
+
+  it("flags a photo that appeared between the purged photos' neighbours", () => {
+    // Photo 3 (card B) was purged; photo 4 carries it. Photo 2.5 appeared later: before or after card B?
+    const photos = [
+      photo("A", 1),
+      photo("p", 2),
+      { ...late("p", 25), id: "p2.5" },
+      { ...photo("p", 4), before: purged("B", 3) },
+      photo("p", 5),
+    ];
+    expect(flags(photos)).toEqual(["card", "child-a", "child-a!afterPurge", "child-b", "child-b"]);
+  });
+
+  it("flags from the purged step on when a late photo in the gap did something itself", () => {
+    // A late card K may come before or after the purged card B: photo 4 on can't be placed either.
+    const photos = [
+      photo("A", 1),
+      { ...late("K", 25), id: "p2.5" },
+      { ...photo("p", 4), before: purged("B", 3) },
+      photo("p", 5),
+      photo("A", 6),
+      photo("p", 7),
+    ];
+    expect(flags(photos)).toEqual([
+      "card",
+      "card",
+      "child-b!afterPurge",
+      "child-b!afterPurge",
+      "card",
+      "child-a",
+    ]);
+  });
+
+  it("doesn't flag a late photo away from any purge", () => {
+    const photos = [
+      photo("A", 1),
+      late("p", 2),
+      photo("p", 3),
+      { ...photo("p", 5), before: purged("B", 4) },
+    ];
+    expect(flags(photos)).toEqual(["card", "child-a", "child-a", "child-b"]);
+  });
+
+  it("flags every photo when the photo carrying a purged step has moved since", () => {
+    const photos = [
+      photo("A", 1),
+      photo("p", 2),
+      { ...late("p", 9), before: purged("B", 3) },
+      photo("?", 4),
+    ];
+    expect(flags(photos)).toEqual([
+      "card",
+      "child-a!afterPurge",
+      "child-b!afterPurge",
+      "child-b!unreadableCard",
+    ]);
   });
 });
 
@@ -529,9 +622,10 @@ describe("reviewActions (security review 3-4, code review M1)", () => {
     place: "child" as const,
     flag: null,
     qrKind: "none" as const,
+    manual: false,
   };
-  const all = { move: true, confirm: true, markCard: true };
-  const none = { move: false, confirm: false, markCard: false };
+  const all = { move: true, confirm: true, markCard: true, undoCard: false };
+  const none = { move: false, confirm: false, markCard: false, undoCard: false };
 
   it("lets a plain photo be moved, confirmed or marked a card photo", () => {
     expect(reviewActions(ready)).toEqual(all);
@@ -544,8 +638,30 @@ describe("reviewActions (security review 3-4, code review M1)", () => {
     expect(reviewActions({ ...ready, place: "card", qrKind: "unreadable" })).toEqual(none);
   });
 
+  it("lets a photo a person marked a card photo be unmarked, never one whose card was read (answer 12)", () => {
+    const undo = { ...none, undoCard: true };
+    expect(reviewActions({ ...ready, place: "card", qrKind: "unreadable", manual: true })).toEqual(
+      undo,
+    );
+    expect(reviewActions({ ...ready, place: "card", qrKind: "otherCard", manual: true })).toEqual(
+      undo,
+    );
+    expect(reviewActions({ ...ready, place: "card", qrKind: "card", manual: true })).toEqual(none);
+    expect(
+      reviewActions({ ...ready, place: "card", qrKind: "none", manual: true, status: "failed" }),
+    ).toEqual(none);
+    // Once undone it is flagged again: confirmed (either way) before it moves.
+    expect(
+      reviewActions({ ...ready, qrKind: "none", flag: "unreadableCard", manual: true }),
+    ).toEqual({ ...none, confirm: true, markCard: true });
+  });
+
+  it("treats a photo flagged near a purge like any flagged photo", () => {
+    expect(reviewActions({ ...ready, flag: "afterPurge" })).toEqual(all);
+  });
+
   it("only lets another job's card (or a removed card) be marked a card photo", () => {
-    const cardOnly = { move: false, confirm: false, markCard: true };
+    const cardOnly = { move: false, confirm: false, markCard: true, undoCard: false };
     expect(reviewActions({ ...ready, qrKind: "otherCard", flag: "otherCard" })).toEqual(cardOnly);
     // Even after its flag is gone (its child was removed and it went to Leftovers).
     expect(reviewActions({ ...ready, qrKind: "otherCard", place: "leftovers" })).toEqual(cardOnly);
@@ -557,6 +673,7 @@ describe("reviewActions (security review 3-4, code review M1)", () => {
       move: false,
       confirm: true,
       markCard: true,
+      undoCard: false,
     });
     // Once confirmed as a normal photo, it moves like any other.
     expect(reviewActions({ ...ready, qrKind: "unreadable" })).toEqual(all);

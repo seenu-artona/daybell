@@ -5,7 +5,7 @@
 -- changes nothing.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(153);
+select plan(188);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -105,7 +105,8 @@ select is((select count(*) from unnest(array[
     'public.blank_card_code(uuid, uuid, uuid)', 'public.claim_blank_card(uuid, uuid, uuid, jsonb)',
     'public.mark_tagging_reviewed(uuid, uuid)', 'app.reopen_tagging_review(uuid[])',
     'app.on_photos_tagging_change()', 'app.on_child_removed_tags()', 'app.check_tag_request(uuid, uuid[])',
-    'app.job_tagging_state(uuid)', 'app.carry_purged_steps(uuid[])', 'public.delete_purged_photos(uuid[])']) f
+    'app.job_tagging_state(uuid)', 'app.carry_purged_steps(uuid[])', 'public.delete_purged_photos(uuid[])',
+    'public.undo_card_photos(uuid, uuid, uuid[])', 'app.on_photo_after_purge()']) f
   where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
   0::bigint, 'no tagging write, worker or system function is executable by browsers');
 select is((select count(*) from unnest(array['public.job_tagging_overview(uuid)',
@@ -333,6 +334,48 @@ select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111
 select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111111111',
   'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(9)], true) $$, 'P0001', 'card_photo',
   'nor marked again');
+
+-- ── Undoing "This is a card photo" (Seenu, answer 12): owners and admins only ────────────────────────────────────
+select throws_ok($$ select public.undo_card_photos('33333333-3333-4333-8333-333333333333',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)]) $$, '42501', null,
+  'a photographer cannot undo a card photo mark');
+select throws_ok($$ select public.undo_card_photos('44444444-4444-4444-8444-444444444444',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)]) $$, '42501', null, 'nor can staff');
+select throws_ok($$ select public.undo_card_photos('22222222-2222-4222-8222-222222222222',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)]) $$, '42501', null,
+  'nor another studio''s owner');
+select throws_ok($$ select public.undo_card_photos('22222222-2222-4222-8222-222222222222',
+  'b0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)]) $$, '22023', null,
+  'nor under their own job');
+select is(pg_temp.place(5), 'card/manual', 'and nothing changed');
+select throws_ok($$ select public.undo_card_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(2)]) $$, 'P0001', 'not_marked_card',
+  'a photo whose card was read stays a card photo');
+select throws_ok($$ select public.undo_card_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(4)]) $$, 'P0001', 'not_marked_card',
+  'and a photo that isn''t a card photo has nothing to undo');
+insert into public.job_tagging_reviews (job_id, studio_id, reviewed_by) values
+  ('a0000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111');
+select is(public.undo_card_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001',
+  array[pg_temp.p(5)]), 1, 'an owner undoes the mark');
+select is(pg_temp.place(5), 'child:c1000000-0000-4000-8000-000000000001!unreadable_card/manual',
+  'the photo is back with the child it was listed under, flagged as a photo that may be a card');
+select ok(not public.photo_parent_visible(pg_temp.p(5)), 'hidden from parents until confirmed again');
+select is((select count(*) from public.job_tagging_reviews where job_id = 'a0000000-0000-4000-8000-000000000001'),
+  0::bigint, 'the flag reopens Review tagging');
+select is((select data from public.events where type = 'photos.card_unmarked'),
+  jsonb_build_object('photo_ids', jsonb_build_array(pg_temp.p(5)), 'count', 1),
+  'one photos.card_unmarked event, ids and a count only');
+select is((select actor_id from public.events where type = 'photos.card_unmarked'),
+  '11111111-1111-4111-8111-111111111111'::uuid, 'attributed to the owner');
+select is(public.apply_batch_tags('a2000000-0000-4000-8000-000000000001', pg_temp.round(), (select v from writes)), 0,
+  'tagging never changes an undone mark');
+select throws_ok($$ select public.move_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)], '{"kind":"leftovers"}') $$, 'P0001', 'other_card',
+  'another job''s card photo still can''t be moved once unmarked');
+select is(public.confirm_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001',
+  array[pg_temp.p(5)], true), 1, 'and can be marked a card photo again');
+select is(pg_temp.place(5), 'card/manual', 'as before');
 
 -- ── Mark reviewed (answer 4) ─────────────────────────────────────────────────────────────────────────────────────
 select throws_ok($$ select public.mark_tagging_reviewed('33333333-3333-4333-8333-333333333333',
@@ -580,14 +623,62 @@ select is(pg_temp.qbefore(5), 'true:c2000000-0000-4000-8000-000000000002:after_u
   'after Noah''s purged card and a purged unreadable card: Noah, flagged');
 select is(pg_temp.qbefore(7), 'false:-:after_failed', 'after a purged failed photo: flagged');
 select is(pg_temp.qbefore(8), null, 'and a photo after none keeps nothing');
+select is((select purge_steps::text || ':' || purge_tail::text from public.upload_batches
+           where id = 'a2000000-0000-4000-8000-000000000003'), 'true:false',
+  'the batch remembers a purge left steps, none of them after its last photo');
+select is((select count(*) from public.photos where batch_id = 'a2000000-0000-4000-8000-000000000003' and after_purge),
+  0::bigint, 'no photo has come or moved since');
 select is((select count(*) from public.events where data::text ~ '(GGGGGGGGGGGGGGGGGGGG|IMG_2)'), 0::bigint,
   'no event names a card code or a filename');
 
 -- Removing a child keeps "may be a card" flags (security review 3-4).
 delete from public.children where id = 'c2000000-0000-4000-8000-000000000002';
 select is(pg_temp.qplace(9), 'leftovers!unreadable_card/auto', 'a removed child''s photo that may be a card stays flagged');
-select is(pg_temp.qplace(8), 'leftovers/manual', 'other photos go to Leftovers by hand');
+select is(pg_temp.qplace(8), 'leftovers!after_purge/manual',
+  'the photos a purged card gave the removed child go to Leftovers flagged: whose they are can''t be known (answer 13)');
 select is(pg_temp.qbefore(5), 'true:-:after_unreadable', 'a purged card since removed is kept as a removed card');
+select ok(pg_temp.qround() > (select tagged_round from public.upload_batches
+                              where id = 'a2000000-0000-4000-8000-000000000003'),
+  'and its batch is tagged again, so the photos after it are flagged');
+select ok(not public.photo_parent_visible(pg_temp.q(8)), 'hidden from parents');
+
+-- Purge edge cases (Seenu, answer 13): the last photo purged, then a photo that sorts after it appears.
+select public.apply_batch_tags('a2000000-0000-4000-8000-000000000003', pg_temp.qround(), '[]'::jsonb);
+select is(public.bin_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000002',
+  array[pg_temp.q(9)]), 1, 'the batch''s last photo, a photo that may be a card, goes to the bin');
+update public.photos set binned_at = now() - interval '31 days', purge_started_at = now() where id = pg_temp.q(9);
+select is(public.delete_purged_photos(array[pg_temp.q(9)]), 1, 'and is purged');
+select is((select purge_tail from public.upload_batches where id = 'a2000000-0000-4000-8000-000000000003'), true,
+  'with nothing after it to carry its step: the batch remembers it');
+insert into public.photos (id, studio_id, job_id, batch_id, batch_seq, status, original_filename, byte_size, sha256,
+  created_by)
+select pg_temp.q(10), b.studio_id, b.job_id, b.id, b.seq, 'uploading', 'IMG_2010.JPG', 1,
+  extensions.digest('a3-10', 'sha256'), b.created_by
+from public.upload_batches b where b.id = 'a2000000-0000-4000-8000-000000000003';
+select is((select after_purge from public.photos where id = pg_temp.q(10)), false, 'a photo still uploading isn''t in the order yet');
+update public.photos set status = 'processing' where id = pg_temp.q(10);
+select is((select after_purge from public.photos where id = pg_temp.q(10)), true,
+  'once it comes into the order after the purge, it is marked');
+select public.record_photo_result(pg_temp.q(10), 1, '{"status":"ready","width":10,"height":10,"qr":{"kind":"none"}}');
+select is((select x ->> 'after_purge' from jsonb_array_elements(
+             public.tagging_inputs('a2000000-0000-4000-8000-000000000003') -> 'photos') x
+           where x ->> 'id' = pg_temp.q(10)::text), 'true', 'tagging reads the mark');
+select is(public.tagging_inputs('a2000000-0000-4000-8000-000000000003') ->> 'purge_tail', 'true',
+  'and the batch''s purge tail');
+select is((select after_purge from public.photos where id = pg_temp.q(2)), false,
+  'a photo that was already in place isn''t marked');
+update public.photos set captured_at = '2026-10-01 09:00' where id = pg_temp.q(2);
+select is((select after_purge from public.photos where id = pg_temp.q(2)), true,
+  'but one that moves in the order after the purge is');
+insert into public.job_tagging_reviews (job_id, studio_id, reviewed_by) values
+  ('a0000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111');
+select is(public.apply_batch_tags('a2000000-0000-4000-8000-000000000003', pg_temp.qround(), jsonb_build_array(
+  pg_temp.qw(10, 'child', child => 'c2000000-0000-4000-8000-000000000001', flag => 'after_purge'))), 1,
+  'tagging flags the late photo (core''s tagBatch) instead of guessing');
+select is(pg_temp.qplace(10), 'child:c2000000-0000-4000-8000-000000000001!after_purge/auto', 'flagged');
+select ok(not public.photo_parent_visible(pg_temp.q(10)), 'hidden from parents until checked');
+select is((select count(*) from public.job_tagging_reviews where job_id = 'a0000000-0000-4000-8000-000000000002'),
+  0::bigint, 'and Review tagging reopens');
 
 -- Closed jobs take no tagging changes (security review 9).
 update public.jobs set status = 'closed' where id = 'a0000000-0000-4000-8000-000000000002';
@@ -602,6 +693,9 @@ select throws_ok($$ select public.claim_blank_card('11111111-1111-4111-8111-1111
   'P0001', 'job_closed', 'nor its blank cards claimed');
 select throws_ok($$ select public.mark_tagging_reviewed('11111111-1111-4111-8111-111111111111',
   'a0000000-0000-4000-8000-000000000002') $$, 'P0001', 'job_closed', 'nor marked reviewed');
+select throws_ok($$ select public.undo_card_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000002', array[pg_temp.q(2)]) $$, 'P0001', 'job_closed',
+  'nor a card photo mark undone');
 
 -- ── Events never hold card codes, names or filenames ─────────────────────────────────────────────────────────────
 select is((select count(*) from public.events

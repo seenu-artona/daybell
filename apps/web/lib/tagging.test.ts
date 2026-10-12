@@ -174,6 +174,32 @@ describe("planBatch and writeRow", () => {
     ]);
   });
 
+  it("passes purge edge cases to core: late photos and a purge tail are flagged (answer 13)", () => {
+    const tail = planBatch(
+      inputs(
+        [
+          photo("p1", { qr_kind: "card", card_id: CARD, card_child_id: CHILD }),
+          photo("p2"),
+          photo("p3", { after_purge: true }),
+        ],
+        { purge_tail: true },
+      ),
+    ).map(writeRow);
+    expect(tail.map((w) => [w.photo_id, w.flag])).toEqual([
+      ["p1", null],
+      ["p2", null],
+      ["p3", "after_purge"],
+    ]);
+    // Without a tail, the same late photo isn't near any purge.
+    const none = planBatch(
+      inputs([
+        photo("p1", { qr_kind: "card", card_id: CARD, card_child_id: CHILD }),
+        photo("p3", { after_purge: true }),
+      ]),
+    ).map(writeRow);
+    expect(none.map((w) => w.flag)).toEqual([null, null]);
+  });
+
   it("flags a photo without a QR result when others in the batch were read (security review 2)", () => {
     const writes = planBatch(
       inputs([
@@ -314,7 +340,7 @@ describe("toTaggedPhoto", () => {
       manual: false,
       cardRead: false,
       qrKind: "none",
-      actions: { move: true, confirm: true, markCard: true },
+      actions: { move: true, confirm: true, markCard: true, undoCard: false },
       thumbUrl: `https://s3.test/${ids.studioId}/${ids.jobId}/${row.id}/thumb.webp`,
     });
     expect(JSON.stringify(photo)).not.toContain("Maya");
@@ -354,21 +380,27 @@ describe("what review allows for a photo", () => {
           ...over,
         })
       ).actions;
-    expect(await actions({})).toEqual({ move: true, confirm: true, markCard: true });
+    const none = { move: false, confirm: false, markCard: false, undoCard: false };
+    expect(await actions({})).toEqual({ ...none, move: true, confirm: true, markCard: true });
     expect(await actions({ qr_kind: "unreadable", flag: "unreadable_card" })).toEqual({
-      move: false,
+      ...none,
       confirm: true,
       markCard: true,
     });
     expect(await actions({ qr_kind: "other_card", flag: "other_card" })).toEqual({
-      move: false,
-      confirm: false,
+      ...none,
       markCard: true,
     });
-    expect(await actions({ place: "card", source: "manual" })).toEqual({
-      move: false,
-      confirm: false,
-      markCard: false,
+    // A card photo a person marked can be unmarked (owners and admins; answer 12); one whose card was read can't.
+    expect(await actions({ place: "card", source: "manual" })).toEqual({ ...none, undoCard: true });
+    expect(
+      await actions({ place: "card", source: "auto", qr_kind: "card", qr_card: true }),
+    ).toEqual(none);
+    expect(await actions({ flag: "after_purge" })).toEqual({
+      ...none,
+      move: true,
+      confirm: true,
+      markCard: true,
     });
   });
 });
@@ -382,6 +414,7 @@ describe("taggingError", () => {
       ["tagging_not_ready", "tagging.notReady"],
       ["confirm_first", "tagging.confirmFirst"],
       ["other_card", "tagging.otherCard"],
+      ["not_marked_card", "tagging.notMarkedCard"],
     ] as const) {
       const e = taggingError({ code: "P0001", message });
       expect([e.status, e.fields]).toEqual([409, { form }]);

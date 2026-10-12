@@ -54,7 +54,10 @@ where exists (select 1 from public.photos p where p.batch_id = b.id and p.status
 
 -- ── Tags ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 create type public.photo_place as enum ('child', 'class_set', 'leftovers', 'card', 'blank_card');
-create type public.photo_flag as enum ('unreadable_card', 'other_card', 'after_unreadable', 'after_failed');
+-- after_purge: photos were purged from the bin near this one, and where they were among the photos that appeared or
+-- moved since can't be known (Seenu, answer 13): never guessed, checked at review.
+create type public.photo_flag as enum ('unreadable_card', 'other_card', 'after_unreadable', 'after_failed',
+  'after_purge');
 
 -- What photos purged from the bin just before a photo did to the photos after them (packages/core's TagStep), kept
 -- on the next photo of the batch by delete_purged_photos (security review 1): before_card, a card that sent the
@@ -68,6 +71,16 @@ alter table public.photos
     references public.qr_cards (studio_id, job_id, id) on delete set null (before_card_id),
   add constraint photos_before_card check (before_card or before_card_id is null);
 create index photos_before_card_idx on public.photos (before_card_id) where before_card_id is not null;
+
+-- Purges that left a step (Seenu, answer 13). purge_steps: a purge in this batch carried a step onto the next photo or
+-- left one with no photo after it (purge_tail: the purged photos were last in the batch). after_purge: the photo came
+-- into the batch's tagging order, or moved in it (its capture time changed), after such a purge, so where the purged
+-- photos were relative to it is unknown. Tagging flags what that could change instead of guessing (core's tagBatch).
+alter table public.upload_batches
+  add column purge_steps boolean not null default false,
+  add column purge_tail boolean not null default false,
+  add constraint upload_batches_purge_tail check (purge_steps or not purge_tail);
+alter table public.photos add column after_purge boolean not null default false;
 
 -- Where each processed photo is (one row per photo): a child, a class's "Class photo" set, Leftovers, a card photo
 -- (hidden from parents), or a blank card's photos waiting for the studio to name the child. Every ready photo of a
@@ -101,7 +114,9 @@ create table public.photo_tags (
     and (place = 'class_set') = (group_id is not null)
     and (card_id is null or place in ('card', 'blank_card'))
     and (place <> 'blank_card' or card_id is not null)),
-  constraint photo_tags_manual check (source = 'auto' or flag is null),
+  -- A manual tag has no flag, except a card photo mark undone (unreadable_card, Seenu answer 12) or a removed child's
+  -- photos after a purged card (after_purge, answer 13): checked again at review, never changed by tagging.
+  constraint photo_tags_manual check (source = 'auto' or flag is null or flag in ('unreadable_card', 'after_purge')),
   -- Automatic tags have no person; manual ones name who made them (nobody when the system moved them, e.g. a removed
   -- child's photos).
   constraint photo_tags_tagged_by check (source = 'manual' or tagged_by is null)
@@ -180,8 +195,10 @@ begin
     update public.upload_batches b set tag_round = b.tag_round + 1
     where b.id in (
       select distinct n.batch_id from new_rows n join old_rows o on o.id = n.id
-      where (n.status, n.qr_kind, n.qr_card_id, n.binned_at is null)
-        is distinct from (o.status, o.qr_kind, o.qr_card_id, o.binned_at is null));
+      where (n.status, n.qr_kind, n.qr_card_id, n.binned_at is null, n.captured_at, n.before_card, n.before_card_id,
+             n.before_flag, n.after_purge)
+        is distinct from (o.status, o.qr_kind, o.qr_card_id, o.binned_at is null, o.captured_at, o.before_card,
+                          o.before_card_id, o.before_flag, o.after_purge));
   end if;
   return null;
 end;
@@ -196,11 +213,41 @@ create trigger photos_tagging_delete after delete on public.photos
 referencing old table as old_rows
 for each statement execute function app.on_photos_tagging_change();
 
+-- A photo that comes into its batch's tagging order (it leaves 'uploading') or moves in it (its capture time changes)
+-- after a purge left a step in the batch is marked after_purge (Seenu, answer 13): where the purged photos were
+-- relative to it is unknown.
+create function app.on_photo_after_purge() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if new.after_purge then
+    return new;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.status = 'uploading' then
+      return new;
+    end if;
+  elsif not ((old.status = 'uploading' and new.status <> 'uploading')
+             or old.captured_at is distinct from new.captured_at) then
+    return new;
+  end if;
+  if exists (select 1 from public.upload_batches b where b.id = new.batch_id and b.purge_steps) then
+    new.after_purge := true;
+  end if;
+  return new;
+end;
+$$;
+create trigger photos_after_purge before insert or update of status, captured_at on public.photos
+for each row execute function app.on_photo_after_purge();
+
 -- Children are removed only from draft jobs. Their photos go to Leftovers (by hand, so tagging won't send them back
 -- to a child that no longer exists), which reopens the review. A photo that may be a card (unreadable_card,
--- other_card) keeps its flag, as an automatic tag, so it still has to be confirmed before it can be moved (security
--- review 3-4). Locks are taken in tagging runs' order (the batches, then the job's tagging lock), as removing the
--- child's card touches the batches of its card photos.
+-- other_card) keeps its flag and source, so it still has to be confirmed before it can be moved (security review 3-4;
+-- an undone card photo mark stays the reviewer's, answer 12). In a batch where the child's card was purged from the
+-- bin, the photos it gave the child are flagged after_purge (answer 13): whose they are can't be known any more. Locks
+-- are taken in tagging runs' order (the batches, then the job's tagging lock), as removing the child's card touches the
+-- batches of its card photos.
 create function app.on_child_removed_tags() returns trigger
 language plpgsql security definer
 set search_path = ''
@@ -218,9 +265,14 @@ begin
   perform pg_advisory_xact_lock(hashtextextended('tagging:' || old.job_id::text, 0));
   update public.photo_tags t
   set place = 'leftovers', child_id = null,
-    flag = case when t.flag in ('unreadable_card', 'other_card') then t.flag end,
-    source = case when t.flag in ('unreadable_card', 'other_card') then 'auto' else 'manual' end,
-    tagged_by = case when t.flag in ('unreadable_card', 'other_card') then null else (select auth.uid()) end
+    flag = case
+      when t.flag in ('unreadable_card', 'other_card') then t.flag
+      when exists (select 1 from public.photos p join public.photos x on x.batch_id = p.batch_id
+                   join public.qr_cards q on q.id = x.before_card_id
+                   where p.id = t.photo_id and q.child_id = old.id) then 'after_purge'::public.photo_flag
+    end,
+    source = case when t.flag in ('unreadable_card', 'other_card') then t.source else 'manual' end,
+    tagged_by = case when t.flag in ('unreadable_card', 'other_card') then t.tagged_by else (select auth.uid()) end
   where t.child_id = old.id;
   if found then
     perform app.reopen_tagging_review(array[old.job_id]);
@@ -322,16 +374,17 @@ $$;
 -- ── Tagging a batch (the API runs the rules in packages/core, as the service role) ───────────────────────────────
 -- What tagging needs about a batch: its class (for class-photo uploads), its round, and its photos in tagging order
 -- (D142 #7), with what the worker read, each card's child (null for a blank card), the photo's current tag, what
--- purged photos just before it did (before) and whether it is in the bin. Photos in the bin are kept, marked binned:
--- they get no tag but still mark where cards were (security review 1). Photos still uploading are left out. Ids only:
--- never filenames or card codes.
+-- purged photos just before it did (before), whether it is in the bin, and whether it came or moved after a purge
+-- (after_purge; the batch's purge_tail: a purge left a step with no photo after it; answer 13). Photos in the bin are
+-- kept, marked binned: they get no tag but still mark where cards were (security review 1). Photos still uploading are
+-- left out. Ids only: never filenames or card codes.
 create function public.tagging_inputs(p_batch_id uuid) returns jsonb
 language sql stable security definer
 set search_path = ''
 as $$
   select jsonb_build_object(
     'batch_id', b.id, 'studio_id', b.studio_id, 'job_id', b.job_id, 'group_id', b.group_id,
-    'tag_round', b.tag_round, 'tagged_round', b.tagged_round,
+    'tag_round', b.tag_round, 'tagged_round', b.tagged_round, 'purge_tail', b.purge_tail,
     'processing', (select count(*) from public.photos p
                    where p.batch_id = b.id and p.binned_at is null and p.status = 'processing'),
     -- Processing for 15 minutes: stuck (its message went to the dead-letter queue; Try again restarts it).
@@ -341,7 +394,7 @@ as $$
     'photos', coalesce((
       select jsonb_agg(jsonb_build_object(
           'id', p.id, 'status', p.status, 'qr_kind', p.qr_kind, 'card_id', p.qr_card_id,
-          'card_child_id', q.child_id, 'binned', p.binned_at is not null,
+          'card_child_id', q.child_id, 'binned', p.binned_at is not null, 'after_purge', p.after_purge,
           'before', case when p.before_card or p.before_flag is not null then jsonb_build_object(
             'card', p.before_card, 'card_id', p.before_card_id, 'card_child_id', bq.child_id,
             'flag', p.before_flag) end,
@@ -404,7 +457,7 @@ begin
       or (w ->> 'card_id' is not null and w ->> 'card_id' !~ '^[0-9a-f-]{36}$')
       or (w ->> 'place' is not null and w ->> 'place' not in ('child', 'class_set', 'leftovers', 'card', 'blank_card'))
       or (w ->> 'flag' is not null
-          and w ->> 'flag' not in ('unreadable_card', 'other_card', 'after_unreadable', 'after_failed'))
+          and w ->> 'flag' not in ('unreadable_card', 'other_card', 'after_unreadable', 'after_failed', 'after_purge'))
       or (w ->> 'place' is not null and (
         ((w ->> 'place' = 'child') <> (w ->> 'child_id' is not null))
         or ((w ->> 'place' = 'class_set') <> (w ->> 'group_id' is not null))
@@ -596,8 +649,8 @@ end;
 $$;
 
 -- Confirms flagged photos at review (Seenu, plan answer 1): "Looks right" / "It's a normal photo" keeps them where
--- they are; "This is a card photo" (p_as_card) makes them card photos, hidden from parents for good (never moved or
--- confirmed again). A card photo stays listed on review: with the child it was with (that child's card), with its blank
+-- they are; "This is a card photo" (p_as_card) makes them card photos, hidden from parents (never moved or confirmed
+-- again; only owners and admins can undo it, undo_card_photos). A card photo stays listed on review: with the child it was with (that child's card), with its blank
 -- card, or else among the job's other card photos. A photo of another job's card (or of a removed card) can only be
 -- marked a card photo (other_card; security review 4). Either way they are the reviewer's from then on.
 create function public.confirm_photos(p_actor uuid, p_job_id uuid, p_photo_ids uuid[], p_as_card boolean)
@@ -641,6 +694,66 @@ begin
     perform app.emit(v_studio, 'photos.confirmed', p_job_id, jsonb_build_object(
       'photo_ids', to_jsonb(array(select x from unnest(p_photo_ids) x order by x)), 'count', v_count,
       'as_card', p_as_card));
+  end if;
+  perform app.end_act_for(v_previous);
+  return v_count;
+end;
+$$;
+
+-- Undoes "This is a card photo" (Seenu, answer 12): owners and admins only (photographers and staff get 42501). The
+-- photos go back to Flagged, unreadable_card, hidden from parents until someone confirms them again, either way. They
+-- stay the reviewer's (manual: tagging never changes them), back where they were: with the child whose card they were
+-- listed under, with their blank card (or its child, if named since), or else in Leftovers (a mark made in Leftovers or
+-- a class photo set keeps no place to go back to). Only photos a person marked can be undone
+-- (not_marked_card): a photo whose card was read stays a card photo. The flag reopens the review. One
+-- photos.card_unmarked event (ids and a count). The job's tagging lock first, as for moves.
+create function public.undo_card_photos(p_actor uuid, p_job_id uuid, p_photo_ids uuid[]) returns int
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_studio uuid := (select j.studio_id from public.jobs j where j.id = p_job_id);
+  v_previous text;
+  v_count int;
+begin
+  if v_studio is null then
+    raise exception 'Job not found' using errcode = 'P0002';
+  end if;
+  v_previous := app.act_for(p_actor, v_studio);
+  if not app.has_role(v_studio, '{owner,admin}') then
+    raise exception 'Owners and admins only' using errcode = '42501';
+  end if;
+  perform app.assert_job_open(p_job_id);
+  perform app.check_bin_request(p_job_id, p_photo_ids);
+  perform pg_advisory_xact_lock(hashtextextended('tagging:' || p_job_id::text, 0));
+  if exists (select 1 from public.photos p left join public.photo_tags t on t.photo_id = p.id
+             where p.id = any (p_photo_ids)
+               and (t.photo_id is null or t.place <> 'card' or t.source <> 'manual'
+                    or (p.qr_kind = 'card' and p.qr_card_id is not null))) then
+    raise exception 'not_marked_card' using errcode = 'P0001';
+  end if;
+  if exists (select 1 from public.photos p
+             where p.id = any (p_photo_ids) and (p.status <> 'ready' or p.binned_at is not null)) then
+    raise exception 'photo_not_ready' using errcode = 'P0001';
+  end if;
+
+  update public.photo_tags t
+  set place = case when q.child_id is not null then 'child'::public.photo_place
+                   when q.id is not null then 'blank_card'::public.photo_place
+                   else 'leftovers'::public.photo_place end,
+    child_id = q.child_id,
+    group_id = null,
+    card_id = case when q.child_id is null then q.id end,
+    flag = 'unreadable_card', source = 'manual', tagged_by = p_actor
+  from public.photo_tags t2
+  left join public.qr_cards q on q.id = t2.card_id and q.studio_id = v_studio and q.job_id = p_job_id
+  where t2.photo_id = t.photo_id and t.photo_id = any (p_photo_ids) and t.job_id = p_job_id;
+  get diagnostics v_count = row_count;
+
+  if v_count > 0 then
+    perform app.reopen_tagging_review(array[p_job_id]);
+    perform app.emit(v_studio, 'photos.card_unmarked', p_job_id, jsonb_build_object(
+      'photo_ids', to_jsonb(array(select x from unnest(p_photo_ids) x order by x)), 'count', v_count));
   end if;
   perform app.end_act_for(v_previous);
   return v_count;
@@ -1022,6 +1135,9 @@ $$;
 -- composeSteps: a card sends them to its child; a failed photo, or one that may be a card, flags them until the next
 -- card) is kept on the next photo of its batch that stays (before_*), so tagging the batch again later gives every
 -- photo the same place. Class-photo batches don't need it: their photos are tagged one by one. Ids and flags only.
+-- The batch remembers that a purge left a step (purge_steps), and whether one was left with no photo after it
+-- (purge_tail: the purged photos were last), so photos that come or move into the batch's order later are flagged
+-- rather than guessed (on_photo_after_purge, core's tagBatch; Seenu, answer 13).
 create function app.carry_purged_steps(p_photo_ids uuid[]) returns void
 language plpgsql security definer
 set search_path = ''
@@ -1079,11 +1195,18 @@ begin
           before_card_id = case when r.before_card then r.before_card_id else v_card_id end,
           before_flag = case when r.before_card then r.before_flag else coalesce(r.before_flag, v_flag) end
         where p.id = r.id;
+        update public.upload_batches b set purge_steps = true where b.id = v_batch and not b.purge_steps;
         v_card := false;
         v_card_id := null;
         v_flag := null;
       end if;
     end loop;
+    -- The last photos purged did something, and no photo follows: nothing to carry it on, but a photo that sorts
+    -- after them later can't be tagged without it.
+    if v_card or v_flag is not null then
+      update public.upload_batches b set purge_steps = true, purge_tail = true
+      where b.id = v_batch and not (b.purge_steps and b.purge_tail);
+    end if;
   end loop;
 end;
 $$;
@@ -1192,7 +1315,7 @@ create index photos_processing_idx on public.photos (job_id) where status = 'pro
 -- ── Grants ────────────────────────────────────────────────────────────────────────────────────────────────────────
 revoke all on function app.reopen_tagging_review(uuid[]), app.on_photos_tagging_change(),
   app.on_child_removed_tags(), app.check_tag_request(uuid, uuid[]), app.job_tagging_state(uuid),
-  app.carry_purged_steps(uuid[])
+  app.carry_purged_steps(uuid[]), app.on_photo_after_purge()
   from public;
 revoke all on type app.claimed_child from public;
 revoke all on function public.job_checklist_facts(uuid, uuid[]) from public, anon;
@@ -1214,6 +1337,7 @@ revoke all on function
   public.batches_of_photos(uuid[]),
   public.move_photos(uuid, uuid, uuid[], jsonb),
   public.confirm_photos(uuid, uuid, uuid[], boolean),
+  public.undo_card_photos(uuid, uuid, uuid[]),
   public.blank_card_code(uuid, uuid, uuid),
   public.claim_blank_card(uuid, uuid, uuid, jsonb),
   public.mark_tagging_reviewed(uuid, uuid)
@@ -1226,6 +1350,7 @@ grant execute on function
   public.batches_of_photos(uuid[]),
   public.move_photos(uuid, uuid, uuid[], jsonb),
   public.confirm_photos(uuid, uuid, uuid[], boolean),
+  public.undo_card_photos(uuid, uuid, uuid[]),
   public.blank_card_code(uuid, uuid, uuid),
   public.claim_blank_card(uuid, uuid, uuid, jsonb),
   public.mark_tagging_reviewed(uuid, uuid)

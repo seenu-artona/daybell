@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type CardPhotosUndoneResponse,
   type MoveTarget,
   PHOTO_CONFLICTS,
   type PhotosConfirmedResponse,
@@ -47,7 +48,7 @@ const PHOTO_CONFLICT_KEYS = Object.fromEntries(
  * Flagged photos and Leftovers at the top, then new children from blank cards, then one album per class with each
  * child's photos, and the children with no photos yet at the bottom. Photos move by drag, or select and Move to…
  * (WCAG 2.5.7); flagged photos are confirmed ("Looks right", or "It's a normal photo" for a photo that may be a card)
- * or marked card photos, and junk goes to the bin (plan answer 4). The selection bar offers only what every ticked
+ * or marked card photos (owners and admins can undo that, answer 12), and junk goes to the bin (plan answer 4). The selection bar offers only what every ticked
  * photo allows (core's reviewActions). Mark reviewed is enabled only when tagging is clean, and says why not in words.
  * Owners, admins and photographers fix tagging; staff look.
  */
@@ -56,7 +57,9 @@ export default function ReviewPage() {
   const tp = useTranslations("app.photos");
   const text = useApiText();
   const format = useFormatter();
-  const { job, canEditRoster: canEdit, refreshSummary, setTaggingReviewed } = useJob();
+  const { job, canEditRoster: canEdit, canManage, refreshSummary, setTaggingReviewed } = useJob();
+  // Undoing "This is a card photo" is for owners and admins (Seenu, answer 12).
+  const canUndoCard = canEdit && canManage;
   const [summary, setSummary] = useState<TaggingSummary | null>(null);
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
@@ -150,6 +153,27 @@ export default function ReviewPage() {
     await changed();
   }
 
+  /** Undo "This is a card photo" (answer 12): back to Flagged, hidden from parents until checked again. */
+  async function undoCard() {
+    setStatus("");
+    const ids = [...checked.keys()];
+    let undone = 0;
+    for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_MOVE) {
+      const res = await api<CardPhotosUndoneResponse>(`${base}/tagging/undo-card`, {
+        method: "POST",
+        body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_MOVE) },
+      });
+      if (!res.ok) {
+        setStatus(problem(res));
+        await changed();
+        return;
+      }
+      undone += res.data.undone;
+    }
+    setStatus(t("announce.undoneCards", { count: undone }));
+    await changed();
+  }
+
   /** Junk goes to the bin (plan answer 4), from where it can be restored for 30 days; its upload is tagged again. */
   async function moveToBin() {
     setStatus("");
@@ -184,6 +208,7 @@ export default function ReviewPage() {
     () => ({
       jobId: job.id,
       canEdit,
+      canUndoCard,
       version,
       checked,
       toggle: (photo, on) =>
@@ -196,14 +221,15 @@ export default function ReviewPage() {
       move,
       openMove: (photoIds) => setMoving(photoIds),
     }),
-    [job.id, canEdit, version, checked, move],
+    [job.id, canEdit, canUndoCard, version, checked, move],
   );
 
   // What every ticked photo allows; "It's a normal photo" when one of them may be a card (Seenu, plan answer 1).
   const selected = [...checked.values()];
   const all = (action: keyof TaggedPhoto["actions"]) => selected.every((p) => p.actions[action]);
   const mayBeCard = selected.some((p) => p.flag === "unreadableCard");
-  const someCannotMove = selected.length > 0 && !all("move");
+  // Card photos (which only owners and admins can tick, to undo) aren't waiting to be confirmed.
+  const someCannotMove = selected.some((p) => !p.actions.move && !p.actions.undoCard);
 
   const s = summary;
   const subline = s
@@ -255,7 +281,7 @@ export default function ReviewPage() {
             <p role="status" className="m-0 text-sm font-semibold text-ink empty:-mb-4">
               {status}
             </p>
-            {canEdit && checked.size > 0 ? (
+            {(canEdit || canUndoCard) && checked.size > 0 ? (
               <div className="flex flex-wrap items-center gap-2 rounded-full bg-surface px-5 py-1">
                 <span className="flex-1 text-sm font-semibold text-ink">
                   {t("selection.selected", { count: checked.size })}
@@ -277,6 +303,11 @@ export default function ReviewPage() {
                 {all("markCard") ? (
                   <Button variant="secondary" shape="pill" onClick={() => void confirm(true)}>
                     {t("selection.isCard")}
+                  </Button>
+                ) : null}
+                {canUndoCard && all("undoCard") ? (
+                  <Button variant="secondary" shape="pill" onClick={() => void undoCard()}>
+                    {t("selection.undoCard")}
                   </Button>
                 ) : null}
                 <Button variant="secondary" shape="pill" onClick={() => void moveToBin()}>

@@ -939,6 +939,7 @@
           "looksRight": "Looks right",
           "normalPhoto": "It's a normal photo",
           "isCard": "This is a card photo",
+          "undoCard": "Not a card photo after all",
           "bin": "Move to bin",
           "clear": "Clear",
           "confirmFirst": "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be moved."
@@ -947,7 +948,8 @@
           "moved": "{count, plural, =0 {No photo was moved.} one {Moved # photo to {target}.} other {Moved # photos to {target}.}}",
           "confirmed": "{count, plural, =0 {Nothing changed.} one {Confirmed # photo.} other {Confirmed # photos.}}",
           "cards": "{count, plural, =0 {Nothing changed.} one {Marked # card photo. It is hidden from parents.} other {Marked # card photos. They are hidden from parents.}}",
-          "reviewed": "Tagging marked reviewed."
+          "reviewed": "Tagging marked reviewed.",
+          "undoneCards": "{count, plural, =0 {Nothing changed.} one {# photo is back in Flagged. Parents can't see it until it's checked.} other {# photos are back in Flagged. Parents can't see them until they're checked.}}"
         },
         "conflicts": {
           "cardPhoto": "Card photos stay card photos and can't be moved.",
@@ -955,7 +957,8 @@
           "cardClaimed": "This card's child has already been named.",
           "notReady": "Tagging changed meanwhile and isn't clean yet. Check the counts above.",
           "confirmFirst": "Confirm photos that may be a card first: mark them card photos, or say they're normal photos. Then move them.",
-          "otherCard": "A photo of another job's card can only be marked a card photo."
+          "otherCard": "A photo of another job's card can only be marked a card photo.",
+          "notMarkedCard": "Only photos someone marked as card photos can be undone. A photo whose card was read stays a card photo."
         },
         "tile": {
           "alt": "{where}, photo {n}",
@@ -969,6 +972,7 @@
           "otherCard": "Another job's card",
           "afterUnreadable": "Check: after a card",
           "afterFailed": "Check: after a failed photo",
+          "afterPurge": "Check: near deleted photos",
           "removedCard": "Removed card"
         },
         "flagged": {

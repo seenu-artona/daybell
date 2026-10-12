@@ -512,7 +512,7 @@ export const photoPlace = z.enum(PHOTO_PLACES).meta({
 export const photoFlag = z.enum(PHOTO_FLAGS).meta({
   id: "PhotoFlag",
   description:
-    "Why to check a photo: unreadableCard (looks like a card, couldn't be read), otherCard (another job's card), afterUnreadable or afterFailed (after one of those, or after a photo that couldn't be processed). Flagged photos are hidden from parents until confirmed.",
+    "Why to check a photo: unreadableCard (looks like a card, couldn't be read, or a card photo mark undone), otherCard (another job's card), afterUnreadable or afterFailed (after one of those, or after a photo that couldn't be processed), afterPurge (near photos deleted from the bin, where what they did can't be placed for sure). Flagged photos are hidden from parents until confirmed.",
 });
 
 export const taggedPhoto = z
@@ -539,10 +539,11 @@ export const taggedPhoto = z
         move: z.boolean(),
         confirm: z.boolean(),
         markCard: z.boolean(),
+        undoCard: z.boolean(),
       })
       .meta({
         description:
-          "What review allows (for people who fix tagging): move it; confirm it where it is (Looks right / It's a normal photo); mark it a card photo. A photo that may be a card is confirmed before it moves; another job's card can only be marked a card photo; card photos stay card photos.",
+          "What review allows (for people who fix tagging): move it; confirm it where it is (Looks right / It's a normal photo); mark it a card photo; undo a person's card photo mark (owners and admins only). A photo that may be a card is confirmed before it moves; another job's card can only be marked a card photo; a photo whose card was read stays a card photo.",
       }),
     thumbUrl: z.url().nullable().meta({
       description: "A 400 px preview (studio only), signed for up to an hour; null until ready.",
@@ -673,6 +674,10 @@ export const photosConfirmedResponse = z.object({
   confirmed: z.number().int().meta({ description: "Photos that changed." }),
 });
 export type PhotosConfirmedResponse = z.infer<typeof photosConfirmedResponse>;
+export const cardPhotosUndoneResponse = z.object({
+  undone: z.number().int().meta({ description: "Photos sent back to Flagged." }),
+});
+export type CardPhotosUndoneResponse = z.infer<typeof cardPhotosUndoneResponse>;
 export const taggingReviewedResponse = z.object({ reviewedAt: z.iso.datetime({ offset: true }) });
 export type TaggingReviewedResponse = z.infer<typeof taggingReviewedResponse>;
 
@@ -686,6 +691,8 @@ export const TAGGING_CONFLICTS = {
   confirmFirst: "tagging.confirmFirst",
   /** A photo of another job's card can only be marked a card photo. */
   otherCard: "tagging.otherCard",
+  /** Only photos a person marked as card photos can be unmarked. */
+  notMarkedCard: "tagging.notMarkedCard",
 } as const;
 export type TaggingConflict = (typeof TAGGING_CONFLICTS)[keyof typeof TAGGING_CONFLICTS];
 

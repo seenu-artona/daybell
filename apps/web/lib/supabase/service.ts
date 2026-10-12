@@ -69,9 +69,10 @@ export type PhotoWriteRpc =
   | "retry_photo"
   | "bin_photos"
   | "restore_photos"
-  // Review (ADR 0018): moves, confirmations and Mark reviewed.
+  // Review (ADR 0018): moves, confirmations, undoing card photo marks and Mark reviewed.
   | "move_photos"
   | "confirm_photos"
+  | "undo_card_photos"
   | "mark_tagging_reviewed";
 
 export function photoWriteRpc(

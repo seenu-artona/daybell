@@ -98,6 +98,11 @@ const WRITES: [string, () => Promise<Route>, string | undefined][] = [
     undefined,
   ],
   [
+    "POST /jobs/:id/tagging/undo-card",
+    async () => (await import("./jobs/[id]/tagging/undo-card/route")).POST,
+    undefined,
+  ],
+  [
     "POST /jobs/:id/qr-cards/:cardId/child",
     async () => (await import("./jobs/[id]/qr-cards/[cardId]/child/route")).POST,
     CARD,
@@ -154,6 +159,7 @@ describe("tagging writes check the person and their role before anything else (S
       await import("./jobs/[id]/tagging/children/route"),
       await import("./jobs/[id]/photos/move/route"),
       await import("./jobs/[id]/photos/confirm/route"),
+      await import("./jobs/[id]/tagging/undo-card/route"),
       await import("./jobs/[id]/qr-cards/[cardId]/child/route"),
       // Database only, but in Montréal like their siblings (security review 12, code review nice 7).
       await import("./jobs/[id]/tagging/review/route"),
@@ -210,10 +216,12 @@ describe("another studio's job is not found, and nothing is written or signed (l
     const confirm = (await import("./jobs/[id]/photos/confirm/route")).POST;
     const review = (await import("./jobs/[id]/tagging/review/route")).POST;
     const claim = (await import("./jobs/[id]/qr-cards/[cardId]/child/route")).POST;
+    const undo = (await import("./jobs/[id]/tagging/undo-card/route")).POST;
     expect(
       (await move(json({ photoIds: [PHOTO], target: { kind: "leftovers" } }), ctx(JOB))).status,
     ).toBe(404);
     expect((await confirm(json({ photoIds: [PHOTO] }), ctx(JOB))).status).toBe(404);
+    expect((await undo(json({ photoIds: [PHOTO] }), ctx(JOB))).status).toBe(404);
     expect((await review(json({}), ctx(JOB))).status).toBe(404);
     expect((await claim(json({ firstName: "Zoe", lastName: "New" }), ctx(JOB, CARD))).status).toBe(
       404,
@@ -303,6 +311,41 @@ describe("moving and confirming", () => {
       409,
       { form: "tagging.otherCard" },
     ]);
+  });
+
+  it("lets only owners and admins undo a card photo mark: photographers get forbidden (answer 12)", async () => {
+    const undo = (await import("./jobs/[id]/tagging/undo-card/route")).POST;
+    expect((await undo(json({ photoIds: [PHOTO] }), ctx(JOB))).status).toBe(403);
+    expect((await undo(garbled("POST"), ctx(JOB))).status).toBe(403);
+    expect(writeRpc).not.toHaveBeenCalled();
+  });
+
+  it("undoes card photo marks for an owner or admin, sending ids only (answer 12)", async () => {
+    const undo = (await import("./jobs/[id]/tagging/undo-card/route")).POST;
+    for (const role of ["owner", "admin"]) {
+      scope.mockResolvedValue({
+        supabase: fakeDatabase({ jobs: { id: JOB, status: "draft" } }),
+        studio: { ...owner, role },
+        userId: "u",
+      });
+      writeRpc.mockResolvedValueOnce({ data: 1, error: null });
+      const res = await undo(json({ photoIds: [PHOTO] }), ctx(JOB));
+      expect([res.status, await res.json()]).toEqual([200, { undone: 1 }]);
+    }
+    expect(writeRpc).toHaveBeenCalledWith("ca", "undo_card_photos", "u", {
+      p_job_id: JOB,
+      p_photo_ids: [PHOTO],
+    });
+    writeRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "P0001", message: "not_marked_card" },
+    });
+    const refused = await undo(json({ photoIds: [PHOTO] }), ctx(JOB));
+    expect([refused.status, (await refused.json()).error.fields]).toEqual([
+      409,
+      { form: "tagging.notMarkedCard" },
+    ]);
+    expect((await undo(json({ photoIds: [] }), ctx(JOB))).status).toBe(400);
   });
 
   it("refuses Mark reviewed while tagging isn't clean", async () => {

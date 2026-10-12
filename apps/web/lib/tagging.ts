@@ -54,12 +54,14 @@ const FLAG_FROM_DB: Record<string, PhotoFlag> = {
   other_card: "otherCard",
   after_unreadable: "afterUnreadable",
   after_failed: "afterFailed",
+  after_purge: "afterPurge",
 };
 const FLAG_TO_DB: Record<PhotoFlag, string> = {
   unreadableCard: "unreadable_card",
   otherCard: "other_card",
   afterUnreadable: "after_unreadable",
   afterFailed: "after_failed",
+  afterPurge: "after_purge",
 };
 
 export const placeFromDb = (place: string): PhotoPlace => PLACE_FROM_DB[place] ?? "leftovers";
@@ -118,6 +120,8 @@ export interface TaggingInputs {
   group_id: string | null;
   tag_round: number;
   tagged_round: number;
+  /** A purge left a step with no photo after it (Seenu, answer 13). */
+  purge_tail?: boolean;
   processing: number;
   processing_stuck: number;
   photos: {
@@ -128,6 +132,8 @@ export interface TaggingInputs {
     card_child_id: string | null;
     /** In the bin: no tag, but it still marks where cards were (security review 1). */
     binned: boolean;
+    /** It came into the batch's order, or moved in it, after a purge left a step (answer 13). */
+    after_purge?: boolean;
     /** What photos purged from the bin just before this one did. */
     before: {
       card: boolean;
@@ -179,11 +185,15 @@ export function planBatch(inputs: TaggingInputs): TagWrite[] {
     qr: photoQr(p),
     binned: p.binned === true,
     before: beforeStep(p.before ?? null),
+    afterPurge: p.after_purge === true,
   }));
   const current = new Map(
     inputs.photos.flatMap((p) => (p.tag ? [[p.id, tagFromRow(p.tag)] as const] : [])),
   );
-  return planTagWrites(current, tagBatch(photos, { classGroupId: inputs.group_id }));
+  return planTagWrites(
+    current,
+    tagBatch(photos, { classGroupId: inputs.group_id, purgeTail: inputs.purge_tail === true }),
+  );
 }
 
 /** Tries before leaving a batch to the daily sweep, when other changes keep moving its round on. */
@@ -302,7 +312,7 @@ export async function toTaggedPhoto(
     manual: row.source === "manual",
     cardRead: qrKind === "card",
     qrKind,
-    actions: reviewActions({ status, place, flag, qrKind }),
+    actions: reviewActions({ status, place, flag, qrKind, manual: row.source === "manual" }),
     thumbUrl:
       row.status === "ready"
         ? await previewUrl(storage, { ...ids, photoId: row.id }, "thumb.webp")
@@ -345,6 +355,11 @@ const NAMED: Record<string, () => ApiError> = {
     conflict(
       "A photo of another job's card can only be marked a card photo.",
       TAGGING_CONFLICTS.otherCard,
+    ),
+  not_marked_card: () =>
+    conflict(
+      "Only photos a person marked as card photos can be unmarked.",
+      TAGGING_CONFLICTS.notMarkedCard,
     ),
   tagging_not_ready: () =>
     conflict(

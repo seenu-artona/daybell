@@ -12,6 +12,8 @@ export interface ReviewContextValue {
   jobId: string;
   /** Owners, admins and photographers fix tagging; staff only look (plan answer 10). */
   canEdit: boolean;
+  /** Owners and admins can also undo "This is a card photo" (Seenu, answer 12). */
+  canUndoCard: boolean;
   /** Goes up after every change, so every section loads again. */
   version: number;
   /** The ticked photos, with what each allows (the selection bar offers what every one of them allows). */

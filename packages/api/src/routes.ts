@@ -33,12 +33,14 @@ import {
   studioChecklistQuery,
   taggingChildrenQuery,
   taggingPhotosQuery,
+  undoCardPhotosInput,
   uploadBatchInput,
   uploadFilesInput,
   workerResultInput,
 } from "./schemas";
 import {
   activityResponse,
+  cardPhotosUndoneResponse,
   checkEmailResponse,
   childResponse,
   childrenResponse,
@@ -708,6 +710,25 @@ export const ROUTES: RouteSpec[] = [
     access: "uploader",
     body: confirmPhotosInput,
     success: { status: 200, schema: photosConfirmedResponse, description: "Confirmed." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/tagging/undo-card",
+    group: "Photos",
+    summary: 'Undo "This is a card photo"',
+    description:
+      "Up to 500 of the job's photos that a person marked as card photos. They go back to Flagged (unreadableCard), where they were before (with the child or blank card they were listed under, else Leftovers), hidden from parents until someone confirms them again; this reopens the review. Owners and admins only. A photo whose card was read stays a card photo (409, tagging.notMarkedCard); photos in the bin can't be changed (409, tagging.photoNotReady); nor can a closed job's.",
+    access: "owner-admin",
+    body: undoCardPhotosInput,
+    success: { status: 200, schema: cardPhotosUndoneResponse, description: "Undone." },
     errors: [
       "invalid_input",
       "not_signed_in",

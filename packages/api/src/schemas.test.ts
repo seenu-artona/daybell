@@ -28,6 +28,7 @@ import {
   suggestSlug,
   taggingChildrenQuery,
   taggingPhotosQuery,
+  undoCardPhotosInput,
   uploadBatchInput,
   workerResultInput,
 } from "./schemas";
@@ -459,6 +460,13 @@ describe("QR tagging and review (ADR 0018)", () => {
       { photoIds: ["Maya Johnson.jpg"], target: { kind: "leftovers" } },
     ])
       expect(movePhotosInput.safeParse(bad).success).toBe(false);
+  });
+
+  it("undoes card photo marks for 1 to 500 distinct photos (answer 12)", () => {
+    expect(undoCardPhotosInput.parse({ photoIds: [photo] })).toEqual({ photoIds: [photo] });
+    expect(undoCardPhotosInput.safeParse({ photoIds: [] }).success).toBe(false);
+    expect(undoCardPhotosInput.safeParse({ photoIds: [photo, photo] }).success).toBe(false);
+    expect(undoCardPhotosInput.safeParse({ photoIds: ["not-a-uuid"] }).success).toBe(false);
   });
 
   it("confirms photos as they are by default, or as card photos", () => {

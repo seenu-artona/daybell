@@ -11,7 +11,10 @@
  * - a card that reappears later (a retake) sends the photos after it back to that child (plan 8);
  * - class-photo uploads go to the class's set, and cards in them are hidden and otherwise ignored (3, plan 8);
  * - each upload batch is tagged on its own, starting in Leftovers;
- * - manual moves are never overwritten when a batch is tagged again.
+ * - manual moves are never overwritten when a batch is tagged again;
+ * - where photos purged from the bin were can't always be known (the purged photos were last, a photo came or moved into
+ *   the batch's order after a purge, or a purged card was removed since): the photos that could be affected are
+ *   flagged, never guessed (13).
  */
 import { parseCardQrPayload } from "./qr-cards";
 
@@ -70,13 +73,15 @@ export type PhotoPlace = (typeof PHOTO_PLACES)[number];
  * - unreadableCard: looks like a QR card but couldn't be read;
  * - otherCard: a Daybell card that isn't one of this job's;
  * - afterUnreadable: after one of those, so it may belong to someone else;
- * - afterFailed: after a photo that couldn't be processed (it may have been a card).
+ * - afterFailed: after a photo that couldn't be processed (it may have been a card);
+ * - afterPurge: near photos purged from the bin, where what they did can't be placed for sure (Seenu, answer 13).
  */
 export const PHOTO_FLAGS = [
   "unreadableCard",
   "otherCard",
   "afterUnreadable",
   "afterFailed",
+  "afterPurge",
 ] as const;
 export type PhotoFlag = (typeof PHOTO_FLAGS)[number];
 
@@ -134,6 +139,11 @@ export interface TaggingPhoto {
   binned?: boolean;
   /** What photos purged from the bin just before this one did (see TagStep). */
   before?: TagStep | null;
+  /**
+   * It came into the batch's order, or moved in it, after a purge left a step in the batch: where the purged photos
+   * were relative to it is unknown (Seenu, answer 13).
+   */
+  afterPurge?: boolean;
 }
 
 export interface TaggingResult {
@@ -177,9 +187,36 @@ export function tagStep(photo: Pick<TaggingPhoto, "status" | "qr">, legacy: bool
 }
 
 /**
+ * Which photos sit where purged photos might have been (Seenu, answer 13), from the end of the batch back. Purged
+ * photos were just before the photo that carries their step (`before`), after the last photo before it that was
+ * already in place then (not afterPurge); with `purgeTail`, after the batch's last such photo. A photo marked afterPurge
+ * in that gap may be before or after them. `lost`: a photo carrying a step has itself moved since, so where its purged
+ * photos were is unknown anywhere in the batch.
+ */
+function purgeGaps(
+  photos: readonly TaggingPhoto[],
+  purgeTail: boolean,
+): { inGap: boolean[]; lost: boolean } {
+  const inGap = photos.map(() => false);
+  let lost = false;
+  let open = purgeTail;
+  for (let i = photos.length - 1; i >= 0; i--) {
+    const photo = photos[i] as TaggingPhoto;
+    if (photo.afterPurge) {
+      inGap[i] = open;
+      if (photo.before) lost = true;
+    } else {
+      open = Boolean(photo.before);
+    }
+  }
+  return { inGap, lost };
+}
+
+/**
  * Tags one upload batch. `photos` must be in tagging order (compareTaggingOrder: capture time, then filename; D142 #7)
  * and include photos in the bin (marked binned: they get no tag but still count where they are). With `classGroupId`
- * the batch is a class-photo upload (Seenu, answer 3). Results are for the photos not in the bin.
+ * the batch is a class-photo upload (Seenu, answer 3). `purgeTail`: a purge left a step with no photo after it. Results
+ * are for the photos not in the bin.
  *
  * In a batch of individual photos the target starts at Leftovers. A readable card makes its own photo a card photo and
  * sends the photos after it to the card's child (or, for a blank card, to that card until the studio names the
@@ -187,10 +224,15 @@ export function tagStep(photo: Pick<TaggingPhoto, "status" | "qr">, legacy: bool
  * (a retake) sends photos back to its child. A card that can't be read, or isn't this job's, stays with the current
  * target, flagged and hidden; the photos after it keep that target, flagged, until the next readable card. A photo that
  * failed or isn't processed yet gets no tag, and flags the photos after it.
+ *
+ * Purges (Seenu, answer 13): a photo that may sit where purged photos were (purgeGaps) is flagged afterPurge, as it may
+ * belong before or after them. If one of those photos did something itself (a card, a flag), the order of the two
+ * steps is unknown, so the photos from the one carrying the purged step on are flagged too, until the next card. A
+ * purged card removed since flags the photos after it. If a photo carrying a step has moved, every photo is flagged.
  */
 export function tagBatch(
   photos: readonly TaggingPhoto[],
-  options: { classGroupId: string | null },
+  options: { classGroupId: string | null; purgeTail?: boolean },
 ): TaggingResult[] {
   const legacy = isLegacyBatch(photos);
   const live = photos.filter((p) => !p.binned);
@@ -215,8 +257,8 @@ export function tagBatch(
     if (step.card) {
       const { cardId, childId } = step.card;
       if (cardId === null) {
-        // A card deleted since (its child was removed): like another job's card, the photos after it are flagged.
-        carried = "afterUnreadable";
+        // A purged card removed since (its child was removed): whose photos follow can't be known (answer 13).
+        carried = "afterPurge";
       } else {
         target = childId ? { place: "child", childId } : { place: "blankCard", cardId };
         carried = null;
@@ -224,32 +266,45 @@ export function tagBatch(
     }
     if (step.flag) carried = step.flag;
   };
+  const { inGap, lost } = purgeGaps(photos, options.purgeTail === true);
+  // A photo in a purge gap did something: the purged step and its own can't be put in order.
+  let gapSteps = false;
   const results: TaggingResult[] = [];
-  for (const photo of photos) {
-    if (photo.before) apply(photo.before);
+  photos.forEach((photo, i) => {
+    if (!photo.afterPurge) {
+      if (photo.before) {
+        apply(photo.before);
+        if (gapSteps) carried = "afterPurge";
+      }
+      gapSteps = false;
+    } else if (photo.before) {
+      apply(photo.before);
+    }
     const step = tagStep(photo, legacy);
+    if (inGap[i] && (step.card || step.flag)) gapSteps = true;
     if (photo.binned) {
       apply(step);
-      continue;
+      return;
     }
     if (photo.status !== "ready") {
       apply(step);
       results.push({ photoId: photo.id, tag: null });
-      continue;
+      return;
     }
     const k = kindOf(photo.qr, legacy);
     if (k.kind === "card") {
       apply(step);
       results.push({ photoId: photo.id, tag: { place: "card", cardId: k.cardId, flag: null } });
-      continue;
+      return;
     }
     if (k.kind === "doubt") {
       results.push({ photoId: photo.id, tag: { ...target, flag: k.flag } });
       apply(step);
-      continue;
+      return;
     }
-    results.push({ photoId: photo.id, tag: { ...target, flag: carried } });
-  }
+    const flag: PhotoFlag | null = lost || inGap[i] ? "afterPurge" : carried;
+    results.push({ photoId: photo.id, tag: { ...target, flag } });
+  });
   return results;
 }
 
@@ -330,6 +385,8 @@ export interface ReviewPhoto {
   place: PhotoPlace;
   flag: PhotoFlag | null;
   qrKind: PhotoQrKind;
+  /** Moved or confirmed by a person. */
+  manual: boolean;
 }
 
 export interface ReviewActions {
@@ -337,8 +394,13 @@ export interface ReviewActions {
   move: boolean;
   /** "Looks right" / "It's a normal photo": keep it where it is, visible to parents once tagged to a child. */
   confirm: boolean;
-  /** "This is a card photo": hidden from parents for good. */
+  /** "This is a card photo": hidden from parents. */
   markCard: boolean;
+  /**
+   * Undo "This is a card photo" (Seenu, answer 12): back to Flagged, hidden until confirmed again. Owners and admins
+   * only; screens offer it only to them.
+   */
+  undoCard: boolean;
 }
 
 /**
@@ -346,15 +408,17 @@ export interface ReviewActions {
  * - card photos (read, or marked by a person) are never moved or confirmed again;
  * - a photo of another job's card (or a removed card) shows that card's child: it can only be marked a card photo;
  * - a photo that may be a card (unreadableCard) must be confirmed, either way, before it can be moved;
+ * - a photo a person marked a card photo can be unmarked (owners and admins; Seenu, answer 12);
  * - photos still processing or failed have nothing to do.
  */
 export function reviewActions(p: ReviewPhoto): ReviewActions {
-  const none = { move: false, confirm: false, markCard: false };
-  if (p.status !== "ready" || p.place === "card" || p.qrKind === "card") return none;
+  const none = { move: false, confirm: false, markCard: false, undoCard: false };
+  if (p.status !== "ready" || p.qrKind === "card") return none;
+  if (p.place === "card") return { ...none, undoCard: p.manual };
   if (p.qrKind === "otherCard" || p.qrKind === "removedCard" || p.flag === "otherCard")
-    return { move: false, confirm: false, markCard: true };
-  if (p.flag === "unreadableCard") return { move: false, confirm: true, markCard: true };
-  return { move: true, confirm: true, markCard: true };
+    return { ...none, markCard: true };
+  if (p.flag === "unreadableCard") return { ...none, confirm: true, markCard: true };
+  return { move: true, confirm: true, markCard: true, undoCard: false };
 }
 
 // ── Review (D143's "Review tagging") ──────────────────────────────────────────────────────────────────────────────

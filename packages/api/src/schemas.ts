@@ -643,6 +643,10 @@ export const confirmPhotosInput = z.object({
 });
 export type ConfirmPhotosInput = z.infer<typeof confirmPhotosInput>;
 
+/** Undo "This is a card photo" (Seenu, answer 12): the photos go back to Flagged, hidden until confirmed again. */
+export const undoCardPhotosInput = z.object({ photoIds: reviewPhotoIds });
+export type UndoCardPhotosInput = z.infer<typeof undoCardPhotosInput>;
+
 /** Name a blank card's child (Seenu, answer 2): a new child in one of the job's classes, with the card's access code. */
 export const claimBlankCardInput = z.object({
   firstName: childFields.firstName,

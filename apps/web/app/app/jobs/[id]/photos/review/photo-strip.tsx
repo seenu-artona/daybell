@@ -10,7 +10,8 @@ import { DRAG_TYPE, dragIds, droppedIds, useReview } from "./review-context";
  * "{where}, photo {n}" (never a filename). Card photos say "Card" in words and can't be moved or confirmed; flagged
  * photos say why. People who fix tagging get a 44px checkbox on each photo they can act on (core's reviewActions), and
  * can drag a photo that can move (or every ticked one) onto a child, a class or Leftovers; Move to… does the same
- * without dragging (WCAG 2.5.7). A photo that may be a card is confirmed before it moves.
+ * without dragging (WCAG 2.5.7). A photo that may be a card is confirmed before it moves. Owners and admins can also
+ * tick a photo someone marked a card photo, to undo the mark (Seenu, answer 12).
  */
 export function PhotoStrip({
   photos,
@@ -23,7 +24,7 @@ export function PhotoStrip({
   showFlags?: boolean;
 }) {
   const t = useTranslations("app.photos.review");
-  const { canEdit, checked, toggle } = useReview();
+  const { canEdit, canUndoCard, checked, toggle } = useReview();
   return (
     <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
       {photos.map((photo, i) => {
@@ -31,7 +32,8 @@ export function PhotoStrip({
         const isCard = photo.cardRead || photo.place === "card";
         const movable = canEdit && photo.actions.move;
         const selectable =
-          canEdit && (photo.actions.move || photo.actions.confirm || photo.actions.markCard);
+          (canEdit && (photo.actions.move || photo.actions.confirm || photo.actions.markCard)) ||
+          (canUndoCard && photo.actions.undoCard);
         // A card of the job that has since been removed isn't "another job's card" (code review nice 3).
         const flagKey =
           photo.flag === "otherCard" && photo.qrKind === "removedCard" ? "removedCard" : photo.flag;

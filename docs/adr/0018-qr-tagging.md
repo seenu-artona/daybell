@@ -4,8 +4,8 @@
   the card's child FK is now deferrable; the access code moves to a fold-back tab, answer 11), 0016 (a batch can be a class-photo upload; the worker reads QR cards and
   decodes to 2048 px; the clean-up tags batches) and 0017 (a new task, new facts, a new Up next reason).
 - Decisions: D32, F16, D142 #7, D143; touches D60, D91, D92, D96, D100, D112, D113, D138, D140, D141, D10. Seenu's
-  answers to the step 5 brief (1–8), to the architect's questions (1–10) and after the security review (11), Oct 12,
-  2026. Revised after the step's security and code reviews (cited below as "security review n" and "code review").
+  answers to the step 5 brief (1–8), to the architect's questions (1–10), after the security review (11) and after the
+  fixes (12: undoing "This is a card photo"; 13: purge edge cases), Oct 12, 2026. Revised after the step's security and code reviews (cited below as "security review n" and "code review").
 
 ## Context
 
@@ -77,8 +77,24 @@ Leftovers):
   sends the photos after it to its child; a failed photo, or one that may be a card, flags them until the next card)
   onto the next photo of its batch that stays (`photos.before_card`, `before_card_id`, `before_flag`; ids and flags
   only, never a filename). Tagging applies it before that photo, so tagging the batch again later gives every photo the
-  same place. A purged card removed since (its child deleted) counts as another job's card: the photos after it are
-  flagged. If no photo follows, there is nothing to carry.
+  same place.
+- **Purge edge cases are flagged, never guessed** (Seenu, answer 13). Each case flags the affected photos `afterPurge`
+  ("Check: near deleted photos"), which hides them from parents and reopens Review tagging (the run writes flags):
+  - *The purged photos were last in their batch:* there is no photo to carry their step, so the batch remembers it
+    (`upload_batches.purge_tail`; `purge_steps` marks any batch where a purge left a step).
+  - *A photo comes into the batch's order, or moves in it, after such a purge:* `app.on_photo_after_purge` marks it
+    `photos.after_purge` when it leaves `uploading` or its capture time changes. `tagBatch` works out where the purged
+    photos may have been (the gap between the photo carrying their step and the last photo that was already in place
+    before it, or after the last such photo for a tail) and flags the marked photos in that gap: they may belong before
+    or after the purged photos. If a marked photo in the gap did something itself (a card, a flag), the two steps
+    can't be put in order, so the photos from the one carrying the purged step on are flagged too, until the next
+    card. If the photo carrying a step has itself moved, every photo of the batch is flagged.
+  - *A purged card is removed later (its child deleted):* the photos it gave the child go to Leftovers by hand, as any
+    removed child's do, but flagged `after_purge`; the photo carrying the removed card's step flags the photos after
+    it until the next card. The removal moves the batch's round on (`before_card_id` is now one of the columns the
+    round watches), so the batch is tagged again at once.
+  A photo marked `after_purge` stays marked (a later purge can't tell it apart), so a few photos may be flagged that
+  didn't need to be; never the other way round.
 - **A ready photo without a QR result** (a worker that didn't read cards) is treated as unreadable (flagged, and the
   photos after it flagged) unless no ready photo of its batch has a QR result: then the batch predates card reading
   and its photos are plain photos, in Leftovers (security review 2).
@@ -87,7 +103,9 @@ Leftovers):
 same batch twice writes nothing. `reviewTaggingDone`, `canMarkReviewed` and `notReviewableReason` are the review rules.
 `reviewActions(photo)` says what review allows for a photo, and the database enforces the same (security review 3-4,
 code review M1):
-- card photos, read or marked by a person, are never moved or confirmed again (`card_photo`);
+- card photos, read or marked by a person, are never moved or confirmed again (`card_photo`); a photo a **person**
+  marked a card photo can be unmarked by an owner or admin (`undoCard`, Seenu answer 12), a photo whose card was read
+  never (`not_marked_card`);
 - a photo of another job's card (or of a removed card) shows that card's child: it can only be marked a card photo,
   never confirmed as a normal photo or moved (`other_card`), and is never parent-visible;
 - a photo that may be a card (flag `unreadable_card` or `other_card`) is confirmed, either way, before it can be moved
@@ -108,11 +126,16 @@ code review M1):
 - **`job_tagging_reviews`**: who marked the job reviewed and when. Row-level security: members read. The row is
   deleted when photos are registered, when tagging writes Leftovers or flags, when photos are moved to Leftovers or a
   child is removed, which **reopens** the task (answer 4); moves between children don't (plan answer 5).
+- **`photos.after_purge`**, **`upload_batches.purge_steps`** and **`purge_tail`** (answer 13, above). `photo_tags`
+  allows a manual tag a flag only for an undone card photo mark (`unreadable_card`) or a removed child's photos after
+  a purged card (`after_purge`): checked again at review, never changed by tagging.
 - Functions, service role only, each acting for the person and checking owner, admin or photographer (staff and other
   studios get 42501), errors without values: `move_photos` (≤500, never card photos: `card_photo`; never unprocessed
-  or binned ones: `photo_not_ready`), `confirm_photos` (keep, or mark as card photos), `blank_card_code`,
-  `claim_blank_card`, `mark_tagging_reviewed` (`tagging_not_ready` unless clean); moves, confirmations, claims and
-  Mark reviewed refuse a closed job (`job_closed`, security review 9); and for tagging runs
+  or binned ones: `photo_not_ready`), `confirm_photos` (keep, or mark as card photos), `undo_card_photos` (owners and
+  admins only, photographers and staff get 42501; ≤500 photos a person marked card photos, else `not_marked_card`;
+  not binned; not in a closed job; takes the job's tagging lock; answer 12, below), `blank_card_code`,
+  `claim_blank_card`, `mark_tagging_reviewed` (`tagging_not_ready` unless clean); moves, confirmations, undos, claims
+  and Mark reviewed refuse a closed job (`job_closed`, security review 9); and for tagging runs
   `tagging_inputs`, `apply_batch_tags` (`tagging_stale` when the round moved on), `batches_of_photos`,
   `batches_to_tag`. Reads for the screen are SECURITY INVOKER (row-level security applies): `job_tagging_overview`,
   `tagging_photos` (also `unlinked_cards`: card photos linked to none of the job's cards), `tagging_children`,
@@ -124,11 +147,13 @@ code review M1):
   `flagged`. `create_upload_batch` gains `p_group_id`.
 - Batches uploaded before this step are marked due, so the daily sweep tags them (their photos were processed without
   cards, so they land in Leftovers).
-- pgTAP `012_tagging.test.sql` (153 assertions): resolution within the job only, rounds, manual tags kept, the claim
+- pgTAP `012_tagging.test.sql` (188 assertions): resolution within the job only, rounds, manual tags kept, the claim
   order, roles (staff can't claim), another studio refused and seeing nothing, events with ids and counts only, and
   the review fixes: binned photos kept as boundaries, purged photos' steps carried, `qr` required, card photos and
   other-job cards locked, `confirm_first`, the blank-card claim race, parent visibility while a retag is due, closed
-  jobs, and a skipped write not reopening the review.
+  jobs, a skipped write not reopening the review; undoing a card photo mark (roles, another studio, read cards, closed
+  jobs, visibility, the reopen, the event, tagging leaving it alone); and the purge edge cases (the tail, a late and a
+  moved photo marked, the flag written and the review reopened, a removed purged card's photos flagged).
 
 ## When tagging runs
 
@@ -162,11 +187,12 @@ claim can't leave photos stuck under a named card (code review M2).
 (`place=leftovers|flagged|child|classSet|blankCard|unlinkedCards`, keyset by photo id; each photo says its `qrKind` and
 the `actions` review allows), `GET /jobs/{id}/tagging/children`,
 `GET /jobs/{id}/tagging/no-photos`, `POST /jobs/{id}/photos/move`, `POST /jobs/{id}/photos/confirm`,
+`POST /jobs/{id}/tagging/undo-card` (owners and admins: photographers and staff get 403 before the body; `{undone}`),
 `POST /jobs/{id}/qr-cards/{cardId}/child` (201, the child), `POST /jobs/{id}/tagging/review` (409 `tagging.notReady`),
 and `POST /jobs/{id}/upload-batches` with an optional `{groupId}` (an empty body, however it is sent, is `{}`; the
 route never decides from `content-length`, which chunked and HTTP/2 bodies lack, code review S1). Conflicts are named
 in `fields.form`: `tagging.cardPhoto`, `tagging.photoNotReady`, `tagging.cardClaimed`, `tagging.notReady`,
-`tagging.confirmFirst`, `tagging.otherCard`. Every route checks the person,
+`tagging.confirmFirst`, `tagging.otherCard`, `tagging.notMarkedCard`. Every route checks the person,
 their role for writes (owners, admins and photographers; staff read, plan answer 10) and the region before the body;
 every tagging route runs in yul1 with `assertFunctionRegion` (and `assertStorageRegion` when it signs previews), the
 database-only `tagging/review` and `tagging/no-photos` included (security review 12). URLs hold ids only.
@@ -184,7 +210,9 @@ database-only `tagging/review` and `tagging/no-photos` included (security review
   no checkbox; a removed card says "Removed card", not "Another job's card" (code review nice 3). Photos with any
   action have a 44px checkbox; ticking opens a bar offering what every ticked photo allows: Move to…, Looks right (or
   "It's a normal photo" when one may be a card), This is a card photo, Move to bin (junk Leftovers, plan answer 4;
-  code review S3), Clear, with a note when some must be confirmed before they move. Dragging carries only photos that
+  code review S3), Not a card photo after all (owners and admins, for photos a person marked card photos; answer 12),
+  Clear, with a note when some must be confirmed before they move. Owners and admins get a checkbox on such card
+  photos too. Dragging carries only photos that
   can move. Card photos linked to no card of the job are listed under **Other card photos**. A child's Show all pages
   500 at a time with Show more, and appears only when the child has more photos than the strip shows (code review
   nice 4-5). **Move to…** is a dialog with a search box and native radios (Leftovers and class photo sets, then children by
@@ -210,7 +238,7 @@ database-only `tagging/review` and `tagging/no-photos` included (security review
 
 Ids and counts only: `photos.tagged {batch_id, round, photos, cards, leftovers, flagged, blank_cards}` per run that
 changed something (attributed to whoever started the upload), `photos.moved {photo_ids, count, target_kind,
-target_id}`, `photos.confirmed {photo_ids, count, as_card}`, `qr_card.claimed {card_id, child_id}` (besides
+target_id}`, `photos.confirmed {photo_ids, count, as_card}`, `photos.card_unmarked {photo_ids, count}`, `qr_card.claimed {card_id, child_id}` (besides
 `child.created`) and `tagging.reviewed`. Never card codes, names, filenames or access codes (pgTAP checks). Not shown in
 the activity log yet (follow-up, as in ADR 0016).
 
@@ -243,16 +271,26 @@ that the QR and its quiet zone end above it.
 - Children marked Do not photograph are left out of No photos yet.
 - Purged photos' steps are carried on the next photo by id and flag, not kept as tombstones holding the photo's order
   key: that key includes the filename, which is sometimes personal data and must go with the photo.
-- A photo marked a card photo stays one (security review 3); there is no undo yet (a question for Seenu, listed in
-  Follow-ups). Confirmed card photos stay listed: with the child they were with (that child's card), with their blank card, or
-  under Other card photos.
+- A photo marked a card photo stays one for photographers (security review 3). Confirmed card photos stay listed: with
+  the child they were with (that child's card), with their blank card, or under Other card photos.
+
+## Undoing "This is a card photo" (Seenu, answer 12)
+
+Owners and admins only; photographers and staff are refused (403 from the API before the body, 42501 from
+`undo_card_photos`). Only photos a person marked can be undone. The photo goes back to **Flagged** with
+`unreadable_card`, hidden from parents until someone confirms it again (either way), and the flag reopens Review
+tagging. It returns to where it was listed: the child whose card it was linked to, its blank card (or that card's
+child, if named since), or else Leftovers; a mark made in Leftovers or a class photo set keeps nothing to go back to,
+so those go to Leftovers. The tag stays the reviewer's (manual), so tagging never clears the flag. A photo of another
+job's card is still only ever a card photo or flagged: unmarked, it can be marked again, never confirmed as normal or
+moved. One `photos.card_unmarked` event (ids and a count).
 - A card photo next to its child keeps the child's card id when marked by hand, so it shows in the child's strip.
 
 ## Follow-ups
 
 - Measure reading time on the Lambda's arm64 (staging) and record it here.
 - Show the new events in the activity log and the job's Recent activity.
-- Undo for moves and for "This is a card photo"; voiding unused blank cards (ADR 0015).
+- Undo for moves; voiding unused blank cards (ADR 0015).
 - The server's refusal to start selling until Review tagging is done (with Start selling).
 - CI's image-worker job could also check the zip lists `lib/zxing_reader.wasm` (the build already refuses to finish
   without it); not changed here, as the workflow is outside this step.

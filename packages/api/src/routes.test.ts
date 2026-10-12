@@ -177,6 +177,8 @@ describe("QR tagging routes (ADR 0018)", () => {
     expect(paths["/jobs/{id}/tagging/photos"]?.get?.["x-access"]).toBe("signed-in");
     expect(paths["/jobs/{id}/photos/move"]?.post?.["x-access"]).toBe("uploader");
     expect(paths["/jobs/{id}/photos/confirm"]?.post?.["x-access"]).toBe("uploader");
+    // Undoing a card photo mark is for owners and admins only (Seenu, answer 12).
+    expect(paths["/jobs/{id}/tagging/undo-card"]?.post?.["x-access"]).toBe("owner-admin");
     expect(paths["/jobs/{id}/tagging/review"]?.post?.["x-access"]).toBe("uploader");
     expect(paths["/jobs/{id}/qr-cards/{cardId}/child"]?.post?.["x-access"]).toBe("roster-editor");
   });
