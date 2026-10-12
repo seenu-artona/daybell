@@ -195,6 +195,12 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await expect(
     main.getByText("Marked 1 card photo. It is hidden from parents.", { exact: true }),
   ).toBeVisible();
+  // The card photo leaves Flagged (it is listed with Liam's card): wait for the list to reload, so photo 1 is the
+  // photo after the card, not the old tile.
+  await expect(flagged.getByText("Card unreadable", { exact: true })).toHaveCount(0);
+  await expect(
+    flagged.getByRole("checkbox", { name: "Select Flagged, photo 2", exact: true }),
+  ).toHaveCount(0);
   await flagged.getByRole("checkbox", { name: "Select Flagged, photo 1", exact: true }).check();
   await main.getByRole("button", { name: "Looks right", exact: true }).click();
   await expect(main.getByText("Confirmed 1 photo.", { exact: true })).toBeVisible();

@@ -143,7 +143,7 @@ test("job page layout, menu search and studio separation", async ({
   await expect(checklist.getByRole("heading", { name: /^Set up/, level: 3 })).toContainText("Now");
   // During Set up the whole list shows: Set up, Picture day and Photos in; Selling and Fulfilment tasks aren't built.
   await expect(checklist.getByRole("heading", { level: 3 })).toHaveCount(3);
-  await expect(checklist.getByRole("listitem")).toHaveCount(5);
+  await expect(checklist.getByRole("listitem")).toHaveCount(6);
   await expect(checklist.getByRole("button", { name: "Hide tasks", exact: true })).toHaveAttribute(
     "aria-expanded",
     "true",
@@ -173,7 +173,7 @@ test("job page layout, menu search and studio separation", async ({
     checklist.getByRole("link", { name: "Next: Add the roster", exact: true }),
   ).toBeVisible();
   await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
-  await expect(checklist.getByRole("listitem")).toHaveCount(5);
+  await expect(checklist.getByRole("listitem")).toHaveCount(6);
   // The job's own activity only, not the other job's, beside the checklist.
   const recent = main.getByRole("region", { name: "Recent activity" });
   await expect(recent.getByRole("heading", { name: "Recent activity", level: 2 })).toBeVisible();
