@@ -4,11 +4,10 @@ import type {
   ChildrenResponse,
   GroupsResponse,
   Job,
-  JobDetailResponse,
   PhotoCountsResponse,
   QrCardStatusResponse,
 } from "@daybell/api";
-import { canEditRoster, localDay } from "@daybell/core";
+import { canEditRoster } from "@daybell/core";
 import { Banner } from "@daybell/ui";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -50,10 +49,10 @@ export function JobShell({ children }: { children: ReactNode }) {
       api<GroupsResponse>(`/jobs/${jobId}/groups`),
       api<QrCardStatusResponse>(`/jobs/${jobId}/qr-cards`),
       api<PhotoCountsResponse>(`/jobs/${jobId}/photos/summary`),
-      // The checklist comes from the API, from the same facts as the Jobs list (one data path; ADR 0017).
-      api<JobDetailResponse>(`/jobs/${jobId}?today=${localDay(new Date())}`),
-    ]).then(([kids, groups, cards, photos, detail]) => {
-      // The card and photo counts only feed notes, and the checklist its card: if one fails, the rest still shows.
+    ]).then(([kids, groups, cards, photos]) => {
+      // The card and photo counts only feed the checklist's notes: if they fail, the rest of the summary still shows.
+      // The checklist itself is loaded by the Overview, never here: People refreshes this summary after every roster
+      // change and must not reload the job each time (ADR 0017).
       if (kids.ok && groups.ok)
         setSummary({
           children: kids.data.total,
@@ -61,7 +60,6 @@ export function JobShell({ children }: { children: ReactNode }) {
           groups: groups.data.groups.length,
           qrCards: cards.ok ? cards.data.qrCards : null,
           photos: photos.ok ? photos.data.counts : null,
-          checklist: detail.ok ? detail.data.job.checklist : null,
         });
     });
   }, [id]);
@@ -74,11 +72,7 @@ export function JobShell({ children }: { children: ReactNode }) {
       job
         ? {
             job,
-            // An edit can move the picture day, which ticks or reopens the Picture day task.
-            setJob: (next: Job) => {
-              setJob(next);
-              refreshSummary();
-            },
+            setJob,
             summary,
             refreshSummary,
             canManage: role === "owner" || role === "admin",
