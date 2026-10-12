@@ -67,5 +67,5 @@ if (process.argv.includes("--package")) {
   );
   rmSync(join(app, "image-worker.zip"), { force: true });
   execFileSync("zip", ["-qr", join(app, "image-worker.zip"), "."], { cwd: dist, stdio: "inherit" });
-  console.log("image-worker.zip ready");
+  process.stdout.write("image-worker.zip ready\n");
 }
