@@ -59,7 +59,8 @@ function regionStorage(region: DataRegion): RegionStorage {
     made = {
       settings,
       storage: localPhotoStorage({
-        root: resolve(process.cwd(), settings.root),
+        // Local only (refused in production), so the folder is never traced into a deployment.
+        root: resolve(/*turbopackIgnore: true*/ process.cwd(), settings.root),
         secret: localSecret(),
       }),
     };

@@ -35,6 +35,7 @@ export default function JobOverviewPage() {
     pictureDay: job.pictureDay,
     children: summary?.children ?? 0,
     qrCards: summary?.qrCards ?? null,
+    readyPhotos: summary?.photos?.ready ?? null,
     today,
   };
   const current = milestone(facts);
@@ -92,7 +93,9 @@ export default function JobOverviewPage() {
                     word: groupLabel(job.type),
                   }}
                   qrCards={summary.qrCards}
+                  readyPhotos={summary.photos?.ready ?? null}
                   canEditRoster={canEditRoster}
+                  canUpload={canEditRoster && job.status !== "closed"}
                 />
               </div>
             ) : null}

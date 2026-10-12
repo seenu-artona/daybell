@@ -40,8 +40,9 @@ function chipFor(todo: Todo): IconChipTone {
 /**
  * The current milestone's to-dos (D140), beside Recent activity: one hairline row each, with a pastel chip, the
  * to-do, a short note and its state in words ("Done", "To do", "Soon"). "Roster added" links to People while there
- * is no roster, and "Print QR cards" opens People's print dialog while some child has no card (for people who can
- * edit the roster; ADR 0015). Soon items have no link or button until their step ships.
+ * is no roster, "Print QR cards" opens People's print dialog while some child has no card (for people who can
+ * edit the roster; ADR 0015), and "Upload photos" links to Photos until a photo is ready (ADR 0016). Soon items have
+ * no link or button until their step ships.
  */
 export function MilestoneTodos({
   milestone,
@@ -51,7 +52,9 @@ export function MilestoneTodos({
   createdOn,
   roster,
   qrCards,
+  readyPhotos,
   canEditRoster,
+  canUpload,
 }: {
   milestone: Milestone;
   todos: Todo[];
@@ -63,7 +66,11 @@ export function MilestoneTodos({
   roster: { children: number; groups: number; duplicates: number; word: GroupLabel };
   /** null if the counts couldn't be loaded. */
   qrCards: QrCardStatus | null;
+  /** Ready photos (ADR 0016); null if the counts couldn't be loaded. */
+  readyPhotos: number | null;
   canEditRoster: boolean;
+  /** Owners, admins and photographers, while the job isn't closed. */
+  canUpload: boolean;
 }) {
   const t = useTranslations("app.job");
   const tr = useTranslations("app.roster");
@@ -104,6 +111,10 @@ export function MilestoneTodos({
         return t("todos.notes.printQrCardsMissing", {
           count: qrCards.eligible - qrCards.withCard,
         });
+      case "uploadPhotos":
+        return todo.done
+          ? t("todos.notes.uploadPhotosDone", { count: readyPhotos ?? 0 })
+          : t("todos.notes.uploadPhotos");
       default:
         return t(`todos.notes.${todo.key}`);
     }
@@ -138,6 +149,15 @@ export function MilestoneTodos({
           {todoText}
           <Button asChild variant="secondary" shape="pill">
             <Link href={`${people}?print=qr`}>{t("todos.printCards")}</Link>
+          </Button>
+        </span>
+      );
+    if (todo.key === "uploadPhotos" && canUpload)
+      return (
+        <span className="flex items-center gap-3">
+          {todoText}
+          <Button asChild variant="secondary" shape="pill">
+            <Link href={tabHref(jobId, "photos")}>{t("todos.uploadPhotos")}</Link>
           </Button>
         </span>
       );

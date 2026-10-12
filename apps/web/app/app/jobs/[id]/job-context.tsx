@@ -1,6 +1,6 @@
 "use client";
 
-import type { Job, QrCardStatus } from "@daybell/api";
+import type { Job, PhotoCounts, QrCardStatus } from "@daybell/api";
 import { createContext, useContext } from "react";
 
 export interface JobSummary {
@@ -12,6 +12,8 @@ export interface JobSummary {
   groups: number;
   /** QR cards (ADR 0015): who may be photographed and how many of them have a card; null if it couldn't be loaded. */
   qrCards: QrCardStatus | null;
+  /** Photos (ADR 0016): the job's photo counts; null if they couldn't be loaded. */
+  photos: PhotoCounts | null;
 }
 
 export interface JobContextValue {
