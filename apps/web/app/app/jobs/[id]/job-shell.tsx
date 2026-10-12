@@ -1,6 +1,12 @@
 "use client";
 
-import type { ChildrenResponse, GroupsResponse, Job, QrCardStatusResponse } from "@daybell/api";
+import type {
+  ChildrenResponse,
+  GroupsResponse,
+  Job,
+  PhotoCountsResponse,
+  QrCardStatusResponse,
+} from "@daybell/api";
 import { canEditRoster } from "@daybell/core";
 import { Banner } from "@daybell/ui";
 import { ArrowLeft } from "lucide-react";
@@ -42,14 +48,16 @@ export function JobShell({ children }: { children: ReactNode }) {
       api<ChildrenResponse>(`/jobs/${jobId}/children?limit=1`),
       api<GroupsResponse>(`/jobs/${jobId}/groups`),
       api<QrCardStatusResponse>(`/jobs/${jobId}/qr-cards`),
-    ]).then(([kids, groups, cards]) => {
-      // The card counts only feed one to-do: if they fail, the rest of the summary still shows.
+      api<PhotoCountsResponse>(`/jobs/${jobId}/photos/summary`),
+    ]).then(([kids, groups, cards, photos]) => {
+      // The card and photo counts only feed one to-do each: if they fail, the rest of the summary still shows.
       if (kids.ok && groups.ok)
         setSummary({
           children: kids.data.total,
           duplicates: kids.data.duplicates,
           groups: groups.data.groups.length,
           qrCards: cards.ok ? cards.data.qrCards : null,
+          photos: photos.ok ? photos.data.counts : null,
         });
     });
   }, [id]);

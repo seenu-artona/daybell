@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // only the child's id logged).
 vi.mock("server-only", () => ({}));
 const {
-  assertPrintRegion,
   blankCardMaker,
   loadCardChildren,
   pdfFilename,
@@ -238,20 +237,6 @@ describe("loadCardChildren", () => {
     );
     expect(paged.queries).toHaveLength(1);
     expect(paged.queries[0]?.some(([op]) => op === "in")).toBe(false);
-  });
-});
-
-describe("assertPrintRegion (S1, D113)", () => {
-  it("builds Canadian studios' cards only in Montréal when on Vercel", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(() => assertPrintRegion("ca", { VERCEL_REGION: "iad1" })).toThrow(
-      expect.objectContaining({ code: "region_unavailable" }),
-    );
-    expect(() => assertPrintRegion("ca", { VERCEL_REGION: "yul1" })).not.toThrow();
-    // Not on Vercel (local and CI): no function region to check.
-    expect(() => assertPrintRegion("ca", {})).not.toThrow();
-    // US studios: no US function region yet (ADR 0015 follow-up).
-    expect(() => assertPrintRegion("us", { VERCEL_REGION: "yul1" })).not.toThrow();
   });
 });
 

@@ -41,9 +41,8 @@ describe("job tabs", () => {
   });
 
   it("show coming soon for the unbuilt tabs only", () => {
-    for (const tab of ["photos", "shop", "messages", "orders", "settings"])
-      expect(isSoonTab(tab)).toBe(true);
-    for (const tab of ["", "people", "import", "overview", "nope"])
+    for (const tab of ["shop", "messages", "orders", "settings"]) expect(isSoonTab(tab)).toBe(true);
+    for (const tab of ["", "people", "photos", "import", "overview", "nope"])
       expect(isSoonTab(tab)).toBe(false);
   });
 

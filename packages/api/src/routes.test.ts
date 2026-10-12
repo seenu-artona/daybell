@@ -123,4 +123,33 @@ describe("API description", () => {
     expect(paths?.get?.["x-access"]).toBe("signed-in");
     expect(doc.components.schemas).toHaveProperty("QrCardStatus");
   });
+
+  it("describes photos: uploads by owners, admins and photographers, reads by the team", () => {
+    type Op = { "x-access": string; "x-internal"?: boolean };
+    const op = (path: string, method: string) =>
+      (doc.paths[path] as Record<string, Op> | undefined)?.[method];
+    expect(op("/jobs/{id}/upload-batches", "post")?.["x-access"]).toBe("uploader");
+    expect(op("/upload-batches/{id}/files", "post")?.["x-access"]).toBe("uploader");
+    expect(op("/jobs/{id}/photos/bin", "post")?.["x-access"]).toBe("uploader");
+    expect(op("/jobs/{id}/photos", "get")?.["x-access"]).toBe("signed-in");
+    expect(op("/photos/{id}", "get")?.["x-access"]).toBe("signed-in");
+    expect(doc.components.schemas).toHaveProperty("Photo");
+    // Filenames travel in bodies only: no photo route takes one in its path or query.
+    expect(JSON.stringify(Object.keys(doc.paths))).not.toMatch(/name/i);
+  });
+
+  it("marks the image worker's and the cron's routes as internal", () => {
+    type Op = { "x-access": string; "x-internal"?: boolean };
+    for (const [path, method] of [
+      ["/internal/photo-worker/photos/{id}", "get"],
+      ["/internal/photo-worker/photos/{id}/result", "post"],
+      ["/internal/cron/photos", "get"],
+    ] as const) {
+      const route = (doc.paths[path] as Record<string, Op> | undefined)?.[method];
+      expect(route?.["x-internal"], path).toBe(true);
+    }
+    expect(
+      (doc.paths["/jobs/{id}/photos"] as Record<string, Op>).get?.["x-internal"],
+    ).toBeUndefined();
+  });
 });

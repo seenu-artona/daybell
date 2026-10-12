@@ -207,7 +207,7 @@ export function encryptCardAccessCode(
 
 /**
  * A blank card's code from its encrypted copy. Throws if the copy, key or card doesn't match. Not used yet: tagging
- * (step 4) reads it to move the code to the new child.
+ * (step 5) reads it to move the code to the new child.
  */
 export function decryptCardAccessCode(
   ciphertext: string,

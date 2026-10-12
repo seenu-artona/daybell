@@ -175,8 +175,14 @@ test("job page layout, menu search and studio separation", async ({
   await expect(todo("Roster added")).toContainText("1 child · 0 classes");
   await expect(main.getByText("Step 1 of 5 · Set up · 2 of 3 done", { exact: true })).toBeVisible();
 
-  // 6. The other tabs show coming soon inside the job's frame; an unknown tab is a 404.
-  for (const name of ["Photos", "Shop", "Messages", "Orders", "Settings"]) {
+  // 6. Photos is real since step 4 (ADR 0016); the other tabs show coming soon inside the job's frame; an unknown tab
+  // is a 404.
+  await main
+    .getByRole("navigation", { name: "Job sections" })
+    .getByRole("link", { name: "Photos", exact: true })
+    .click();
+  await expect(main.getByRole("heading", { name: "No photos yet", level: 2 })).toBeVisible();
+  for (const name of ["Shop", "Messages", "Orders", "Settings"]) {
     await main
       .getByRole("navigation", { name: "Job sections" })
       .getByRole("link", { name, exact: true })

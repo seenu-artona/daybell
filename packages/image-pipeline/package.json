@@ -1,0 +1,23 @@
+{
+  "name": "@daybell/image-pipeline",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Makes a photo's previews once, at upload: plain for the studio, watermarked for parents (D60, D100).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@daybell/core": "workspace:*",
+    "exif-reader": "2.0.3",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "vitest": "5.0.2"
+  }
+}

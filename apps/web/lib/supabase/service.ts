@@ -9,7 +9,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  * preparing QR cards (blank cards carry pre-made codes, ADR 0015) go through these database functions, which only the
  * service role can run. Call this only from route handlers, after studioScope() and assertCanEditRoster(); the
  * function checks the acting person's role again and attributes the events to them. Nothing else may use the service
- * role: it bypasses row-level security.
+ * role (photo writes and the image worker's and cron's photo work below are the only other uses): it bypasses
+ * row-level security.
  */
 export type CodeWriteRpc = "add_child" | "import_roster" | "prepare_qr_cards";
 
@@ -44,4 +45,51 @@ export function codeWriteRpc(
   args: Record<string, unknown>,
 ) {
   return serviceClient(region).rpc(fn, { p_actor: actorId, ...args });
+}
+
+/**
+ * Photo writes (ADR 0016): uploads, the bin and retries. Browsers can't write photos (the storage upload id and the
+ * status must never be chosen by a browser), so these run as the service role, like code writes: only from route
+ * handlers after studioScope() and the uploader check; each function acts for the person and checks their role again.
+ */
+export type PhotoWriteRpc =
+  | "create_upload_batch"
+  | "register_photos"
+  | "photos_uploading"
+  | "set_photo_upload_id"
+  | "mark_photo_uploaded"
+  | "cancel_photo_upload"
+  | "finish_upload_batch"
+  | "retry_photo"
+  | "bin_photos"
+  | "restore_photos";
+
+export function photoWriteRpc(
+  region: DataRegion,
+  fn: PhotoWriteRpc,
+  actorId: string,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, { p_actor: actorId, ...args });
+}
+
+/**
+ * Photo work nobody signed in does: the image worker's read and result (only from the HMAC-checked internal routes)
+ * and the daily clean-up (only from the CRON_SECRET-checked cron route).
+ */
+export type PhotoSystemRpc =
+  | "photo_for_worker"
+  | "record_photo_result"
+  | "begin_photo_purge"
+  | "delete_purged_photos"
+  | "abandoned_uploads"
+  | "delete_abandoned_uploads"
+  | "finish_idle_batches";
+
+export function photoSystemRpc(
+  region: DataRegion,
+  fn: PhotoSystemRpc,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, args);
 }

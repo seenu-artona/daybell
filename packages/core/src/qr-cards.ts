@@ -33,7 +33,7 @@ export function cardQrPayload(cardCode: string): string {
 
 /**
  * The card code a scanned QR holds, or null if it isn't a Daybell card. Not used yet: it is for the tagging app in
- * step 4, kept here so the format is defined (and tested) in one place.
+ * step 5, kept here so the format is defined (and tested) in one place.
  */
 export function parseCardQrPayload(text: string): string | null {
   const trimmed = text.trim();

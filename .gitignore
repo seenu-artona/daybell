@@ -11,3 +11,7 @@ coverage/
 .vercel
 next-env.d.ts
 *.tsbuildinfo
+
+# Photos stored by the local storage driver (STORAGE_DRIVER=local) and the image worker's Lambda zip.
+.storage/
+apps/image-worker/image-worker.zip

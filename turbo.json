@@ -8,6 +8,8 @@
         "NEXT_PUBLIC_SUPABASE_*",
         "SITE_URL",
         "SHOP_URL",
+        "STORAGE_DRIVER",
+        "VERCEL",
         "VERCEL_ENV",
         "VERCEL_URL",
         "VERCEL_BRANCH_URL",

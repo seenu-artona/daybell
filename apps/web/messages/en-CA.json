@@ -172,7 +172,11 @@
     "rosterTooLarge": "Import up to 5,000 rows at a time.",
     "searchShort": "Type at least 2 characters.",
     "blankCards": "Enter a whole number of blank cards from 0 to 100.",
-    "qrCardsGroups": "Choose at least one."
+    "qrCardsGroups": "Choose at least one.",
+    "photoName": "Each photo needs its file's name, at most 255 characters.",
+    "photoSize": "Photos must be JPEG files of at most 50 MB.",
+    "photoHash": "A photo's fingerprint is missing or wrong. Choose the photos again.",
+    "photoFiles": "Send 1 to 500 photos at a time."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -741,9 +745,11 @@
           "startSelling": "Open the shop to parents",
           "sendToLab": "Print and ship orders",
           "printQrCardsDone": "Every child who may be photographed has a card",
-          "printQrCardsMissing": "{count, plural, one {# child without a card} other {# children without a card}}"
+          "printQrCardsMissing": "{count, plural, one {# child without a card} other {# children without a card}}",
+          "uploadPhotosDone": "{count, plural, one {# photo ready} other {# photos ready}}"
         },
-        "printCards": "Print cards"
+        "printCards": "Print cards",
+        "uploadPhotos": "Upload photos"
       },
       "checklist": {
         "title": "Before you can sell",
@@ -824,6 +830,90 @@
       "nothing": "Nothing to print. Choose at least one card.",
       "printedCard": "Downloaded the QR card.",
       "doNotPhotograph": "This child is marked Do not photograph, so they get no card."
+    },
+    "photos": {
+      "heading": "{count, plural, one {# photo} other {# photos}}",
+      "subline": "{uploads, plural, one {# upload} other {# uploads}} · {processing, plural, =0 {all processed} other {# processing}} · {duplicates, plural, one {# duplicate skipped} other {# duplicates skipped}}",
+      "upload": "Upload photos",
+      "bin": "Bin ({count})",
+      "binHeading": "{count, plural, one {# photo in the bin} other {# photos in the bin}}",
+      "binNote": "Photos in the bin are deleted for good 30 days after they were moved here.",
+      "backToPhotos": "Back to photos",
+      "loading": "Loading photos…",
+      "loadFailed": "We couldn't load the photos. Please try again.",
+      "emptyTitle": "No photos yet",
+      "emptyBody": "Upload the photos from picture day: drop a whole folder, or choose photos. JPEG only, up to 50 MB each.",
+      "emptyReadOnly": "Owners, admins and photographers upload photos.",
+      "binEmpty": "The bin is empty.",
+      "closed": "This job is closed, so it takes no more photos.",
+      "showMore": "Show more",
+      "photoAlt": "Photo {n}",
+      "open": "Open photo {n}",
+      "select": "Select photo {n}",
+      "processing": "Processing",
+      "failed": "Couldn't process",
+      "selected": "{count, plural, one {# photo selected} other {# photos selected}}",
+      "moveToBin": "Move to bin",
+      "restore": "Restore",
+      "clearSelection": "Clear selection",
+      "binned": "{count, plural, =0 {No photo was moved.} one {Moved # photo to the bin.} other {Moved # photos to the bin.}}",
+      "restored": "{count, plural, =0 {No photo was restored.} one {Restored # photo.} other {Restored # photos.}}",
+      "retried": "Making this photo's previews again.",
+      "conflicts": {
+        "jobClosed": "This job is closed, so it takes no more photos.",
+        "photoLimit": "A job holds at most 50,000 photos, the bin included. Empty the bin or start another job.",
+        "batchFinished": "This upload had already finished. Drop the photos again to carry on.",
+        "notUploading": "Some photos had already finished uploading.",
+        "incomplete": "Some parts of a photo didn't arrive. Drop the photos again to send them.",
+        "photoSold": "A photo that has sold can't be moved to the bin.",
+        "notRetryable": "This photo can't be tried again: it isn't stuck, or the job already has the same photo.",
+        "photoPurging": "This photo is being deleted for good, so it can't be restored."
+      },
+      "uploader": {
+        "title": "Upload photos",
+        "drop": "Drop a folder or photos here",
+        "or": "or",
+        "chooseFolder": "Choose folder",
+        "choosePhotos": "Choose photos",
+        "rules": "JPEG only, up to 50 MB each. Photos the job already has are skipped. If your connection drops, the upload waits and carries on; if you close the page, drop the same photos again to finish. Stop cancels the photos not yet uploaded.",
+        "close": "Close",
+        "batch": "Upload {n}",
+        "checking": "Checking {checked, number} of {total, number} files",
+        "progress": "{uploaded, number} of {total, number} uploaded{failed, plural, =0 {} other { · # failed}}{duplicates, plural, =0 {} one { · # duplicate skipped} other { · # duplicates skipped}}",
+        "offline": "Waiting for your connection…",
+        "finishing": "Finishing…",
+        "done": "Done: {uploaded, plural, one {# photo added} other {# photos added}}{failed, plural, =0 {} other { · # failed}}{duplicates, plural, =0 {} one { · # duplicate skipped} other { · # duplicates skipped}}",
+        "stopped": "Stopped",
+        "skipped": "{count, plural, one {# file skipped: not a JPEG, empty or over 50 MB} other {# files skipped: not JPEGs, empty or over 50 MB}}",
+        "retry": "Retry",
+        "nothing": "No JPEG photos in what you dropped.",
+        "announce": "{uploaded, number} of {total, number} photos uploaded",
+        "stop": "Stop"
+      },
+      "panel": {
+        "file": "File",
+        "taken": "Taken",
+        "noCaptureTime": "No capture time",
+        "size": "Size",
+        "dimensions": "{width, number} × {height, number} px",
+        "status": "Status",
+        "statuses": {
+          "processing": "Processing",
+          "ready": "Ready",
+          "failed": "Couldn't process"
+        },
+        "reasons": {
+          "not_jpeg": "This file isn't a JPEG.",
+          "too_large": "This file is over 50 MB.",
+          "hash_mismatch": "The file changed while it was uploading. Drop it again.",
+          "unreadable": "This photo couldn't be read.",
+          "incomplete": "Part of the file didn't arrive. Drop it again."
+        },
+        "retry": "Try again",
+        "inBin": "In the bin",
+        "megabytes": "{size} MB",
+        "pixels": "Pixels"
+      }
     }
   },
   "invite": {
@@ -855,15 +945,19 @@
       "Studio": "Studio",
       "Jobs": "Jobs",
       "Roster": "Roster",
+      "Photos": "Photos",
       "Contacts": "Contacts",
-      "Search": "Search"
+      "Search": "Search",
+      "Internal": "Internal"
     },
     "access": {
       "public": "Anyone",
       "signed-in": "Signed in",
       "owner-admin": "Owners and admins",
       "owner": "Owners",
-      "roster-editor": "Owners, admins and photographers"
+      "roster-editor": "Owners, admins and photographers",
+      "uploader": "Owners, admins and photographers",
+      "internal": "Internal: the image worker and the daily clean-up"
     },
     "englishOnly": "Endpoint descriptions are in English, for developers.",
     "query": "Query parameters"

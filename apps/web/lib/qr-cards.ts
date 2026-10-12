@@ -1,6 +1,5 @@
 import "server-only";
 import { ApiError, fromDatabaseError, QR_CARD_CONFLICTS, type QrCardsInput } from "@daybell/api";
-import type { DataRegion } from "@daybell/config";
 import {
   type AccessCodeCryptoKeys,
   type CardPerson,
@@ -236,27 +235,4 @@ export async function printCards(options: {
 export function pdfFilename(internalNumber: string): string {
   const safe = internalNumber.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   return `qr-cards${safe ? `-${safe}` : ""}.pdf`;
-}
-
-/**
- * Cards are built only where the studio's data lives (D113). Canadian studios' cards must be built in Montréal
- * (yul1): on Vercel (VERCEL_REGION set), any other region is refused before the body is read or a code decrypted.
- * When a US database exists, US studios need the mirror rule for their region.
- */
-export const PRINT_REGION: Record<DataRegion, string | null> = { ca: "yul1", us: null };
-
-export function assertPrintRegion(
-  region: DataRegion,
-  env: Record<string, string | undefined> = process.env,
-): void {
-  const required = PRINT_REGION[region];
-  const running = env.VERCEL_REGION;
-  if (required && running && running !== required) {
-    // Region names only: never anything about the studio or its data.
-    console.error("qr_cards_wrong_region", region, running);
-    throw new ApiError(
-      "region_unavailable",
-      "Cards can't be printed from here right now. Please try again.",
-    );
-  }
 }
