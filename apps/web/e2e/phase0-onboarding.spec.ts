@@ -38,13 +38,15 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   await expect(page.getByText(`North Peak ${tag}`).filter({ visible: true }).first()).toBeVisible();
   const setup = page.getByRole("region", { name: "Set up your studio", exact: true });
-  await expect(setup.getByText("1 of 3 done", { exact: true })).toBeVisible();
+  // Account and first job only: inviting the team stays in Settings (Seenu, answer 12).
+  await expect(setup.getByText("1 of 2 done", { exact: true })).toBeVisible();
   await expect(
     setup.getByRole("listitem").filter({ hasText: "Create your account" }),
   ).toContainText("Done");
-  await expect(setup.getByRole("listitem").filter({ hasText: "Invite your team" })).toContainText(
-    "Next",
-  );
+  await expect(
+    setup.getByRole("listitem").filter({ hasText: "Create your first job" }),
+  ).toContainText("Next");
+  await expect(setup.getByText("Invite your team")).toHaveCount(0);
 
   // Every section is in the one dark menu; unbuilt ones say "Soon" (D126, D128). There is no top bar (D137).
   const menu = page.getByRole("navigation", { name: "Main" });
@@ -57,9 +59,8 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
     .click();
   await expect(page.getByRole("heading", { name: "Orders is coming soon" })).toBeVisible();
 
-  // 3. From the setup checklist, goes to Settings and invites a photographer.
-  await page.goto("/app");
-  await setup.getByRole("link", { name: /^Invite your team/ }).click();
+  // 3. Goes to Settings and invites a photographer.
+  await menu.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/settings$/);
   await expect(page.getByRole("cell", { name: /Owner/ })).toBeVisible();
   await page.getByLabel("Their email").fill(photographer);
@@ -78,15 +79,9 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByText("Waiting to join")).toBeVisible();
   inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
 
-  // Home now shows the team step done (it ticked itself), and the activity log has all three changes (event log, D96).
+  // Inviting doesn't change the setup checklist; the activity log has all three changes (event log, D96).
   await page.goto("/app");
-  await expect(setup.getByText("2 of 3 done", { exact: true })).toBeVisible();
-  await expect(setup.getByRole("listitem").filter({ hasText: "Invite your team" })).toContainText(
-    "Done",
-  );
-  await expect(
-    setup.getByRole("listitem").filter({ hasText: "Create your first job" }),
-  ).toContainText("Next");
+  await expect(setup.getByText("1 of 2 done", { exact: true })).toBeVisible();
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
 

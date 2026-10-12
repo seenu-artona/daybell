@@ -46,9 +46,9 @@ async function newJob(page: Page, tag: string, pictureDay: string): Promise<stri
   return (await created.json()).job.id as string;
 }
 
-// Yesterday in UTC: already past in every time zone, so the Picture day task has ticked itself wherever the browser
-// runs (the app counts days in the browser's own zone).
-const today = () => new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+// Two days ago in UTC: every time zone's date is within a day of UTC's, so this day has passed wherever the browser
+// runs and the Picture day task has ticked itself (the app counts days in the browser's own zone).
+const pastDay = () => new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
 
 test("Photos: a folder upload, previews, the checklist task, the bin, and nothing for another studio", async ({
   page: firstTab,
@@ -62,7 +62,7 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
     email: `photo-owner-${tag}@example.test`,
   });
   const main = page.getByRole("main");
-  const jobId = await newJob(page, tag, today());
+  const jobId = await newJob(page, tag, pastDay());
   // One child and no QR cards yet, so the checklist is still at Set up and shows every task.
   expect(
     (
