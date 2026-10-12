@@ -8,7 +8,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useState } from "react";
 import { api } from "@/lib/client-api";
 import { DROP_TARGET, PhotoStrip, useDropTarget } from "./photo-strip";
-import { usePlacePhotos, useReview } from "./review-context";
+import { usePlacePhotos, useReconcileSelection, useReview } from "./review-context";
 
 /**
  * The review's albums (Seenu, answer 5): one per class, then No class. Each opens (a button with aria-expanded) to its
@@ -183,6 +183,8 @@ function ChildRow({ child }: { child: TaggingChild }) {
     500,
   );
   const photos = all && everything.photos ? everything.photos : child.strip;
+  // The strip comes with the summary: keep ticked photos in step when it loads again (the full list does this itself).
+  useReconcileSelection(all ? null : child.strip, "strip");
   // The strip holds card photos too, which child.photos doesn't count: there is more only when the strip is full and
   // shows fewer of the child's own photos than they have (code review nice 5).
   const shownOwn = child.strip.filter((p) => p.place !== "card").length;

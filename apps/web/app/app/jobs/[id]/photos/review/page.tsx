@@ -32,6 +32,7 @@ import {
   usePlacePhotos,
   useReview,
 } from "./review-context";
+import { reconcileChecked } from "./selection";
 
 /** How often the review checks for photos still being processed or tagged. */
 const POLL_MS = 4000;
@@ -67,6 +68,9 @@ export default function ReviewPage() {
   const [moving, setMoving] = useState<string[] | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  // Sections loading again; while any is (or a request is in flight) the selection bar waits.
+  const [loads, setLoads] = useState(0);
+  const waiting = busy || loads > 0;
   const last = useRef("");
   const base = `/jobs/${encodeURIComponent(job.id)}`;
 
@@ -113,6 +117,7 @@ export default function ReviewPage() {
 
   const move = useCallback(
     async (photoIds: string[], target: MoveTarget, targetName: string) => {
+      setBusy(true);
       setStatus("");
       let moved = 0;
       for (let i = 0; i < photoIds.length; i += MAX_PHOTOS_PER_MOVE) {
@@ -123,17 +128,28 @@ export default function ReviewPage() {
         if (!res.ok) {
           setStatus(problem(res));
           await changed();
+          setBusy(false);
           return;
         }
         moved += res.data.moved;
       }
       setStatus(t("announce.moved", { count: moved, target: targetName }));
       await changed();
+      setBusy(false);
     },
     [base, changed, problem, t],
   );
 
+  const reconcile = useCallback(
+    (before: readonly TaggedPhoto[] | null, after: readonly TaggedPhoto[]) =>
+      setChecked((current) => reconcileChecked(current, before, after)),
+    [],
+  );
+  const trackLoad = useCallback((delta: 1 | -1) => setLoads((n) => Math.max(0, n + delta)), []);
+
   async function confirm(asCard: boolean) {
+    if (waiting) return;
+    setBusy(true);
     setStatus("");
     const ids = [...checked.keys()];
     let confirmed = 0;
@@ -145,16 +161,20 @@ export default function ReviewPage() {
       if (!res.ok) {
         setStatus(problem(res));
         await changed();
+        setBusy(false);
         return;
       }
       confirmed += res.data.confirmed;
     }
     setStatus(t(asCard ? "announce.cards" : "announce.confirmed", { count: confirmed }));
     await changed();
+    setBusy(false);
   }
 
   /** Undo "This is a card photo" (answer 12): back to Flagged, hidden from parents until checked again. */
   async function undoCard() {
+    if (waiting) return;
+    setBusy(true);
     setStatus("");
     const ids = [...checked.keys()];
     let undone = 0;
@@ -166,16 +186,20 @@ export default function ReviewPage() {
       if (!res.ok) {
         setStatus(problem(res));
         await changed();
+        setBusy(false);
         return;
       }
       undone += res.data.undone;
     }
     setStatus(t("announce.undoneCards", { count: undone }));
     await changed();
+    setBusy(false);
   }
 
   /** Junk goes to the bin (plan answer 4), from where it can be restored for 30 days; its upload is tagged again. */
   async function moveToBin() {
+    if (waiting) return;
+    setBusy(true);
     setStatus("");
     const ids = [...checked.keys()];
     let moved = 0;
@@ -187,21 +211,23 @@ export default function ReviewPage() {
       if (!res.ok) {
         setStatus(problem(res));
         await changed();
+        setBusy(false);
         return;
       }
       moved += res.data.moved;
     }
     setStatus(tp("binned", { count: moved }));
     await changed();
+    setBusy(false);
   }
 
   async function markReviewed() {
     setBusy(true);
     setStatus("");
     const res = await api(`${base}/tagging/review`, { method: "POST" });
-    setBusy(false);
     setStatus(res.ok ? t("announce.reviewed") : problem(res));
     await changed();
+    setBusy(false);
   }
 
   const context = useMemo<ReviewContextValue>(
@@ -220,8 +246,10 @@ export default function ReviewPage() {
         }),
       move,
       openMove: (photoIds) => setMoving(photoIds),
+      reconcile,
+      trackLoad,
     }),
-    [job.id, canEdit, canUndoCard, version, checked, move],
+    [job.id, canEdit, canUndoCard, version, checked, move, reconcile, trackLoad],
   );
 
   // What every ticked photo allows; "It's a normal photo" when one of them may be a card (Seenu, plan answer 1).
@@ -230,6 +258,9 @@ export default function ReviewPage() {
   const mayBeCard = selected.some((p) => p.flag === "unreadableCard");
   // Card photos (which only owners and admins can tick, to undo) aren't waiting to be confirmed.
   const someCannotMove = selected.some((p) => !p.actions.move && !p.actions.undoCard);
+  // aria-disabled, not disabled, while a request or a reload is in flight: focus stays on the button, screen readers
+  // announce it unavailable, and the handlers do nothing meanwhile (WCAG 2.2 AA).
+  const wait = { "aria-disabled": waiting || undefined, className: "aria-disabled:opacity-60" };
 
   const s = summary;
   const subline = s
@@ -290,27 +321,45 @@ export default function ReviewPage() {
                   <Button
                     variant="secondary"
                     shape="pill"
-                    onClick={() => setMoving([...checked.keys()])}
+                    {...wait}
+                    onClick={() => {
+                      if (!waiting) setMoving([...checked.keys()]);
+                    }}
                   >
                     {t("selection.moveTo")}
                   </Button>
                 ) : null}
                 {all("confirm") ? (
-                  <Button variant="secondary" shape="pill" onClick={() => void confirm(false)}>
+                  <Button
+                    variant="secondary"
+                    shape="pill"
+                    {...wait}
+                    onClick={() => void confirm(false)}
+                  >
                     {mayBeCard ? t("selection.normalPhoto") : t("selection.looksRight")}
                   </Button>
                 ) : null}
                 {all("markCard") ? (
-                  <Button variant="secondary" shape="pill" onClick={() => void confirm(true)}>
+                  <Button
+                    variant="secondary"
+                    shape="pill"
+                    {...wait}
+                    onClick={() => void confirm(true)}
+                  >
                     {t("selection.isCard")}
                   </Button>
                 ) : null}
                 {canUndoCard && all("undoCard") ? (
-                  <Button variant="secondary" shape="pill" onClick={() => void undoCard()}>
+                  <Button
+                    variant="secondary"
+                    shape="pill"
+                    {...wait}
+                    onClick={() => void undoCard()}
+                  >
                     {t("selection.undoCard")}
                   </Button>
                 ) : null}
-                <Button variant="secondary" shape="pill" onClick={() => void moveToBin()}>
+                <Button variant="secondary" shape="pill" {...wait} onClick={() => void moveToBin()}>
                   {t("selection.bin")}
                 </Button>
                 <Button variant="ghost" shape="pill" onClick={() => setChecked(new Map())}>

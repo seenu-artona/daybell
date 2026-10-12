@@ -2,7 +2,7 @@
 
 import type { MoveTarget, TaggedPhoto, TaggedPhotosResponse } from "@daybell/api";
 import { PHOTO_PAGE_SIZE } from "@daybell/core";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type ApiResult, api } from "@/lib/client-api";
 
 /** The drag-and-drop payload type: photo ids only, never names (D96). */
@@ -23,6 +23,10 @@ export interface ReviewContextValue {
   move: (photoIds: string[], target: MoveTarget, targetName: string) => Promise<void>;
   /** Opens Move to… for these photos (the non-drag way, WCAG 2.5.7). */
   openMove: (photoIds: string[]) => void;
+  /** A section's photos loaded again: drop ticked photos that left it, refresh the rest (reconcileChecked). */
+  reconcile: (before: readonly TaggedPhoto[] | null, after: readonly TaggedPhoto[]) => void;
+  /** A section starts (+1) or ends (-1) loading; the selection bar waits while any is loading. */
+  trackLoad: (delta: 1 | -1) => void;
 }
 
 export const ReviewContext = createContext<ReviewContextValue | null>(null);
@@ -73,6 +77,21 @@ export function droppedIds(data: string): string[] {
 }
 
 /**
+ * Keeps the ticked photos in step with a section's photos each time they load (so the selection bar never offers
+ * actions from old data). `source` names what the photos are; when it changes, nothing is dropped.
+ */
+export function useReconcileSelection(photos: readonly TaggedPhoto[] | null, source = "") {
+  const reconcile = useContext(ReviewContext)?.reconcile;
+  const last = useRef<{ photos: readonly TaggedPhoto[]; source: string } | null>(null);
+  useEffect(() => {
+    if (!photos || !reconcile) return;
+    const before = last.current?.source === source ? last.current.photos : null;
+    last.current = { photos, source };
+    reconcile(before, photos);
+  }, [photos, source, reconcile]);
+}
+
+/**
  * The photos in one place (Leftovers, flagged, a child, a class set, a blank card), a page at a time in tagging order,
  * loaded again whenever the review changes. Ids only in the URL.
  */
@@ -85,6 +104,7 @@ export function usePlacePhotos(
   const [photos, setPhotos] = useState<TaggedPhoto[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const trackLoad = useContext(ReviewContext)?.trackLoad;
   const base = query
     ? `/jobs/${encodeURIComponent(jobId)}/tagging/photos?${query}&limit=${pageSize}`
     : null;
@@ -93,8 +113,15 @@ export function usePlacePhotos(
   useEffect(() => {
     if (!base) return;
     let live = true;
+    let loading = true;
+    trackLoad?.(1);
+    const done = () => {
+      if (loading) trackLoad?.(-1);
+      loading = false;
+    };
     void api<TaggedPhotosResponse>(base).then((res) => {
       if (!live) return;
+      done();
       setFailed(!res.ok);
       if (res.ok) {
         setPhotos(res.data.photos);
@@ -103,8 +130,11 @@ export function usePlacePhotos(
     });
     return () => {
       live = false;
+      done();
     };
-  }, [base, version]);
+  }, [base, version, trackLoad]);
+
+  useReconcileSelection(photos, base ?? "");
 
   const more = useCallback(async () => {
     if (!base || !next) return;
