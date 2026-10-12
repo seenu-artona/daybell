@@ -53,26 +53,36 @@ revoke all on function app.guard_studio_onboarded(), app.on_studio_onboarded() f
 -- table filtered by p_studio_id. Another studio's id, or another studio's job ids, return no rows. Row-level security
 -- would give the same answer, but it calls app.is_member once per child, card and photo row: on a seeded studio of
 -- 300 jobs, 90,000 children and 300,000 photos, 50 jobs took 200 ms that way and 39 ms this way (ADR 0017).
+--
+-- At most 1,000 job ids per call (the Jobs list pages 100, Up next 1,000); more raises 22023, with no values in the
+-- message. A null studio or a null list returns no rows.
 create function public.job_checklist_facts(p_studio_id uuid, p_job_ids uuid[])
 returns table (job_id uuid, children int, qr_eligible int, qr_with_card int, has_ready_photo boolean,
   failed_photos int)
-language sql stable security definer
+language plpgsql stable security definer
 set search_path = ''
 as $$
+#variable_conflict use_column
+begin
+  if coalesce(cardinality(p_job_ids), 0) > 1000 then
+    raise exception 'At most 1000 jobs per call' using errcode = '22023';
+  end if;
+  return query
   with js as (
+    -- A scalar subquery, so the membership check runs once (an InitPlan), not per row.
     select j.id from public.jobs j
-    where app.is_member(p_studio_id) and j.studio_id = p_studio_id and j.id = any (p_job_ids)
+    where (select app.is_member(p_studio_id)) and j.studio_id = p_studio_id and j.id = any (p_job_ids)
   ), kids as (
     select c.job_id, count(*)::int as children,
       count(*) filter (where not c.do_not_photograph)::int as eligible,
       count(q.child_id) filter (where not c.do_not_photograph)::int as with_card
     from public.children c
     left join public.qr_cards q on q.child_id = c.id and q.studio_id = p_studio_id
-    where c.studio_id = p_studio_id and c.job_id in (select id from js)
+    where c.studio_id = p_studio_id and c.job_id in (select js.id from js)
     group by c.job_id
   ), failed as (
     select p.job_id, count(*)::int as n from public.photos p
-    where p.studio_id = p_studio_id and p.job_id in (select id from js)
+    where p.studio_id = p_studio_id and p.job_id in (select js.id from js)
       and p.status = 'failed' and p.binned_at is null
     group by p.job_id
   )
@@ -81,6 +91,7 @@ as $$
             where p.job_id = js.id and p.studio_id = p_studio_id and p.binned_at is null and p.status = 'ready'),
     coalesce(f.n, 0)
   from js left join kids k on k.job_id = js.id left join failed f on f.job_id = js.id;
+end;
 $$;
 
 -- Failed photos per job without reading every photo of the job: EXPLAIN on the seeded studio above showed a bitmap

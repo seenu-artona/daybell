@@ -3,7 +3,7 @@
 -- event that carries ids only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(26);
+select plan(33);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -69,6 +69,11 @@ select col_is_null('public', 'studios', 'onboarded_at', 'onboarded_at is nullabl
 select is((select count(*) from public.studios where onboarded_at is not null), 0::bigint, 'no studio starts onboarded');
 select ok((select proconfig @> array['search_path=""'] from pg_proc where proname = 'job_checklist_facts'),
   'job_checklist_facts (SECURITY DEFINER) runs with an empty search_path');
+select ok((select prosecdef from pg_proc where proname = 'job_checklist_facts'),
+  'job_checklist_facts is SECURITY DEFINER (it checks membership itself)');
+select ok(not exists (select 1 from pg_proc p, aclexplode(p.proacl) a
+  where p.proname = 'job_checklist_facts' and a.grantee = 0 and a.privilege_type = 'EXECUTE'),
+  'PUBLIC cannot execute job_checklist_facts');
 select ok(not has_function_privilege('anon', 'public.job_checklist_facts(uuid, uuid[])', 'execute'),
   'logged-out visitors cannot run job_checklist_facts');
 select is((select count(*) from unnest(array['app.guard_studio_onboarded()', 'app.on_studio_onboarded()']) f
@@ -100,6 +105,14 @@ select is_empty($$
   'my own job asked for under another studio returns nothing');
 select is_empty($$ select * from public.job_checklist_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '{}') $$,
   'no job ids, no rows');
+select is_empty($$ select * from public.job_checklist_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null) $$,
+  'a null list of job ids, no rows');
+select is_empty($$ select * from public.job_checklist_facts(null,
+  array['a0000000-0000-4000-8000-000000000001']::uuid[]) $$,
+  'a null studio, no rows');
+select throws_ok($$ select * from public.job_checklist_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  (select array_agg(gen_random_uuid()) from generate_series(1, 1001))) $$,
+  '22023', 'At most 1000 jobs per call', 'more than 1000 job ids are refused, with no values in the message');
 
 -- ── Checklist facts, as B's owner ─────────────────────────────────────────────────────────────────────────────────
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as signed_in;
@@ -120,19 +133,29 @@ select is_empty($$
   select * from public.job_checklist_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     array['a0000000-0000-4000-8000-000000000001']::uuid[]) $$,
   'an outsider gets no facts');
+
+-- A member removed from studio A gets nothing any more.
+reset role;
+delete from public.studio_members where user_id = '44444444-4444-4444-8444-444444444444';
+set local role authenticated;
+select pg_temp.as_user('44444444-4444-4444-8444-444444444444') as signed_in;
+select is_empty($$
+  select * from public.job_checklist_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    array['a0000000-0000-4000-8000-000000000001']::uuid[]) $$,
+  'a removed member gets no facts');
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as signed_in;
 
 -- ── onboarded_at ──────────────────────────────────────────────────────────────────────────────────────────────────
 -- B's owner tries A's studio: RLS matches no rows.
 update public.studios set onboarded_at = now() where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
--- A's photographer and staff can't update the studio either.
+-- A's photographer can't update the studio either, nor can the removed staff member.
 select pg_temp.as_user('33333333-3333-4333-8333-333333333333') as signed_in;
 update public.studios set onboarded_at = now() where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 select pg_temp.as_user('44444444-4444-4444-8444-444444444444') as signed_in;
 update public.studios set onboarded_at = now() where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 reset role;
 select is((select onboarded_at from public.studios where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), null,
-  'another studio''s owner, a photographer and staff cannot mark studio A onboarded');
+  'another studio''s owner, a photographer and a removed member cannot mark studio A onboarded');
 
 -- A's admin marks it, choosing a date in the past: the database's clock wins.
 set local role authenticated;
@@ -151,13 +174,20 @@ select is((select data from public.events where type = 'studio.onboarded'), '{}'
 select is((select actor_id from public.events where type = 'studio.onboarded'),
   '55555555-5555-4555-8555-555555555555'::uuid, 'the event records who completed it');
 
--- Once set, it stays: neither cleared nor moved, and no second event.
+-- Once set, it stays: neither cleared nor moved, and no second event. A known past value (written with triggers
+-- off, as the table's owner) makes "moved" visible: now() would hide a move to now(). Rolled back with the test.
+alter table public.studios disable trigger studios_guard_onboarded;
+update public.studios set onboarded_at = '2001-01-01T00:00:00Z' where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+alter table public.studios enable trigger studios_guard_onboarded;
 set local role authenticated;
 select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;
 update public.studios set onboarded_at = null where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+select is((select onboarded_at from public.studios where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+  '2001-01-01T00:00:00Z'::timestamptz, 'the owner cannot clear it');
 update public.studios set onboarded_at = '2030-01-01' where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-select is((select onboarded_at from public.studios where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), now(),
-  'the owner can neither clear nor move it');
+update public.studios set onboarded_at = now() where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+select is((select onboarded_at from public.studios where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+  '2001-01-01T00:00:00Z'::timestamptz, 'nor move it, to a chosen time or to now');
 select lives_ok($$ update public.studios set name = 'Studio A Photo' where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$,
   'renaming the studio still works');
 reset role;
