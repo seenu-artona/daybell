@@ -29,10 +29,11 @@ function counted(result: {
 }
 
 /**
- * The studio setup checklist (D143) for owners and admins, until it is first complete. The first time it is, the
- * server records it on the studio (Seenu, answer 5); from then on it is never shown again, even if the only job or
- * teammate goes. Returns null once it's done. Reads and the one write go through the person's own session, so
- * row-level security applies (only owners and admins may update the studio).
+ * The studio setup checklist (D143) for owners and admins, until it is first complete: account and first job (Seenu,
+ * answer 12: the team stays in Settings). The first time it is complete, the server records it on the studio (answer
+ * 5); from then on it is never shown again, even if the only job goes. Returns null once it's done. Reads and the one
+ * write go through the person's own session, so row-level security applies (only owners and admins may update the
+ * studio). This is the one GET with a write: idempotent, since the database keeps the first time (ADR 0017).
  */
 async function onboarding(
   supabase: SupabaseClient,
@@ -42,23 +43,11 @@ async function onboarding(
     await supabase.from("studios").select("onboarded_at").eq("id", studioId).maybeSingle(),
   ) as { onboarded_at: string | null } | null;
   if (!studio || studio.onboarded_at) return null;
-  const [members, invites, jobs] = await Promise.all([
-    supabase
-      .from("studio_members")
-      .select("user_id", { count: "exact", head: true })
-      .eq("studio_id", studioId),
-    supabase
-      .from("studio_invites")
-      .select("id", { count: "exact", head: true })
-      .eq("studio_id", studioId)
-      .is("accepted_at", null)
-      .gt("expires_at", new Date().toISOString()),
-    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("studio_id", studioId),
-  ]);
-  const tasks = onboardingChecklist({
-    hasTeam: counted(members) > 1 || counted(invites) > 0,
-    hasJob: counted(jobs) > 0,
-  });
+  const jobs = await supabase
+    .from("jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("studio_id", studioId);
+  const tasks = onboardingChecklist({ hasJob: counted(jobs) > 0 });
   if (!onboardingComplete(tasks)) return { tasks: tasks.map(({ key, done }) => ({ key, done })) };
   // The database stamps its own time and keeps the first one (ADR 0017); the event carries the studio id only.
   check(
@@ -87,6 +76,8 @@ async function upNext(
       .order("id")
       .limit(ACTIVE_JOBS_MAX),
   ) ?? []) as Pick<JobRow, "id" | "name" | "type" | "status" | "picture_day">[];
+  // Counts only, never ids or names (D96): a studio this busy should be looked at.
+  if (rows.length >= ACTIVE_JOBS_MAX) console.warn("up_next_truncated", rows.length);
   const facts = await loadChecklistFacts(
     supabase,
     studioId,

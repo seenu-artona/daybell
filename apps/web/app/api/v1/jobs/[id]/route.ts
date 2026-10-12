@@ -1,8 +1,15 @@
-import { ApiError, type JobInput, jobPatch } from "@daybell/api";
+import {
+  ApiError,
+  type JobDetailResponse,
+  type JobInput,
+  jobPatch,
+  studioChecklistQuery,
+} from "@daybell/api";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { check, handle, parseBody } from "@/lib/api";
+import { check, handle, parseBody, parseQuery } from "@/lib/api";
+import { checklistDetail, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
 import {
   assertClientInStudio,
   isNumberTaken,
@@ -36,11 +43,20 @@ async function loadJob(supabase: SupabaseClient, studioId: string, id: string): 
   return row;
 }
 
-/** GET /api/v1/jobs/:id */
-export const GET = handle(async (_request: Request, ctx: Ctx) => {
+/**
+ * GET /api/v1/jobs/:id — one job with its whole checklist (D143; ADR 0017), from job_checklist_facts like the Jobs
+ * list, so the Overview and the list never disagree. `?today=` as on /jobs.
+ */
+export const GET = handle(async (request: Request, ctx: Ctx) => {
   const id = await jobId(ctx);
+  const today = checklistToday(parseQuery(request, studioChecklistQuery).today);
   const { supabase, studio } = await studioScope();
-  return NextResponse.json({ job: toJob(await loadJob(supabase, studio.id, id)) });
+  const job = toJob(await loadJob(supabase, studio.id, id));
+  const facts = await loadChecklistFacts(supabase, studio.id, [job.id]);
+  const body: JobDetailResponse = {
+    job: { ...job, checklist: checklistDetail(job, facts.get(job.id), today) },
+  };
+  return NextResponse.json(body);
 });
 
 /** PATCH /api/v1/jobs/:id — owners and admins change a job's details. Status changes arrive in step 8. */

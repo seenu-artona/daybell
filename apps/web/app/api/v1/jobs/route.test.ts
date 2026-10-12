@@ -78,4 +78,19 @@ describe("GET /jobs", () => {
       p_job_ids: ["a", "b"],
     });
   });
+
+  it("refuses a ?today= more than a day away from the server's UTC date", async () => {
+    const db = fakeDatabase([], []);
+    scope.mockResolvedValue({
+      supabase: db.supabase,
+      studio: { id: STUDIO, name: "A", slug: "a", region: "ca", role: "owner" },
+      userId: "u",
+    });
+    const { GET } = await import("./route");
+    const far = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const res = await GET(new Request(`http://localhost/api/v1/jobs?today=${far}`));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.fields.today).toBe("validation.invalid");
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
 });

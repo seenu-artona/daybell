@@ -180,6 +180,21 @@ export const jobListItem = job
 export type JobListItem = z.infer<typeof jobListItem>;
 
 export const jobsResponse = z.object({ jobs: z.array(jobListItem), nextCursor });
+
+export const jobChecklist = jobChecklistSummary
+  .extend({
+    tasks: z
+      .array(z.object({ key: taskKey, milestone, done: z.boolean() }))
+      .meta({ description: "Every built task of the job type's list, in order." }),
+    onTrack: z.boolean().meta({
+      description:
+        "Past Set up, with no date close and nothing broken (or closed): the Overview collapses the list.",
+    }),
+  })
+  .meta({ id: "JobChecklist", description: "A job's whole checklist (D143)." });
+export type JobChecklist = z.infer<typeof jobChecklist>;
+export const jobDetailResponse = z.object({ job: job.extend({ checklist: jobChecklist }) });
+export type JobDetailResponse = z.infer<typeof jobDetailResponse>;
 export type JobsResponse = z.infer<typeof jobsResponse>;
 export const jobResponse = z.object({ job });
 export const nextJobNumberResponse = z.object({
@@ -540,7 +555,7 @@ export const studioChecklistResponse = z
       .nullable()
       .meta({
         description:
-          "The studio setup checklist, for owners and admins until it is first complete; then null for good.",
+          "The studio setup checklist (account, first job), for owners and admins until it is first complete; then null for good.",
       }),
     upNext: z
       .object({

@@ -71,10 +71,7 @@ const fact = (job_id: string, over: Record<string, unknown> = {}) => ({
 
 describe("GET /studio/checklist", () => {
   it("shows owners the setup checklist while it isn't complete, and writes nothing", async () => {
-    const db = fakeDatabase(
-      { studios: { onboarded_at: null } },
-      { studio_members: 1, studio_invites: 0, jobs: 1 },
-    );
+    const db = fakeDatabase({ studios: { onboarded_at: null } }, { jobs: 0 });
     scope.mockResolvedValue({ supabase: db.supabase, studio: as("owner"), userId: "u" });
     const res = await get();
     expect(res.status).toBe(200);
@@ -82,22 +79,20 @@ describe("GET /studio/checklist", () => {
       onboarding: {
         tasks: [
           { key: "account", done: true },
-          { key: "team", done: false },
-          { key: "firstJob", done: true },
+          { key: "firstJob", done: false },
         ],
       },
       upNext: null,
     });
     expect(db.calls.some((c) => c.ops.some(([op]) => op === "update"))).toBe(false);
+    // The team isn't part of onboarding (Seenu, answer 12): neither members nor invites are read.
+    expect(db.calls.map((c) => c.table)).toEqual(["studios", "jobs"]);
     for (const c of db.calls)
       expect(c.ops).toContainEqual(["eq", [c.table === "studios" ? "id" : "studio_id", STUDIO]]);
   });
 
   it("records the first completion once, then answers with Up next", async () => {
-    const db = fakeDatabase(
-      { studios: { onboarded_at: null }, jobs: [] },
-      { studio_members: 1, studio_invites: 1, jobs: 1 },
-    );
+    const db = fakeDatabase({ studios: { onboarded_at: null }, jobs: [] }, { jobs: 1 });
     scope.mockResolvedValue({ supabase: db.supabase, studio: as("admin"), userId: "u" });
     const body = await (await get()).json();
     expect(body).toEqual({ onboarding: null, upNext: { items: [], total: 0 } });
@@ -185,5 +180,28 @@ describe("GET /studio/checklist", () => {
     expect(body.upNext.items[0].reason).toEqual({ kind: "dateClose", days: 1 });
     expect((await get(`?today=${utcDay(3)}`)).status).toBe(400);
     expect((await get("?today=12-10-2026")).status).toBe(400);
+  });
+
+  it("skips jobs whose only open task is on the Overview itself (Picture day)", async () => {
+    const db = fakeDatabase({ jobs: [job("a", utcDay(30))] }, {}, [
+      fact("a", {
+        children: 1,
+        qr_eligible: 1,
+        qr_with_card: 1,
+        has_ready_photo: true,
+      }),
+    ]);
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("staff"), userId: "u" });
+    expect((await (await get()).json()).upNext).toEqual({ items: [], total: 0 });
+  });
+
+  it("warns with a count only when the active jobs are cut off", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const many = Array.from({ length: 1000 }, (_, i) => job(`j${i}`, utcDay(60)));
+    const db = fakeDatabase({ jobs: many });
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("staff"), userId: "u" });
+    await get();
+    expect(warn).toHaveBeenCalledWith("up_next_truncated", 1000);
+    warn.mockRestore();
   });
 });

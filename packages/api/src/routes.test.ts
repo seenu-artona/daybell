@@ -49,7 +49,13 @@ describe("API description", () => {
 
   it("describes the checklist on jobs and Home (D143)", () => {
     expect(doc.paths["/studio/checklist"]).toHaveProperty("get");
-    for (const name of ["JobListItem", "JobChecklistSummary", "StudioChecklist", "UpNextReason"])
+    for (const name of [
+      "JobListItem",
+      "JobChecklistSummary",
+      "JobChecklist",
+      "StudioChecklist",
+      "UpNextReason",
+    ])
       expect(doc.components.schemas).toHaveProperty(name);
     const checklist = doc.paths["/studio/checklist"]?.get as { parameters: { name: string }[] };
     expect(checklist.parameters.map((p) => p.name)).toEqual(["today"]);

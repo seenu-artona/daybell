@@ -1,8 +1,9 @@
 import "server-only";
-import { ApiError, type JobChecklistSummary } from "@daybell/api";
+import { ApiError, type JobChecklist, type JobChecklistSummary } from "@daybell/api";
 import {
   type ChecklistFacts,
   daysUntil,
+  isOnTrack,
   type JobStatus,
   type JobType,
   jobChecklist,
@@ -61,6 +62,26 @@ export function checklistSummary(
 ): JobChecklistSummary {
   const c = jobChecklist(job.type, checklistFacts(job, row, today));
   return { milestone: c.milestone, done: c.done, total: c.total, next: c.next?.key ?? null };
+}
+
+/** A job's whole checklist, for its Overview (D143): the same facts and rules as the Jobs list. */
+export function checklistDetail(
+  job: { type: JobType; status: JobStatus; pictureDay: string },
+  row: FactsRow | undefined,
+  today: string,
+): JobChecklist {
+  const facts = checklistFacts(job, row, today);
+  const c = jobChecklist(job.type, facts);
+  return {
+    milestone: c.milestone,
+    done: c.done,
+    total: c.total,
+    next: c.next?.key ?? null,
+    tasks: c.groups.flatMap((g) =>
+      g.tasks.map(({ key, milestone, done }) => ({ key, milestone, done })),
+    ),
+    onTrack: isOnTrack(c, facts),
+  };
 }
 
 const utcDay = (now: Date) => now.toISOString().slice(0, 10);

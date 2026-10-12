@@ -43,6 +43,7 @@ import {
   groupsResponse,
   inviteCreatedResponse,
   invitesResponse,
+  jobDetailResponse,
   jobResponse,
   jobsResponse,
   meResponse,
@@ -256,7 +257,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Studio",
     summary: "Home's checklist: studio setup, then Up next",
     description:
-      "Owners and admins get the studio setup checklist until it is first complete (then it is recorded and never shown again). Everyone else, and owners and admins afterwards, get Up next: at most one task per draft or selling job, the most urgent first.",
+      "Owners and admins get the studio setup checklist until it is first complete. The first time an owner or admin loads it complete, this request records the completion on the studio (studios.onboarded_at, written once by the database and never cleared; repeating the request changes nothing) and writes one studio.onboarded event; from then on it is never shown again. Everyone else, and owners and admins afterwards, get Up next: at most one task per draft or selling job, the most urgent first. Tasks on the job's Overview itself (Create the job, Picture day) are never picked.",
     access: "signed-in",
     query: studioChecklistQuery,
     success: {
@@ -306,8 +307,14 @@ export const ROUTES: RouteSpec[] = [
     group: "Jobs",
     summary: "One job",
     access: "signed-in",
-    success: { status: 200, schema: jobResponse, description: "The job." },
-    errors: ["not_signed_in", "not_found"],
+    query: studioChecklistQuery,
+    success: {
+      status: 200,
+      schema: jobDetailResponse,
+      description:
+        "The job, with its whole checklist (D143), from the same facts as the Jobs list.",
+    },
+    errors: ["invalid_input", "not_signed_in", "not_found"],
   },
   {
     method: "PATCH",
