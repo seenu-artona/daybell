@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1141.0",
+    "@aws-sdk/client-secrets-manager": "3.1141.0",
     "@daybell/core": "workspace:*",
     "@daybell/image-pipeline": "workspace:*",
     "@daybell/storage": "workspace:*"
@@ -20,7 +21,7 @@
     "@types/aws-lambda": "8.10.163",
     "@types/node": "22.20.4",
     "esbuild": "0.28.2",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "vitest": "5.0.2"
   }
 }

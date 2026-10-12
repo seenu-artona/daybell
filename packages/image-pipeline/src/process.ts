@@ -7,7 +7,7 @@ import {
   sha256OfBytes,
 } from "@daybell/core";
 import exif from "exif-reader";
-import sharp, { type Metadata } from "sharp";
+import sharp, { type Metadata, type Sharp } from "sharp";
 
 /**
  * Makes a photo's previews once, at upload (D60, D100; ADR 0016). Pure: bytes in, previews and facts out; the image
@@ -134,74 +134,113 @@ function readFacts(meta: Metadata): PhotoFacts {
 }
 
 /**
+ * Decompression bombs: a small file can claim a huge image. Originals of more than 120 million pixels are refused
+ * (a 100 MP camera is about 100 million), and progressive JPEGs, which must be decoded whole, at half that. The
+ * limits are checked from the header before any pixel is decoded, and libvips enforces them again while decoding.
+ */
+export const MAX_INPUT_PIXELS = 120_000_000;
+export const MAX_PROGRESSIVE_PIXELS = 60_000_000;
+
+const decoder = (input: Buffer, limit: number) =>
+  sharp(input, { failOn: "error", limitInputPixels: limit, sequentialRead: true });
+
+/** Fits a watermark tile inside a preview of `w` × `h` (very wide or tiny photos). */
+async function tileFor(
+  cache: Map<number, Buffer>,
+  studioName: string,
+  w: number,
+  h: number,
+  fontFile: string | undefined,
+): Promise<Buffer> {
+  const side = Math.max(w, h);
+  let tile = cache.get(side) ?? (await watermarkTile(studioName, side, fontFile));
+  cache.set(side, tile);
+  const t = await sharp(tile).metadata();
+  if ((t.width ?? 0) > w || (t.height ?? 0) > h)
+    tile = await sharp(tile).resize({ width: w, height: h, fit: "inside" }).png().toBuffer();
+  return tile;
+}
+
+/**
  * Checks an uploaded original and makes its four previews: 400 px and 1600 px plain (the studio's screens) and the
  * same sizes watermarked with the studio's name (parents, later). The original must be the file the browser hashed
- * (SHA-256), JPEG (Seenu, answer 1) and at most 50 MB. Previews are upright (EXIF orientation applied), sRGB WebP,
- * with every bit of metadata stripped: no EXIF, no GPS, no camera serial.
+ * (SHA-256), JPEG (Seenu, answer 1), at most 50 MB and at most MAX_INPUT_PIXELS. It is decoded once, to the 1600 px
+ * size; the other previews are made from that. Previews are upright (EXIF orientation applied), sRGB WebP, with every
+ * bit of metadata stripped: no EXIF, XMP, IPTC, GPS or camera serial.
  */
 export async function processOriginal(
   bytes: Uint8Array<ArrayBuffer>,
-  options: { studioName: string; expectedSha256: string; fontFile?: string },
+  options: {
+    studioName: string;
+    expectedSha256: string;
+    fontFile?: string;
+    /** Tests only: lower pixel limits. */
+    maxPixels?: number;
+    maxProgressivePixels?: number;
+  },
 ): Promise<ProcessResult> {
   if (bytes.length > MAX_PHOTO_BYTES) return { ok: false, reason: "too_large" };
   if ((await sha256OfBytes(bytes)) !== options.expectedSha256.toLowerCase())
     return { ok: false, reason: "hash_mismatch" };
   if (!isJpeg(bytes)) return { ok: false, reason: "not_jpeg" };
 
+  const maxPixels = options.maxPixels ?? MAX_INPUT_PIXELS;
+  const maxProgressive = options.maxProgressivePixels ?? MAX_PROGRESSIVE_PIXELS;
   const input = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let facts: PhotoFacts;
+  let limit: number;
   try {
-    const meta = await sharp(input, { failOn: "error" }).metadata();
+    // The header only: no pixels are decoded here, so the size is read without a limit and checked below.
+    const meta = await sharp(input, { failOn: "error", limitInputPixels: false }).metadata();
     if (meta.format !== "jpeg") return { ok: false, reason: "not_jpeg" };
+    limit = meta.isProgressive ? maxProgressive : maxPixels;
+    if ((meta.width ?? 0) * (meta.height ?? 0) > limit) return { ok: false, reason: "too_large" };
     facts = readFacts(meta);
   } catch {
     return { ok: false, reason: "unreadable" };
   }
 
   try {
-    const tiles = new Map<number, Buffer>();
-    const entries = await Promise.all(
-      (
-        Object.entries(DERIVATIVES) as [
-          DerivativeVariant,
-          (typeof DERIVATIVES)[DerivativeVariant],
-        ][]
-      ).map(async ([variant, { longestSide, watermark }]) => {
-        let image = sharp(input, { failOn: "error" })
-          .autoOrient()
-          .resize({
-            width: longestSide,
-            height: longestSide,
-            fit: "inside",
-            withoutEnlargement: true,
-          })
-          .toColourspace("srgb");
-        if (watermark) {
-          // The preview's own size: small originals aren't enlarged.
-          const scale = Math.min(1, longestSide / Math.max(facts.width, facts.height, 1));
-          const outW = Math.max(1, Math.round(facts.width * scale));
-          const outH = Math.max(1, Math.round(facts.height * scale));
-          const side = Math.max(outW, outH);
-          let tile =
-            tiles.get(side) ?? (await watermarkTile(options.studioName, side, options.fontFile));
-          tiles.set(side, tile);
-          // A tile never larger than the preview (very wide or tiny photos).
-          const t = await sharp(tile).metadata();
-          if ((t.width ?? 0) > outW || (t.height ?? 0) > outH)
-            tile = await sharp(tile)
-              .resize({ width: outW, height: outH, fit: "inside" })
-              .png()
-              .toBuffer();
-          image = image.composite([{ input: tile, tile: true, blend: "over" }]);
-        }
-        return [variant, await image.webp({ quality: WEBP_QUALITY }).toBuffer()] as const;
-      }),
-    );
-    return {
-      ok: true,
-      facts,
-      derivatives: Object.fromEntries(entries) as Record<DerivativeVariant, Buffer>,
+    const view = DERIVATIVES["view.webp"].longestSide;
+    const thumb = DERIVATIVES["thumb.webp"].longestSide;
+    // Decoded once (JPEG shrink-on-load does most of the work), upright, sRGB, to the largest preview's size.
+    const { data, info } = await decoder(input, limit)
+      .autoOrient()
+      .resize({ width: view, height: view, fit: "inside", withoutEnlargement: true })
+      .toColourspace("srgb")
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const raw = { raw: { width: info.width, height: info.height, channels: info.channels } };
+    const scale = Math.min(1, thumb / Math.max(info.width, info.height));
+    const small = {
+      width: Math.max(1, Math.round(info.width * scale)),
+      height: Math.max(1, Math.round(info.height * scale)),
     };
+    const tiles = new Map<number, Buffer>();
+    const webp = (image: Sharp) => image.webp({ quality: WEBP_QUALITY }).toBuffer();
+    const [viewBuf, thumbBuf, proofBuf, proofThumbBuf] = await Promise.all([
+      webp(sharp(data, raw)),
+      webp(sharp(data, raw).resize(small)),
+      tileFor(tiles, options.studioName, info.width, info.height, options.fontFile).then((tile) =>
+        webp(sharp(data, raw).composite([{ input: tile, tile: true, blend: "over" }])),
+      ),
+      tileFor(tiles, options.studioName, small.width, small.height, options.fontFile).then(
+        async (tile) =>
+          webp(
+            sharp(await sharp(data, raw).resize(small).raw().toBuffer(), {
+              raw: { ...small, channels: info.channels },
+            }).composite([{ input: tile, tile: true, blend: "over" }]),
+          ),
+      ),
+    ]);
+    const derivatives: Record<DerivativeVariant, Buffer> = {
+      "view.webp": viewBuf,
+      "thumb.webp": thumbBuf,
+      "proof.webp": proofBuf,
+      "proof-thumb.webp": proofThumbBuf,
+    };
+    return { ok: true, facts, derivatives };
   } catch {
     return { ok: false, reason: "unreadable" };
   }

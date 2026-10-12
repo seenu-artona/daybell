@@ -60,6 +60,8 @@ describe("processOriginal (D60, D100)", () => {
       expect(meta.format).toBe("webp");
       // Every bit of metadata is stripped: no EXIF, no GPS, no camera.
       expect(meta.exif).toBeUndefined();
+      expect(meta.xmp).toBeUndefined();
+      expect(meta.iptc).toBeUndefined();
       expect(meta.icc).toBeUndefined();
       sizes[variant] = [meta.width ?? 0, meta.height ?? 0];
     }
@@ -129,6 +131,43 @@ describe("processOriginal (D60, D100)", () => {
       ok: false,
       reason: "unreadable",
     });
+  });
+
+  it("refuses a large progressive JPEG (a decompression bomb) from its header, before decoding it", async () => {
+    // 8,000 × 7,600 = 60.8 million pixels, over the progressive limit; a plain colour, so the file stays small.
+    const bomb = asBytes(
+      await sharp({ create: { width: 8000, height: 7600, channels: 3, background: "#888" } })
+        .jpeg({ progressive: true, quality: 50 })
+        .toBuffer(),
+    );
+    expect(bomb.length).toBeLessThan(5_000_000);
+    const started = Date.now();
+    expect(await processOriginal(bomb, { studioName, expectedSha256: sha(bomb) })).toEqual({
+      ok: false,
+      reason: "too_large",
+    });
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 60_000);
+
+  it("refuses originals over the pixel limit, baseline or progressive", async () => {
+    const baseline = await jpeg(200, 100);
+    const options = { studioName, expectedSha256: sha(baseline) };
+    expect(await processOriginal(baseline, { ...options, maxPixels: 19_999 })).toEqual({
+      ok: false,
+      reason: "too_large",
+    });
+    expect((await processOriginal(baseline, { ...options, maxPixels: 20_000 })).ok).toBe(true);
+    const progressive = asBytes(
+      await sharp({ create: { width: 200, height: 100, channels: 3, background: "#468" } })
+        .jpeg({ progressive: true })
+        .toBuffer(),
+    );
+    const p = { studioName, expectedSha256: sha(progressive) };
+    expect(await processOriginal(progressive, { ...p, maxProgressivePixels: 19_999 })).toEqual({
+      ok: false,
+      reason: "too_large",
+    });
+    expect((await processOriginal(progressive, p)).ok).toBe(true);
   });
 
   it("refuses files over 50 MB before hashing them", async () => {
