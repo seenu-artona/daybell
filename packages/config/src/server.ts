@@ -29,3 +29,77 @@ export function supabaseSecretKey(
   if (!value) throw new Error(`${supabaseSecretKeyName(region)} is not set`);
   return value;
 }
+
+// ── Photo storage (Phase 1 step 4; ADR 0016) ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Where photos are stored, per data region (D53, D113):
+ * - STORAGE_DRIVER: "s3" on Vercel; "local" for development, CI and end-to-end tests (files under LOCAL_STORAGE_DIR,
+ *   default `.storage` in the web app). "local" is refused in production.
+ * - s3, Canada: PHOTO_BUCKET_CA (the bucket, in ca-central-1), PHOTO_QUEUE_URL_CA (the photo-events queue, for
+ *   retries), AWS_ROLE_ARN (the role Vercel's OIDC token assumes) and AWS_REGION, which must be ca-central-1 so
+ *   Canadian photos never leave Canada.
+ * - The US has no photo storage yet (R2 later): its settings are null, and the API refuses with region_unavailable.
+ * Errors name the variable, never a value.
+ */
+export type PhotoStorageSettings =
+  | { driver: "s3"; bucket: string; awsRegion: string; roleArn: string; queueUrl: string }
+  | { driver: "local"; root: string };
+
+/** The AWS region each data region's photos live in. */
+export const PHOTO_AWS_REGION: Record<DataRegion, string | null> = { ca: "ca-central-1", us: null };
+
+function required(env: Record<string, string | undefined>, name: string): string {
+  const value = env[name]?.trim() ?? "";
+  if (!value) throw new Error(`${name} is not set`);
+  return value;
+}
+
+export function photoStorageSettings(
+  region: DataRegion,
+  env: Record<string, string | undefined> = process.env,
+): PhotoStorageSettings | null {
+  const driver = required(env, "STORAGE_DRIVER");
+  if (driver === "local") {
+    if (env.VERCEL_ENV === "production")
+      throw new Error("STORAGE_DRIVER=local is not allowed in production");
+    return { driver, root: env.LOCAL_STORAGE_DIR?.trim() || ".storage" };
+  }
+  if (driver !== "s3") throw new Error("STORAGE_DRIVER must be s3 or local");
+  const awsRegion = PHOTO_AWS_REGION[region];
+  if (!awsRegion) return null;
+  if (required(env, "AWS_REGION") !== awsRegion)
+    throw new Error(`AWS_REGION must be ${awsRegion} for this region's photos`);
+  const suffix = region.toUpperCase();
+  return {
+    driver,
+    bucket: required(env, `PHOTO_BUCKET_${suffix}`),
+    queueUrl: required(env, `PHOTO_QUEUE_URL_${suffix}`),
+    roleArn: required(env, "AWS_ROLE_ARN"),
+    awsRegion,
+  };
+}
+
+/**
+ * PHOTO_WORKER_SECRETS: the secrets the image worker signs its requests with, comma-separated, each at least 32
+ * characters (`openssl rand -base64 32`). Two while one is being rotated: the worker's new secret is added here first,
+ * then the worker is changed, then the old one is removed.
+ */
+export function photoWorkerSecrets(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const secrets = required(env, "PHOTO_WORKER_SECRETS")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (secrets.length === 0 || secrets.length > 2 || secrets.some((s) => s.length < 32))
+    throw new Error("PHOTO_WORKER_SECRETS must be one or two secrets of at least 32 characters");
+  return secrets;
+}
+
+/** CRON_SECRET: Vercel sends it as a bearer token to cron routes. At least 32 characters. */
+export function cronSecret(env: Record<string, string | undefined> = process.env): string {
+  const value = required(env, "CRON_SECRET");
+  if (value.length < 32) throw new Error("CRON_SECRET must be at least 32 characters");
+  return value;
+}

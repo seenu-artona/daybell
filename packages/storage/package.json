@@ -1,0 +1,23 @@
+{
+  "name": "@daybell/storage",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Photo storage behind one interface: S3 (Canada now, R2 later) and a local driver for development and tests (D53, D113).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1141.0",
+    "@aws-sdk/s3-request-presigner": "3.1141.0",
+    "@daybell/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "vitest": "5.0.2"
+  }
+}
