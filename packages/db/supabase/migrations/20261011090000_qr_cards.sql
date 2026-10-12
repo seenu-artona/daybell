@@ -21,6 +21,8 @@ comment on table public.access_code_hashes is
 alter table public.access_code_hashes enable row level security;
 -- No policies and no grants: only the triggers below write it, and nothing reads it but them (and, later, lookup).
 revoke all on public.access_code_hashes from anon, authenticated;
+-- Deleting a studio removes its claims through the FK.
+create index access_code_hashes_studio_idx on public.access_code_hashes (studio_id);
 
 insert into public.access_code_hashes (access_code_hash, studio_id)
 select c.access_code_hash, c.studio_id from public.children c;
@@ -40,24 +42,39 @@ begin
 end;
 $$;
 
-create function app.on_access_code_change() returns trigger
+-- Trigger halves: a row that gains a hash claims it; a row that loses one releases it, so the code can be used again.
+-- WHEN clauses skip rows without a hash (a child's QR card) and updates that don't change it.
+create function app.on_access_code_added() returns trigger
 language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  if tg_op in ('UPDATE', 'DELETE') and old.access_code_hash is not null
-     and (tg_op = 'DELETE' or new.access_code_hash is distinct from old.access_code_hash) then
-    delete from public.access_code_hashes h where h.access_code_hash = old.access_code_hash;
-  end if;
-  if tg_op in ('INSERT', 'UPDATE') and new.access_code_hash is not null
-     and (tg_op = 'INSERT' or new.access_code_hash is distinct from old.access_code_hash) then
-    perform app.claim_access_code(new.access_code_hash, new.studio_id);
-  end if;
-  return coalesce(new, old);
+  perform app.claim_access_code(new.access_code_hash, new.studio_id);
+  return new;
 end;
 $$;
-create trigger children_access_code after insert or update of access_code_hash or delete on public.children
-for each row execute function app.on_access_code_change();
+
+create function app.on_access_code_removed() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  delete from public.access_code_hashes h where h.access_code_hash = old.access_code_hash;
+  return old;
+end;
+$$;
+
+-- Every child has a code.
+create trigger children_code_claim after insert on public.children
+for each row execute function app.on_access_code_added();
+create trigger children_code_release after delete on public.children
+for each row execute function app.on_access_code_removed();
+create trigger children_code_change_claim after update of access_code_hash on public.children
+for each row when (new.access_code_hash is distinct from old.access_code_hash)
+execute function app.on_access_code_added();
+create trigger children_code_change_release after update of access_code_hash on public.children
+for each row when (new.access_code_hash is distinct from old.access_code_hash)
+execute function app.on_access_code_removed();
 
 -- ── QR cards ──────────────────────────────────────────────────────────────────────────────────────────────────────
 -- A printed card (D32, D138). Its QR holds only card_code, a random card ID, never the access code, so a photo of a
@@ -96,8 +113,17 @@ create index qr_cards_job_idx on public.qr_cards (studio_id, job_id, child_id);
 comment on table public.qr_cards is
   'Printed QR cards. The QR holds card_code only, never the access code. Blank cards carry a pre-made access code (hash and encrypted copy), never readable by browsers.';
 
-create trigger qr_cards_access_code after insert or update of access_code_hash or delete on public.qr_cards
-for each row execute function app.on_access_code_change();
+-- Only blank cards have a code; tagging (step 4) clears it, which releases it for the child to claim.
+create trigger qr_cards_code_claim after insert on public.qr_cards
+for each row when (new.access_code_hash is not null) execute function app.on_access_code_added();
+create trigger qr_cards_code_release after delete on public.qr_cards
+for each row when (old.access_code_hash is not null) execute function app.on_access_code_removed();
+create trigger qr_cards_code_change_claim after update of access_code_hash on public.qr_cards
+for each row when (new.access_code_hash is not null and new.access_code_hash is distinct from old.access_code_hash)
+execute function app.on_access_code_added();
+create trigger qr_cards_code_change_release after update of access_code_hash on public.qr_cards
+for each row when (old.access_code_hash is not null and new.access_code_hash is distinct from old.access_code_hash)
+execute function app.on_access_code_removed();
 
 alter table public.qr_cards enable row level security;
 create policy "members read their studio's cards" on public.qr_cards
@@ -231,8 +257,9 @@ end;
 $$;
 
 -- ── The Overview's "Print QR cards" ───────────────────────────────────────────────────────────────────────────────
--- Done when every child who may be photographed has a card (Seenu, answer 2); a child added later reopens it.
--- SECURITY INVOKER: row-level security applies, so another studio's job counts nothing.
+-- The counts behind it (Seenu, answer 2; the rule itself is qrCardsDone in packages/core): done when every child who
+-- may be photographed has a card, and a child added later reopens it. SECURITY INVOKER: row-level security applies,
+-- so another studio's job counts nothing.
 create function public.qr_card_status(p_job_id uuid) returns jsonb
 language sql stable
 set search_path = ''
@@ -245,7 +272,8 @@ as $$
     'blank_cards', (select count(*) from public.qr_cards q where q.job_id = p_job_id and q.child_id is null));
 $$;
 
-revoke all on function app.claim_access_code(text, uuid), app.on_access_code_change(), app.new_card_code()
+revoke all on function app.claim_access_code(text, uuid), app.on_access_code_added(), app.on_access_code_removed(),
+  app.new_card_code()
   from public;
 revoke all on type app.blank_card_row from public;
 revoke all on function public.qr_card_status(uuid) from public, anon;

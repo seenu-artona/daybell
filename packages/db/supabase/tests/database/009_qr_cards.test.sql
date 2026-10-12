@@ -3,7 +3,7 @@
 -- pre-made access codes unique across children and cards, the Overview status, and events without personal data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(64);
+select plan(69);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -95,6 +95,13 @@ select throws_ok($$ select access_code_ciphertext from public.qr_cards $$,
   '42501', null, 'nobody signed in can read a blank card''s encrypted code');
 select throws_ok($$ select * from public.access_code_hashes $$,
   '42501', null, 'nobody signed in can read the code registry');
+select throws_ok($$ select app.claim_access_code(repeat('f', 64), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') $$,
+  '42501', null, 'nobody signed in can claim a code directly');
+select throws_ok($$ select app.new_card_code() $$, '42501', null, 'nobody signed in can make card codes');
+select is((select count(*) from unnest(array['app.claim_access_code(text, uuid)', 'app.on_access_code_added()',
+    'app.on_access_code_removed()', 'app.new_card_code()']) f
+  where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
+  0::bigint, 'no new app function is executable by browsers');
 
 -- ── As the server, for the photographer: the whole job plus two blank cards ───────────────────────────────────────
 reset role;
@@ -255,6 +262,9 @@ select lives_ok($$ delete from public.children where id = 'c0000000-0000-4000-80
 reset role;
 set local role anon;
 select throws_ok($$ select * from public.qr_cards $$, '42501', null, 'logged-out visitors cannot read cards');
+select throws_ok($$ select app.claim_access_code(repeat('f', 64), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') $$,
+  '42501', null, 'logged-out visitors cannot claim a code');
+select throws_ok($$ select app.new_card_code() $$, '42501', null, 'logged-out visitors cannot make card codes');
 select throws_ok($$ select public.qr_card_status('a0000000-0000-4000-8000-000000000001') $$,
   '42501', null, 'logged-out visitors cannot read card status');
 select throws_ok($$
