@@ -1,0 +1,28 @@
+import { photoIdsInput } from "@daybell/api";
+import { NextResponse } from "next/server";
+import { handle, parseBody } from "@/lib/api";
+import { assertCanUpload, photoResult } from "@/lib/photos";
+import { loadRosterJob, pathId } from "@/lib/roster";
+import { studioScope } from "@/lib/studio";
+import { photoWriteRpc } from "@/lib/supabase/service";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+/**
+ * POST /api/v1/jobs/:id/photos/restore — takes up to 500 of the job's photos out of the bin.
+ * One event for the lot, with the photos' ids and a count (D142 answer 1).
+ */
+export const POST = handle(async (request: Request, ctx: Ctx) => {
+  const jobId = await pathId(ctx, "Job not found.");
+  const { supabase, studio, userId } = await studioScope();
+  assertCanUpload(studio);
+  const input = await parseBody(request, photoIdsInput);
+  await loadRosterJob(supabase, studio.id, jobId);
+  const moved = photoResult<number>(
+    await photoWriteRpc(studio.region, "restore_photos", userId, {
+      p_job_id: jobId,
+      p_photo_ids: input.photoIds,
+    }),
+  );
+  return NextResponse.json({ moved });
+});

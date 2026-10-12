@@ -271,3 +271,181 @@ export const QR_CARD_CONFLICTS = {
   codesUnreadable: "qrCards.codesUnreadable",
 } as const;
 export type QrCardConflict = (typeof QR_CARD_CONFLICTS)[keyof typeof QR_CARD_CONFLICTS];
+
+// ── Photos (Phase 1 step 4, ADR 0016) ─────────────────────────────────────────────────────────────────────────────
+export const PHOTO_STATUSES = ["processing", "ready", "failed"] as const;
+export const PHOTO_FAILURE_REASONS = [
+  "not_jpeg",
+  "too_large",
+  "hash_mismatch",
+  "unreadable",
+  "incomplete",
+] as const;
+
+export const photo = z
+  .object({
+    id: z.uuid(),
+    batchId: z.uuid(),
+    status: z.enum(PHOTO_STATUSES).meta({
+      description:
+        "processing: previews are being made; ready: they are; failed: see failureReason.",
+    }),
+    originalFilename: z
+      .string()
+      .meta({ description: "As uploaded. Can be personal data: never put it in URLs or logs." }),
+    byteSize: z.number().int(),
+    width: z.number().int().nullable(),
+    height: z.number().int().nullable(),
+    capturedAt: z.string().nullable().meta({
+      description:
+        "EXIF capture time with sub-seconds, as the camera's clock wrote it (no time zone), or null.",
+    }),
+    failureReason: z.enum(PHOTO_FAILURE_REASONS).nullable(),
+    binnedAt: z.iso.datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    thumbUrl: z.url().nullable().meta({
+      description:
+        "A 400 px preview (WebP, unwatermarked, for the studio only), signed for about an hour; null until ready.",
+    }),
+  })
+  .meta({
+    id: "Photo",
+    description:
+      "A photo of a job. The original is never served; previews are made once, at upload.",
+  });
+export type Photo = z.infer<typeof photo>;
+
+export const photosResponse = z.object({
+  photos: z
+    .array(photo)
+    .meta({ description: "In tagging order: upload batch, capture time, filename." }),
+  nextCursor: z
+    .uuid()
+    .nullable()
+    .meta({ description: "Pass as ?cursor= for the next page; null on the last page." }),
+});
+export type PhotosResponse = z.infer<typeof photosResponse>;
+
+export const photoDetailResponse = z.object({
+  photo: photo.extend({
+    viewUrl: z.url().nullable().meta({
+      description:
+        "A 1600 px preview (WebP, unwatermarked, studio only), signed for about an hour.",
+    }),
+  }),
+});
+export type PhotoDetailResponse = z.infer<typeof photoDetailResponse>;
+
+export const photoCounts = z
+  .object({
+    photos: z.number().int().meta({ description: "Uploaded, not in the bin." }),
+    ready: z.number().int(),
+    processing: z.number().int(),
+    failed: z.number().int(),
+    uploading: z.number().int().meta({ description: "Registered and not finished uploading." }),
+    binned: z.number().int(),
+    uploads: z.number().int().meta({ description: "Upload batches (drops of photos)." }),
+    duplicatesSkipped: z.number().int(),
+  })
+  .meta({
+    id: "PhotoCounts",
+    description: "The Overview's Upload photos to-do is done once ready > 0.",
+  });
+export type PhotoCounts = z.infer<typeof photoCounts>;
+export const photoCountsResponse = z.object({ counts: photoCounts });
+export type PhotoCountsResponse = z.infer<typeof photoCountsResponse>;
+
+export const uploadBatchResponse = z.object({ batchId: z.uuid() });
+export type UploadBatchResponse = z.infer<typeof uploadBatchResponse>;
+
+export const UPLOAD_OUTCOMES = ["new", "resume", "duplicate", "duplicate_in_bin"] as const;
+export type UploadOutcome = (typeof UPLOAD_OUTCOMES)[number];
+
+export const registerFilesResponse = z.object({
+  results: z
+    .array(
+      z.object({
+        index: z.number().int().meta({ description: "The file's place in the request." }),
+        outcome: z.enum(UPLOAD_OUTCOMES).meta({
+          description:
+            "new: upload it. resume: the same file is still uploading; ask upload-parts which parts are missing. duplicate / duplicate_in_bin: the job has it already, skipped.",
+        }),
+        photoId: z.uuid().nullable(),
+        partSize: z.number().int(),
+        partCount: z.number().int(),
+      }),
+    )
+    .meta({ description: "One per file, in request order." }),
+});
+export type RegisterFilesResponse = z.infer<typeof registerFilesResponse>;
+
+export const partUrlsResponse = z.object({
+  urls: z.array(
+    z.object({
+      photoId: z.uuid(),
+      partNumber: z.number().int(),
+      url: z
+        .url()
+        .meta({ description: "PUT exactly this part's bytes here; any other length is refused." }),
+    }),
+  ),
+  expiresIn: z.number().int().meta({ description: "Seconds the URLs stay valid." }),
+});
+export type PartUrlsResponse = z.infer<typeof partUrlsResponse>;
+
+export const uploadPartsResponse = z.object({
+  parts: z.array(z.number().int()).meta({ description: "Part numbers already uploaded whole." }),
+  partSize: z.number().int(),
+  partCount: z.number().int(),
+});
+export type UploadPartsResponse = z.infer<typeof uploadPartsResponse>;
+
+export const uploadCompleteResponse = z.object({
+  status: z.enum(["processing", "failed"]).meta({
+    description: "failed: the stored file wasn't the declared size; drop the file again.",
+  }),
+});
+export type UploadCompleteResponse = z.infer<typeof uploadCompleteResponse>;
+
+export const photosMovedResponse = z.object({
+  moved: z
+    .number()
+    .int()
+    .meta({ description: "Photos that moved (already there ones don't count)." }),
+});
+export type PhotosMovedResponse = z.infer<typeof photosMovedResponse>;
+
+/** What the image worker learns about a photo (internal route): ids, hash, size and the studio's name for the watermark. */
+export const workerPhotoResponse = z.object({
+  photo: z.object({
+    id: z.uuid(),
+    studioId: z.uuid(),
+    jobId: z.uuid(),
+    status: z.enum(["uploading", "processing", "ready", "failed"]),
+    sha256: z.string(),
+    byteSize: z.number().int(),
+    studioName: z.string(),
+  }),
+});
+export const workerRecordedResponse = z.object({
+  recorded: z.boolean().meta({ description: "false if the photo had already been processed." }),
+});
+export const cronPhotosResponse = z.object({
+  finishedBatches: z.number().int(),
+  droppedUploads: z.number().int(),
+  purgedPhotos: z.number().int(),
+});
+
+/**
+ * Why a photo request was refused with 409, in the error's `fields.form` (stable keys; screens show their own words).
+ */
+export const PHOTO_CONFLICTS = {
+  jobClosed: "photos.jobClosed",
+  photoLimit: "photos.photoLimit",
+  batchFinished: "photos.batchFinished",
+  notUploading: "photos.notUploading",
+  incomplete: "photos.incomplete",
+  photoSold: "photos.photoSold",
+  notRetryable: "photos.notRetryable",
+} as const;
+export type PhotoConflict = (typeof PHOTO_CONFLICTS)[keyof typeof PHOTO_CONFLICTS];

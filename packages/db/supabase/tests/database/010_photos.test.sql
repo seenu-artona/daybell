@@ -3,7 +3,7 @@
 -- the bin and its purge, closed jobs, tagging order, and events with ids and counts only (never filenames).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(82);
+select plan(85);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -65,7 +65,7 @@ select throws_ok($$ select public.record_photo_result(gen_random_uuid(), '{"stat
 select is((select count(*) from unnest(array[
     'public.create_upload_batch(uuid, uuid)', 'public.register_photos(uuid, uuid, jsonb)',
     'public.set_photo_upload_id(uuid, uuid, text)', 'public.mark_photo_uploaded(uuid, uuid, text)',
-    'public.cancel_photo_upload(uuid, uuid)', 'public.finish_upload_batch(uuid, uuid, int)',
+    'public.cancel_photo_upload(uuid, uuid)', 'public.photos_uploading(uuid, uuid[])', 'public.finish_upload_batch(uuid, uuid, int)',
     'public.photo_for_worker(uuid)', 'public.record_photo_result(uuid, jsonb)', 'public.retry_photo(uuid, uuid)',
     'public.bin_photos(uuid, uuid, uuid[])', 'public.restore_photos(uuid, uuid, uuid[])',
     'public.photos_due_for_purge(int)', 'public.delete_purged_photos(uuid[])', 'public.abandoned_uploads(int)',
@@ -118,6 +118,15 @@ select is(public.set_photo_upload_id('33333333-3333-4333-8333-333333333333',
 select is(public.set_photo_upload_id('33333333-3333-4333-8333-333333333333',
   (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 'upload-2'), 'upload-1',
   'a racing second one gets the first back');
+select is((select jsonb_agg(e ->> 'upload_id') from jsonb_array_elements(public.photos_uploading(
+  '33333333-3333-4333-8333-333333333333', array[(select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')])) e),
+  '["upload-1"]'::jsonb, 'the server reads the upload id of a photo still uploading');
+select throws_ok($$ select public.photos_uploading('44444444-4444-4444-8444-444444444444',
+  array[(select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')]) $$, '42501', null,
+  'staff can''t read upload state');
+select throws_ok($$ select public.photos_uploading('22222222-2222-4222-8222-222222222222',
+  array[(select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')]) $$, '42501', null,
+  'nor can another studio''s owner');
 select lives_ok($$ select public.mark_photo_uploaded('33333333-3333-4333-8333-333333333333',
   (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) $$, 'a complete upload moves on');
 select is((select status::text || coalesce(upload_id, '-') from public.photos

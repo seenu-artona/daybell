@@ -7,7 +7,6 @@ import { DEFAULT_LOCALE } from "@/i18n/request";
 import { accessCodeCryptoKeys, newCardAccessCode } from "@/lib/access-codes";
 import { check, handle, parseBody } from "@/lib/api";
 import {
-  assertPrintRegion,
   blankCardMaker,
   CODES_UNREADABLE,
   DO_NOT_PHOTOGRAPH,
@@ -18,6 +17,7 @@ import {
   printCards,
 } from "@/lib/qr-cards";
 import { loadFonts, renderQrCardsPdf } from "@/lib/qr-cards-pdf";
+import { assertFunctionRegion } from "@/lib/region-guard";
 import { loadGroups, loadRosterJob, pathId } from "@/lib/roster";
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
 import { codeWriteRpc } from "@/lib/supabase/service";
@@ -26,7 +26,7 @@ import messages from "@/messages/en-US.json";
 // pdfkit needs Node (fs, zlib), not the edge runtime. A 5,000-child job's PDF is built in memory well within 60 s.
 export const runtime = "nodejs";
 export const maxDuration = 60;
-// Canadian studios' cards are built in Montréal (D113; ADR 0015). assertPrintRegion refuses any other region.
+// Canadian studios' cards are built in Montréal (D113; ADR 0015). assertFunctionRegion refuses any other region.
 export const preferredRegion = "yul1";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -64,7 +64,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   const { supabase, studio, userId } = await studioScope();
   assertCanEditRoster(studio);
   // Only where the studio's data may be processed, before the body is read or anything decrypted (D113).
-  assertPrintRegion(studio.region);
+  assertFunctionRegion(studio.region);
   const input = await parseBody(request, qrCardsInput);
 
   const job = check(

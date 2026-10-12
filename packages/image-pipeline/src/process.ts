@@ -38,9 +38,13 @@ export const WATERMARK_OPACITY = 0.3;
 /** Diagonal, rising to the right. */
 const WATERMARK_ANGLE = -30;
 
-export const WATERMARK_FONT_FILE = fileURLToPath(
-  new URL("../assets/PlusJakartaSans-Bold.ttf", import.meta.url),
-);
+/**
+ * The bundled watermark font, next to this package (and next to the Lambda's bundle, at ../assets). Resolved when
+ * first needed, so bundlers that move this file can pass their own path instead (`fontFile`).
+ */
+export function defaultFontFile(): string {
+  return fileURLToPath(new URL("../assets/PlusJakartaSans-Bold.ttf", import.meta.url));
+}
 
 /** Pango markup needs &, < and > escaped; quotes too inside attributes. Control characters are dropped. */
 export function escapePango(text: string): string {
@@ -63,7 +67,11 @@ const isJpeg = (bytes: Uint8Array) => bytes[0] === 0xff && bytes[1] === 0xd8 && 
  * dark shadow (readable on light and dark photos), at about 30% opacity, turned 30°, with room around it so the tiles
  * don't touch. The fonts file is bundled; no system font is used.
  */
-export async function watermarkTile(studioName: string, longestSide: number): Promise<Buffer> {
+export async function watermarkTile(
+  studioName: string,
+  longestSide: number,
+  fontFile: string = defaultFontFile(),
+): Promise<Buffer> {
   const size = Math.max(12, Math.round(longestSide * 0.04));
   const text = escapePango(studioName.trim()) || "&#8203;";
   const render = (colour: string) =>
@@ -71,7 +79,7 @@ export async function watermarkTile(studioName: string, longestSide: number): Pr
       text: {
         text: `<span foreground="${colour}">${text}</span>`,
         font: `Plus Jakarta Sans Bold ${size}`,
-        fontfile: WATERMARK_FONT_FILE,
+        fontfile: fontFile,
         rgba: true,
         dpi: 72,
         width: Math.round(longestSide * 0.45),
@@ -133,7 +141,7 @@ function readFacts(meta: Metadata): PhotoFacts {
  */
 export async function processOriginal(
   bytes: Uint8Array<ArrayBuffer>,
-  options: { studioName: string; expectedSha256: string },
+  options: { studioName: string; expectedSha256: string; fontFile?: string },
 ): Promise<ProcessResult> {
   if (bytes.length > MAX_PHOTO_BYTES) return { ok: false, reason: "too_large" };
   if ((await sha256OfBytes(bytes)) !== options.expectedSha256.toLowerCase())
@@ -174,7 +182,8 @@ export async function processOriginal(
           const outW = Math.max(1, Math.round(facts.width * scale));
           const outH = Math.max(1, Math.round(facts.height * scale));
           const side = Math.max(outW, outH);
-          let tile = tiles.get(side) ?? (await watermarkTile(options.studioName, side));
+          let tile =
+            tiles.get(side) ?? (await watermarkTile(options.studioName, side, options.fontFile));
           tiles.set(side, tile);
           // A tile never larger than the preview (very wide or tiny photos).
           const t = await sharp(tile).metadata();

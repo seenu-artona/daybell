@@ -327,6 +327,35 @@ begin
 end;
 $$;
 
+-- Photos still uploading, with their storage upload ids (which browsers never read), for the API's part URLs, resume
+-- and completion. Only photos of the actor's studio, checked for the actor's role. Up to 50 at a time.
+create function public.photos_uploading(p_actor uuid, p_photo_ids uuid[]) returns jsonb
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_studio uuid;
+  v_previous text;
+  v_result jsonb;
+begin
+  if coalesce(cardinality(p_photo_ids), 0) not between 1 and 50 then
+    raise exception 'Send 1 to 50 photos' using errcode = '22023';
+  end if;
+  select p.studio_id into v_studio from public.photos p where p.id = any (p_photo_ids) limit 1;
+  if v_studio is null then
+    return '[]'::jsonb;
+  end if;
+  v_previous := app.act_for(p_actor, v_studio);
+  select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'studio_id', p.studio_id, 'job_id', p.job_id,
+      'byte_size', p.byte_size, 'upload_id', p.upload_id) order by p.id), '[]'::jsonb)
+  into v_result
+  from public.photos p
+  where p.id = any (p_photo_ids) and p.studio_id = v_studio and p.status = 'uploading';
+  perform app.end_act_for(v_previous);
+  return v_result;
+end;
+$$;
+
 -- Remembers the storage upload's id, only if the photo has none yet; returns the one kept. Two requests racing to
 -- start the same upload agree on the first, and the API aborts the other's.
 create function public.set_photo_upload_id(p_actor uuid, p_photo_id uuid, p_upload_id text) returns text
@@ -726,6 +755,7 @@ grant execute on function public.job_photo_counts(uuid),
 revoke all on function
   public.create_upload_batch(uuid, uuid),
   public.register_photos(uuid, uuid, jsonb),
+  public.photos_uploading(uuid, uuid[]),
   public.set_photo_upload_id(uuid, uuid, text),
   public.mark_photo_uploaded(uuid, uuid, text),
   public.cancel_photo_upload(uuid, uuid),
@@ -744,6 +774,7 @@ revoke all on function
 grant execute on function
   public.create_upload_batch(uuid, uuid),
   public.register_photos(uuid, uuid, jsonb),
+  public.photos_uploading(uuid, uuid[]),
   public.set_photo_upload_id(uuid, uuid, text),
   public.mark_photo_uploaded(uuid, uuid, text),
   public.cancel_photo_upload(uuid, uuid),

@@ -4,11 +4,11 @@ import { MAX_PHOTO_BYTES, photoKey } from "@daybell/core";
 import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 import {
+  defaultFontFile,
   escapePango,
   type PhotoJobDeps,
   processOriginal,
   runPhotoJob,
-  WATERMARK_FONT_FILE,
   type WorkerPhoto,
 } from "./index";
 
@@ -146,7 +146,7 @@ describe("processOriginal (D60, D100)", () => {
   });
 
   it("draws with the bundled font, whose file is the one checked in", () => {
-    expect(createHash("sha256").update(readFileSync(WATERMARK_FONT_FILE)).digest("hex")).toBe(
+    expect(createHash("sha256").update(readFileSync(defaultFontFile())).digest("hex")).toBe(
       "5f5342ef76862b5b5365d1dff1a667629dfa484e388dd602552f647219c3870f",
     );
   });

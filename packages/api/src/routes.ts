@@ -8,6 +8,7 @@ import {
   clientInput,
   clientListQuery,
   clientPatch,
+  finishBatchInput,
   groupInput,
   groupPatch,
   inviteInput,
@@ -15,14 +16,19 @@ import {
   jobPatch,
   joinSignUpInput,
   listQuery,
+  partUrlsInput,
   passwordResetRequestInput,
   passwordUpdateInput,
+  photoIdsInput,
+  photoListQuery,
   qrCardsInput,
   rosterImportInput,
   rosterQuery,
   searchInput,
   signInInput,
   signUpInput,
+  uploadFilesInput,
+  workerResultInput,
 } from "./schemas";
 import {
   activityResponse,
@@ -31,6 +37,7 @@ import {
   childrenResponse,
   clientResponse,
   clientsResponse,
+  cronPhotosResponse,
   groupResponse,
   groupsResponse,
   inviteCreatedResponse,
@@ -39,18 +46,36 @@ import {
   jobsResponse,
   meResponse,
   nextJobNumberResponse,
+  partUrlsResponse,
+  photoCountsResponse,
+  photoDetailResponse,
+  photosMovedResponse,
+  photosResponse,
   QR_CARD_HEADERS,
   qrCardStatusResponse,
+  registerFilesResponse,
   rosterImportResponse,
   searchResponse,
   teamResponse,
+  uploadBatchResponse,
+  uploadCompleteResponse,
+  uploadPartsResponse,
+  workerPhotoResponse,
+  workerRecordedResponse,
 } from "./types";
 
 /**
  * Every /api/v1 endpoint, described once (D92). The docs page and openapi.json are generated from this list, and a test
  * fails if a route file exists that isn't listed here (or the other way round).
  */
-export type Access = "public" | "signed-in" | "owner-admin" | "owner" | "roster-editor";
+export type Access =
+  | "public"
+  | "signed-in"
+  | "owner-admin"
+  | "owner"
+  | "roster-editor"
+  | "uploader"
+  | "internal";
 
 export const ROUTE_GROUPS = [
   "Account",
@@ -58,8 +83,10 @@ export const ROUTE_GROUPS = [
   "Studio",
   "Jobs",
   "Roster",
+  "Photos",
   "Contacts",
   "Search",
+  "Internal",
 ] as const;
 
 export interface RouteSpec {
@@ -399,6 +426,165 @@ export const ROUTES: RouteSpec[] = [
     errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "conflict"],
   },
   {
+    method: "POST",
+    path: "/jobs/{id}/upload-batches",
+    group: "Photos",
+    summary: "Start an upload",
+    description:
+      "One drop of photos (a folder or a selection). Closed jobs refuse uploads (409, photos.jobClosed). Then register the files, upload their parts and finish the batch.",
+    access: "uploader",
+    success: { status: 201, schema: uploadBatchResponse, description: "The batch." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/upload-batches/{id}/files",
+    group: "Photos",
+    summary: "Register files before uploading them",
+    description:
+      "Up to 500 files: name, size (at most 50 MB) and SHA-256. JPEG only. The same file twice in a job is a duplicate and skipped, the bin included. A file still uploading from an earlier drop answers resume with its photo, so an upload continues after a reload or on another computer. A job holds at most 50,000 photos, the bin included (409, photos.photoLimit).",
+    access: "uploader",
+    body: uploadFilesInput,
+    success: { status: 200, schema: registerFilesResponse, description: "What to upload." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/upload-batches/{id}/part-urls",
+    group: "Photos",
+    summary: "Signed URLs to upload parts",
+    description:
+      "Up to 200 parts of photos still uploading. Each URL accepts exactly its part's length (8 MiB, the last part shorter) and lasts 15 minutes. Upload straight to storage, several parts at a time.",
+    access: "uploader",
+    body: partUrlsInput,
+    success: { status: 200, schema: partUrlsResponse, description: "One URL per part." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "GET",
+    path: "/photos/{id}/upload-parts",
+    group: "Photos",
+    summary: "Parts already uploaded",
+    description: "For resuming: upload only the parts missing here.",
+    access: "uploader",
+    success: { status: 200, schema: uploadPartsResponse, description: "The parts storage has." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/photos/{id}/upload-complete",
+    group: "Photos",
+    summary: "Finish a photo's upload",
+    description:
+      "The server checks storage has every part at its exact length (409, photos.incomplete, if not), assembles the file and checks its size. Its previews are then made once, in the studio's region.",
+    access: "uploader",
+    success: { status: 200, schema: uploadCompleteResponse, description: "Uploaded." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+  },
+  {
+    method: "DELETE",
+    path: "/photos/{id}/upload",
+    group: "Photos",
+    summary: "Cancel a photo's upload",
+    description: "Only while it is still uploading. Its parts are dropped and the photo is gone.",
+    access: "uploader",
+    success: { status: 204, description: "Cancelled." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/upload-batches/{id}/finish",
+    group: "Photos",
+    summary: "Finish an upload",
+    description:
+      "Records what was added, skipped and duplicated in the job's activity (counts only). Finishing twice changes nothing. Batches nobody finishes are finished after a day.",
+    access: "uploader",
+    body: finishBatchInput,
+    success: { status: 204, description: "Finished." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}/photos",
+    group: "Photos",
+    summary: "A job's photos",
+    description:
+      "In tagging order (upload batch, then capture time, then filename; photos without a capture time last in their batch), in pages (keyset pagination). Photos still uploading are not listed.",
+    access: "signed-in",
+    query: photoListQuery,
+    success: { status: 200, schema: photosResponse, description: "A page of photos." },
+    errors: ["invalid_input", "not_signed_in", "not_found", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/jobs/{id}/photos/summary",
+    group: "Photos",
+    summary: "A job's photo counts",
+    access: "signed-in",
+    success: { status: 200, schema: photoCountsResponse, description: "Counts." },
+    errors: ["not_signed_in", "not_found"],
+  },
+  {
+    method: "GET",
+    path: "/photos/{id}",
+    group: "Photos",
+    summary: "One photo",
+    access: "signed-in",
+    success: {
+      status: 200,
+      schema: photoDetailResponse,
+      description: "The photo, with a 1600 px preview.",
+    },
+    errors: ["not_signed_in", "not_found", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/photos/bin",
+    group: "Photos",
+    summary: "Move photos to the bin",
+    description:
+      "Up to 500 of the job's photos. Binned photos are deleted for good after 30 days. A photo that has sold can't be binned (409, photos.photoSold; nothing moves).",
+    access: "uploader",
+    body: photoIdsInput,
+    success: { status: 200, schema: photosMovedResponse, description: "Moved." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "conflict"],
+  },
+  {
+    method: "POST",
+    path: "/jobs/{id}/photos/restore",
+    group: "Photos",
+    summary: "Restore photos from the bin",
+    access: "uploader",
+    body: photoIdsInput,
+    success: { status: 200, schema: photosMovedResponse, description: "Restored." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+  },
+  {
+    method: "POST",
+    path: "/photos/{id}/retry",
+    group: "Photos",
+    summary: "Make a photo's previews again",
+    description:
+      "For a photo the worker couldn't read, or one still processing after 15 minutes (409, photos.notRetryable, otherwise).",
+    access: "uploader",
+    success: { status: 202, schema: uploadCompleteResponse, description: "Queued." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+  },
+  {
     method: "GET",
     path: "/clients",
     group: "Contacts",
@@ -451,6 +637,40 @@ export const ROUTES: RouteSpec[] = [
     body: searchInput,
     success: { status: 200, schema: searchResponse, description: "Up to 10 jobs and 10 clients." },
     errors: ["invalid_input", "not_signed_in", "not_found"],
+  },
+  {
+    method: "GET",
+    path: "/internal/photo-worker/photos/{id}",
+    group: "Internal",
+    summary: "The image worker reads a photo",
+    description:
+      "Not for integrations. Signed with HMAC-SHA256 (Daybell-Signature: t=…,v1=… over time, region, method, path and the body's SHA-256; Daybell-Region names the data region). Ids, hash, size and the studio's name for the watermark; never the filename.",
+    access: "internal",
+    success: { status: 200, schema: workerPhotoResponse, description: "The photo." },
+    errors: ["not_signed_in", "not_found", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/internal/photo-worker/photos/{id}/result",
+    group: "Internal",
+    summary: "The image worker reports a photo's result",
+    description:
+      "Not for integrations. Signed like the read. Idempotent: a photo already processed doesn't change.",
+    access: "internal",
+    body: workerResultInput,
+    success: { status: 200, schema: workerRecordedResponse, description: "Recorded." },
+    errors: ["invalid_input", "not_signed_in", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/internal/cron/photos",
+    group: "Internal",
+    summary: "Daily photo clean-up",
+    description:
+      "Not for integrations. Vercel Cron, with CRON_SECRET as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days and finishes batches idle for a day.",
+    access: "internal",
+    success: { status: 200, schema: cronPhotosResponse, description: "What was cleaned up." },
+    errors: ["not_signed_in", "internal"],
   },
 ];
 
@@ -560,6 +780,7 @@ export function buildOpenApi(serverUrl: string) {
       ...(r.description ? { description: r.description } : {}),
       tags: [r.group],
       "x-access": r.access,
+      ...(r.access === "internal" ? { "x-internal": true } : {}),
       ...(params.length ? { parameters: params } : {}),
       ...(r.body
         ? {

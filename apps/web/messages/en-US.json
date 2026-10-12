@@ -172,7 +172,11 @@
     "rosterTooLarge": "Import up to 5,000 rows at a time.",
     "searchShort": "Type at least 2 characters.",
     "blankCards": "Enter a whole number of blank cards from 0 to 100.",
-    "qrCardsGroups": "Choose at least one."
+    "qrCardsGroups": "Choose at least one.",
+    "photoName": "Each photo needs its file's name, at most 255 characters.",
+    "photoSize": "Photos must be JPEG files of at most 50 MB.",
+    "photoHash": "A photo's fingerprint is missing or wrong. Choose the photos again.",
+    "photoFiles": "Send 1 to 500 photos at a time."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -855,15 +859,19 @@
       "Studio": "Studio",
       "Jobs": "Jobs",
       "Roster": "Roster",
+      "Photos": "Photos",
       "Contacts": "Contacts",
-      "Search": "Search"
+      "Search": "Search",
+      "Internal": "Internal"
     },
     "access": {
       "public": "Anyone",
       "signed-in": "Signed in",
       "owner-admin": "Owners and admins",
       "owner": "Owners",
-      "roster-editor": "Owners, admins and photographers"
+      "roster-editor": "Owners, admins and photographers",
+      "uploader": "Owners, admins and photographers",
+      "internal": "Internal: the image worker and the daily clean-up"
     },
     "englishOnly": "Endpoint descriptions are in English, for developers.",
     "query": "Query parameters"

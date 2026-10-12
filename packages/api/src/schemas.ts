@@ -1,5 +1,14 @@
 import { DATA_REGIONS } from "@daybell/config";
-import { JOB_TYPES, MAX_BLANK_CARDS } from "@daybell/core";
+import {
+  JOB_TYPES,
+  MAX_BLANK_CARDS,
+  MAX_FILES_PER_REQUEST,
+  MAX_PART_URLS_PER_REQUEST,
+  MAX_PHOTO_BYTES,
+  MAX_PHOTOS_PER_BIN_REQUEST,
+  PHOTO_PAGE_SIZE,
+  planParts,
+} from "@daybell/core";
 import { z } from "zod";
 
 /**
@@ -411,6 +420,137 @@ export const qrCardsInput = z
       ctx.addIssue({ code: "custom", path: ["blankCards"], message: "validation.blankCards" });
   });
 export type QrCardsInput = z.infer<typeof qrCardsInput>;
+
+// ── Photos (Phase 1 step 4, ADR 0016) ─────────────────────────────────────────────────────────────────────────────
+// Bodies, never URLs, carry filenames (D96): a photo's name can be a child's name.
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters is the point.
+const FILE_NAME_FORBIDDEN = /[\u0000-\u001F\u007F/\\]/;
+
+export const uploadFile = z.object({
+  name: z
+    .string({ error: "validation.photoName" })
+    .min(1, { error: "validation.photoName" })
+    .max(255, { error: "validation.photoName" })
+    .refine((name) => !FILE_NAME_FORBIDDEN.test(name), { error: "validation.photoName" })
+    .meta({ description: "The file's own name, without folders. Kept only in the database." }),
+  size: z
+    .number({ error: "validation.photoSize" })
+    .int({ error: "validation.photoSize" })
+    .min(1, { error: "validation.photoSize" })
+    .max(MAX_PHOTO_BYTES, { error: "validation.photoSize" })
+    .meta({ description: "Bytes, at most 50 MB (52,428,800)." }),
+  sha256: z
+    .string({ error: "validation.photoHash" })
+    .regex(/^[0-9a-f]{64}$/, { error: "validation.photoHash" })
+    .meta({
+      description: "SHA-256 of the file, lower-case hex. Duplicates in the job are found by it.",
+    }),
+});
+export type UploadFile = z.infer<typeof uploadFile>;
+
+/** Register up to 500 files of a drop before uploading them. JPEG only; the image worker checks the bytes. */
+export const uploadFilesInput = z.object({
+  files: z
+    .array(uploadFile, { error: "validation.photoFiles" })
+    .min(1, { error: "validation.photoFiles" })
+    .max(MAX_FILES_PER_REQUEST, { error: "validation.photoFiles" }),
+});
+export type UploadFilesInput = z.infer<typeof uploadFilesInput>;
+
+/** Signed URLs for parts of photos being uploaded: at most 200 parts per request. */
+export const partUrlsInput = z.object({
+  items: z
+    .array(
+      z.object({
+        photoId: z.uuid({ error: "validation.invalid" }),
+        partNumbers: z
+          .array(z.number().int().min(1).max(planParts(MAX_PHOTO_BYTES).partCount), {
+            error: "validation.invalid",
+          })
+          .min(1, { error: "validation.invalid" })
+          .refine((n) => new Set(n).size === n.length, { error: "validation.invalid" }),
+      }),
+      { error: "validation.invalid" },
+    )
+    .min(1, { error: "validation.invalid" })
+    .max(50, { error: "validation.invalid" })
+    .refine(
+      (items) =>
+        items.reduce((sum, i) => sum + i.partNumbers.length, 0) <= MAX_PART_URLS_PER_REQUEST,
+      { error: "validation.invalid" },
+    )
+    .refine((items) => new Set(items.map((i) => i.photoId)).size === items.length, {
+      error: "validation.invalid",
+    }),
+});
+export type PartUrlsInput = z.infer<typeof partUrlsInput>;
+
+export const finishBatchInput = z.object({
+  skipped: z
+    .number({ error: "validation.invalid" })
+    .int({ error: "validation.invalid" })
+    .min(0, { error: "validation.invalid" })
+    .max(1_000_000, { error: "validation.invalid" })
+    .default(0)
+    .meta({
+      description:
+        "Files the browser left out (not JPEG, empty, over 50 MB), for the batch's counts.",
+    }),
+});
+export type FinishBatchInput = z.infer<typeof finishBatchInput>;
+
+/** Photos to move to or from the bin: 1 to 500 of one job. */
+export const photoIdsInput = z.object({
+  photoIds: z
+    .array(z.uuid({ error: "validation.invalid" }), { error: "validation.invalid" })
+    .min(1, { error: "validation.invalid" })
+    .max(MAX_PHOTOS_PER_BIN_REQUEST, { error: "validation.invalid" })
+    .refine((ids) => new Set(ids).size === ids.length, { error: "validation.invalid" }),
+});
+export type PhotoIdsInput = z.infer<typeof photoIdsInput>;
+
+export const photoListQuery = z.object({
+  cursor: z
+    .uuid({ error: "validation.cursor" })
+    .optional()
+    .meta({ description: "The nextCursor from the previous page (a photo's id)." }),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .default(PHOTO_PAGE_SIZE)
+    .meta({ description: `How many to return, 1–500 (default ${PHOTO_PAGE_SIZE}).` }),
+  bin: z
+    .enum(["true", "false"], { error: "validation.invalid" })
+    .default("false")
+    .transform((v) => v === "true")
+    .meta({ description: "true: the job's bin instead of its photos." }),
+  status: z
+    .enum(["processing", "ready", "failed"], { error: "validation.invalid" })
+    .optional()
+    .meta({ description: "Only photos with this status." }),
+});
+export type PhotoListQuery = z.infer<typeof photoListQuery>;
+
+/** The image worker's result for a photo (internal route). */
+export const workerResultInput = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ready"),
+    width: z.number().int().min(1).max(100_000),
+    height: z.number().int().min(1).max(100_000),
+    capturedAt: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/)
+      .nullable(),
+  }),
+  z.object({
+    status: z.literal("failed"),
+    failureReason: z.enum(["not_jpeg", "too_large", "hash_mismatch", "unreadable"]),
+  }),
+]);
+export type WorkerResultInput = z.infer<typeof workerResultInput>;
 
 /** Turns zod issues into `{ field: messageKey }` for forms. */
 export function fieldErrors(error: z.ZodError): Record<string, string> {

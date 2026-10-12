@@ -43,7 +43,11 @@ export const PREVIEW_CACHE_CONTROL = "private, max-age=3600";
 
 export type PhotoJobOutcome = "ready" | "failed" | "skipped";
 
-export async function runPhotoJob(photoId: string, deps: PhotoJobDeps): Promise<PhotoJobOutcome> {
+export async function runPhotoJob(
+  photoId: string,
+  deps: PhotoJobDeps,
+  options: { fontFile?: string } = {},
+): Promise<PhotoJobOutcome> {
   const photo = await deps.photo(photoId);
   if (!photo) {
     // Deleted (a cancelled upload, or purged): nothing to do.
@@ -75,6 +79,7 @@ export async function runPhotoJob(photoId: string, deps: PhotoJobDeps): Promise<
   const result = await processOriginal(await deps.get(key), {
     studioName: photo.studioName,
     expectedSha256: photo.sha256,
+    ...(options.fontFile ? { fontFile: options.fontFile } : {}),
   });
   if (!result.ok) return fail(result.reason);
   await Promise.all(
