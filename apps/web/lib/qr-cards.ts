@@ -1,5 +1,6 @@
 import "server-only";
-import { ApiError, fromDatabaseError, type QrCardsInput } from "@daybell/api";
+import { ApiError, fromDatabaseError, QR_CARD_CONFLICTS, type QrCardsInput } from "@daybell/api";
+import type { DataRegion } from "@daybell/config";
 import {
   type AccessCodeCryptoKeys,
   type CardPerson,
@@ -9,8 +10,8 @@ import {
   sortCardChildren,
 } from "@daybell/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { check } from "./api";
 import type { PrintCard } from "./qr-cards-pdf";
+import { allRows } from "./roster";
 
 /**
  * Server helpers for QR cards (Phase 1 step 3, ADR 0015). Only IDs ever go in URLs or logs: names, card codes and
@@ -56,12 +57,25 @@ const ATTEMPTS = 3;
 
 const RETRY = new Set(["access_code_collision", "card_code_collision"]);
 
+/** A 409 that says why in `fields.form`, so screens can show the right words (QR_CARD_CONFLICTS). */
+export const DO_NOT_PHOTOGRAPH = new ApiError(
+  "conflict",
+  "This child is marked Do not photograph, so they get no card.",
+  { form: QR_CARD_CONFLICTS.doNotPhotograph },
+);
+export const NOTHING_TO_PRINT = new ApiError("conflict", "There are no cards to print.", {
+  form: QR_CARD_CONFLICTS.nothingToPrint,
+});
+export const CODES_UNREADABLE = new ApiError(
+  "conflict",
+  "None of these cards can be printed: their access codes can't be read.",
+  { form: QR_CARD_CONFLICTS.codesUnreadable },
+);
+
 /** The named failures prepare_qr_cards raises (their messages carry no values), as API errors. */
 export function prepareError(error: NonNullable<DbError>): ApiError {
-  if (error.code === "P0001" && error.message === "do_not_photograph")
-    return new ApiError("conflict", "This child is marked Do not photograph, so they get no card.");
-  if (error.code === "P0001" && error.message === "nothing_to_print")
-    return new ApiError("conflict", "There are no cards to print.");
+  if (error.code === "P0001" && error.message === "do_not_photograph") return DO_NOT_PHOTOGRAPH;
+  if (error.code === "P0001" && error.message === "nothing_to_print") return NOTHING_TO_PRINT;
   if (error.code === "P0002") return new ApiError("not_found", "Job not found.");
   if (error.code === "22023")
     return new ApiError("invalid_input", "Please check what you chose to print.");
@@ -109,28 +123,43 @@ export interface CardChildRow {
   access_code_ciphertext: string;
 }
 
-const PAGE = 1000; // Supabase returns at most 1,000 rows per request by default.
+/** IDs per `in` filter: about 3.7 KB of URL, well under request-line limits. IDs only, never names (D96). */
+const ID_CHUNK = 100;
+/** Above this many cards, reading the whole job (pages of 1,000) takes fewer requests than chunks of IDs. */
+const BY_ID_MAX = 1000;
 
-/** The job's children (only what a card needs), paged by id, read as the signed-in person through RLS. */
+const CARD_CHILD_COLUMNS =
+  "id, group_id, first_name, last_name, do_not_photograph, access_code_ciphertext";
+
+/**
+ * The children a print's cards are for (only what a card needs), read as the signed-in person through RLS. A small
+ * print (one child's card, a class) reads only those children, by id; a large one reads the job in pages.
+ */
 export async function loadCardChildren(
   supabase: SupabaseClient,
   studioId: string,
   jobId: string,
+  childIds: readonly string[],
 ): Promise<CardChildRow[]> {
-  const out: CardChildRow[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const rows = (check(
-      await supabase
-        .from("children")
-        .select("id, group_id, first_name, last_name, do_not_photograph, access_code_ciphertext")
-        .eq("studio_id", studioId)
-        .eq("job_id", jobId)
-        .order("id")
-        .range(from, from + PAGE - 1),
-    ) ?? []) as CardChildRow[];
-    out.push(...rows);
-    if (rows.length < PAGE) return out;
+  const scoped = () =>
+    supabase
+      .from("children")
+      .select(CARD_CHILD_COLUMNS)
+      .eq("studio_id", studioId)
+      .eq("job_id", jobId);
+  if (childIds.length > BY_ID_MAX) {
+    const wanted = new Set(childIds);
+    const rows = await allRows<CardChildRow>((from, to) => scoped().order("id").range(from, to));
+    return rows.filter((r) => wanted.has(r.id));
   }
+  const chunks: string[][] = [];
+  for (let i = 0; i < childIds.length; i += ID_CHUNK) chunks.push(childIds.slice(i, i + ID_CHUNK));
+  const pages = await Promise.all(
+    chunks.map((ids) =>
+      allRows<CardChildRow>((from, to) => scoped().in("id", ids).order("id").range(from, to)),
+    ),
+  );
+  return pages.flat();
 }
 
 /**
@@ -151,7 +180,8 @@ export async function printCards(options: {
   const people: (CardPerson & { row: CardChildRow })[] = [];
   for (const childId of cardCodes.keys()) {
     const row = rows.get(childId);
-    if (!row) continue;
+    // Marked Do not photograph after the cards were prepared: still no card (D138).
+    if (!row || row.do_not_photograph) continue;
     const groupName = row.group_id ? groupNames.get(row.group_id) : undefined;
     people.push({
       id: row.id,
@@ -206,4 +236,27 @@ export async function printCards(options: {
 export function pdfFilename(internalNumber: string): string {
   const safe = internalNumber.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   return `qr-cards${safe ? `-${safe}` : ""}.pdf`;
+}
+
+/**
+ * Cards are built only where the studio's data lives (D113). Canadian studios' cards must be built in Montréal
+ * (yul1): on Vercel (VERCEL_REGION set), any other region is refused before the body is read or a code decrypted.
+ * When a US database exists, US studios need the mirror rule for their region.
+ */
+export const PRINT_REGION: Record<DataRegion, string | null> = { ca: "yul1", us: null };
+
+export function assertPrintRegion(
+  region: DataRegion,
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const required = PRINT_REGION[region];
+  const running = env.VERCEL_REGION;
+  if (required && running && running !== required) {
+    // Region names only: never anything about the studio or its data.
+    console.error("qr_cards_wrong_region", region, running);
+    throw new ApiError(
+      "region_unavailable",
+      "Cards can't be printed from here right now. Please try again.",
+    );
+  }
 }

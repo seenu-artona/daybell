@@ -5,9 +5,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // blank cards, named database failures become clear API errors, and an unreadable code leaves its card out (counted,
 // only the child's id logged).
 vi.mock("server-only", () => ({}));
-const { blankCardMaker, pdfFilename, prepareArgs, prepareWithRetries, printCards } = await import(
-  "./qr-cards"
-);
+const {
+  assertPrintRegion,
+  blankCardMaker,
+  loadCardChildren,
+  pdfFilename,
+  prepareArgs,
+  prepareWithRetries,
+  printCards,
+} = await import("./qr-cards");
 
 const JOB = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
 const G1 = "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f";
@@ -77,9 +83,11 @@ describe("prepareWithRetries", () => {
       prepareWithRetries(blankCardMaker(0, vi.fn()), async () => ({ data: null, error }));
     await expect(fails({ code: "P0001", message: "do_not_photograph" })).rejects.toMatchObject({
       code: "conflict",
+      fields: { form: "qrCards.doNotPhotograph" },
     });
     await expect(fails({ code: "P0001", message: "nothing_to_print" })).rejects.toMatchObject({
       code: "conflict",
+      fields: { form: "qrCards.nothingToPrint" },
     });
     await expect(fails({ code: "P0002", message: "Job not found" })).rejects.toMatchObject({
       code: "not_found",
@@ -147,6 +155,103 @@ describe("printCards", () => {
     expect(skipped).toBe(1);
     expect(errors).toHaveBeenCalledWith("access_code_unreadable", "c4");
     expect(JSON.stringify(errors.mock.calls)).not.toMatch(/Ava|Patel|broken/);
+  });
+});
+
+describe("printCards and Do not photograph", () => {
+  it("leaves out a child marked Do not photograph after the cards were prepared (S2)", async () => {
+    const keys = await importAccessCodeKeys({ hmacKey: random32(), encryptionKey: random32() });
+    const { cards, skipped } = await printCards({
+      prepared: {
+        cards: [{ child_id: "c1", card_code: "0".repeat(20) }],
+        blanks: [],
+        new_cards: 0,
+      },
+      blanks: [],
+      children: [
+        {
+          id: "c1",
+          group_id: null,
+          first_name: "Zoe",
+          last_name: "Optout",
+          do_not_photograph: true,
+          access_code_ciphertext: await encryptAccessCode("K7QM4XPA", "c1", keys.encryption),
+        },
+      ],
+      groups: [],
+      keys,
+    });
+    expect(cards).toEqual([]);
+    expect(skipped).toBe(0);
+  });
+});
+
+describe("loadCardChildren", () => {
+  /** Records each query's filters and answers with no rows. */
+  function fake() {
+    const queries: [string, unknown[]][][] = [];
+    const supabase = {
+      from: () => {
+        const ops: [string, unknown[]][] = [];
+        queries.push(ops);
+        const chain: object = new Proxy(
+          {},
+          {
+            get: (_t, prop: string) =>
+              prop === "then"
+                ? (resolve: (v: unknown) => void) => resolve({ data: [], error: null })
+                : (...args: unknown[]) => {
+                    ops.push([prop, args]);
+                    return chain;
+                  },
+          },
+        );
+        return chain;
+      },
+    };
+    return { supabase: supabase as never, queries };
+  }
+
+  it("reads one child's card by id only, never the whole job (S7)", async () => {
+    const db = fake();
+    await loadCardChildren(db.supabase, "studio-a", JOB, ["c1"]);
+    expect(db.queries).toHaveLength(1);
+    expect(db.queries[0]).toContainEqual(["in", ["id", ["c1"]]]);
+    expect(db.queries[0]).toContainEqual(["eq", ["studio_id", "studio-a"]]);
+  });
+
+  it("reads ids in chunks of 100, and a big print by pages of the job", async () => {
+    const ids = Array.from({ length: 250 }, (_, i) => `c${i}`);
+    const chunked = fake();
+    await loadCardChildren(chunked.supabase, "studio-a", JOB, ids);
+    expect(
+      chunked.queries.map(
+        (q) => (q.find(([op]) => op === "in")?.[1][1] as string[] | undefined)?.length,
+      ),
+    ).toEqual([100, 100, 50]);
+    const paged = fake();
+    await loadCardChildren(
+      paged.supabase,
+      "studio-a",
+      JOB,
+      Array.from({ length: 1001 }, (_, i) => `c${i}`),
+    );
+    expect(paged.queries).toHaveLength(1);
+    expect(paged.queries[0]?.some(([op]) => op === "in")).toBe(false);
+  });
+});
+
+describe("assertPrintRegion (S1, D113)", () => {
+  it("builds Canadian studios' cards only in Montréal when on Vercel", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() => assertPrintRegion("ca", { VERCEL_REGION: "iad1" })).toThrow(
+      expect.objectContaining({ code: "region_unavailable" }),
+    );
+    expect(() => assertPrintRegion("ca", { VERCEL_REGION: "yul1" })).not.toThrow();
+    // Not on Vercel (local and CI): no function region to check.
+    expect(() => assertPrintRegion("ca", {})).not.toThrow();
+    // US studios: no US function region yet (ADR 0015 follow-up).
+    expect(() => assertPrintRegion("us", { VERCEL_REGION: "yul1" })).not.toThrow();
   });
 });
 

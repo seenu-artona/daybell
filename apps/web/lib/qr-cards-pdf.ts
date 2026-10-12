@@ -32,6 +32,8 @@ export interface PrintCard {
 
 /** The words on every card, already translated (D96). */
 export interface CardTexts {
+  /** The PDF's title (metadata). Never a name. */
+  title: string;
   studioName: string;
   /** "Class: {name}" in the job's group word (Seenu, answer 7). */
   groupLine: (name: string) => string;
@@ -48,18 +50,27 @@ const FONT_DIR = join(process.cwd(), "assets", "fonts");
 const REGULAR_PATH = join(FONT_DIR, "PlusJakartaSans-Regular.ttf");
 const BOLD_PATH = join(FONT_DIR, "PlusJakartaSans-Bold.ttf");
 
-let fonts: { regular: Buffer; bold: Buffer; hasGlyph: (cp: number) => boolean } | null = null;
+let fonts: { bold: Buffer; hasGlyph: (cp: number) => boolean } | null = null;
 
-/** Read once per process. Both weights cover the same characters. */
-function loadFonts() {
+/**
+ * The fonts, read once per process (both weights cover the same characters). The route calls this before it makes
+ * any card, so a missing font fails the print before blank cards are made.
+ */
+export function loadFonts() {
   if (!fonts) {
-    const regular = readFileSync(REGULAR_PATH);
-    const bold = readFileSync(BOLD_PATH);
-    const face = openFont(regular);
-    fonts = { regular, bold, hasGlyph: (cp) => face.hasGlyphForCodePoint(cp) };
+    const face = openFont(readFileSync(REGULAR_PATH));
+    fonts = { bold: readFileSync(BOLD_PATH), hasGlyph: (cp) => face.hasGlyphForCodePoint(cp) };
   }
   return fonts;
 }
+
+/**
+ * Font names in the document. The regular weight is the document's starting font, opened from its path; using the
+ * same path as its name reuses it rather than embedding it twice.
+ */
+const REGULAR = REGULAR_PATH;
+const BOLD = "bold";
+type FontName = typeof REGULAR | typeof BOLD;
 
 /** A design token's colour (D112): never a raw value in code. */
 function color(name: "ink" | "muted" | "line-strong"): string {
@@ -74,7 +85,7 @@ export async function renderQrCardsPdf(
   texts: CardTexts,
   options: { compress?: boolean } = {},
 ): Promise<{ pdf: Buffer; replacedCards: number }> {
-  const { regular, bold, hasGlyph } = loadFonts();
+  const { bold, hasGlyph } = loadFonts();
   const doc = new PDFDocument({
     size: "LETTER",
     margin: 0,
@@ -82,10 +93,9 @@ export async function renderQrCardsPdf(
     compress: options.compress ?? true,
     // Starts in the embedded font, so no standard PDF font is ever loaded. No names in the metadata (D96).
     font: REGULAR_PATH,
-    info: { Title: "QR cards", Creator: "Daybell", Producer: "Daybell" },
+    info: { Title: texts.title, Creator: "Daybell", Producer: "Daybell" },
   });
-  doc.registerFont("regular", regular);
-  doc.registerFont("bold", bold);
+  doc.registerFont(BOLD, bold);
   const chunks: Buffer[] = [];
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -94,7 +104,7 @@ export async function renderQrCardsPdf(
   });
 
   const measure =
-    (font: "regular" | "bold"): MeasureText =>
+    (font: FontName): MeasureText =>
     (text, size) =>
       doc.font(font).fontSize(size).widthOfString(text);
 
@@ -126,27 +136,15 @@ function cutLines(doc: PDFKit.PDFDocument) {
   doc.undash().restore();
 }
 
-/** Vertical positions inside a card, from its top. Fixed, so every card's QR sits in the same place. */
-const AT = {
-  studio: 24,
-  name: 50,
-  nameBlock: 56,
-  group: 114,
-  qr: 138,
-  codeLabel: 292,
-  code: 305,
-  instructions: 344,
-} as const;
-
 function drawCard(
   doc: PDFKit.PDFDocument,
   origin: { x: number; y: number },
   card: PrintCard,
   texts: CardTexts,
   clean: (text: string) => string,
-  measure: (font: "regular" | "bold") => MeasureText,
+  measure: (font: FontName) => MeasureText,
 ) {
-  const { card: size, padding, qrSize } = CARD_LAYOUT;
+  const { card: size, padding, qrSymbol, at: AT } = CARD_LAYOUT;
   const width = size.width - 2 * padding;
   const x = origin.x + padding;
   const top = origin.y;
@@ -157,10 +155,10 @@ function drawCard(
     clean(texts.studioName),
     width,
     { max: CARD_LAYOUT.studio.size, min: 8 },
-    measure("bold"),
+    measure(BOLD),
   );
   doc
-    .font("bold")
+    .font(BOLD)
     .fontSize(studio.size)
     .fillColor(muted)
     .text(studio.text, x, top + AT.studio, { lineBreak: false });
@@ -170,11 +168,11 @@ function drawCard(
       clean(card.child.firstName),
       clean(card.child.lastName),
       width,
-      measure("bold"),
+      measure(BOLD),
     );
-    const lineHeight = name.size * 1.25;
+    const lineHeight = name.size * CARD_LAYOUT.name.lineHeight;
     let y = top + AT.name + (AT.nameBlock - lineHeight * name.lines.length) / 2;
-    doc.font("bold").fontSize(name.size).fillColor(ink);
+    doc.font(BOLD).fontSize(name.size).fillColor(ink);
     for (const line of name.lines) {
       doc.text(line, x, y, { lineBreak: false });
       y += lineHeight;
@@ -184,10 +182,10 @@ function drawCard(
         clean(texts.groupLine(card.child.group)),
         width,
         { max: CARD_LAYOUT.group.size, min: 9 },
-        measure("regular"),
+        measure(REGULAR),
       );
       doc
-        .font("regular")
+        .font(REGULAR)
         .fontSize(group.size)
         .fillColor(ink)
         .text(group.text, x, top + AT.group, { lineBreak: false });
@@ -199,21 +197,21 @@ function drawCard(
     writeOnLine(doc, x, top + AT.group, width, clean(texts.groupLabel));
   }
 
-  drawQr(doc, card.qrPayload, origin.x + (size.width - qrSize) / 2, top + AT.qr, qrSize, ink);
+  drawQr(doc, card.qrPayload, origin.x + (size.width - qrSymbol) / 2, top + AT.qr, qrSymbol, ink);
 
   centered(doc, clean(texts.accessCodeLabel), origin.x, top + AT.codeLabel, size.width, {
-    font: "regular",
+    font: REGULAR,
     size: CARD_LAYOUT.codeLabel.size,
     color: muted,
   });
   centered(doc, card.accessCode, origin.x, top + AT.code, size.width, {
-    font: "bold",
+    font: BOLD,
     size: CARD_LAYOUT.code.size,
     color: ink,
     spacing: 1.5,
   });
   doc
-    .font("regular")
+    .font(REGULAR)
     .fontSize(CARD_LAYOUT.instructions.size)
     .fillColor(ink)
     .text(clean(texts.instructions), x, top + AT.instructions, {
@@ -227,11 +225,7 @@ function drawCard(
 /** "Name ______": a label and a line to write on, for blank cards and children without a class. */
 function writeOnLine(doc: PDFKit.PDFDocument, x: number, y: number, width: number, label: string) {
   const size = CARD_LAYOUT.group.size;
-  doc
-    .font("regular")
-    .fontSize(size)
-    .fillColor(color("ink"))
-    .text(label, x, y, { lineBreak: false });
+  doc.font(REGULAR).fontSize(size).fillColor(color("ink")).text(label, x, y, { lineBreak: false });
   const start = x + doc.widthOfString(label) + 6;
   const baseline = y + size * 1.05;
   doc
@@ -250,7 +244,7 @@ function centered(
   left: number,
   y: number,
   width: number,
-  style: { font: "regular" | "bold"; size: number; color: string; spacing?: number },
+  style: { font: FontName; size: number; color: string; spacing?: number },
 ) {
   doc.font(style.font).fontSize(style.size).fillColor(style.color);
   const spacing = style.spacing ?? 0;
@@ -261,7 +255,10 @@ function centered(
   });
 }
 
-/** The QR as filled squares, with the quiet zone the standard asks for. Runs of dark modules are joined per row. */
+/**
+ * The QR as filled squares: the symbol is `size` wide at (x, y); the quiet zone the standard asks for lies around it
+ * and is left blank (the layout keeps text out of it). Runs of dark modules are joined per row.
+ */
 function drawQr(
   doc: PDFKit.PDFDocument,
   payload: string,
@@ -271,8 +268,7 @@ function drawQr(
   fill: string,
 ) {
   const { modules } = QRCode.create(payload, { errorCorrectionLevel: "M" });
-  const quiet = CARD_LAYOUT.qrQuietModules;
-  const unit = size / (modules.size + 2 * quiet);
+  const unit = size / modules.size;
   doc.save();
   for (let row = 0; row < modules.size; row++) {
     let col = 0;
@@ -283,7 +279,7 @@ function drawQr(
       }
       const start = col;
       while (col < modules.size && modules.get(row, col)) col++;
-      doc.rect(x + (quiet + start) * unit, y + (quiet + row) * unit, (col - start) * unit, unit);
+      doc.rect(x + start * unit, y + row * unit, (col - start) * unit, unit);
     }
   }
   doc.fillColor(fill).fill();

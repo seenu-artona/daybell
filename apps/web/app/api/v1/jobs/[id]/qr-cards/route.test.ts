@@ -55,6 +55,8 @@ const JOB_ROW = { id: JOB, type: "sports", internal_number: "JOB00042" };
 afterEach(() => {
   scope.mockReset();
   rpc.mockReset();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("POST /jobs/:id/qr-cards", () => {
@@ -66,6 +68,7 @@ describe("POST /jobs/:id/qr-cards", () => {
     scope.mockResolvedValue({ supabase, studio: OWNER, userId: "u" });
     const res = await print({ childId: CHILD });
     expect(res.status).toBe(409);
+    expect((await res.json()).error.fields).toEqual({ form: "qrCards.doNotPhotograph" });
     expect(rpc).not.toHaveBeenCalled();
   });
 
@@ -76,6 +79,73 @@ describe("POST /jobs/:id/qr-cards", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error.fields).toEqual({ groupIds: "validation.group" });
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Canadian studio's print outside Montréal, before reading the body (S1, D113)", async () => {
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    scope.mockResolvedValue({
+      supabase: fakeDatabase({ jobs: JOB_ROW }),
+      studio: OWNER,
+      userId: "u",
+    });
+    const res = await (await import("./route")).POST(
+      new Request(`http://localhost/api/v1/jobs/${JOB}/qr-cards`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{ not json",
+      }),
+      ctx,
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("region_unavailable");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("builds in Montréal (preferredRegion yul1)", async () => {
+    expect((await import("./route")).preferredRegion).toBe("yul1");
+  });
+
+  it("says when every card's code is unreadable, with how many, after no card was printed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const supabase = fakeDatabase({
+      jobs: JOB_ROW,
+      job_groups: [],
+      children: [
+        {
+          id: CHILD,
+          group_id: null,
+          first_name: "Maya",
+          last_name: "Johnson",
+          do_not_photograph: false,
+          access_code_ciphertext: "v1.broken",
+        },
+      ],
+    });
+    scope.mockResolvedValue({ supabase, studio: OWNER, userId: "u" });
+    rpc.mockResolvedValue({
+      data: { cards: [{ child_id: CHILD, card_code: "0".repeat(20) }], blanks: [], new_cards: 0 },
+      error: null,
+    });
+    const res = await print({});
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.fields).toEqual({ form: "qrCards.codesUnreadable" });
+    expect(res.headers.get("daybell-cards-skipped")).toBe("1");
+  });
+
+  it("fails on a bad SHOP_URL before making any card or recording a print (S3)", async () => {
+    vi.stubEnv("SHOP_URL", "not a url");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    scope.mockResolvedValue({
+      supabase: fakeDatabase({ jobs: JOB_ROW, job_groups: [] }),
+      studio: OWNER,
+      userId: "u",
+    });
+    const res = await print({ blankCards: 5 });
+    expect(res.status).toBe(500);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledWith("shop_url_invalid");
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("not a url");
   });
 
   it("refuses more than 100 blank cards", async () => {

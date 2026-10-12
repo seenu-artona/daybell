@@ -7,22 +7,27 @@ import { DEFAULT_LOCALE } from "@/i18n/request";
 import { accessCodeCryptoKeys, newCardAccessCode } from "@/lib/access-codes";
 import { check, handle, parseBody } from "@/lib/api";
 import {
+  assertPrintRegion,
   blankCardMaker,
+  CODES_UNREADABLE,
+  DO_NOT_PHOTOGRAPH,
   loadCardChildren,
   pdfFilename,
   prepareArgs,
   prepareWithRetries,
   printCards,
 } from "@/lib/qr-cards";
-import { renderQrCardsPdf } from "@/lib/qr-cards-pdf";
+import { loadFonts, renderQrCardsPdf } from "@/lib/qr-cards-pdf";
 import { loadGroups, loadRosterJob, pathId } from "@/lib/roster";
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
 import { codeWriteRpc } from "@/lib/supabase/service";
 import messages from "@/messages/en-US.json";
 
-// pdfkit needs Node (fs, zlib), not the edge runtime. The PDF for a 5,000-child job is built in memory well within this.
+// pdfkit needs Node (fs, zlib), not the edge runtime. A 5,000-child job's PDF is built in memory well within 60 s.
 export const runtime = "nodejs";
 export const maxDuration = 60;
+// Canadian studios' cards are built in Montréal (D113; ADR 0015). assertPrintRegion refuses any other region.
+export const preferredRegion = "yul1";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -58,6 +63,8 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   // Who and what role first: nobody else gets as far as reading the body (S4).
   const { supabase, studio, userId } = await studioScope();
   assertCanEditRoster(studio);
+  // Only where the studio's data may be processed, before the body is read or anything decrypted (D113).
+  assertPrintRegion(studio.region);
   const input = await parseBody(request, qrCardsInput);
 
   const job = check(
@@ -81,11 +88,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
         .maybeSingle(),
     ) as { id: string; do_not_photograph: boolean } | null;
     if (!child) throw new ApiError("not_found", "Child not found.");
-    if (child.do_not_photograph)
-      throw new ApiError(
-        "conflict",
-        "This child is marked Do not photograph, so they get no card.",
-      );
+    if (child.do_not_photograph) throw DO_NOT_PHOTOGRAPH;
   }
   const groups = await loadGroups(supabase, studio.id, jobId);
   const known = new Set(groups.map((g) => g.id));
@@ -94,20 +97,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
       groupIds: "validation.group",
     });
 
-  const keys = await accessCodeCryptoKeys();
-  const { prepared, blanks } = await prepareWithRetries(
-    blankCardMaker(input.blankCards, (cardId) => newCardAccessCode(studio.region, cardId, keys)),
-    (attempt) =>
-      codeWriteRpc(studio.region, "prepare_qr_cards", userId, prepareArgs(jobId, input, attempt)),
-  );
-  const children = await loadCardChildren(supabase, studio.id, jobId);
-  const { cards, skipped } = await printCards({ prepared, blanks, children, groups, keys });
-  if (cards.length === 0)
-    throw new ApiError(
-      "conflict",
-      "None of these cards can be printed: their access codes can't be read.",
-    );
-
+  // Settings and fonts first: a misconfiguration fails before any blank card is made or a print is recorded.
   let link: string;
   try {
     link = shopLinkText(shopUrl());
@@ -116,11 +106,39 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
     console.error("shop_url_invalid");
     throw new ApiError("internal", "Something went wrong on our side. Please try again.");
   }
+  try {
+    loadFonts();
+  } catch {
+    console.error("qr_card_fonts_missing");
+    throw new ApiError("internal", "Something went wrong on our side. Please try again.");
+  }
+  const keys = await accessCodeCryptoKeys();
+
+  const { prepared, blanks } = await prepareWithRetries(
+    blankCardMaker(input.blankCards, (cardId) => newCardAccessCode(studio.region, cardId, keys)),
+    (blanks) =>
+      codeWriteRpc(studio.region, "prepare_qr_cards", userId, prepareArgs(jobId, input, blanks)),
+  );
+  const children = await loadCardChildren(
+    supabase,
+    studio.id,
+    jobId,
+    prepared.cards.map((c) => c.child_id),
+  );
+  const { cards, skipped } = await printCards({ prepared, blanks, children, groups, keys });
+  if (cards.length === 0)
+    // Every card's code is unreadable: say why, and how many (counts only).
+    return NextResponse.json(CODES_UNREADABLE.toBody(), {
+      status: CODES_UNREADABLE.status,
+      headers: { [QR_CARD_HEADERS.skipped]: String(skipped) },
+    });
+
   const t = createTranslator({ locale: DEFAULT_LOCALE, messages, namespace: "pdf.qrCards" });
   const group = groupLabel(job.type);
   let rendered: Awaited<ReturnType<typeof renderQrCardsPdf>>;
   try {
     rendered = await renderQrCardsPdf(cards, {
+      title: t("title"),
       studioName: studio.name,
       groupLine: (name) => t("groupLine", { group, name }),
       groupLabel: t("groupLabel", { group }),

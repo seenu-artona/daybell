@@ -260,3 +260,14 @@ export const QR_CARD_HEADERS = {
   skipped: "Daybell-Cards-Skipped",
   replaced: "Daybell-Cards-Replaced-Characters",
 } as const;
+
+/**
+ * Why a print was refused with 409, in the error's `fields.form` (stable keys; screens show their own words). With
+ * codesUnreadable, the Daybell-Cards-Skipped header says how many cards were left out.
+ */
+export const QR_CARD_CONFLICTS = {
+  nothingToPrint: "qrCards.nothingToPrint",
+  doNotPhotograph: "qrCards.doNotPhotograph",
+  codesUnreadable: "qrCards.codesUnreadable",
+} as const;
+export type QrCardConflict = (typeof QR_CARD_CONFLICTS)[keyof typeof QR_CARD_CONFLICTS];

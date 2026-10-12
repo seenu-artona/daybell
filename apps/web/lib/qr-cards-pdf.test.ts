@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 const { renderQrCardsPdf } = await import("./qr-cards-pdf");
 
 const TEXTS = {
+  title: "QR cards",
   studioName: "North Peak Photo",
   groupLine: (name: string) => `Class: ${name}`,
   groupLabel: "Class",
@@ -69,6 +70,22 @@ describe("renderQrCardsPdf", () => {
       card("Ана", "Петрова", null, 3),
     ]);
     expect(other.replacedCards).toBe(2);
+  });
+
+  it("draws the QR symbol (quiet zone excluded) at least 1.75 inches square", async () => {
+    const { pdf } = await render([card("Maya", "Johnson", "Room 4", 1)]);
+    // The QR is the only thing drawn with rectangles: "x y w h re".
+    const rects = [
+      ...pdf.toString("latin1").matchAll(/(-?[\d.]+) (-?[\d.]+) ([\d.]+) (-?[\d.]+) re/g),
+    ].map((m) => m.slice(1, 5).map(Number) as [number, number, number, number]);
+    expect(rects.length).toBeGreaterThan(20);
+    const left = Math.min(...rects.map(([x]) => x));
+    const right = Math.max(...rects.map(([x, , w]) => x + w));
+    const ys = rects.flatMap(([, y, , h]) => [y, y + h]);
+    const width = right - left;
+    const height = Math.max(...ys) - Math.min(...ys);
+    expect(width).toBeGreaterThanOrEqual(1.75 * 72);
+    expect(height).toBeCloseTo(width, 3);
   });
 
   it("fits the longest names the roster allows", async () => {

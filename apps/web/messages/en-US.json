@@ -817,12 +817,13 @@
       "dnpNote": "Children marked Do not photograph get no card. Each child keeps the same card on every print.",
       "download": "Download PDF",
       "preparing": "Preparing the PDF…",
-      "cancel": "Close",
+      "close": "Close",
       "done": "Downloaded {count, plural, one {# card} other {# cards}}.",
       "skipped": "{count, plural, one {# card was left out} other {# cards were left out}}: the access code can't be read. Contact support.",
       "replaced": "{count, plural, one {# card has} other {# cards have}} characters the card font can't print. They show as ?.",
       "nothing": "Nothing to print. Choose at least one card.",
-      "printedCard": "Downloaded the QR card."
+      "printedCard": "Downloaded the QR card.",
+      "doNotPhotograph": "This child is marked Do not photograph, so they get no card."
     }
   },
   "invite": {
@@ -869,6 +870,7 @@
   },
   "pdf": {
     "qrCards": {
+      "title": "QR cards",
       "groupLine": "{group, select, class {Class} team {Team} other {Group}}: {name}",
       "groupLabel": "{group, select, class {Class} team {Team} other {Group}}",
       "nameLabel": "Name",

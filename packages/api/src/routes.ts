@@ -382,7 +382,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Roster",
     summary: "Print QR cards (PDF)",
     description:
-      "A PDF of cards, four per US Letter page, sorted by class: the studio's name, the child's name and class, a QR holding a random card ID (never the access code), the access code and the shop link. Children marked Do not photograph get no card. A child's card is made on their first print and reused on every reprint, so cards already handed out keep working. Blank cards (0–100) have a line for the name and a new access code; each print makes new ones. Made on demand in the studio's region and never stored. A card whose access code can't be read is left out and counted, never printed without a working code.",
+      "A PDF of cards, four per US Letter page, sorted by class: the studio's name, the child's name and class, a QR holding a random card ID (never the access code), the access code and the shop link. Children marked Do not photograph get no card. A child's card is made on their first print and reused on every reprint, so cards already handed out keep working. Blank cards (0–100) have a line for the name and a new access code; each print makes new ones. Made on demand in the studio's region and never stored. A card whose access code can't be read is left out and counted, never printed without a working code. A 409 says why in fields.form: qrCards.nothingToPrint, qrCards.doNotPhotograph or qrCards.codesUnreadable (every card's code is unreadable; Daybell-Cards-Skipped gives the count).",
     access: "roster-editor",
     body: qrCardsInput,
     success: {

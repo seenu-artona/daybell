@@ -36,7 +36,14 @@ export async function api<T = unknown>(
 
 export type DownloadResult =
   | { ok: true; headers: Headers }
-  | { ok: false; status: number; code: string; fields: Record<string, string> };
+  | {
+      ok: false;
+      status: number;
+      code: string;
+      fields: Record<string, string>;
+      /** The failed response's headers (e.g. counts with a 409), empty when the network failed. */
+      headers: Headers;
+    };
 
 /**
  * POSTs to /api/v1 and saves the file it answers with (e.g. the QR card PDF, ADR 0015). The request body stays out of
@@ -52,7 +59,7 @@ export async function download(path: string, body: unknown): Promise<DownloadRes
       credentials: "same-origin",
     });
   } catch {
-    return { ok: false, status: 0, code: "network", fields: {} };
+    return { ok: false, status: 0, code: "network", fields: {}, headers: new Headers() };
   }
   if (!res.ok) {
     const error = ((await res.json().catch(() => null)) as ApiErrorBody | null)?.error;
@@ -61,6 +68,7 @@ export async function download(path: string, body: unknown): Promise<DownloadRes
       status: res.status,
       code: error?.code ?? "internal",
       fields: error?.fields ?? {},
+      headers: res.headers,
     };
   }
   const name =
