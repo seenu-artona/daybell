@@ -3,7 +3,7 @@
 -- the bin and its purge, closed jobs, tagging order, and events with ids and counts only (never filenames).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(85);
+select plan(103);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -23,6 +23,7 @@ insert into public.jobs (id, studio_id, name, type, picture_day, internal_number
   ('a0000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Fall', 'seniors', '2026-10-01', 'JOB00001'),
   ('a0000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Big', 'seniors', '2026-10-01', 'JOB00002'),
   ('a0000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Closed', 'seniors', '2026-10-01', 'JOB00003'),
+  ('a0000000-0000-4000-8000-000000000004', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Retry', 'seniors', '2026-10-01', 'JOB00004'),
   ('b0000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Fall', 'seniors', '2026-10-01', 'JOB00001');
 update public.jobs set status = 'closed' where id = 'a0000000-0000-4000-8000-000000000003';
 
@@ -60,17 +61,17 @@ select throws_ok($$ select upload_id from public.photos $$, '42501', null,
 select throws_ok($$ select public.create_upload_batch('11111111-1111-4111-8111-111111111111',
   'a0000000-0000-4000-8000-000000000001') $$, '42501', null,
   'owners cannot run create_upload_batch from a browser session');
-select throws_ok($$ select public.record_photo_result(gen_random_uuid(), '{"status":"failed","failure_reason":"unreadable"}') $$,
+select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1, '{"status":"failed","failure_reason":"unreadable"}') $$,
   '42501', null, 'nobody signed in can record a worker result');
 select is((select count(*) from unnest(array[
     'public.create_upload_batch(uuid, uuid)', 'public.register_photos(uuid, uuid, jsonb)',
     'public.set_photo_upload_id(uuid, uuid, text)', 'public.mark_photo_uploaded(uuid, uuid, text)',
-    'public.cancel_photo_upload(uuid, uuid)', 'public.photos_uploading(uuid, uuid[])', 'public.finish_upload_batch(uuid, uuid, int)',
-    'public.photo_for_worker(uuid)', 'public.record_photo_result(uuid, jsonb)', 'public.retry_photo(uuid, uuid)',
+    'public.cancel_photo_upload(uuid, uuid)', 'public.photos_uploading(uuid, uuid[])', 'public.finish_upload_batch(uuid, uuid, int, int)',
+    'public.photo_for_worker(uuid)', 'public.record_photo_result(uuid, int, jsonb)', 'public.retry_photo(uuid, uuid)',
     'public.bin_photos(uuid, uuid, uuid[])', 'public.restore_photos(uuid, uuid, uuid[])',
-    'public.photos_due_for_purge(int)', 'public.delete_purged_photos(uuid[])', 'public.abandoned_uploads(int)',
+    'public.begin_photo_purge(int)', 'public.delete_purged_photos(uuid[])', 'public.abandoned_uploads(int)',
     'public.delete_abandoned_uploads(uuid[])', 'public.finish_idle_batches()', 'app.assert_job_open(uuid)',
-    'app.open_batch(uuid, uuid)', 'app.uploading_photo(uuid, uuid)', 'app.close_batch(uuid, int)',
+    'app.open_batch(uuid, uuid)', 'app.uploading_photo(uuid, uuid)', 'app.close_batch(uuid, int, int)',
     'app.check_bin_request(uuid, uuid[])', 'app.on_photos_bin_change()', 'app.on_photos_purged()']) f
   where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
   0::bigint, 'no photo write, worker or cron function is executable by browsers');
@@ -127,6 +128,23 @@ select throws_ok($$ select public.photos_uploading('44444444-4444-4444-8444-4444
 select throws_ok($$ select public.photos_uploading('22222222-2222-4222-8222-222222222222',
   array[(select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')]) $$, '42501', null,
   'nor can another studio''s owner');
+-- Another studio's owner can't touch any of studio A's uploads or photos (review S5).
+select throws_ok($$ select public.register_photos('22222222-2222-4222-8222-222222222222', (select (v #>> '{}')::uuid from out where k = 'b1'),
+  jsonb_build_array(pg_temp.f('x.jpg', 'outsider'))) $$, '42501', null, 'nor register files in A''s batch');
+select throws_ok($$ select public.finish_upload_batch('22222222-2222-4222-8222-222222222222', (select (v #>> '{}')::uuid from out where k = 'b1'), 0, 0) $$,
+  '42501', null, 'nor finish it');
+select throws_ok($$ select public.set_photo_upload_id('22222222-2222-4222-8222-222222222222', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 'x') $$,
+  '42501', null, 'nor start A''s uploads');
+select throws_ok($$ select public.mark_photo_uploaded('22222222-2222-4222-8222-222222222222', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) $$,
+  '42501', null, 'nor complete them');
+select throws_ok($$ select public.cancel_photo_upload('22222222-2222-4222-8222-222222222222', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) $$,
+  '42501', null, 'nor cancel them');
+select throws_ok($$ select public.restore_photos('22222222-2222-4222-8222-222222222222',
+  'a0000000-0000-4000-8000-000000000001', array[(select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')]) $$, '42501', null, 'nor restore A''s photos');
+select throws_ok($$ select public.retry_photo('22222222-2222-4222-8222-222222222222', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) $$,
+  '42501', null, 'nor retry them');
+select throws_ok($$ select public.mark_photo_uploaded('33333333-3333-4333-8333-333333333333', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 'other') $$,
+  '22023', 'The only upload failure is incomplete', 'an unknown upload failure is refused, with no values');
 select lives_ok($$ select public.mark_photo_uploaded('33333333-3333-4333-8333-333333333333',
   (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) $$, 'a complete upload moves on');
 select is((select status::text || coalesce(upload_id, '-') from public.photos
@@ -135,6 +153,10 @@ select is((select status::text || coalesce(upload_id, '-') from public.photos
 select throws_ok($$ select public.mark_photo_uploaded('33333333-3333-4333-8333-333333333333',
   (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) $$, 'P0001', 'not_uploading',
   'only once');
+select throws_ok($$ select public.set_photo_upload_id('33333333-3333-4333-8333-333333333333', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 'late') $$,
+  'P0001', 'not_uploading', 'and no upload starts on a photo that is past uploading');
+select throws_ok($$ select public.cancel_photo_upload('33333333-3333-4333-8333-333333333333', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) $$,
+  'P0001', 'not_uploading', 'nor is it cancelled');
 
 -- The same file again, now processing: a duplicate, counted on the batch.
 select is((public.register_photos('11111111-1111-4111-8111-111111111111',
@@ -144,30 +166,41 @@ select is((select duplicates_skipped from public.upload_batches where id = (sele
   2, 'and duplicates are counted on the batch');
 
 -- The worker's result, idempotent.
-select ok(public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'),
+select ok(not public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 2,
+  '{"status":"ready","width":1,"height":1}'), 'a result for another round is ignored');
+select ok(public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
   '{"status":"ready","width":6000,"height":4000,"captured_at":"2026-10-01T09:30:05.47"}'), 'the worker records a result');
-select ok(not public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'),
+select ok(not public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
   '{"status":"failed","failure_reason":"unreadable"}'), 'a repeated message changes nothing');
 select is((select status::text || ' ' || width || 'x' || height || ' ' || captured_at::text from public.photos
            where id = (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')),
   'ready 6000x4000 2026-10-01 09:30:05.47', 'ready, with its size and capture time to the hundredth');
-select throws_ok($$ select public.record_photo_result(gen_random_uuid(), '{"status":"ready"}') $$, '22023', null,
+select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1, '{"status":"ready"}') $$, '22023', null,
   'a ready result needs a size');
-select ok(not public.record_photo_result((select (v -> 1 ->> 'photo_id')::uuid from out where k = 'r1'),
+select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
+  '{"status":"failed","failure_reason":"Maya Johnson.jpg"}') $$, '22023', 'A result is ready (with a size) or failed',
+  'an unknown failure reason is refused, with no values');
+select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
+  '{"status":"ready","width":1,"height":1,"captured_at":"yesterday"}') $$, '22023', null,
+  'and so is a capture time that isn''t one');
+select ok(not public.record_photo_result((select (v -> 1 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
   '{"status":"ready","width":1,"height":1}'), 'a photo still uploading takes no result');
 select is((select public.photo_for_worker((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) - 'id'),
   jsonb_build_object('studio_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_id', 'a0000000-0000-4000-8000-000000000001',
     'status', 'ready', 'sha256', encode(extensions.digest('two', 'sha256'), 'hex'), 'byte_size', 1000,
-    'studio_name', 'Studio A'),
+    'attempt', 1, 'studio_name', 'Studio A'),
   'the worker reads ids, the hash, the size and the studio''s name for the watermark, never the filename');
 
 -- Retry: only unreadable failures, or photos stuck processing.
 select lives_ok($$ select public.mark_photo_uploaded('33333333-3333-4333-8333-333333333333',
   (select (v -> 3 ->> 'photo_id')::uuid from out where k = 'r1')) $$, 'another upload completes');
-select public.record_photo_result((select (v -> 3 ->> 'photo_id')::uuid from out where k = 'r1'),
+select public.record_photo_result((select (v -> 3 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
   '{"status":"failed","failure_reason":"unreadable"}');
 select ok(public.retry_photo('11111111-1111-4111-8111-111111111111',
   (select (v -> 3 ->> 'photo_id')::uuid from out where k = 'r1')), 'an unreadable photo can be tried again');
+select is((select attempt from public.photos where id = (select (v -> 3 ->> 'photo_id')::uuid from out where k = 'r1')), 2, 'in a new round');
+select ok(not public.record_photo_result((select (v -> 3 ->> 'photo_id')::uuid from out where k = 'r1'), 1, '{"status":"failed","failure_reason":"unreadable"}'),
+  'so a replayed failure from the first round can''t fail it again (review S11)');
 select throws_ok($$ select public.retry_photo('11111111-1111-4111-8111-111111111111',
   (select (v -> 3 ->> 'photo_id')::uuid from out where k = 'r1')) $$, 'P0001', 'not_retryable',
   'a photo just queued can''t be retried yet');
@@ -233,19 +266,32 @@ select is((select actor_id::text || ' ' || subject_id::text from public.events w
 
 -- ── Finishing a batch ─────────────────────────────────────────────────────────────────────────────────────────────
 select lives_ok($$ select public.finish_upload_batch('33333333-3333-4333-8333-333333333333',
-  (select (v #>> '{}')::uuid from out where k = 'b1'), 2) $$, 'the batch finishes');
+  (select (v #>> '{}')::uuid from out where k = 'b1'), 2, 1) $$, 'the batch finishes');
 select lives_ok($$ select public.finish_upload_batch('33333333-3333-4333-8333-333333333333',
-  (select (v #>> '{}')::uuid from out where k = 'b1'), 2) $$, 'twice, harmlessly');
+  (select (v #>> '{}')::uuid from out where k = 'b1'), 2, 1) $$, 'twice, harmlessly');
 select is((select count(*) from public.events where type = 'photos.uploaded'), 1::bigint, 'with one event');
 select is((select data - 'batch_id' from public.events where type = 'photos.uploaded'),
-  '{"added": 2, "failed": 1, "skipped": 2, "duplicates": 3, "unfinished": 1}'::jsonb,
-  'counting what was added, failed, unfinished, duplicated and skipped');
+  '{"added": 2, "failed": 1, "skipped": 2, "duplicates": 4, "unfinished": 1}'::jsonb,
+  'counting what was added, failed, unfinished, duplicated (the browser''s in-drop duplicates too) and skipped');
 select throws_ok($$ select public.register_photos('11111111-1111-4111-8111-111111111111',
   (select (v #>> '{}')::uuid from out where k = 'b1'), jsonb_build_array(pg_temp.f('late.jpg', 'late'))) $$,
   'P0001', 'batch_finished', 'a finished batch takes no more files');
 select is((select count(*) from public.events e where e.type like 'photos.%'
            and (e.data::text ~* 'IMG_|Maya|Johnson|\.jpg' or e.data ? 'sha256')),
   0::bigint, 'photo events never contain filenames or hashes');
+
+-- ── Retrying a photo the job has again (review CR4) ───────────────────────────────────────────────────────────────
+insert into out values ('b4', to_jsonb(public.create_upload_batch('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000004')));
+insert into out values ('r4', public.register_photos('11111111-1111-4111-8111-111111111111',
+  (select (v #>> '{}')::uuid from out where k = 'b4'), jsonb_build_array(pg_temp.f('r.jpg', 'retry-me'))));
+select public.mark_photo_uploaded('11111111-1111-4111-8111-111111111111', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r4'));
+select public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r4'), 1, '{"status":"failed","failure_reason":"unreadable"}');
+insert into out values ('r5', public.register_photos('11111111-1111-4111-8111-111111111111',
+  (select (v #>> '{}')::uuid from out where k = 'b4'), jsonb_build_array(pg_temp.f('r again.jpg', 'retry-me'))));
+select throws_ok($$ select public.retry_photo('11111111-1111-4111-8111-111111111111', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r4')) $$,
+  'P0001', 'not_retryable', 'a failed photo whose file the job has again can''t be retried');
+select public.cancel_photo_upload('11111111-1111-4111-8111-111111111111', (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r5'));
 
 -- ── 50,000 photos per job, the bin included (Seenu, answer 1) ─────────────────────────────────────────────────────
 insert into out values ('b2', to_jsonb(public.create_upload_batch('11111111-1111-4111-8111-111111111111',
@@ -274,9 +320,12 @@ where job_id = 'a0000000-0000-4000-8000-000000000002' and original_filename = 'b
   and sha256 in (select extensions.digest('bulk' || i, 'sha256') from generate_series(1, 4) i);
 set local role service_role;
 select pg_temp.as_server() as server;
-select is((select count(*) from public.photos_due_for_purge(100)), 4::bigint,
-  'only photos more than 30 days in the bin are due');
-select is(public.delete_purged_photos(array(select id from public.photos_due_for_purge(100))
+select is((select count(*) from public.begin_photo_purge(100)), 4::bigint,
+  'only photos more than 30 days in the bin are due, and are marked');
+select throws_ok($$ select public.restore_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000002', array(select id from public.photos where purge_started_at is not null)) $$,
+  'P0001', 'photo_purging', 'a photo being purged can''t be restored (review CR7)');
+select is(public.delete_purged_photos(array(select id from public.photos where purge_started_at is not null)
   || (select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')), 4,
   'and only they are deleted, whatever ids are sent');
 select is((select data ->> 'count' from public.events where type = 'photos.purged'), '4', 'one purge event, with a count');
@@ -311,7 +360,7 @@ select is((select count(*) from public.job_photos_page('a0000000-0000-4000-8000-
 -- ── Studio A's photographer, signed in: counts and tagging order ──────────────────────────────────────────────────
 select pg_temp.as_user('33333333-3333-4333-8333-333333333333') as signed_in_a;
 select is(public.job_photo_counts('a0000000-0000-4000-8000-000000000001'),
-  '{"photos": 3, "ready": 1, "processing": 1, "failed": 1, "uploading": 0, "binned": 0, "uploads": 1, "duplicates_skipped": 3}'::jsonb,
+  '{"photos": 3, "ready": 1, "processing": 1, "failed": 1, "uploading": 0, "binned": 0, "uploads": 1, "duplicates_skipped": 4}'::jsonb,
   'the Photos tab''s counts');
 reset role;
 -- Order: a second batch, untimed photos and a tie on time.
@@ -338,6 +387,8 @@ select results_eq($$ select original_filename from public.job_photos_page('a0000
   'pages run by batch, then capture time, then filename (untimed last), after the cursor photo (the first batch''s last)');
 select is((select count(*) from public.job_photos_page('a0000000-0000-4000-8000-000000000001', null, 200, false, 'failed')),
   1::bigint, 'and can show one status');
+select is((select count(*) from public.job_photos_page('a0000000-0000-4000-8000-000000000002', null, 1000, false, null)),
+  501::bigint, 'a page holds at most 501 photos: the API''s largest page and one more (review CR5)');
 
 -- ── Integrity ─────────────────────────────────────────────────────────────────────────────────────────────────────
 reset role;
@@ -356,10 +407,10 @@ select throws_ok($$ delete from public.jobs where id = 'a0000000-0000-4000-8000-
   'a job with photos can''t be deleted, so no stored photo is left without a row');
 update public.photos set binned_at = now(), binned_by = created_by where job_id = 'a0000000-0000-4000-8000-000000000001'
   and status = 'ready';
-select lives_ok($$ delete from public.studios where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$,
-  'a studio with photos, some in the bin, can still be deleted');
-select is((select count(*) from public.photos where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 0::bigint,
-  'and its photos go with it');
+select throws_ok($$ delete from public.studios where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$, '23503', null,
+  'a studio with photos can''t be deleted until its stored photos are purged (review S3)');
+select ok((select count(*) from public.photos where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') > 0,
+  'and its photos stay');
 
 select * from finish();
 rollback;

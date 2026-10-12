@@ -13,7 +13,8 @@ create type public.photo_status as enum ('uploading', 'processing', 'ready', 'fa
 create table public.upload_batches (
   id uuid primary key default gen_random_uuid(),
   seq bigint generated always as identity,
-  studio_id uuid not null references public.studios (id) on delete cascade,
+  -- Restrict: a studio with photos can't be deleted until a purge flow removes its stored objects first (review S3).
+  studio_id uuid not null references public.studios (id) on delete restrict,
   job_id uuid not null,
   -- No foreign key, as on events: erasing a person must never be blocked by their uploads.
   created_by uuid not null,
@@ -37,7 +38,8 @@ comment on table public.upload_batches is
 -- ── Photos ────────────────────────────────────────────────────────────────────────────────────────────────────────
 create table public.photos (
   id uuid primary key default gen_random_uuid(),
-  studio_id uuid not null references public.studios (id) on delete cascade,
+  -- Restrict, as on upload_batches: deleting a studio must never leave its photos in storage without rows.
+  studio_id uuid not null references public.studios (id) on delete restrict,
   job_id uuid not null,
   batch_id uuid not null,
   batch_seq bigint not null,
@@ -59,6 +61,11 @@ create table public.photos (
   -- The bin (Seenu, answer 7): binned photos are deleted for good after 30 days.
   binned_at timestamptz,
   binned_by uuid,
+  -- Which round of processing a worker result belongs to: retry_photo starts a new one, so a replayed or late result
+  -- of an earlier round can't change the photo.
+  attempt int not null default 1 check (attempt >= 1),
+  -- Set when the daily clean-up starts deleting the photo's stored objects; it can't be restored after that.
+  purge_started_at timestamptz,
   -- Set when a photo is first sold (Phase 3). A sold photo can't be binned (Seenu, answer 7).
   sold_at timestamptz,
   created_by uuid not null,
@@ -316,7 +323,8 @@ language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  select p.studio_id into studio_id from public.photos p where p.id = p_photo_id;
+  -- Locked until the caller's transaction ends, so completing, cancelling and starting an upload never interleave.
+  select p.studio_id into studio_id from public.photos p where p.id = p_photo_id for update;
   if studio_id is null then
     raise exception 'Photo not found' using errcode = 'P0002';
   end if;
@@ -367,8 +375,15 @@ declare
   v_kept text;
 begin
   select * into v_photo from app.uploading_photo(p_actor, p_photo_id);
-  update public.photos p set upload_id = p_upload_id where p.id = p_photo_id and p.upload_id is null;
-  select p.upload_id into v_kept from public.photos p where p.id = p_photo_id;
+  if coalesce(char_length(p_upload_id), 0) not between 1 and 1024 then
+    raise exception 'An upload id is 1 to 1,024 characters' using errcode = '22023';
+  end if;
+  update public.photos p set upload_id = p_upload_id
+  where p.id = p_photo_id and p.status = 'uploading' and p.upload_id is null;
+  select p.upload_id into v_kept from public.photos p where p.id = p_photo_id and p.status = 'uploading';
+  if v_kept is null then
+    raise exception 'not_uploading' using errcode = 'P0001';
+  end if;
   perform app.end_act_for(v_photo.previous);
   return v_kept;
 end;
@@ -383,11 +398,18 @@ as $$
 declare
   v_photo record;
 begin
+  -- Checked here, not by the table's constraint, so a bad value is refused without a row in the error.
+  if p_failure is not null and p_failure <> 'incomplete' then
+    raise exception 'The only upload failure is incomplete' using errcode = '22023';
+  end if;
   select * into v_photo from app.uploading_photo(p_actor, p_photo_id);
   update public.photos p
   set status = case when p_failure is null then 'processing'::public.photo_status else 'failed' end,
     failure_reason = p_failure, upload_id = null
-  where p.id = p_photo_id;
+  where p.id = p_photo_id and p.status = 'uploading';
+  if not found then
+    raise exception 'not_uploading' using errcode = 'P0001';
+  end if;
   perform app.end_act_for(v_photo.previous);
 end;
 $$;
@@ -403,14 +425,18 @@ declare
   v_upload text;
 begin
   select * into v_photo from app.uploading_photo(p_actor, p_photo_id);
-  delete from public.photos p where p.id = p_photo_id returning p.upload_id into v_upload;
+  delete from public.photos p where p.id = p_photo_id and p.status = 'uploading' returning p.upload_id into v_upload;
+  if not found then
+    raise exception 'not_uploading' using errcode = 'P0001';
+  end if;
   perform app.end_act_for(v_photo.previous);
   return v_upload;
 end;
 $$;
 
--- Ends a batch: what the browser skipped is added, and one event says what happened (counts and ids only).
-create function app.close_batch(p_batch_id uuid, p_files_skipped int) returns void
+-- Ends a batch: what the browser skipped (and the files it found twice in the drop) is added, and one event says
+-- what happened (counts and ids only).
+create function app.close_batch(p_batch_id uuid, p_files_skipped int, p_duplicates int) returns void
 language plpgsql security definer
 set search_path = ''
 as $$
@@ -418,7 +444,8 @@ declare
   v_batch public.upload_batches;
 begin
   update public.upload_batches b
-  set finished_at = now(), files_skipped = b.files_skipped + greatest(coalesce(p_files_skipped, 0), 0)
+  set finished_at = now(), files_skipped = b.files_skipped + greatest(coalesce(p_files_skipped, 0), 0),
+    duplicates_skipped = b.duplicates_skipped + greatest(coalesce(p_duplicates, 0), 0)
   where b.id = p_batch_id and b.finished_at is null
   returning * into v_batch;
   if v_batch.id is null then
@@ -436,7 +463,8 @@ begin
 end;
 $$;
 
-create function public.finish_upload_batch(p_actor uuid, p_batch_id uuid, p_files_skipped int) returns void
+create function public.finish_upload_batch(p_actor uuid, p_batch_id uuid, p_files_skipped int, p_duplicates int)
+returns void
 language plpgsql security definer
 set search_path = ''
 as $$
@@ -447,12 +475,13 @@ begin
   if v_studio is null then
     raise exception 'Batch not found' using errcode = 'P0002';
   end if;
-  if p_files_skipped is null or p_files_skipped not between 0 and 1000000 then
-    raise exception 'Skipped files must be a count' using errcode = '22023';
+  if p_files_skipped is null or p_files_skipped not between 0 and 1000000
+     or p_duplicates is null or p_duplicates not between 0 and 1000000 then
+    raise exception 'Skipped files and duplicates must be counts' using errcode = '22023';
   end if;
   v_previous := app.act_for(p_actor, v_studio);
   -- Finishing twice (a retry after a dropped connection) changes nothing.
-  perform app.close_batch(p_batch_id, p_files_skipped);
+  perform app.close_batch(p_batch_id, p_files_skipped, p_duplicates);
   perform app.end_act_for(v_previous);
 end;
 $$;
@@ -465,14 +494,16 @@ language sql stable security definer
 set search_path = ''
 as $$
   select jsonb_build_object('id', p.id, 'studio_id', p.studio_id, 'job_id', p.job_id, 'status', p.status,
-    'sha256', encode(p.sha256, 'hex'), 'byte_size', p.byte_size, 'studio_name', s.name)
+    'sha256', encode(p.sha256, 'hex'), 'byte_size', p.byte_size, 'attempt', p.attempt, 'studio_name', s.name)
   from public.photos p join public.studios s on s.id = p.studio_id
   where p.id = p_photo_id;
 $$;
 
--- The worker's result. Idempotent: only a photo being processed changes, so a repeated message does nothing.
--- p_result is {status: ready, width, height, captured_at} or {status: failed, failure_reason}.
-create function public.record_photo_result(p_photo_id uuid, p_result jsonb) returns boolean
+-- The worker's result for one round of processing (p_attempt, as photo_for_worker gave it). Idempotent: only a photo
+-- being processed in that round changes, so a repeated or replayed message does nothing.
+-- p_result is {status: ready, width, height, captured_at} or {status: failed, failure_reason}, checked here so a bad
+-- value is refused without values in the error (never by a table constraint).
+create function public.record_photo_result(p_photo_id uuid, p_attempt int, p_result jsonb) returns boolean
 language plpgsql security definer
 set search_path = ''
 as $$
@@ -480,8 +511,13 @@ declare
   v_ready boolean := p_result ->> 'status' = 'ready';
 begin
   if jsonb_typeof(p_result) is distinct from 'object' or p_result ->> 'status' not in ('ready', 'failed')
+     or p_attempt is null
      or (v_ready and (coalesce(p_result ->> 'width', '') !~ '^[1-9][0-9]{0,5}$'
-                      or coalesce(p_result ->> 'height', '') !~ '^[1-9][0-9]{0,5}$')) then
+                      or coalesce(p_result ->> 'height', '') !~ '^[1-9][0-9]{0,5}$'
+                      or (p_result ->> 'captured_at' is not null
+                          and p_result ->> 'captured_at' !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?$')))
+     or (not v_ready and coalesce(p_result ->> 'failure_reason', '')
+                         not in ('not_jpeg', 'too_large', 'hash_mismatch', 'unreadable')) then
     raise exception 'A result is ready (with a size) or failed' using errcode = '22023';
   end if;
   update public.photos p
@@ -491,7 +527,7 @@ begin
     captured_at = case when v_ready then (p_result ->> 'captured_at')::timestamp end,
     failure_reason = case when not v_ready then p_result ->> 'failure_reason' end,
     processed_at = now()
-  where p.id = p_photo_id and p.status = 'processing';
+  where p.id = p_photo_id and p.status = 'processing' and p.attempt = p_attempt;
   return found;
 end;
 $$;
@@ -510,8 +546,15 @@ begin
     raise exception 'Photo not found' using errcode = 'P0002';
   end if;
   v_previous := app.act_for(p_actor, v_studio);
+  -- A failed photo whose file the job has again (uploaded since) stays failed: the other copy is the photo.
+  if exists (select 1 from public.photos p join public.photos o
+               on o.job_id = p.job_id and o.sha256 = p.sha256 and o.id <> p.id and o.status <> 'failed'
+             where p.id = p_photo_id) then
+    raise exception 'not_retryable' using errcode = 'P0001';
+  end if;
+  -- A new round: a late result of the previous one is ignored (record_photo_result checks the attempt).
   update public.photos p
-  set status = 'processing', failure_reason = null
+  set status = 'processing', failure_reason = null, attempt = p.attempt + 1
   where p.id = p_photo_id and p.binned_at is null
     and ((p.status = 'failed' and p.failure_reason = 'unreadable')
       or (p.status = 'processing' and p.updated_at < now() - interval '15 minutes'));
@@ -580,6 +623,9 @@ begin
   end if;
   v_previous := app.act_for(p_actor, v_studio);
   perform app.check_bin_request(p_job_id, p_photo_ids);
+  if exists (select 1 from public.photos p where p.id = any (p_photo_ids) and p.purge_started_at is not null) then
+    raise exception 'photo_purging' using errcode = 'P0001';
+  end if;
   update public.photos p set binned_at = null, binned_by = null
   where p.id = any (p_photo_ids) and p.binned_at is not null;
   get diagnostics v_count = row_count;
@@ -589,16 +635,24 @@ end;
 $$;
 
 -- ── Daily clean-up (the cron, service role) ───────────────────────────────────────────────────────────────────────
--- Photos in the bin for more than 30 days, never sold. The cron deletes their stored objects (every version) first,
--- then the rows (delete_purged_photos re-checks the rule), so a failure never leaves objects without a row.
-create function public.photos_due_for_purge(p_limit int) returns table (id uuid, studio_id uuid, job_id uuid)
-language sql stable security definer
+-- Photos in the bin for more than 30 days, never sold. The cron marks them (purge_started_at: no restoring from
+-- then on), deletes their stored objects (every version), then the rows (delete_purged_photos re-checks the rule), so
+-- a failure never leaves objects without a row, nor a restored photo without objects. Marked rows whose deletion
+-- failed are picked again the next day.
+create function public.begin_photo_purge(p_limit int) returns table (id uuid, studio_id uuid, job_id uuid)
+language sql security definer
 set search_path = ''
 as $$
-  select p.id, p.studio_id, p.job_id from public.photos p
-  where p.binned_at < now() - interval '30 days' and p.sold_at is null
-  order by p.binned_at
-  limit least(greatest(coalesce(p_limit, 0), 0), 1000);
+  with due as (
+    select p.id from public.photos p
+    where p.binned_at < now() - interval '30 days' and p.sold_at is null
+    order by p.binned_at
+    limit least(greatest(coalesce(p_limit, 0), 0), 1000)
+    for update skip locked
+  )
+  update public.photos p set purge_started_at = coalesce(p.purge_started_at, now())
+  from due where p.id = due.id
+  returning p.id, p.studio_id, p.job_id;
 $$;
 
 create function public.delete_purged_photos(p_photo_ids uuid[]) returns int
@@ -609,7 +663,8 @@ declare
   v_count int;
 begin
   delete from public.photos p
-  where p.id = any (p_photo_ids) and p.binned_at < now() - interval '30 days' and p.sold_at is null;
+  where p.id = any (p_photo_ids) and p.binned_at < now() - interval '30 days' and p.sold_at is null
+    and p.purge_started_at is not null;
   get diagnostics v_count = row_count;
   return v_count;
 end;
@@ -661,7 +716,7 @@ begin
     limit 1000
   loop
     perform set_config('request.jwt.claim.sub', v_batch.created_by::text, true);
-    perform app.close_batch(v_batch.id, 0);
+    perform app.close_batch(v_batch.id, 0, 0);
     v_count := v_count + 1;
   end loop;
   perform app.end_act_for(v_previous);
@@ -695,7 +750,7 @@ create function public.job_photos_page(p_job_id uuid, p_after uuid, p_limit int,
   p_status public.photo_status)
 returns table (id uuid, batch_id uuid, batch_seq bigint, status public.photo_status, original_filename text,
   byte_size bigint, width int, height int, captured_at timestamp, failure_reason text, binned_at timestamptz,
-  created_at timestamptz, processed_at timestamptz)
+  created_at timestamptz, processed_at timestamptz, updated_at timestamptz)
 language plpgsql stable
 set search_path = ''
 as $$
@@ -704,7 +759,8 @@ declare
   v_at timestamp;
   v_name text;
   v_id uuid;
-  v_limit int := least(greatest(coalesce(p_limit, 200), 1), 500);
+  -- 501: the API asks for one more than its largest page (500) to know whether there is another.
+  v_limit int := least(greatest(coalesce(p_limit, 200), 1), 501);
 begin
   if p_after is not null then
     select p.batch_seq, coalesce(p.captured_at, 'infinity'::timestamp), p.original_filename, p.id
@@ -717,7 +773,7 @@ begin
   if coalesce(p_bin, false) then
     return query
       select p.id, p.batch_id, p.batch_seq, p.status, p.original_filename, p.byte_size, p.width, p.height,
-        p.captured_at, p.failure_reason, p.binned_at, p.created_at, p.processed_at
+        p.captured_at, p.failure_reason, p.binned_at, p.created_at, p.processed_at, p.updated_at
       from public.photos p
       where p.job_id = p_job_id and p.binned_at is not null
         and (p_status is null or p.status = p_status)
@@ -728,7 +784,7 @@ begin
   else
     return query
       select p.id, p.batch_id, p.batch_seq, p.status, p.original_filename, p.byte_size, p.width, p.height,
-        p.captured_at, p.failure_reason, p.binned_at, p.created_at, p.processed_at
+        p.captured_at, p.failure_reason, p.binned_at, p.created_at, p.processed_at, p.updated_at
       from public.photos p
       where p.job_id = p_job_id and p.binned_at is null and p.status <> 'uploading'
         and (p_status is null or p.status = p_status)
@@ -742,7 +798,7 @@ $$;
 
 -- ── Grants ────────────────────────────────────────────────────────────────────────────────────────────────────────
 revoke all on function app.on_photos_bin_change(), app.on_photos_purged(), app.assert_job_open(uuid),
-  app.open_batch(uuid, uuid), app.uploading_photo(uuid, uuid), app.close_batch(uuid, int),
+  app.open_batch(uuid, uuid), app.uploading_photo(uuid, uuid), app.close_batch(uuid, int, int),
   app.check_bin_request(uuid, uuid[])
   from public;
 revoke all on function public.job_photo_counts(uuid),
@@ -759,13 +815,13 @@ revoke all on function
   public.set_photo_upload_id(uuid, uuid, text),
   public.mark_photo_uploaded(uuid, uuid, text),
   public.cancel_photo_upload(uuid, uuid),
-  public.finish_upload_batch(uuid, uuid, int),
+  public.finish_upload_batch(uuid, uuid, int, int),
   public.photo_for_worker(uuid),
-  public.record_photo_result(uuid, jsonb),
+  public.record_photo_result(uuid, int, jsonb),
   public.retry_photo(uuid, uuid),
   public.bin_photos(uuid, uuid, uuid[]),
   public.restore_photos(uuid, uuid, uuid[]),
-  public.photos_due_for_purge(int),
+  public.begin_photo_purge(int),
   public.delete_purged_photos(uuid[]),
   public.abandoned_uploads(int),
   public.delete_abandoned_uploads(uuid[]),
@@ -778,13 +834,13 @@ grant execute on function
   public.set_photo_upload_id(uuid, uuid, text),
   public.mark_photo_uploaded(uuid, uuid, text),
   public.cancel_photo_upload(uuid, uuid),
-  public.finish_upload_batch(uuid, uuid, int),
+  public.finish_upload_batch(uuid, uuid, int, int),
   public.photo_for_worker(uuid),
-  public.record_photo_result(uuid, jsonb),
+  public.record_photo_result(uuid, int, jsonb),
   public.retry_photo(uuid, uuid),
   public.bin_photos(uuid, uuid, uuid[]),
   public.restore_photos(uuid, uuid, uuid[]),
-  public.photos_due_for_purge(int),
+  public.begin_photo_purge(int),
   public.delete_purged_photos(uuid[]),
   public.abandoned_uploads(int),
   public.delete_abandoned_uploads(uuid[]),
