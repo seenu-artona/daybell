@@ -3,7 +3,8 @@ import { PASSWORD, VERIFY_LINK } from "./helpers";
 import { linkFromEmail } from "./mail";
 
 // Phase 0 "Done when" (steps 1, 2, 5): sign up a studio, confirm the email, invite staff, staff joins with a role,
-// and a second studio sees nothing of the first. Unique emails per run. Desktop only (D136; ADR 0013).
+// and a second studio sees nothing of the first. Since Phase 1 step 2d (D143; ADR 0017) Home shows the studio setup
+// checklist until it is done, then Up next. Unique emails per run. Desktop only (D136; ADR 0013).
 const run = `${Date.now()}`;
 
 test("owner signs up, invites a photographer, and studios stay separate", async ({
@@ -36,7 +37,16 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page).toHaveURL(/\/app$/);
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
   await expect(page.getByText(`North Peak ${tag}`).filter({ visible: true }).first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Needs you" })).toBeVisible();
+  const setup = page.getByRole("region", { name: "Set up your studio", exact: true });
+  // Account and first job only: inviting the team stays in Settings (Seenu, answer 12).
+  await expect(setup.getByText("1 of 2 done", { exact: true })).toBeVisible();
+  await expect(
+    setup.getByRole("listitem").filter({ hasText: "Create your account" }),
+  ).toContainText("Done");
+  await expect(
+    setup.getByRole("listitem").filter({ hasText: "Create your first job" }),
+  ).toContainText("Next");
+  await expect(setup.getByText("Invite your team")).toHaveCount(0);
 
   // Every section is in the one dark menu; unbuilt ones say "Soon" (D126, D128). There is no top bar (D137).
   const menu = page.getByRole("navigation", { name: "Main" });
@@ -49,9 +59,8 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
     .click();
   await expect(page.getByRole("heading", { name: "Orders is coming soon" })).toBeVisible();
 
-  // 3. From "Needs you", goes to Settings and invites a photographer.
-  await page.goto("/app");
-  await page.getByRole("link", { name: /Invite your team/ }).click();
+  // 3. Goes to Settings and invites a photographer.
+  await menu.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/settings$/);
   await expect(page.getByRole("cell", { name: /Owner/ })).toBeVisible();
   await page.getByLabel("Their email").fill(photographer);
@@ -70,10 +79,9 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByText("Waiting to join")).toBeVisible();
   inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
 
-  // Home now shows the team step done, and the activity log has all three changes (event log, D96).
+  // Inviting doesn't change the setup checklist; the activity log has all three changes (event log, D96).
   await page.goto("/app");
-  await expect(page.getByText("Brand your shop")).toBeVisible();
-  await expect(page.getByRole("link", { name: /Invite your team/ })).toHaveCount(0);
+  await expect(setup.getByText("1 of 2 done", { exact: true })).toBeVisible();
   await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
   await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
 
@@ -116,6 +124,43 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
     "photographer",
   ]);
 
+  // The first jobs complete the setup for good; Home then shows Up next, most urgent first: the job whose picture day
+  // is 3 days away (in the browser's own day) before the one 40 days away (D143).
+  const dayFromNow = (days: number) =>
+    page.evaluate((n) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      const pad = (v: number) => String(v).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }, days);
+  for (const [name, days] of [
+    [`Far ${tag}`, 40],
+    [`Soon ${tag}`, 3],
+  ] as const) {
+    const res = await page.request.post("/api/v1/jobs", {
+      data: { name, type: "school", pictureDay: await dayFromNow(days) },
+    });
+    expect(res.status()).toBe(201);
+  }
+  await page.goto("/app");
+  const upNext = page.getByRole("region", { name: "Up next", exact: true });
+  await expect(upNext.getByRole("listitem")).toHaveCount(2);
+  await expect(upNext.getByRole("listitem").first()).toContainText("Add the roster");
+  await expect(upNext.getByRole("listitem").first()).toContainText(
+    `Soon ${tag} · Picture day in 3 days`,
+  );
+  await expect(upNext.getByRole("listitem").first().getByRole("link")).toHaveAttribute(
+    "href",
+    /^\/app\/jobs\/[0-9a-f-]{36}\/people$/,
+  );
+  await expect(upNext.getByRole("listitem").nth(1)).toContainText(`Far ${tag} · Next step`);
+  await expect(setup).toHaveCount(0);
+  // The photographer never sees the setup checklist; Up next is the same for them.
+  await staffTab.goto("/app");
+  const staffUpNext = staffTab.getByRole("region", { name: "Up next", exact: true });
+  await expect(staffUpNext.getByRole("listitem").first()).toContainText(`Soon ${tag}`);
+  await expect(staffTab.getByRole("region", { name: "Set up your studio" })).toHaveCount(0);
+
   // 5. A second studio sees nothing of the first.
   const other = `other-${tag}@example.test`;
   const outsider = await (await browser.newContext()).newPage();
@@ -134,6 +179,12 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(outsider).toHaveURL(/\/app$/);
   const outsiderTeam = await (await outsider.request.get("/api/v1/studio/team")).json();
   expect(outsiderTeam.team.map((m: { email: string }) => m.email)).toEqual([other]);
+  // Its Home checklist is its own: setup not done, and nothing of the first studio's jobs.
+  const outsiderChecklist = await outsider.request.get("/api/v1/studio/checklist");
+  expect(outsiderChecklist.status()).toBe(200);
+  const theirs = await outsiderChecklist.json();
+  expect(theirs.upNext).toBeNull();
+  expect(JSON.stringify(theirs)).not.toContain(tag);
   // Reusing the photographer's invite link fails for anyone else.
   const steal = await outsider.request.post("/api/v1/invites/accept", {
     data: { token: inviteLink.split("#").pop() },

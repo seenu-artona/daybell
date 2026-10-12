@@ -33,7 +33,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/v1/jobs/:id/qr-cards — how many children who may be photographed have a card, for the Overview's Print QR
- * cards to-do (Seenu, answer 2). Counts only; row-level security keeps it to the caller's studio.
+ * cards checklist task (Seenu, answer 2). Counts only; row-level security keeps it to the caller's studio.
  */
 export const GET = handle(async (_request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");

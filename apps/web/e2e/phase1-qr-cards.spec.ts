@@ -1,7 +1,8 @@
 import { type APIResponse, expect, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
-// Phase 1 step 3 "QR cards" (D32, D138, D140; Seenu's answers of Oct 11 2026; ADR 0015): the Overview to-do, the API's
+// Phase 1 step 3 "QR cards" (D32, D138, D140, D143; Seenu's answers of Oct 11 2026; ADR 0015, 0017): the checklist
+// task that ticks itself, the API's
 // PDF (four cards per page, no card for Do not photograph, blank cards, the same card on every reprint, never cached),
 // People's Print QR cards dialog, one card from the child panel, the job's activity, and that another studio can't
 // print or count the job's cards. Desktop only (D136). PDFs are checked by their page objects; the cards' text is
@@ -13,7 +14,7 @@ async function pdfPages(res: APIResponse): Promise<number> {
   return (await res.body()).toString("latin1").match(/\/Type \/Page(?!s)/g)?.length ?? 0;
 }
 
-test("QR cards: print from the API and from People, with the Overview to-do", async ({
+test("QR cards: print from the API and from People, with the checklist task", async ({
   page: firstTab,
   browser,
 }, info) => {
@@ -58,12 +59,15 @@ test("QR cards: print from the API and from People, with the Overview to-do", as
     doNotPhotograph: true,
   });
 
-  // 1. Overview: Print QR cards is to do, with a button to People's print dialog.
+  // 1. Overview: Print QR cards is next, and its row links to People's print dialog.
   await page.goto(`/app/jobs/${job.id}`);
-  const todos = main.getByRole("region", { name: "Set up: to-dos" });
-  const qrTodo = todos.getByRole("listitem").filter({ hasText: "Print QR cards" });
-  await expect(qrTodo).toContainText("To do");
-  await expect(qrTodo.getByRole("link", { name: "Print cards", exact: true })).toBeVisible();
+  const checklist = main.getByRole("region", { name: "Checklist", exact: true });
+  const qrTodo = checklist.getByRole("listitem").filter({ hasText: "Print QR cards" });
+  await expect(qrTodo).toContainText("Next");
+  await expect(qrTodo.getByRole("link")).toHaveAttribute(
+    "href",
+    `/app/jobs/${job.id}/people?print=qr`,
+  );
 
   // 2. The API: the whole job is 4 cards (never the Do not photograph child) on one page, never cached.
   const whole = await page.request.post(cardsPath, { data: {} });
@@ -93,20 +97,25 @@ test("QR cards: print from the API and from People, with the Overview to-do", as
   const status = await page.request.get(cardsPath);
   expect(await status.json()).toEqual({ qrCards: { eligible: 4, withCard: 4, blankCards: 1 } });
 
-  // 3. Overview: done, and the print is in the job's Recent activity.
+  // 3. Overview: the task ticked itself; Set up is done and picture day is far, so the list is collapsed to the next
+  // task (on track), and the print is in the job's Recent activity.
   await page.reload();
+  await expect(checklist.getByText("3 of 5 done", { exact: true })).toBeVisible();
+  await expect(checklist.getByText("Next: Picture day", { exact: true })).toBeVisible();
+  await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
   await expect(qrTodo).toContainText("Done");
-  await expect(qrTodo).toContainText("Every child who may be photographed has a card");
   const recent = main.getByRole("region", { name: "Recent activity" });
   await expect(
     recent.getByText(`${owner} printed QR cards for ${jobName}`, { exact: true }).first(),
   ).toBeVisible();
 
-  // 4. A child added later reopens the to-do; its button opens People's print dialog.
+  // 4. A child added later reopens the task (the list opens again: back in Set up); its row opens People's print
+  // dialog.
   await addChild({ firstName: "Late", lastName: "Comer", groupId: g5a });
   await page.reload();
+  await expect(qrTodo).toContainText("Next");
   await expect(qrTodo).toContainText("1 child without a card");
-  await qrTodo.getByRole("link", { name: "Print cards", exact: true }).click();
+  await qrTodo.getByRole("link").click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
   const dialog = page.getByRole("dialog", { name: "Print QR cards" });
   await expect(dialog).toBeVisible();

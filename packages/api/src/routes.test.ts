@@ -41,9 +41,24 @@ describe("API description", () => {
     expect(list.parameters.map((p) => `${p.in}:${p.name}:${p.required}`)).toEqual([
       "query:limit:false",
       "query:cursor:false",
+      "query:today:false",
     ]);
     const clients = doc.paths["/clients"]?.get as { parameters: { name: string }[] };
     expect(clients.parameters.map((p) => p.name)).toContain("q");
+  });
+
+  it("describes the checklist on jobs and Home (D143)", () => {
+    expect(doc.paths["/studio/checklist"]).toHaveProperty("get");
+    for (const name of [
+      "JobListItem",
+      "JobChecklistSummary",
+      "JobChecklist",
+      "StudioChecklist",
+      "UpNextReason",
+    ])
+      expect(doc.components.schemas).toHaveProperty(name);
+    const checklist = doc.paths["/studio/checklist"]?.get as { parameters: { name: string }[] };
+    expect(checklist.parameters.map((p) => p.name)).toEqual(["today"]);
   });
 
   it("describes jobs and clients", () => {

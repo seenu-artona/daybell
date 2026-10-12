@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MILESTONE_TODOS, MILESTONES } from "@daybell/core";
+import { MILESTONES, ONBOARDING_TASKS, TASK_KEYS, UP_NEXT_REASONS } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import enCA from "../messages/en-CA.json";
 import enUS from "../messages/en-US.json";
@@ -28,23 +28,22 @@ describe("locale files", () => {
   });
 
   it("hold whole phrases, not pieces joined in code (D96)", () => {
-    // The Overview's hero subline and the current milestone's "Now · 2 of 3 done" are one message each (D140).
     for (const messages of [enUS, enCA]) {
-      expect(messages.app.job.hero.step).toBe(
-        "Step {step} of {steps} · {milestone} · {done} of {total} done",
-      );
-      expect(messages.app.job.timeline.nowProgress).toBe("Now · {done} of {total} done");
+      expect(messages.app.checklist.progress).toBe("{done} of {total} done");
+      expect(messages.app.checklist.nextTask).toBe("Next: {task}");
+      expect(messages.app.home.upNext.row).toBe("{job} · {reason}");
     }
   });
 
-  it("name all five timeline milestones and every to-do (D140)", () => {
+  it("name every milestone, task, onboarding task and Up next reason (D143)", () => {
     for (const messages of [enUS, enCA]) {
-      expect(Object.keys(messages.app.job.timeline.milestones)).toEqual([...MILESTONES]);
-      const todos = Object.values(MILESTONE_TODOS).flat();
-      for (const key of todos) {
-        expect(Object.keys(messages.app.job.todos.items), key).toContain(key);
-        expect(Object.keys(messages.app.job.todos.notes), key).toContain(key);
-      }
+      expect(Object.keys(messages.app.checklist.milestones)).toEqual([...MILESTONES]);
+      expect(Object.keys(messages.app.checklist.tasks)).toEqual([
+        ...TASK_KEYS,
+        "reviewFailedPhotos",
+      ]);
+      expect(Object.keys(messages.app.home.onboarding.tasks)).toEqual([...ONBOARDING_TASKS]);
+      expect(Object.keys(messages.app.home.upNext.reasons)).toEqual([...UP_NEXT_REASONS]);
     }
   });
 });

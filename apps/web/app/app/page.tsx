@@ -1,26 +1,14 @@
 "use client";
 
-import type { JobsResponse, PendingInvite, TeamMember } from "@daybell/api";
 import { formatMoney, money } from "@daybell/core";
-import { Badge } from "@daybell/ui";
-import { Camera, ChevronDown, Megaphone, Package, Palette, Plug, UserPlus } from "lucide-react";
-import Link from "next/link";
+import { ChevronDown, Megaphone } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type ReactNode, useEffect, useState } from "react";
-import { api } from "@/lib/client-api";
+import { type ReactNode, useState } from "react";
 import { ActivityCard } from "./activity-card";
-import { checklistSteps, type StepKey } from "./checklist-steps";
+import { HomeChecklist } from "./home-checklist";
 import { useStudio } from "./me-context";
 import { PageFrame } from "./page-frame";
 
-const STEP_ICON: Record<StepKey, typeof Camera> = {
-  studio: Package,
-  team: UserPlus,
-  brand: Palette,
-  products: Package,
-  payouts: Plug,
-  job: Camera,
-};
 const RANGES = ["week", "month", "season"] as const;
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
@@ -56,29 +44,16 @@ function Trend({ points }: { points: number[] }) {
   );
 }
 
-/** Studio Home (D127): numbers like Shopify, then what needs you, jobs selling now, and recent activity. */
+/**
+ * Studio Home (D127, D143): numbers like Shopify, then the studio setup checklist or Up next (in place of "Needs you";
+ * ADR 0017), jobs selling now, and recent activity.
+ */
 export default function HomePage() {
-  const t = useTranslations("app");
   const th = useTranslations("app.home");
   const { me, version } = useStudio();
   const studio = me.studio;
   const canManage = studio.role === "owner" || studio.role === "admin";
   const [range, setRange] = useState<(typeof RANGES)[number]>("week");
-  const [hasTeam, setHasTeam] = useState<boolean | null>(null);
-  const [hasJob, setHasJob] = useState<boolean | null>(null);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: version re-checks after team changes.
-  useEffect(() => {
-    Promise.all([
-      api<{ team: TeamMember[] }>("/studio/team"),
-      canManage ? api<{ invites: PendingInvite[] }>("/studio/invites") : Promise.resolve(null),
-      api<JobsResponse>("/jobs?limit=1"),
-    ]).then(([team, invites, jobs]) => {
-      const members = team.ok ? team.data.team.length : 1;
-      setHasTeam(members > 1 || (invites?.ok ? invites.data.invites.length > 0 : false));
-      setHasJob(jobs.ok ? jobs.data.jobs.length > 0 : false);
-    });
-  }, [version, canManage]);
 
   const currency = studio.region === "ca" ? "CAD" : "USD";
   const locale = studio.region === "ca" ? "en-CA" : "en-US";
@@ -91,9 +66,6 @@ export default function HomePage() {
     { key: "familiesOrdered", value: th("dash"), money: false },
     { key: "averageOrder", value: th("dash"), money: false },
   ] as const;
-
-  const loading = hasTeam === null || hasJob === null;
-  const steps = loading ? [] : checklistSteps({ hasTeam, hasJob }).filter((s) => !s.done);
 
   return (
     <PageFrame>
@@ -147,49 +119,7 @@ export default function HomePage() {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
-        <Panel title={th("needsYou")}>
-          {loading ? (
-            <p className="m-0 border-t border-line px-5 py-4 text-muted">{th("checking")}</p>
-          ) : steps.length === 0 ? (
-            <p className="m-0 border-t border-line px-5 py-4 text-muted">{th("nothingNeeded")}</p>
-          ) : (
-            <ul className="m-0 list-none p-0">
-              {steps.map((step) => {
-                const Icon = STEP_ICON[step.key];
-                return (
-                  <li
-                    key={step.key}
-                    className="flex min-h-16 items-center gap-4 border-t border-line px-5 py-3"
-                  >
-                    <span
-                      className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-subtle"
-                      aria-hidden="true"
-                    >
-                      <Icon className="size-5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-semibold">{t(`checklist.${step.key}`)}</span>
-                      <span className="block text-sm text-muted">
-                        {t(`checklist.${step.key}Body`)}
-                      </span>
-                    </span>
-                    {step.soon ? (
-                      <Badge tone="draft">{t("checklist.soon")}</Badge>
-                    ) : step.href && (step.key !== "job" || canManage) ? (
-                      <Link
-                        href={step.href}
-                        className="inline-flex min-h-11 items-center px-2 font-semibold text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
-                      >
-                        {th(`actions.${step.key as "team" | "job"}`)}
-                        <span className="sr-only"> — {t(`checklist.${step.key}`)}</span>
-                      </Link>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Panel>
+        <HomeChecklist />
 
         <div className="flex flex-col gap-6">
           <Panel title={th("jobsSelling")}>
