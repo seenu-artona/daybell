@@ -7,10 +7,13 @@ import {
   Button,
   Card,
   CardMeta,
+  CardRow,
   CardTitle,
   Celebration,
   CodeInput,
   Field,
+  IconButton,
+  IconChip,
   JobProgress,
   MoneyStat,
   OptionCard,
@@ -26,13 +29,19 @@ import {
   Toast,
 } from "@daybell/ui";
 import {
+  ArrowLeft,
   Camera,
+  Check,
   CircleDollarSign,
+  Ellipsis,
   House,
+  ListFilter,
   Package,
+  QrCode,
   School,
   Settings,
   ShoppingCart,
+  Users,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useState } from "react";
@@ -187,6 +196,51 @@ export function Gallery() {
             {t("menu.settings")}
           </SideMenuItem>
         </SideMenu>
+      </Section>
+
+      <Section title={t("sections.jobPage")}>
+        <div className="flex flex-col gap-4 rounded-xl bg-canvas p-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <IconButton label={t("jobPage.back")}>
+              <ArrowLeft aria-hidden="true" />
+            </IconButton>
+            <IconButton label={t("jobPage.more")}>
+              <Ellipsis aria-hidden="true" />
+            </IconButton>
+            <IconButton label={t("jobPage.filter")}>
+              <ListFilter aria-hidden="true" />
+            </IconButton>
+            <Button variant="white" shape="pill">
+              {t("jobPage.import")}
+            </Button>
+            <Button shape="pill">{t("jobPage.startSelling")}</Button>
+          </div>
+          <Card variant="sheet" asChild>
+            <section aria-labelledby="gallery-todos">
+              <CardRow>
+                <h3 id="gallery-todos" className="m-0 flex-1 text-h3 font-bold">
+                  {t("jobPage.todosTitle")}
+                </h3>
+                <p className="m-0 text-label text-muted">{t("jobPage.progress")}</p>
+              </CardRow>
+              {(
+                [
+                  ["jobCreated", "lime", Check, "done"],
+                  ["rosterAdded", "lime", Users, "done"],
+                  ["printQrCards", "neutral", QrCode, "soon"],
+                ] as const
+              ).map(([key, tone, Icon, state]) => (
+                <CardRow key={key}>
+                  <IconChip tone={tone}>
+                    <Icon />
+                  </IconChip>
+                  <span className="flex-1 text-title-sm">{t(`jobPage.${key}`)}</span>
+                  <span className="text-label font-bold text-muted">{t(`jobPage.${state}`)}</span>
+                </CardRow>
+              ))}
+            </section>
+          </Card>
+        </div>
       </Section>
 
       <Section title={t("sections.money")}>

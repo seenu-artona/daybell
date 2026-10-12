@@ -5,7 +5,9 @@ import {
   Badge,
   Banner,
   Button,
+  buttonVariants,
   Card,
+  CardRow,
   CardTitle,
   Celebration,
   CodeInput,
@@ -13,6 +15,9 @@ import {
   cn,
   contrastRatio,
   Field,
+  IconButton,
+  IconChip,
+  iconButtonVariants,
   JobProgress,
   MIN_UI_CONTRAST,
   MoneyStat,
@@ -237,6 +242,104 @@ describe("D137 layout pieces", () => {
     expect(screen.getByText("Jobs").className).toContain("sr-only");
     expect(screen.getByText("Soon").className).toContain("sr-only");
     expect(screen.getByRole("navigation", { name: "Main" }).className).toContain("w-16");
+    await expectNoA11yViolations(container);
+  });
+});
+
+describe("D140 job page pieces", () => {
+  it("an icon button is round, 44px, named by its label, and has a visible focus ring", async () => {
+    const { container } = render(
+      <main>
+        <IconButton label="More actions">
+          <svg aria-hidden="true" />
+        </IconButton>
+      </main>,
+    );
+    const button = screen.getByRole("button", { name: "More actions" });
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.className).toMatch(/\bsize-11\b/);
+    expect(button.className).toMatch(/\brounded-full\b/);
+    expect(button.className).toMatch(/focus-visible:outline-2/);
+    await expectNoA11yViolations(container);
+  });
+
+  it("an icon button can render a link (the job header's back button)", () => {
+    render(
+      <IconButton asChild label="All jobs">
+        <a href="/app/jobs">
+          <svg aria-hidden="true" />
+        </a>
+      </IconButton>,
+    );
+    const link = screen.getByRole("link", { name: "All jobs" });
+    expect(link.getAttribute("type")).toBeNull();
+    expect(link.className).toMatch(/\bsize-11\b/);
+  });
+
+  it("requires a label for an icon button (type check)", () => {
+    // @ts-expect-error label is required: an icon-only button needs a name.
+    const element = <IconButton>x</IconButton>;
+    expect(element).toBeDefined();
+  });
+
+  it("the canvas tone sits on white cards and panels", () => {
+    expect(iconButtonVariants({ tone: "canvas" })).toMatch(/\bbg-canvas\b/);
+    expect(iconButtonVariants()).toMatch(/\bbg-surface\b/);
+  });
+
+  it("an icon chip is always hidden from screen readers, whatever is passed", () => {
+    const { container } = render(
+      <IconChip tone="lime" data-testid="chip">
+        <svg />
+      </IconChip>,
+    );
+    const chip = container.firstElementChild as HTMLElement;
+    expect(chip.getAttribute("aria-hidden")).toBe("true");
+    expect(chip.className).toMatch(/\bbg-lime-soft\b/);
+    expect(chip.className).toMatch(/\bsize-9\.5\b/);
+  });
+
+  it("an initials avatar is a round chip", () => {
+    const { container } = render(
+      <IconChip tone="info" shape="round">
+        MJ
+      </IconChip>,
+    );
+    const chip = container.firstElementChild as HTMLElement;
+    expect(chip.getAttribute("aria-hidden")).toBe("true");
+    expect(chip.className).toMatch(/\brounded-full\b/);
+  });
+
+  it("a pill button is fully round; the pill's rounding and padding win over the size's", () => {
+    const classes = buttonVariants({ variant: "white", shape: "pill" });
+    expect(classes).toMatch(/\brounded-full\b/);
+    expect(classes).not.toMatch(/\brounded-md\b/);
+    expect(classes).toMatch(/\bpx-5\b/);
+    expect(classes).not.toMatch(/px-\[18px\]/);
+    expect(classes).toMatch(/\bmin-h-11\b/);
+    expect(classes).toMatch(/\bbg-surface\b/);
+    render(<Button shape="pill">Start selling</Button>);
+    const button = screen.getByRole("button", { name: "Start selling" });
+    expect(button.className).toMatch(/\bbg-primary\b/);
+    expect(button.className).toMatch(/\brounded-full\b/);
+  });
+
+  it("a sheet card has 24px corners and no border; its rows are hairlines", async () => {
+    const { container } = render(
+      <main>
+        <Card variant="sheet" asChild>
+          <section aria-label="To-dos">
+            <CardRow>One</CardRow>
+            <CardRow>Two</CardRow>
+          </section>
+        </Card>
+      </main>,
+    );
+    const sheet = screen.getByRole("region", { name: "To-dos" });
+    expect(sheet.className).toMatch(/\brounded-xl\b/);
+    expect(sheet.className).not.toMatch(/\bborder\b/);
+    expect(screen.getByText("One").className).toMatch(/\bborder-b\b/);
+    expect(screen.getByText("One").className).toMatch(/\bmin-h-14\b/);
     await expectNoA11yViolations(container);
   });
 });

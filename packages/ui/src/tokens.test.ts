@@ -38,9 +38,37 @@ describe("tokens", () => {
     ["warning-text", "warning-soft"],
     ["info", "info-soft"],
     ["on-primary", "ink"],
+    // D140: the hero's green subline and the pill tabs sit on the warm canvas.
+    ["primary", "canvas"],
+    // D140: icon chips and avatars put ink on every soft background.
+    ["ink", "primary-soft"],
+    ["ink", "lime-soft"],
+    ["ink", "info-soft"],
+    ["ink", "warning-soft"],
+    ["ink", "danger-soft"],
+    ["ink", "subtle"],
   ];
   it.each(pairs)("%s on %s passes 4.5:1", (fg, bg) => {
     expect(contrastRatio(c(fg), c(bg))).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+  });
+
+  it("the hero type style carries its letter spacing into the theme (D140)", () => {
+    const css = buildThemeCss(tokens) as string;
+    expect(css).toContain("--text-hero: 40px;");
+    expect(css).toContain("--text-hero--line-height: 1.05;");
+    expect(css).toContain("--text-hero--font-weight: 800;");
+    expect(css).toContain("--text-hero--letter-spacing: -0.02em;");
+    expect(css).toContain("--radius-xl: 24px;");
+  });
+
+  it("the access code's label (white at 80% on ink) still passes 4.5:1", () => {
+    // 80% white over ink, blended per channel.
+    const ink = c("ink").slice(1);
+    const blended = [0, 2, 4]
+      .map((i) => Math.round(0.8 * 255 + 0.2 * Number.parseInt(ink.slice(i, i + 2), 16)))
+      .map((v) => v.toString(16).padStart(2, "0"))
+      .join("");
+    expect(contrastRatio(`#${blended}`, c("ink"))).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
   });
 
   it.each(STUDIO_COLORS.map((c) => [c.id, c.hex]))(

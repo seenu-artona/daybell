@@ -1,4 +1,5 @@
 import { ACTIVITY_TYPES, type ActivityType } from "@daybell/api";
+import type { IconChipTone } from "@daybell/ui";
 
 const KNOWN = new Set<string>(ACTIVITY_TYPES);
 
@@ -35,4 +36,20 @@ export const JOB_ACTIVITY_TYPES: readonly string[] = STORED_ACTIVITY_TYPES.filte
  * point at a job; client events (and legacy organization ones) at a client. */
 export function unnamedSubject(type: ActivityType): "aJob" | "aClient" {
   return type.startsWith("job.") || type.startsWith("roster.") ? "aJob" : "aClient";
+}
+
+/** The icon on an activity row's chip; the component maps each to a lucide icon. */
+export type ActivityIcon = "created" | "edited" | "imported" | "team" | "studio";
+
+/**
+ * The pastel chip at the start of an activity row (D140): new things green, edits amber, imports blue, team changes
+ * lime, studio changes grey. Decorative only: the sentence says what happened.
+ */
+export function activityChip(type: ActivityType): { tone: IconChipTone; icon: ActivityIcon } {
+  if (type === "roster.imported") return { tone: "info", icon: "imported" };
+  if (type.startsWith("member.") || type.startsWith("invite."))
+    return { tone: "lime", icon: "team" };
+  if (type.startsWith("studio.")) return { tone: "neutral", icon: "studio" };
+  if (type.endsWith(".created")) return { tone: "primary", icon: "created" };
+  return { tone: "warning", icon: "edited" };
 }

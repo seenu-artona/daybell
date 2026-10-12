@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { MILESTONE_TODOS, MILESTONES } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import enCA from "../messages/en-CA.json";
 import enUS from "../messages/en-US.json";
@@ -27,9 +28,23 @@ describe("locale files", () => {
   });
 
   it("hold whole phrases, not pieces joined in code (D96)", () => {
-    // The job journey's finished stages read "Set up (done)" to screen readers; the brackets are words too.
-    expect(enUS.app.job.journey.stageDone).toBe("{stage} (done)");
-    expect(enCA.app.job.journey.stageDone).toBe("{stage} (done)");
-    expect(Object.keys(enUS.app.job.journey)).not.toContain("done");
+    // The Overview's hero subline and the current milestone's "Now · 2 of 3 done" are one message each (D140).
+    for (const messages of [enUS, enCA]) {
+      expect(messages.app.job.hero.step).toBe(
+        "Step {step} of {steps} · {milestone} · {done} of {total} done",
+      );
+      expect(messages.app.job.timeline.nowProgress).toBe("Now · {done} of {total} done");
+    }
+  });
+
+  it("name all five timeline milestones and every to-do (D140)", () => {
+    for (const messages of [enUS, enCA]) {
+      expect(Object.keys(messages.app.job.timeline.milestones)).toEqual([...MILESTONES]);
+      const todos = Object.values(MILESTONE_TODOS).flat();
+      for (const key of todos) {
+        expect(Object.keys(messages.app.job.todos.items), key).toContain(key);
+        expect(Object.keys(messages.app.job.todos.notes), key).toContain(key);
+      }
+    }
   });
 });

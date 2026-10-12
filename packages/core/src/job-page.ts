@@ -1,20 +1,10 @@
 /**
- * The job page's Overview (D137, D138; ADR 0013): where a job is in its journey, the one next step, the picture day
- * countdown and the "Before you can sell" checklist. Only data that exists today is used: the job's status, its
- * picture day and how many children are on its roster. Photos, tagging, price lists and payouts arrive in later
- * steps, so their stages are never returned and their checklist items are never done yet.
+ * The job page's Overview (D140, amending D138; ADR 0014): one job timeline of five milestones, the current
+ * milestone's to-dos and the picture day countdown. Only data that exists today is used: the job's status, its
+ * picture day and how many children are on its roster. Photos, the shop, payouts and the lab arrive in later steps,
+ * so "Photos in" and "Fulfilment" are never current yet and the to-dos that need them are "Soon", never done.
  */
 import type { JobStatus } from "./jobs";
-
-export const JOURNEY_STAGES = [
-  "setUp",
-  "pictureDay",
-  "reviewPhotos",
-  "selling",
-  "fulfilment",
-  "closed",
-] as const;
-export type JourneyStage = (typeof JOURNEY_STAGES)[number];
 
 export interface JobFacts {
   status: JobStatus;
@@ -42,29 +32,92 @@ export function daysUntil(day: string, today: string): number {
   return Math.round(ms / 86_400_000);
 }
 
+/** The job timeline's five milestones, in order (D140). */
+export const MILESTONES = ["setUp", "pictureDay", "photosIn", "selling", "fulfilment"] as const;
+export type Milestone = (typeof MILESTONES)[number];
+
+/** Milestones whose data and screens arrive in later steps: shown as "Soon" until they are reached. */
+const UNBUILT: ReadonlySet<Milestone> = new Set(["photosIn", "selling", "fulfilment"]);
+
+export type MilestoneState = "done" | "current" | "upcoming";
+
+export interface MilestoneView {
+  key: Milestone;
+  state: MilestoneState;
+  /** Not built yet and not reached: shown with the word "Soon". */
+  soon: boolean;
+}
+
 /**
- * The journey stage, from data that exists now. A draft without a roster is being set up whatever the date; with a
- * roster it moves to picture day on the day and stays there until photos arrive (step 4).
+ * Where the job is, from data that exists now, or null once it is closed (every milestone done). A draft without a
+ * roster is being set up whatever the date; with a roster it moves to picture day on the day and stays there until
+ * photos arrive (step 4). Selling follows the status. Photos in and Fulfilment are never returned yet.
  */
-export function jobStage({ status, pictureDay, children, today }: JobFacts): JourneyStage {
-  if (status === "closed") return "closed";
+export function milestone({ status, pictureDay, children, today }: JobFacts): Milestone | null {
+  if (status === "closed") return null;
   if (status === "selling") return "selling";
   if (children === 0) return "setUp";
   return today < pictureDay ? "setUp" : "pictureDay";
 }
 
-export type NextStep =
-  | { key: "addRoster" }
-  | { key: "getReady"; pictureDay: string }
-  | { key: "uploadPhotos"; soon: true };
+/** The five milestones with their states: done before the current one, upcoming after it; all done when closed. */
+export function timeline(facts: JobFacts): MilestoneView[] {
+  const current = milestone(facts);
+  const at = current === null ? MILESTONES.length : MILESTONES.indexOf(current);
+  return MILESTONES.map((key, i) => {
+    const state: MilestoneState = i < at ? "done" : i === at ? "current" : "upcoming";
+    return { key, state, soon: state === "upcoming" && UNBUILT.has(key) };
+  });
+}
 
-/** The one thing to do next on a job, or null once it sells (the card is hidden). */
-export function nextStep(facts: JobFacts): NextStep | null {
-  const stage = jobStage(facts);
-  if (stage === "selling" || stage === "closed") return null;
-  if (facts.children === 0) return { key: "addRoster" };
-  if (stage === "setUp") return { key: "getReady", pictureDay: facts.pictureDay };
-  return { key: "uploadPhotos", soon: true };
+/** Each milestone's to-dos, in order (Seenu's answer 3 to the step 2c plan). */
+export const MILESTONE_TODOS = {
+  setUp: ["jobCreated", "rosterAdded", "printQrCards"],
+  pictureDay: ["printQrCards", "uploadPhotos"],
+  photosIn: ["tagPhotos"],
+  selling: ["choosePriceList", "connectPayouts", "startSelling"],
+  fulfilment: ["sendToLab"],
+} as const satisfies Record<Milestone, readonly string[]>;
+
+export type TodoKey = (typeof MILESTONE_TODOS)[Milestone][number];
+
+export interface Todo {
+  key: TodoKey;
+  done: boolean;
+  /** Not built yet: shown as "Soon", never done and never a link. */
+  soon: boolean;
+}
+
+/**
+ * A milestone's to-dos. QR cards ship in step 3, photos and tagging in step 4, the shop, payouts and selling in later
+ * steps, so those are "Soon". A job can only be selling once it has a price list and payouts, so once it sells (or
+ * has closed) "Choose a price list", "Connect payouts" and "Start selling" are done; before that they are Soon.
+ */
+export function milestoneTodos(
+  m: Milestone,
+  { status, children }: Pick<JobFacts, "status" | "children">,
+): Todo[] {
+  return MILESTONE_TODOS[m].map((key): Todo => {
+    switch (key) {
+      case "jobCreated":
+        return { key, done: true, soon: false };
+      case "rosterAdded":
+        return { key, done: children > 0, soon: false };
+      case "choosePriceList":
+      case "connectPayouts":
+      case "startSelling": {
+        const done = status === "selling" || status === "closed";
+        return { key, done, soon: !done };
+      }
+      default:
+        return { key, done: false, soon: true };
+    }
+  });
+}
+
+/** How many of a list of to-dos are done. */
+export function todoProgress(todos: readonly Todo[]): { done: number; total: number } {
+  return { done: todos.filter((t) => t.done).length, total: todos.length };
 }
 
 export const SELL_CHECKLIST = ["roster", "photos", "tagging", "priceList", "payouts"] as const;
@@ -77,7 +130,7 @@ export interface SellChecklistItem {
   soon: boolean;
 }
 
-/** "Before you can sell". Only "Roster added" is real today. */
+/** "Before you can sell", in the Start selling dialog. Only "Roster added" is real today. */
 export function sellChecklist({ children }: { children: number }): SellChecklistItem[] {
   return SELL_CHECKLIST.map((key) =>
     key === "roster" ? { key, done: children > 0, soon: false } : { key, done: false, soon: true },

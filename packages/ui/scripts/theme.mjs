@@ -13,6 +13,7 @@ export function buildThemeCss(tokens) {
       add(n, s.fontSize);
       add(`${n}--line-height`, s.lineHeight);
       add(`${n}--font-weight`, s.fontWeight);
+      if (s.letterSpacing) add(`${n}--letter-spacing`, s.letterSpacing);
     }
   }
   for (const t of tokens.radius.tokens) add(t.name, t.value);
