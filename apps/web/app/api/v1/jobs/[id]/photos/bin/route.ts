@@ -2,10 +2,12 @@ import { photoIdsInput } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { handle, parseBody } from "@/lib/api";
 import { assertCanUpload, photoResult } from "@/lib/photos";
+import { assertFunctionRegion, assertStorageRegion } from "@/lib/region-guard";
 import { loadRosterJob, pathId } from "@/lib/roster";
 import { studioScope } from "@/lib/studio";
 import { photoWriteRpc } from "@/lib/supabase/service";
 
+export const runtime = "nodejs";
 // Canadian studios' photos are handled in Montréal (D113; ADR 0016).
 export const preferredRegion = "yul1";
 
@@ -20,6 +22,8 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
   const { supabase, studio, userId } = await studioScope();
   assertCanUpload(studio);
+  assertFunctionRegion(studio.region);
+  assertStorageRegion(studio.region);
   const input = await parseBody(request, photoIdsInput);
   await loadRosterJob(supabase, studio.id, jobId);
   const moved = photoResult<number>(

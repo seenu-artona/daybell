@@ -8,11 +8,11 @@ import {
   type StudioSummary,
 } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
-import { canEditRoster, photoKey } from "@daybell/core";
+import { canEditRoster, photoKey, photoPrefix } from "@daybell/core";
 import type { PhotoStorage } from "@daybell/storage";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
-import { previewSigning } from "./photo-storage";
+import { isLocalDriver, queuePhotoForProcessing } from "./photo-storage";
 import { photoSystemRpc, photoWriteRpc } from "./supabase/service";
 
 /**
@@ -42,6 +42,11 @@ const NAMED: Record<string, () => ApiError> = {
     conflict("A photo that has sold can't be moved to the bin.", PHOTO_CONFLICTS.photoSold),
   not_retryable: () =>
     conflict("This photo can't be tried again right now.", PHOTO_CONFLICTS.notRetryable),
+  photo_purging: () =>
+    conflict(
+      "This photo is being deleted for good and can't be restored.",
+      PHOTO_CONFLICTS.photoPurging,
+    ),
 };
 
 export function photoError(error: NonNullable<DbError>): ApiError {
@@ -68,22 +73,22 @@ export async function loadBatch(
   supabase: SupabaseClient,
   studioId: string,
   batchId: string,
-): Promise<{ id: string; job_id: string; finished_at: string | null }> {
+): Promise<{ id: string; job_id: string }> {
   const batch = check(
     await supabase
       .from("upload_batches")
-      .select("id, job_id, finished_at")
+      .select("id, job_id")
       .eq("studio_id", studioId)
       .eq("id", batchId)
       .maybeSingle(),
-  ) as { id: string; job_id: string; finished_at: string | null } | null;
+  ) as { id: string; job_id: string } | null;
   if (!batch) throw new ApiError("not_found", "Upload not found.");
   return batch;
 }
 
 /** Columns the API reads from photos. Never the storage upload id (browsers can't read it anyway). */
 export const PHOTO_COLUMNS =
-  "id, job_id, batch_id, status, original_filename, byte_size, width, height, captured_at, failure_reason, binned_at, created_at";
+  "id, job_id, batch_id, status, original_filename, byte_size, width, height, captured_at, failure_reason, binned_at, created_at, updated_at";
 
 export interface PhotoRow {
   id: string;
@@ -98,7 +103,11 @@ export interface PhotoRow {
   failure_reason: Photo["failureReason"];
   binned_at: string | null;
   created_at: string;
+  updated_at: string;
 }
+
+/** A photo processing this long is stuck (its message went to the dead-letter queue) and may be tried again. */
+export const STUCK_MS = 15 * 60 * 1000;
 
 /** A photo of the studio, through row-level security. */
 export async function loadPhoto(
@@ -119,7 +128,11 @@ export async function loadPhoto(
 }
 
 /** Postgres returns "2026-10-01T09:30:05.47" for a timestamp without zone; kept exactly as the camera wrote it. */
-export function toPhoto(row: PhotoRow, thumbUrl: string | null): Photo {
+export function toPhoto(row: PhotoRow, thumbUrl: string | null, now = Date.now()): Photo {
+  const retryable =
+    row.binned_at === null &&
+    ((row.status === "failed" && row.failure_reason === "unreadable") ||
+      (row.status === "processing" && now - Date.parse(row.updated_at) > STUCK_MS));
   return {
     id: row.id,
     batchId: row.batch_id,
@@ -132,17 +145,21 @@ export function toPhoto(row: PhotoRow, thumbUrl: string | null): Photo {
     failureReason: row.failure_reason,
     binnedAt: row.binned_at,
     createdAt: row.created_at,
+    retryable,
     thumbUrl,
   };
 }
 
-/** A signed URL to one of a ready photo's plain previews (studio only), stable for an hour. */
+/** Previews are signed for an hour at most (never longer than the credentials signing them). */
+export const PREVIEW_URL_SECONDS = 3600;
+
+/** A signed URL to one of a ready photo's plain previews (studio only). */
 export async function previewUrl(
   storage: PhotoStorage,
   ids: { studioId: string; jobId: string; photoId: string },
   variant: "thumb.webp" | "view.webp",
 ): Promise<string> {
-  return storage.presignGet(photoKey(ids, variant), previewSigning());
+  return storage.presignGet(photoKey(ids, variant), { expiresIn: PREVIEW_URL_SECONDS });
 }
 
 /** One photo still uploading, as photos_uploading returns it. */
@@ -202,6 +219,7 @@ export async function processLocally(
             status: "uploading" | "processing" | "ready" | "failed";
             sha256: string;
             byte_size: number;
+            attempt: number;
             studio_name: string;
           } | null>(await photoSystemRpc(region, "photo_for_worker", { p_photo_id: id }));
           return row
@@ -212,6 +230,7 @@ export async function processLocally(
                 status: row.status,
                 sha256: row.sha256,
                 byteSize: Number(row.byte_size),
+                attempt: Number(row.attempt),
                 studioName: row.studio_name,
               }
             : null;
@@ -224,6 +243,7 @@ export async function processLocally(
           photoResult(
             await photoSystemRpc(region, "record_photo_result", {
               p_photo_id: id,
+              p_attempt: result.attempt,
               p_result: workerResultRow(result),
             }),
           );
@@ -254,4 +274,44 @@ export function workerResultRow(
         captured_at: result.capturedAt,
       }
     : { status: "failed", failure_reason: result.failureReason };
+}
+
+/**
+ * After an original is whole in storage: the photo moves to processing, and its previews are queued. With S3, S3's
+ * own event queues it, except when `requeue` (the upload was completed by an earlier request that didn't get as far
+ * as marking it): then it is queued here too, which is harmless if it was already (the worker is idempotent). With the
+ * local driver it is processed here, after the response.
+ */
+export async function markUploaded(
+  region: DataRegion,
+  storage: PhotoStorage,
+  userId: string,
+  photoId: string,
+  options: { requeue: boolean; after: (fn: () => Promise<void>) => void },
+): Promise<void> {
+  photoResult(await photoWriteRpc(region, "mark_photo_uploaded", userId, { p_photo_id: photoId }));
+  if (isLocalDriver(region)) options.after(() => processLocally(region, storage, photoId));
+  else if (options.requeue) await queuePhotoForProcessing(region, photoId);
+}
+
+/**
+ * The storage upload is gone (completed by an earlier request, or aborted). If the original is there at its declared
+ * size, the photo is uploaded: mark and queue it. Otherwise nothing more can be sent to that upload, so the photo is
+ * cancelled; dropping the file again starts afresh. Answers whether the photo is now uploaded.
+ */
+export async function recoverFinishedUpload(
+  region: DataRegion,
+  storage: PhotoStorage,
+  userId: string,
+  photo: UploadingPhoto,
+  after: (fn: () => Promise<void>) => void,
+): Promise<boolean> {
+  const stored = await storage.head(photoKey(keyParts(photo), "original"));
+  if (stored?.size === Number(photo.byte_size)) {
+    await markUploaded(region, storage, userId, photo.id, { requeue: true, after });
+    return true;
+  }
+  photoResult(await photoWriteRpc(region, "cancel_photo_upload", userId, { p_photo_id: photo.id }));
+  await storage.deleteAllVersions(photoPrefix(keyParts(photo)));
+  return false;
 }

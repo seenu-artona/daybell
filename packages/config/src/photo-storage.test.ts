@@ -52,7 +52,11 @@ describe("photoStorageSettings (D53, D113)", () => {
     ).toEqual({ driver: "local", root: "/x" });
     expect(() =>
       photoStorageSettings("ca", { STORAGE_DRIVER: "local", VERCEL_ENV: "production" }),
-    ).toThrow(/not allowed in production/);
+    ).toThrow(/not allowed on Vercel/);
+    // Previews and staging too (review S7).
+    expect(() =>
+      photoStorageSettings("ca", { STORAGE_DRIVER: "local", VERCEL: "1", VERCEL_ENV: "preview" }),
+    ).toThrow(/not allowed on Vercel/);
   });
 });
 

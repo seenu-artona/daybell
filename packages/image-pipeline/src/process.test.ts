@@ -202,7 +202,7 @@ describe("runPhotoJob", () => {
     const original = bytes ?? (await jpeg(800, 600, { exif: true }));
     const stored = new Map<string, Uint8Array>([[photoKey(ids, "original"), original]]);
     const deps = {
-      photo: vi.fn(async () =>
+      photo: vi.fn(async (_id: string) =>
         photo === null
           ? null
           : {
@@ -212,6 +212,7 @@ describe("runPhotoJob", () => {
               status: "processing" as const,
               sha256: sha(original),
               byteSize: original.length,
+              attempt: 1,
               studioName,
               ...photo,
             },
@@ -224,6 +225,7 @@ describe("runPhotoJob", () => {
       put: vi.fn(async (key: string, body: Uint8Array) => void stored.set(key, body)),
       report: vi.fn(async () => {}),
       log: vi.fn(),
+      sleep: vi.fn(async (_ms: number) => {}),
     } satisfies PhotoJobDeps;
     return { deps, stored };
   }
@@ -247,6 +249,7 @@ describe("runPhotoJob", () => {
       width: 800,
       height: 600,
       capturedAt: "2026-10-01T09:30:05.47",
+      attempt: 1,
     });
     // Logs carry the photo's id and a reason only, never the studio's name.
     expect(JSON.stringify(deps.log.mock.calls)).not.toContain("North Peak");
@@ -268,7 +271,24 @@ describe("runPhotoJob", () => {
     expect(deps.report).toHaveBeenCalledWith(ids.photoId, {
       status: "failed",
       failureReason: "hash_mismatch",
+      attempt: 1,
     });
+  });
+
+  it("waits for a photo S3 announced before the API marked it uploaded, then hands it back to the queue", async () => {
+    const { deps } = await setup({ status: "uploading" });
+    await expect(runPhotoJob(ids.photoId, deps)).rejects.toThrow("photo_not_uploaded_yet");
+    expect(deps.photo).toHaveBeenCalledTimes(4);
+    expect(deps.sleep).toHaveBeenCalledTimes(3);
+    expect(deps.report).not.toHaveBeenCalled();
+  });
+
+  it("carries on once the photo is marked uploaded", async () => {
+    const { deps } = await setup({});
+    const processing = await deps.photo(ids.photoId);
+    deps.photo.mockResolvedValueOnce({ ...(processing as WorkerPhoto), status: "uploading" });
+    expect(await runPhotoJob(ids.photoId, deps)).toBe("ready");
+    expect(deps.sleep).toHaveBeenCalledTimes(1);
   });
 
   it("fails a photo over 50 MB without reading it", async () => {

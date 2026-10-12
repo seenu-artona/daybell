@@ -26,6 +26,7 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
     status: string;
     sha256: string;
     byte_size: number;
+    attempt: number;
     studio_name: string;
   } | null>(await photoSystemRpc(region, "photo_for_worker", { p_photo_id: photoId }));
   if (!row) throw new ApiError("not_found", "Photo not found.");
@@ -38,6 +39,7 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
         status: row.status,
         sha256: row.sha256,
         byteSize: Number(row.byte_size),
+        attempt: Number(row.attempt),
         studioName: row.studio_name,
       },
     },

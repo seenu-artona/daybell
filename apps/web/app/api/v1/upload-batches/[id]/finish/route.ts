@@ -27,6 +27,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
     await photoWriteRpc(studio.region, "finish_upload_batch", userId, {
       p_batch_id: batchId,
       p_files_skipped: input.skipped,
+      p_duplicates: input.duplicates,
     }),
   );
   return new Response(null, { status: 204 });

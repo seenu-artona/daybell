@@ -1,9 +1,11 @@
 import type { PhotoCountsResponse } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { check, handle } from "@/lib/api";
+import { assertFunctionRegion, assertStorageRegion } from "@/lib/region-guard";
 import { loadRosterJob, pathId } from "@/lib/roster";
 import { studioScope } from "@/lib/studio";
 
+export const runtime = "nodejs";
 // Canadian studios' photos are handled in Montréal (D113; ADR 0016).
 export const preferredRegion = "yul1";
 
@@ -16,6 +18,8 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handle(async (_request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
+  assertStorageRegion(studio.region);
   await loadRosterJob(supabase, studio.id, jobId);
   const c = check(await supabase.rpc("job_photo_counts", { p_job_id: jobId })) as Record<
     string,

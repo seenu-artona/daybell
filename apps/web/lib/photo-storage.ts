@@ -115,8 +115,3 @@ export async function queuePhotoForProcessing(region: DataRegion, photoId: strin
     }),
   );
 }
-
-/** Signed preview URLs stay the same for an hour (signed at the top of the hour, valid for two), so browsers cache them. */
-export function previewSigning(now = Date.now()): { expiresIn: number; signedAt: Date } {
-  return { expiresIn: 2 * 60 * 60, signedAt: new Date(Math.floor(now / 3_600_000) * 3_600_000) };
-}

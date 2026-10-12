@@ -497,6 +497,16 @@ export const finishBatchInput = z.object({
       description:
         "Files the browser left out (not JPEG, empty, over 50 MB), for the batch's counts.",
     }),
+  duplicates: z
+    .number({ error: "validation.invalid" })
+    .int({ error: "validation.invalid" })
+    .min(0, { error: "validation.invalid" })
+    .max(1_000_000, { error: "validation.invalid" })
+    .default(0)
+    .meta({
+      description:
+        "Files that were twice in the drop (sent once), added to the batch's duplicates.",
+    }),
 });
 export type FinishBatchInput = z.infer<typeof finishBatchInput>;
 
@@ -535,9 +545,14 @@ export const photoListQuery = z.object({
 export type PhotoListQuery = z.infer<typeof photoListQuery>;
 
 /** The image worker's result for a photo (internal route). */
+const attempt = z.number().int().min(1).meta({
+  description:
+    "The round of processing, as the read gave it; results of an earlier round are ignored.",
+});
 export const workerResultInput = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ready"),
+    attempt,
     width: z.number().int().min(1).max(100_000),
     height: z.number().int().min(1).max(100_000),
     capturedAt: z
@@ -547,6 +562,7 @@ export const workerResultInput = z.discriminatedUnion("status", [
   }),
   z.object({
     status: z.literal("failed"),
+    attempt,
     failureReason: z.enum(["not_jpeg", "too_large", "hash_mismatch", "unreadable"]),
   }),
 ]);

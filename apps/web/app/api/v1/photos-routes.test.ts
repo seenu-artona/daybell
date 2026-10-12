@@ -1,5 +1,6 @@
 import { ApiError } from "@daybell/api";
 import { PART_BYTES, photoKey, signWorkerRequest } from "@daybell/core";
+import { StorageError } from "@daybell/storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Photo routes (ADR 0016): who may call them and in what order (the person and their role before the body; the
@@ -38,7 +39,6 @@ vi.mock("@/lib/photo-storage", () => ({
   photoStorage: () => storage,
   isLocalDriver: () => false,
   queuePhotoForProcessing: vi.fn(),
-  previewSigning: () => ({ expiresIn: 7200, signedAt: new Date(0) }),
   localStorageDriver: () => null,
 }));
 
@@ -166,9 +166,7 @@ describe("photo writes check the person, their role and the region before anythi
     });
   }
 
-  for (const [name, load, method, id] of WRITES.filter(
-    ([n]) => !n.includes("/photos/bin") && !n.includes("restore"),
-  )) {
+  for (const [name, load, method, id] of WRITES) {
     it(`${name}: a Canadian studio outside Montréal is refused before the body or storage`, async () => {
       vi.stubEnv("VERCEL_REGION", "iad1");
       vi.spyOn(console, "error").mockImplementation(() => {});
@@ -423,6 +421,106 @@ describe("uploading", () => {
   });
 });
 
+describe("recovering and cleaning up (review CR2, CR3, S11)", () => {
+  const key = photoKey({ studioId: STUDIO, jobId: JOB, photoId: PHOTO }, "original");
+  const uploading = [
+    { id: PHOTO, studio_id: STUDIO, job_id: JOB, byte_size: 10, upload_id: "up-1" },
+  ];
+  const complete = async () =>
+    (await import("./photos/[id]/upload-complete/route")).POST(
+      new Request("http://localhost/x", { method: "POST" }),
+      ctx(PHOTO),
+    );
+
+  it("marks a photo uploaded when an earlier request already completed its upload", async () => {
+    scope.mockResolvedValue({
+      supabase: fakeDatabase({ photos: { id: PHOTO, job_id: JOB } }),
+      studio: owner,
+      userId: "u",
+    });
+    writeRpc.mockImplementation(async (_r, fn) =>
+      fn === "photos_uploading" ? { data: uploading, error: null } : { data: null, error: null },
+    );
+    storage.listParts.mockRejectedValue(new StorageError("not_found"));
+    storage.head.mockResolvedValue({ size: 10 });
+    expect(await (await complete()).json()).toEqual({ status: "processing" });
+    expect(writeRpc).toHaveBeenLastCalledWith("ca", "mark_photo_uploaded", "u", {
+      p_photo_id: PHOTO,
+    });
+    expect(storage.deleteAllVersions).not.toHaveBeenCalled();
+  });
+
+  it("cancels a photo whose upload was aborted with nothing whole stored", async () => {
+    scope.mockResolvedValue({
+      supabase: fakeDatabase({ photos: { id: PHOTO, job_id: JOB } }),
+      studio: owner,
+      userId: "u",
+    });
+    writeRpc.mockImplementation(async (_r, fn) =>
+      fn === "photos_uploading" ? { data: uploading, error: null } : { data: null, error: null },
+    );
+    storage.listParts.mockRejectedValue(new StorageError("not_found"));
+    storage.head.mockResolvedValue(null);
+    const res = await complete();
+    expect(res.status).toBe(409);
+    expect(writeRpc).toHaveBeenLastCalledWith("ca", "cancel_photo_upload", "u", {
+      p_photo_id: PHOTO,
+    });
+  });
+
+  it("deletes the stored object when the photo was cancelled while completing", async () => {
+    let visible: unknown = { id: PHOTO, job_id: JOB };
+    const supabase = {
+      ...fakeDatabase({}),
+      from: () => {
+        const chain: object = new Proxy(
+          {},
+          {
+            get: (_t, prop: string) =>
+              prop === "then"
+                ? (resolve: (v: unknown) => void) => resolve({ data: visible, error: null })
+                : () => chain,
+          },
+        );
+        return chain;
+      },
+    };
+    scope.mockResolvedValue({ supabase, studio: owner, userId: "u" });
+    writeRpc.mockImplementation(async (_r, fn) => {
+      if (fn === "photos_uploading") return { data: uploading, error: null };
+      visible = null;
+      return { data: null, error: { code: "P0002", message: "Photo not found" } };
+    });
+    storage.listParts.mockResolvedValue([{ partNumber: 1, size: 10, etag: '"a"' }]);
+    storage.head.mockResolvedValue({ size: 10 });
+    expect((await complete()).status).toBe(404);
+    expect(storage.deleteAllVersions).toHaveBeenCalledWith(key.replace(/original$/, ""));
+  });
+
+  it("reads a worker's body only up to 4 KB, whatever its headers claim", async () => {
+    vi.stubEnv("PHOTO_WORKER_SECRETS", "s".repeat(32));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const big = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("x".repeat(5000)));
+        c.close();
+      },
+    });
+    const req = new Request(`https://x/api/v1/internal/photo-worker/photos/${PHOTO}/result`, {
+      method: "POST",
+      headers: { "Daybell-Region": "ca", "content-type": "application/json" },
+      body: big,
+      duplex: "half",
+    } as RequestInit);
+    const res = await (await import("./internal/photo-worker/photos/[id]/result/route")).POST(
+      req,
+      ctx(PHOTO),
+    );
+    expect(res.status).toBe(401);
+    expect(systemRpc).not.toHaveBeenCalled();
+  });
+});
+
 describe("the image worker's routes accept signed requests only", () => {
   const SECRET = "s".repeat(32);
   const path = `/api/v1/internal/photo-worker/photos/${PHOTO}`;
@@ -458,6 +556,7 @@ describe("the image worker's routes accept signed requests only", () => {
         status: "processing",
         sha256: "a".repeat(64),
         byte_size: 10,
+        attempt: 2,
         studio_name: "North Peak",
       },
       error: null,
@@ -474,6 +573,7 @@ describe("the image worker's routes accept signed requests only", () => {
       status: "processing",
       sha256: "a".repeat(64),
       byteSize: 10,
+      attempt: 2,
       studioName: "North Peak",
     });
     expect(systemRpc).toHaveBeenCalledWith("ca", "photo_for_worker", { p_photo_id: PHOTO });
@@ -499,6 +599,7 @@ describe("the image worker's routes accept signed requests only", () => {
     systemRpc.mockResolvedValue({ data: true, error: null });
     const body = JSON.stringify({
       status: "ready",
+      attempt: 2,
       width: 10,
       height: 8,
       capturedAt: "2026-10-01T09:30:05.47",
@@ -507,6 +608,7 @@ describe("the image worker's routes accept signed requests only", () => {
     expect(await res.json()).toEqual({ recorded: true });
     expect(systemRpc).toHaveBeenCalledWith("ca", "record_photo_result", {
       p_photo_id: PHOTO,
+      p_attempt: 2,
       p_result: { status: "ready", width: 10, height: 8, captured_at: "2026-10-01T09:30:05.47" },
     });
     systemRpc.mockClear();
@@ -560,7 +662,7 @@ describe("the daily clean-up", () => {
     systemRpc.mockImplementation(async (_r, fn, args) => {
       if (fn === "finish_idle_batches") return { data: 1, error: null };
       if (fn === "abandoned_uploads") return { data: [], error: null };
-      if (fn === "photos_due_for_purge") return { data: due, error: null };
+      if (fn === "begin_photo_purge") return { data: due, error: null };
       if (fn === "delete_purged_photos") return { data: args.p_photo_ids.length, error: null };
       return { data: null, error: null };
     });

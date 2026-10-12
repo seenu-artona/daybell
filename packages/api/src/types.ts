@@ -303,9 +303,13 @@ export const photo = z
     failureReason: z.enum(PHOTO_FAILURE_REASONS).nullable(),
     binnedAt: z.iso.datetime({ offset: true }).nullable(),
     createdAt: z.iso.datetime({ offset: true }),
+    retryable: z.boolean().meta({
+      description:
+        "Its previews can be made again: the worker couldn't read it, or it has been processing for 15 minutes.",
+    }),
     thumbUrl: z.url().nullable().meta({
       description:
-        "A 400 px preview (WebP, unwatermarked, for the studio only), signed for about an hour; null until ready.",
+        "A 400 px preview (WebP, unwatermarked, for the studio only), signed for up to an hour; null until ready.",
     }),
   })
   .meta({
@@ -330,7 +334,7 @@ export const photoDetailResponse = z.object({
   photo: photo.extend({
     viewUrl: z.url().nullable().meta({
       description:
-        "A 1600 px preview (WebP, unwatermarked, studio only), signed for about an hour.",
+        "A 1600 px preview (WebP, unwatermarked, studio only), signed for up to an hour.",
     }),
   }),
 });
@@ -424,6 +428,7 @@ export const workerPhotoResponse = z.object({
     status: z.enum(["uploading", "processing", "ready", "failed"]),
     sha256: z.string(),
     byteSize: z.number().int(),
+    attempt: z.number().int(),
     studioName: z.string(),
   }),
 });
@@ -446,6 +451,7 @@ export const PHOTO_CONFLICTS = {
   notUploading: "photos.notUploading",
   incomplete: "photos.incomplete",
   photoSold: "photos.photoSold",
+  photoPurging: "photos.photoPurging",
   notRetryable: "photos.notRetryable",
 } as const;
 export type PhotoConflict = (typeof PHOTO_CONFLICTS)[keyof typeof PHOTO_CONFLICTS];

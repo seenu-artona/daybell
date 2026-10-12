@@ -7,7 +7,13 @@ import { localPhotoStorage, type PhotoStorage } from "@daybell/storage";
 import type { SQSEvent } from "aws-lambda";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { configFromEnv, createHandler, photoIdsFromMessage, type WorkerConfig } from "./worker";
+import {
+  configFromEnv,
+  createHandler,
+  photoIdsFromMessage,
+  secretsFromJson,
+  type WorkerConfig,
+} from "./worker";
 
 const ids = {
   studioId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -49,28 +55,53 @@ describe("photoIdsFromMessage", () => {
   });
 });
 
-describe("configFromEnv", () => {
+describe("configFromEnv and the secret", () => {
+  const ARN =
+    "arn:aws:secretsmanager:ca-central-1:123456789012:secret:daybell-staging-ca-image-worker-AbCdEf";
   const env = {
     DATA_REGION: "ca",
     AWS_REGION: "ca-central-1",
-    PHOTO_WORKER_SECRET: SECRET,
+    PHOTO_WORKER_SECRETS_ARN: ARN,
     CALLBACK_BASE_URL: "https://example.vercel.app/",
     PHOTO_BUCKET: BUCKET,
   };
-  it("reads its settings", () => {
+  it("reads its settings, with no secret in the environment", () => {
     expect(configFromEnv(env)).toEqual({
       callbackBaseUrl: "https://example.vercel.app",
-      secret: SECRET,
       region: "ca",
       bucket: BUCKET,
+      secretArn: ARN,
     });
   });
   it("runs only in Canada for Canadian data (D113), and names what's wrong, never a value", () => {
     expect(() => configFromEnv({ ...env, AWS_REGION: "us-east-1" })).toThrow(/^AWS_REGION must be/);
     expect(() => configFromEnv({ ...env, DATA_REGION: "us" })).toThrow(/^DATA_REGION must be ca$/);
-    expect(() => configFromEnv({ ...env, PHOTO_WORKER_SECRET: "short" })).toThrow(/at least 32/);
+    expect(() =>
+      configFromEnv({ ...env, PHOTO_WORKER_SECRETS_ARN: ARN.replace("ca-central-1", "us-east-1") }),
+    ).toThrow(/in ca-central-1$/);
     expect(() => configFromEnv({ ...env, CALLBACK_BASE_URL: "http://x" })).toThrow(/https/);
     expect(() => configFromEnv({ ...env, PHOTO_BUCKET: "" })).toThrow(/^PHOTO_BUCKET is not set$/);
+  });
+  it("reads the signing secret and Vercel's bypass from the secret's JSON, refusing a short one by name", () => {
+    expect(secretsFromJson(JSON.stringify({ photoWorkerSecret: SECRET }))).toEqual({
+      secret: SECRET,
+    });
+    expect(
+      secretsFromJson(JSON.stringify({ photoWorkerSecret: SECRET, vercelProtectionBypass: "b" })),
+    ).toEqual({ secret: SECRET, protectionBypass: "b" });
+    for (const bad of [
+      "not json",
+      JSON.stringify({ photoWorkerSecret: "short-secret" }),
+      undefined,
+    ]) {
+      try {
+        secretsFromJson(bad);
+        throw new Error("accepted");
+      } catch (e) {
+        expect(String(e)).not.toContain("short-secret");
+        expect(String(e)).not.toContain("accepted");
+      }
+    }
   });
 });
 
@@ -107,6 +138,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
         status,
         sha256: createHash("sha256").update(original).digest("hex"),
         byteSize: original.length,
+        attempt: 2,
         studioName: "North Peak",
       },
     });
@@ -136,7 +168,9 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     expect(await handler(sqs(s3Event(photoKey(ids, "original"))))).toEqual({
       batchItemFailures: [],
     });
-    expect(reports).toEqual([{ status: "ready", width: 900, height: 600, capturedAt: null }]);
+    expect(reports).toEqual([
+      { status: "ready", width: 900, height: 600, capturedAt: null, attempt: 2 },
+    ]);
     for (const variant of ["thumb.webp", "view.webp", "proof-thumb.webp", "proof.webp"] as const)
       expect(await storage.head(photoKey(ids, variant))).not.toBeNull();
     expect(fetchFake.mock.calls.map(([url]) => String(url))).toEqual([
@@ -179,6 +213,47 @@ describe("the Lambda handler (S3 and the API faked)", () => {
       ["photo_error", ids.photoId, "TypeError"],
       ["message_ignored", "m1"],
     ]);
+  });
+
+  it("hands a photo still uploading back to the queue after a few short checks (review CR1)", async () => {
+    status = "uploading";
+    const sleep = vi.fn(async (_ms: number) => {});
+    const handler = createHandler({
+      config,
+      storage,
+      fetch: fetchFake as typeof fetch,
+      log: () => {},
+      sleep,
+    });
+    expect(await handler(sqs(s3Event(photoKey(ids, "original"))))).toEqual({
+      batchItemFailures: [{ itemIdentifier: "m0" }],
+    });
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(reports).toEqual([]);
+  });
+
+  it("treats only the API's own not_found as a missing photo; any other 404 is tried again (review CR8)", async () => {
+    const answer = (body: string) =>
+      vi.fn(
+        async () =>
+          new Response(body, { status: 404, headers: { "content-type": "application/json" } }),
+      );
+    const gone = createHandler({
+      config,
+      storage,
+      fetch: answer('{"error":{"code":"not_found","message":"x"}}') as unknown as typeof fetch,
+      log: () => {},
+    });
+    expect(await gone(sqs(s3Event(photoKey(ids, "original"))))).toEqual({ batchItemFailures: [] });
+    const proxy = createHandler({
+      config,
+      storage,
+      fetch: answer("<html>Not Found</html>") as unknown as typeof fetch,
+      log: () => {},
+    });
+    expect((await proxy(sqs(s3Event(photoKey(ids, "original"))))).batchItemFailures).toHaveLength(
+      1,
+    );
   });
 
   it("refuses to trust an API that rejects its signature", async () => {

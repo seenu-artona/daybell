@@ -35,7 +35,7 @@ export function supabaseSecretKey(
 /**
  * Where photos are stored, per data region (D53, D113):
  * - STORAGE_DRIVER: "s3" on Vercel; "local" for development, CI and end-to-end tests (files under LOCAL_STORAGE_DIR,
- *   default `.storage` in the web app). "local" is refused in production.
+ *   default `.storage` in the web app). "local" is refused on Vercel.
  * - s3, Canada: PHOTO_BUCKET_CA (the bucket, in ca-central-1), PHOTO_QUEUE_URL_CA (the photo-events queue, for
  *   retries), AWS_ROLE_ARN (the role Vercel's OIDC token assumes) and AWS_REGION, which must be ca-central-1 so
  *   Canadian photos never leave Canada.
@@ -61,8 +61,9 @@ export function photoStorageSettings(
 ): PhotoStorageSettings | null {
   const driver = required(env, "STORAGE_DRIVER");
   if (driver === "local") {
-    if (env.VERCEL_ENV === "production")
-      throw new Error("STORAGE_DRIVER=local is not allowed in production");
+    // Never on Vercel (production, preview or staging): only on a developer's machine and in CI.
+    if (env.VERCEL || env.VERCEL_ENV === "production")
+      throw new Error("STORAGE_DRIVER=local is not allowed on Vercel");
     return { driver, root: env.LOCAL_STORAGE_DIR?.trim() || ".storage" };
   }
   if (driver !== "s3") throw new Error("STORAGE_DRIVER must be s3 or local");

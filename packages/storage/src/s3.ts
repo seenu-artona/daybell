@@ -4,7 +4,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
-  HeadObjectCommand,
+  ListObjectsV2Command,
   ListObjectVersionsCommand,
   ListPartsCommand,
   type ObjectIdentifier,
@@ -26,8 +26,27 @@ function checkKey(key: string): string {
 
 function isNotFound(err: unknown): boolean {
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
-  return e?.name === "NotFound" || e?.name === "NoSuchKey" || e?.$metadata?.httpStatusCode === 404;
+  return (
+    e?.name === "NotFound" ||
+    e?.name === "NoSuchKey" ||
+    e?.name === "NoSuchUpload" ||
+    e?.$metadata?.httpStatusCode === 404
+  );
 }
+
+/** An upload that was completed or aborted is "not found", as the local driver says it. */
+async function uploadCall<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    if (isNotFound(err)) throw new StorageError("not_found");
+    throw err;
+  }
+}
+
+/** Signed reads never outlive the credentials that sign them (temporary role credentials last about an hour). */
+const MIN_URL_SECONDS = 60;
+const SAFETY_SECONDS = 30;
 
 /**
  * The S3 driver (S3 in ca-central-1 now; R2 later through the same API). The client is made by the caller: on Vercel
@@ -73,13 +92,15 @@ export function s3PhotoStorage({
       const parts: UploadedPart[] = [];
       let marker: string | undefined;
       for (;;) {
-        const out = await client.send(
-          new ListPartsCommand({
-            Bucket: bucket,
-            Key: checkKey(key),
-            UploadId: uploadId,
-            ...(marker ? { PartNumberMarker: marker } : {}),
-          }),
+        const out = await uploadCall(() =>
+          client.send(
+            new ListPartsCommand({
+              Bucket: bucket,
+              Key: checkKey(key),
+              UploadId: uploadId,
+              ...(marker ? { PartNumberMarker: marker } : {}),
+            }),
+          ),
         );
         for (const p of out.Parts ?? [])
           if (p.PartNumber && p.ETag && p.Size !== undefined)
@@ -91,15 +112,17 @@ export function s3PhotoStorage({
     },
 
     async complete(key, uploadId, parts) {
-      await client.send(
-        new CompleteMultipartUploadCommand({
-          Bucket: bucket,
-          Key: checkKey(key),
-          UploadId: uploadId,
-          MultipartUpload: {
-            Parts: parts.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
-          },
-        }),
+      await uploadCall(() =>
+        client.send(
+          new CompleteMultipartUploadCommand({
+            Bucket: bucket,
+            Key: checkKey(key),
+            UploadId: uploadId,
+            MultipartUpload: {
+              Parts: parts.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+            },
+          }),
+        ),
       );
     },
 
@@ -113,20 +136,17 @@ export function s3PhotoStorage({
           }),
         );
       } catch (err) {
-        if (!isNotFound(err) && (err as { name?: string })?.name !== "NoSuchUpload") throw err;
+        if (!isNotFound(err)) throw err;
       }
     },
 
+    // By listing, not HeadObject: listing needs only s3:ListBucket, so the web app's role never reads originals.
     async head(key) {
-      try {
-        const out = await client.send(
-          new HeadObjectCommand({ Bucket: bucket, Key: checkKey(key) }),
-        );
-        return { size: out.ContentLength ?? 0 };
-      } catch (err) {
-        if (isNotFound(err)) return null;
-        throw err;
-      }
+      const out = await client.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: checkKey(key), MaxKeys: 1 }),
+      );
+      const found = out.Contents?.find((o) => o.Key === key);
+      return found ? { size: found.Size ?? 0 } : null;
     },
 
     async get(key) {
@@ -147,10 +167,20 @@ export function s3PhotoStorage({
       );
     },
 
-    presignGet(key, { expiresIn, signedAt }) {
-      return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: checkKey(key) }), {
-        expiresIn,
-        ...(signedAt ? { signingDate: signedAt } : {}),
+    async presignGet(key, { expiresIn, signedAt }) {
+      checkKey(key);
+      const signing = signedAt ?? new Date();
+      const credentials = await client.config.credentials();
+      let seconds = expiresIn;
+      if (credentials.expiration) {
+        const left =
+          Math.floor((credentials.expiration.getTime() - signing.getTime()) / 1000) -
+          SAFETY_SECONDS;
+        seconds = Math.max(MIN_URL_SECONDS, Math.min(expiresIn, left));
+      }
+      return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
+        expiresIn: seconds,
+        signingDate: signing,
       });
     },
 

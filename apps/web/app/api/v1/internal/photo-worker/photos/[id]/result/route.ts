@@ -30,6 +30,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   const recorded = photoResult<boolean>(
     await photoSystemRpc(region, "record_photo_result", {
       p_photo_id: photoId,
+      p_attempt: parsed.data.attempt,
       p_result: workerResultRow(parsed.data),
     }),
   );

@@ -3,10 +3,10 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
-// The local storage driver is for development, CI and end-to-end tests only (ADR 0016): a production build that
-// would use it fails here, before it can be deployed.
-if (process.env.STORAGE_DRIVER === "local" && process.env.VERCEL_ENV === "production")
-  throw new Error("STORAGE_DRIVER=local is not allowed in production");
+// The local storage driver is for development, CI and end-to-end tests only (ADR 0016): any Vercel build (production,
+// preview or staging) that would use it fails here, before it can be deployed.
+if (process.env.STORAGE_DRIVER === "local" && (process.env.VERCEL || process.env.VERCEL_ENV))
+  throw new Error("STORAGE_DRIVER=local is not allowed on Vercel");
 
 const config: NextConfig = {
   // Internal packages ship TypeScript source; Next compiles them (D7).

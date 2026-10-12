@@ -16,6 +16,31 @@ const REFUSED = () => new ApiError("not_signed_in", "Not allowed.");
 /** A worker request's body is a small JSON result; anything bigger is refused before it is hashed. */
 const MAX_WORKER_BODY = 4096;
 
+/** The body as text, reading no more than `max` bytes however much is sent (no Content-Length is trusted). */
+export async function readCapped(request: Request, max: number): Promise<string> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      throw REFUSED();
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    all.set(c, at);
+    at += c.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+
 export async function workerRequest(
   request: Request,
 ): Promise<{ region: DataRegion; body: string }> {
@@ -29,8 +54,7 @@ export async function workerRequest(
     throw new ApiError("internal", "Something went wrong on our side.");
   }
   if (Number(request.headers.get("content-length") ?? "0") > MAX_WORKER_BODY) throw REFUSED();
-  const body = await request.text();
-  if (body.length > MAX_WORKER_BODY) throw REFUSED();
+  const body = await readCapped(request, MAX_WORKER_BODY);
   const ok = await verifyWorkerRequest(secrets, request.headers.get(WORKER_SIGNATURE_HEADER), {
     method: request.method,
     path: new URL(request.url).pathname,

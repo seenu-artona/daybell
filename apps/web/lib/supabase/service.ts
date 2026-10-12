@@ -80,7 +80,7 @@ export function photoWriteRpc(
 export type PhotoSystemRpc =
   | "photo_for_worker"
   | "record_photo_result"
-  | "photos_due_for_purge"
+  | "begin_photo_purge"
   | "delete_purged_photos"
   | "abandoned_uploads"
   | "delete_abandoned_uploads"

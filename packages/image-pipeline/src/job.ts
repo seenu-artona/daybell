@@ -20,13 +20,16 @@ export interface WorkerPhoto {
   status: "uploading" | "processing" | "ready" | "failed";
   sha256: string;
   byteSize: number;
+  /** The round of processing; the result is reported for it, so a late result of an earlier round is ignored. */
+  attempt: number;
   /** For the watermark (Seenu, answer 4). Never logged. */
   studioName: string;
 }
 
-export type WorkerResult =
+export type WorkerResult = (
   | ({ status: "ready" } & PhotoFacts)
-  | { status: "failed"; failureReason: FailureReason };
+  | { status: "failed"; failureReason: FailureReason }
+) & { attempt: number };
 
 export interface PhotoJobDeps {
   photo(photoId: string): Promise<WorkerPhoto | null>;
@@ -36,6 +39,22 @@ export interface PhotoJobDeps {
   report(photoId: string, result: WorkerResult): Promise<void>;
   /** An event name, the photo's id and maybe a reason: nothing else. */
   log(event: string, photoId: string, reason?: string): void;
+  sleep?(ms: number): Promise<void>;
+}
+
+/**
+ * S3 announces an original when its upload completes, a moment before the API marks the photo uploaded. A photo
+ * still "uploading" is checked again a few times; then the message goes back to the queue (an error), so SQS tries
+ * again later instead of dropping it.
+ */
+export const UPLOADING_CHECKS = 3;
+export const UPLOADING_PAUSE_MS = 5000;
+
+export class PhotoNotUploadedYet extends Error {
+  constructor() {
+    super("photo_not_uploaded_yet");
+    this.name = "PhotoNotUploadedYet";
+  }
 }
 
 /** Previews are private: only signed URLs read them, and browsers may keep them for an hour. */
@@ -48,21 +67,26 @@ export async function runPhotoJob(
   deps: PhotoJobDeps,
   options: { fontFile?: string } = {},
 ): Promise<PhotoJobOutcome> {
-  const photo = await deps.photo(photoId);
+  let photo = await deps.photo(photoId);
+  for (let check = 1; photo?.status === "uploading"; check++) {
+    if (check > UPLOADING_CHECKS) throw new PhotoNotUploadedYet();
+    await (deps.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms))))(UPLOADING_PAUSE_MS);
+    photo = await deps.photo(photoId);
+  }
   if (!photo) {
     // Deleted (a cancelled upload, or purged): nothing to do.
     deps.log("photo_skipped", photoId, "missing");
     return "skipped";
   }
   if (photo.status !== "processing") {
-    // Already done (a repeated message) or not uploaded yet.
+    // Already done (a repeated message).
     deps.log("photo_skipped", photoId, photo.status);
     return "skipped";
   }
   const ids = { studioId: photo.studioId, jobId: photo.jobId, photoId: photo.id };
   const fail = async (reason: FailureReason): Promise<PhotoJobOutcome> => {
     deps.log("photo_failed", photoId, reason);
-    await deps.report(photoId, { status: "failed", failureReason: reason });
+    await deps.report(photoId, { status: "failed", failureReason: reason, attempt: photo.attempt });
     return "failed";
   };
 
@@ -87,7 +111,7 @@ export async function runPhotoJob(
       deps.put(photoKey(ids, variant), body, DERIVATIVE_CONTENT_TYPE, PREVIEW_CACHE_CONTROL),
     ),
   );
-  await deps.report(photoId, { status: "ready", ...result.facts });
+  await deps.report(photoId, { status: "ready", ...result.facts, attempt: photo.attempt });
   deps.log("photo_ready", photoId);
   return "ready";
 }

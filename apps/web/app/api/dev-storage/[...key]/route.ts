@@ -16,6 +16,8 @@ type Ctx = { params: Promise<{ key: string[] }> };
 const notFound = () => new Response(null, { status: 404 });
 
 function driver(request: Request) {
+  // Never on Vercel, whatever the settings say (review S7).
+  if (process.env.VERCEL) return null;
   // The region a local stack runs (one database); the cookie only picks among those configured.
   const cookie = request.headers.get("cookie")?.match(new RegExp(`${REGION_COOKIE}=(\\w+)`))?.[1];
   const region: DataRegion = isDataRegion(cookie) ? cookie : "ca";

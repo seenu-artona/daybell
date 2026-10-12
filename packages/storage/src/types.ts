@@ -33,18 +33,21 @@ export interface PhotoStorage {
     contentLength: number,
     expiresIn: number,
   ): Promise<string>;
-  /** The parts storage has received, in part order. The server completes an upload from these, never from the browser. */
+  /**
+   * The parts storage has received, in part order. The server completes an upload from these, never from the
+   * browser. An upload already completed or aborted throws StorageError("not_found"), as `complete` does.
+   */
   listParts(key: string, uploadId: string): Promise<UploadedPart[]>;
   complete(key: string, uploadId: string, parts: readonly UploadedPart[]): Promise<void>;
   /** Drops an unfinished upload and its parts. Missing uploads are not an error. */
   abort(key: string, uploadId: string): Promise<void>;
-  /** The object's size, or null if it doesn't exist. */
+  /** The object's size, or null if it doesn't exist (S3: by listing, so originals needn't be readable). */
   head(key: string): Promise<StoredObject | null>;
   get(key: string): Promise<Uint8Array<ArrayBuffer>>;
   put(key: string, body: Uint8Array, options: PutOptions): Promise<void>;
   /**
-   * A short-lived URL to read an object (previews for the studio's screens). `signedAt` lets callers round the
-   * signing time, so the same URL is handed out for a while and browsers can cache the image.
+   * A short-lived URL to read an object (previews for the studio's screens), valid for `expiresIn` seconds at most and
+   * never longer than the credentials that sign it. `signedAt` is for tests.
    */
   presignGet(key: string, options: { expiresIn: number; signedAt?: Date }): Promise<string>;
   /** Deletes every object and every version under a prefix (`{studio}/{job}/{photo}/`). Returns how many. */

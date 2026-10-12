@@ -41,8 +41,19 @@ export const log: Log = (event, photoId, reason) => {
   console.error(JSON.stringify(reason ? { event, photoId, reason } : { event, photoId }));
 };
 
+/** What the worker reads from its environment: no secrets (those are in Secrets Manager, read at cold start). */
+export interface EnvConfig {
+  callbackBaseUrl: string;
+  region: "ca";
+  bucket: string;
+  /** The Secrets Manager secret holding the signing secret and Vercel's bypass, in ca-central-1. */
+  secretArn: string;
+}
+
+const SECRET_ARN = /^arn:aws:secretsmanager:ca-central-1:\d{12}:secret:[A-Za-z0-9/_+=.@-]+$/;
+
 /** Every value a variable must have, by name only, so a misconfigured worker fails loudly and never quietly. */
-export function configFromEnv(env: Record<string, string | undefined>): WorkerConfig {
+export function configFromEnv(env: Record<string, string | undefined>): EnvConfig {
   const need = (name: string) => {
     const value = env[name]?.trim();
     if (!value) throw new Error(`${name} is not set`);
@@ -52,18 +63,34 @@ export function configFromEnv(env: Record<string, string | undefined>): WorkerCo
   if (region !== "ca") throw new Error("DATA_REGION must be ca");
   // Canadian photos are processed in Canada only (D113). AWS_REGION is set by Lambda itself.
   if (need("AWS_REGION") !== "ca-central-1") throw new Error("AWS_REGION must be ca-central-1");
-  const secret = need("PHOTO_WORKER_SECRET");
-  if (secret.length < 32) throw new Error("PHOTO_WORKER_SECRET must be at least 32 characters");
+  const secretArn = need("PHOTO_WORKER_SECRETS_ARN");
+  if (!SECRET_ARN.test(secretArn))
+    throw new Error("PHOTO_WORKER_SECRETS_ARN must be a Secrets Manager secret in ca-central-1");
   const base = need("CALLBACK_BASE_URL").replace(/\/+$/, "");
   if (!base.startsWith("https://")) throw new Error("CALLBACK_BASE_URL must be https");
-  const bypass = env.VERCEL_PROTECTION_BYPASS?.trim();
-  return {
-    callbackBaseUrl: base,
-    secret,
-    region,
-    bucket: need("PHOTO_BUCKET"),
-    ...(bypass ? { protectionBypass: bypass } : {}),
-  };
+  return { callbackBaseUrl: base, region, bucket: need("PHOTO_BUCKET"), secretArn };
+}
+
+/**
+ * The secret's value: JSON with `photoWorkerSecret` (at least 32 characters; one of the API's PHOTO_WORKER_SECRETS)
+ * and, when Vercel's deployment protection is on, `vercelProtectionBypass`. Errors name the field, never a value.
+ */
+export function secretsFromJson(text: string | undefined): {
+  secret: string;
+  protectionBypass?: string;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text ?? "");
+  } catch {
+    throw new Error("The worker's secret must be JSON");
+  }
+  const v = parsed as { photoWorkerSecret?: unknown; vercelProtectionBypass?: unknown };
+  if (typeof v.photoWorkerSecret !== "string" || v.photoWorkerSecret.trim().length < 32)
+    throw new Error("photoWorkerSecret must be at least 32 characters");
+  const bypass =
+    typeof v.vercelProtectionBypass === "string" ? v.vercelProtectionBypass.trim() : "";
+  return { secret: v.photoWorkerSecret.trim(), ...(bypass ? { protectionBypass: bypass } : {}) };
 }
 
 /**
@@ -123,7 +150,13 @@ export function workerApi(config: WorkerConfig, fetchImpl: typeof fetch = fetch)
   return {
     async photo(photoId: string): Promise<WorkerPhoto | null> {
       const res = await call("GET", `${API_PATH}/${photoId}`, "");
-      if (res.status === 404) return null;
+      if (res.status === 404) {
+        // Only the API's own "not found" means the photo is gone; any other 404 (a wrong address, a proxy) is an
+        // error, so the message is tried again rather than dropped.
+        const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+        if (body?.error?.code === "not_found") return null;
+        throw new Error("api_404");
+      }
       // The status only: a response body could echo data.
       if (!res.ok) throw new Error(`api_${res.status}`);
       return ((await res.json()) as { photo: WorkerPhoto }).photo;
@@ -144,6 +177,7 @@ export function createHandler(parts: {
   storage: PhotoStorage;
   fetch?: typeof fetch;
   log?: Log;
+  sleep?: (ms: number) => Promise<void>;
 }) {
   const api = workerApi(parts.config, parts.fetch);
   const write = parts.log ?? log;
@@ -155,6 +189,7 @@ export function createHandler(parts: {
       parts.storage.put(key, body, { contentType, cacheControl }),
     report: (id, result) => api.report(id, result),
     log: write,
+    ...(parts.sleep ? { sleep: parts.sleep } : {}),
   };
 
   return async (event: SQSEvent): Promise<SQSBatchResponse> => {

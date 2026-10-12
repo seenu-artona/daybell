@@ -48,11 +48,16 @@ export const GET = handle(async (request: Request) => {
         await photoSystemRpc(region, "abandoned_uploads", { p_limit: PAGE }),
       );
       if (rows.length === 0) break;
-      for (const row of rows)
+      for (const row of rows) {
         if (row.upload_id)
           await storage.abort(`${prefixOf(row)}original`, row.upload_id).catch(() => {
             console.error("photo_abort_failed", row.id);
           });
+        // An upload completed but never marked leaves an object behind: it goes too.
+        await storage.deleteAllVersions(prefixOf(row)).catch(() => {
+          console.error("photo_abort_failed", row.id);
+        });
+      }
       totals.droppedUploads += photoResult<number>(
         await photoSystemRpc(region, "delete_abandoned_uploads", {
           p_photo_ids: rows.map((r) => r.id),
@@ -62,8 +67,9 @@ export const GET = handle(async (request: Request) => {
     }
 
     while (inTime()) {
+      // Marked as purging first, so nobody restores a photo whose objects are being deleted.
       const rows = photoResult<Row[]>(
-        await photoSystemRpc(region, "photos_due_for_purge", { p_limit: PAGE }),
+        await photoSystemRpc(region, "begin_photo_purge", { p_limit: PAGE }),
       );
       if (rows.length === 0) break;
       const deleted: string[] = [];

@@ -159,11 +159,40 @@ describe("S3 driver", () => {
     await expect(storage.deleteAllVersions(original)).rejects.toThrow("invalid_key");
   });
 
-  it("answers null for a missing object and refuses unsafe keys", async () => {
-    vi.spyOn(client, "send").mockRejectedValueOnce(
-      Object.assign(new Error("x"), { name: "NotFound" }) as never,
-    );
+  it("finds an object's size by listing (no read permission on originals), null when it's missing", async () => {
+    const send = vi.spyOn(client, "send");
+    send.mockResolvedValueOnce({ Contents: [{ Key: original, Size: 42 }] } as never);
+    expect(await storage.head(original)).toEqual({ size: 42 });
+    expect(
+      (send.mock.calls[0] as unknown as [{ constructor: { name: string } }])[0].constructor.name,
+    ).toBe("ListObjectsV2Command");
+    send.mockResolvedValueOnce({ Contents: [{ Key: `${original}-other`, Size: 1 }] } as never);
     expect(await storage.head(original)).toBeNull();
     await expect(storage.head("../x")).rejects.toThrow("invalid_key");
+  });
+
+  it("says an upload that was completed or aborted is not found", async () => {
+    vi.spyOn(client, "send").mockRejectedValueOnce(
+      Object.assign(new Error("x"), { name: "NoSuchUpload" }) as never,
+    );
+    await expect(storage.listParts(original, "gone")).rejects.toThrow("not_found");
+  });
+
+  it("never signs a read for longer than its credentials last (review CR13)", async () => {
+    const signedAt = new Date("2026-10-11T12:00:00Z");
+    const short = new S3Client({
+      region: "ca-central-1",
+      credentials: async () => ({
+        accessKeyId: "AKIDEXAMPLE",
+        secretAccessKey: "secret",
+        sessionToken: "token",
+        expiration: new Date(signedAt.getTime() + 10 * 60_000),
+      }),
+    });
+    const url = await s3PhotoStorage({ client: short, bucket: "b" }).presignGet(
+      photoKey(ids, "thumb.webp"),
+      { expiresIn: 3600, signedAt },
+    );
+    expect(new URL(url).searchParams.get("X-Amz-Expires")).toBe("570");
   });
 });
