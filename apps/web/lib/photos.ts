@@ -278,11 +278,7 @@ export function workerResultRow(
         width: number;
         height: number;
         capturedAt: string | null;
-        qr?:
-          | { kind: "none" }
-          | { kind: "unreadable" }
-          | { kind: "card"; cardCode: string }
-          | undefined;
+        qr: { kind: "none" } | { kind: "unreadable" } | { kind: "card"; cardCode: string };
       }
     | { status: "failed"; failureReason: string },
 ): Record<string, unknown> {
@@ -292,14 +288,11 @@ export function workerResultRow(
     width: result.width,
     height: result.height,
     captured_at: result.capturedAt,
-    ...(result.qr
-      ? {
-          qr:
-            result.qr.kind === "card"
-              ? { kind: "card", card_code: result.qr.cardCode }
-              : { kind: result.qr.kind },
-        }
-      : {}),
+    // Always sent for a ready photo (security review 2).
+    qr:
+      result.qr.kind === "card"
+        ? { kind: "card", card_code: result.qr.cardCode }
+        : { kind: result.qr.kind },
   };
 }
 

@@ -34,6 +34,8 @@ function Album({ album }: { album: TaggingAlbum }) {
   const { jobId, version, move } = useReview();
   const [open, setOpen] = useState(false);
   const panelId = useId();
+  const nameId = useId();
+  const summaryId = useId();
   const name = album.name ?? t("noClass");
   const drop = useDropTarget((ids) =>
     album.groupId
@@ -48,6 +50,8 @@ function Album({ album }: { album: TaggingAlbum }) {
             type="button"
             aria-expanded={open}
             aria-controls={panelId}
+            // The name and the summary, read with a space between them ("Room 4 2 of 3 children with photos").
+            aria-labelledby={`${nameId} ${summaryId}`}
             onClick={() => setOpen(!open)}
             className="flex min-h-11 w-full items-center gap-3 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
@@ -55,8 +59,10 @@ function Album({ album }: { album: TaggingAlbum }) {
               className={`size-5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
               aria-hidden="true"
             />
-            <span className="flex-1 text-title-sm font-bold text-ink">{name}</span>
-            <span className="text-sm text-muted">
+            <span id={nameId} className="flex-1 text-title-sm font-bold text-ink">
+              {name}
+            </span>
+            <span id={summaryId} className="text-sm text-muted">
               {t("summary", { withPhotos: album.childrenWithPhotos, children: album.children })}
             </span>
           </button>
@@ -169,6 +175,7 @@ function ChildRow({ child }: { child: TaggingChild }) {
   const [all, setAll] = useState(false);
   const name = t("childName", { first: child.firstName, last: child.lastName });
   const drop = useDropTarget((ids) => void move(ids, { kind: "child", childId: child.id }, name));
+  // "Show all" loads pages of 500 with "Show more" after each (code review nice 4).
   const everything = usePlacePhotos(
     jobId,
     all ? `place=child&id=${encodeURIComponent(child.id)}` : null,
@@ -176,7 +183,10 @@ function ChildRow({ child }: { child: TaggingChild }) {
     500,
   );
   const photos = all && everything.photos ? everything.photos : child.strip;
-  const hidden = child.strip.length >= REVIEW_STRIP_PHOTOS;
+  // The strip holds card photos too, which child.photos doesn't count: there is more only when the strip is full and
+  // shows fewer of the child's own photos than they have (code review nice 5).
+  const shownOwn = child.strip.filter((p) => p.place !== "card").length;
+  const hidden = child.strip.length >= REVIEW_STRIP_PHOTOS && shownOwn < child.photos;
   return (
     <li className="border-t border-line py-3 first:border-t-0">
       <div {...drop} className={`flex flex-col gap-2 ${DROP_TARGET}`}>
@@ -187,6 +197,11 @@ function ChildRow({ child }: { child: TaggingChild }) {
           </span>
         </div>
         {photos.length ? <PhotoStrip photos={photos} where={name} /> : null}
+        {all && everything.next ? (
+          <Button variant="ghost" className="self-start" onClick={() => void everything.more()}>
+            {t("showMorePhotos")}
+          </Button>
+        ) : null}
         {hidden ? (
           <Button
             variant="ghost"

@@ -155,8 +155,26 @@ describe("tagging writes check the person and their role before anything else (S
       await import("./jobs/[id]/photos/move/route"),
       await import("./jobs/[id]/photos/confirm/route"),
       await import("./jobs/[id]/qr-cards/[cardId]/child/route"),
+      // Database only, but in Montréal like their siblings (security review 12, code review nice 7).
+      await import("./jobs/[id]/tagging/review/route"),
+      await import("./jobs/[id]/tagging/no-photos/route"),
     ])
       expect(mod.preferredRegion).toBe("yul1");
+  });
+
+  it("Mark reviewed and the no-photos list refuse a Canadian studio outside Montréal", async () => {
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    scope.mockResolvedValue({
+      supabase: fakeDatabase({ jobs: { id: JOB, status: "draft" } }),
+      studio: owner,
+      userId: "u",
+    });
+    const review = (await import("./jobs/[id]/tagging/review/route")).POST;
+    const noPhotos = (await import("./jobs/[id]/tagging/no-photos/route")).GET;
+    expect((await review(json({}), ctx(JOB))).status).toBe(422);
+    expect((await noPhotos(new Request("http://localhost/x"), ctx(JOB))).status).toBe(422);
+    expect(writeRpc).not.toHaveBeenCalled();
   });
 });
 
@@ -265,6 +283,26 @@ describe("moving and confirming", () => {
       p_photo_ids: [PHOTO],
       p_as_card: true,
     });
+  });
+
+  it("names photos that must be confirmed first, and another job's card photos (code review M1)", async () => {
+    const move = (await import("./jobs/[id]/photos/move/route")).POST;
+    const confirm = (await import("./jobs/[id]/photos/confirm/route")).POST;
+    writeRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "P0001", message: "confirm_first" },
+    });
+    const res = await move(json({ photoIds: [PHOTO], target: { kind: "leftovers" } }), ctx(JOB));
+    expect([res.status, (await res.json()).error.fields]).toEqual([
+      409,
+      { form: "tagging.confirmFirst" },
+    ]);
+    writeRpc.mockResolvedValueOnce({ data: null, error: { code: "P0001", message: "other_card" } });
+    const other = await confirm(json({ photoIds: [PHOTO], asCard: false }), ctx(JOB));
+    expect([other.status, (await other.json()).error.fields]).toEqual([
+      409,
+      { form: "tagging.otherCard" },
+    ]);
   });
 
   it("refuses Mark reviewed while tagging isn't clean", async () => {
@@ -433,5 +471,57 @@ describe("the review's summary", () => {
     });
     expect(tagging.albums.map((a: { groupId: string | null }) => a.groupId)).toEqual(["g1", null]);
     expect(tagging.blankCardGroups[0].cardPhotoUrl).toContain(`/${PHOTO}/thumb.webp`);
+  });
+});
+
+describe("starting an upload (code review S1)", () => {
+  const GROUP = "4fad1a5c-6e1b-4a99-9b4c-7d5e6f708192";
+  const start = async (request: Request) =>
+    (await import("./jobs/[id]/upload-batches/route")).POST(request, ctx(JOB));
+  /** A body streamed in chunks, as public API clients over HTTP/2 send it: no content-length. */
+  const chunked = (text: string) =>
+    new Request("http://localhost/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(text));
+          controller.close();
+        },
+      }),
+      duplex: "half",
+    } as RequestInit);
+
+  beforeEach(() => {
+    scope.mockResolvedValue({
+      supabase: fakeDatabase({
+        jobs: { id: JOB, status: "draft" },
+        job_groups: { id: GROUP, name: "Room 4" },
+      }),
+      studio: owner,
+      userId: "u",
+    });
+    writeRpc.mockResolvedValue({ data: PHOTO, error: null });
+  });
+
+  it("keeps a class-photo upload's class when the body has no content-length", async () => {
+    const req = chunked(JSON.stringify({ groupId: GROUP }));
+    expect(req.headers.get("content-length")).toBeNull();
+    expect((await start(req)).status).toBe(201);
+    expect(writeRpc).toHaveBeenCalledWith("ca", "create_upload_batch", "u", {
+      p_job_id: JOB,
+      p_group_id: GROUP,
+    });
+  });
+
+  it("treats an empty body, sent either way, as an upload of individual photos", async () => {
+    expect((await start(new Request("http://localhost/x", { method: "POST" }))).status).toBe(201);
+    expect((await start(chunked(""))).status).toBe(201);
+    for (const call of writeRpc.mock.calls) expect(call[3]).toEqual({ p_job_id: JOB });
+  });
+
+  it("refuses a body that isn't JSON, however it was sent", async () => {
+    expect((await start(chunked("{ not json"))).status).toBe(400);
+    expect(writeRpc).not.toHaveBeenCalled();
   });
 });

@@ -530,6 +530,20 @@ export const taggedPhoto = z
     cardRead: z.boolean().meta({
       description: "Its QR card was read: a card photo, which can't be moved.",
     }),
+    qrKind: z.enum(["none", "card", "unreadable", "otherCard", "removedCard"]).nullable().meta({
+      description:
+        "What the image worker read: none, card (one of the job's cards), unreadable (looks like a card), otherCard (another job's card), removedCard (one of the job's cards, since removed with its child); null: no result that reads cards.",
+    }),
+    actions: z
+      .object({
+        move: z.boolean(),
+        confirm: z.boolean(),
+        markCard: z.boolean(),
+      })
+      .meta({
+        description:
+          "What review allows (for people who fix tagging): move it; confirm it where it is (Looks right / It's a normal photo); mark it a card photo. A photo that may be a card is confirmed before it moves; another job's card can only be marked a card photo; card photos stay card photos.",
+      }),
     thumbUrl: z.url().nullable().meta({
       description: "A 400 px preview (studio only), signed for up to an hour; null until ready.",
     }),
@@ -587,6 +601,10 @@ export const taggingSummary = z
       .int()
       .meta({ description: "Blank cards whose child is still to be named." }),
     cardPhotos: z.number().int(),
+    unlinkedCardPhotos: z.number().int().meta({
+      description:
+        "Card photos linked to none of the job's cards (such as photos marked card photos in Leftovers), listed on their own.",
+    }),
     noPhotos: z.number().int().meta({
       description:
         "Children with no photos yet (not counting Do not photograph). Doesn't block selling.",
@@ -664,6 +682,10 @@ export const TAGGING_CONFLICTS = {
   photoNotReady: "tagging.photoNotReady",
   cardClaimed: "tagging.cardClaimed",
   notReady: "tagging.notReady",
+  /** A photo that may be a card is confirmed (either way) before it can be moved. */
+  confirmFirst: "tagging.confirmFirst",
+  /** A photo of another job's card can only be marked a card photo. */
+  otherCard: "tagging.otherCard",
 } as const;
 export type TaggingConflict = (typeof TAGGING_CONFLICTS)[keyof typeof TAGGING_CONFLICTS];
 

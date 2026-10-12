@@ -1,6 +1,6 @@
 import { uploadBatchInput } from "@daybell/api";
 import { NextResponse } from "next/server";
-import { handle, parseBody } from "@/lib/api";
+import { handle, parseOptionalBody } from "@/lib/api";
 import { assertCanUpload, photoResult } from "@/lib/photos";
 import { assertFunctionRegion, assertStorageRegion } from "@/lib/region-guard";
 import { assertGroupInJob, loadRosterJob, pathId } from "@/lib/roster";
@@ -24,8 +24,8 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   assertCanUpload(studio);
   assertFunctionRegion(studio.region);
   assertStorageRegion(studio.region);
-  const hasBody = Number(request.headers.get("content-length") ?? "0") > 0;
-  const input = hasBody ? await parseBody(request, uploadBatchInput) : {};
+  // Read whatever was sent: a chunked or HTTP/2 body has no content-length (code review S1).
+  const input = await parseOptionalBody(request, uploadBatchInput);
   await loadRosterJob(supabase, studio.id, jobId);
   await assertGroupInJob(supabase, studio.id, jobId, input.groupId);
   const batchId = photoResult<string>(

@@ -33,7 +33,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
       p_photo_ids: input.photoIds,
     }),
   );
-  // Their batches are tagged again without them, or with them back (ADR 0018).
+  // Their batches are tagged again: binned photos get no tag but still mark where cards were (ADR 0018).
   if (moved > 0) after(() => tagBatchesOfPhotos(studio.region, input.photoIds));
   return NextResponse.json({ moved });
 });

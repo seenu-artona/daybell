@@ -2,10 +2,15 @@ import type { TaggingReviewedResponse } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { handle } from "@/lib/api";
 import { assertCanUpload } from "@/lib/photos";
+import { assertFunctionRegion } from "@/lib/region-guard";
 import { loadRosterJob, pathId } from "@/lib/roster";
 import { studioScope } from "@/lib/studio";
 import { photoWriteRpc } from "@/lib/supabase/service";
 import { taggingResult } from "@/lib/tagging";
+
+export const runtime = "nodejs";
+// Canadian studios' data is handled in Montréal (D113; ADR 0016), like the other tagging routes.
+export const preferredRegion = "yul1";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -19,6 +24,7 @@ export const POST = handle(async (_request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
   const { supabase, studio, userId } = await studioScope();
   assertCanUpload(studio);
+  assertFunctionRegion(studio.region);
   await loadRosterJob(supabase, studio.id, jobId);
   const reviewedAt = taggingResult<string>(
     await photoWriteRpc(studio.region, "mark_tagging_reviewed", userId, { p_job_id: jobId }),

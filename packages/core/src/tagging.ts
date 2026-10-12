@@ -92,7 +92,10 @@ export type Tag = TagTarget & { flag: PhotoFlag | null };
 
 /** What tagging knows about a photo's QR card, from the database (the card resolved within the photo's own job). */
 export type PhotoQr =
-  /** Not processed by a worker that reads cards: treated as a plain photo. */
+  /**
+   * Not processed by a worker that reads cards. In a batch where some photo was read, it may have been a card, so it
+   * counts as unreadable; in a batch where none was (uploaded before cards were read), as a plain photo (review 2).
+   */
   | null
   | { kind: "none" }
   | { kind: "unreadable" }
@@ -101,10 +104,36 @@ export type PhotoQr =
   /** One of the job's cards: a child's (childId) or a blank card (childId null). */
   | { kind: "card"; cardId: string; childId: string | null };
 
+/**
+ * What a photo does to the photos after it: a card sends them to its child (a card since deleted is null: it counts as
+ * another job's card), and a flag marks them for checking until the next card. Photos purged from the bin leave theirs
+ * on the next photo (TaggingPhoto.before), so purging a card photo never moves anyone's photos (security review 1).
+ */
+export interface TagStep {
+  card: { cardId: string | null; childId: string | null } | null;
+  flag: "afterUnreadable" | "afterFailed" | null;
+}
+
+/** A step that changes nothing: a plain photo. */
+export const NO_STEP: TagStep = { card: null, flag: null };
+
+/** One step, then another: the later card wins, and a flag stays until a card clears it. */
+export function composeSteps(a: TagStep, b: TagStep): TagStep {
+  if (b.card) return { card: b.card, flag: b.flag };
+  return { card: a.card, flag: b.flag ?? a.flag };
+}
+
 export interface TaggingPhoto {
   id: string;
   status: "uploading" | "processing" | "ready" | "failed";
   qr: PhotoQr;
+  /**
+   * In the bin: the photo gets no tag, but still does what it did to the photos after it (a card is still where it
+   * was), so binning a card photo never gives the next child's photos to the previous child (security review 1).
+   */
+  binned?: boolean;
+  /** What photos purged from the bin just before this one did (see TagStep). */
+  before?: TagStep | null;
 }
 
 export interface TaggingResult {
@@ -113,9 +142,44 @@ export interface TaggingResult {
   tag: Tag | null;
 }
 
+/** A batch uploaded before cards were read: no ready photo has a QR result, so null means "no card". */
+export function isLegacyBatch(photos: readonly TaggingPhoto[]): boolean {
+  return photos.every((p) => p.status !== "ready" || p.qr === null);
+}
+
+/** What one photo is, for tagging: a card, something that may be a card (flagged), or a plain photo. */
+type PhotoKind =
+  | { kind: "card"; cardId: string; childId: string | null }
+  | { kind: "doubt"; flag: "unreadableCard" | "otherCard" }
+  | { kind: "plain" };
+
+function kindOf(qr: PhotoQr, legacy: boolean): PhotoKind {
+  if (qr === null) return legacy ? { kind: "plain" } : { kind: "doubt", flag: "unreadableCard" };
+  switch (qr.kind) {
+    case "card":
+      return qr;
+    case "unreadable":
+      return { kind: "doubt", flag: "unreadableCard" };
+    case "otherCard":
+      return { kind: "doubt", flag: "otherCard" };
+    default:
+      return { kind: "plain" };
+  }
+}
+
+/** What a photo itself does to the photos after it (without what purged photos before it did). */
+export function tagStep(photo: Pick<TaggingPhoto, "status" | "qr">, legacy: boolean): TagStep {
+  if (photo.status !== "ready") return { card: null, flag: "afterFailed" };
+  const k = kindOf(photo.qr, legacy);
+  if (k.kind === "card") return { card: { cardId: k.cardId, childId: k.childId }, flag: null };
+  if (k.kind === "doubt") return { card: null, flag: "afterUnreadable" };
+  return NO_STEP;
+}
+
 /**
  * Tags one upload batch. `photos` must be in tagging order (compareTaggingOrder: capture time, then filename; D142 #7)
- * and exclude photos in the bin. With `classGroupId` the batch is a class-photo upload (Seenu, answer 3).
+ * and include photos in the bin (marked binned: they get no tag but still count where they are). With `classGroupId`
+ * the batch is a class-photo upload (Seenu, answer 3). Results are for the photos not in the bin.
  *
  * In a batch of individual photos the target starts at Leftovers. A readable card makes its own photo a card photo and
  * sends the photos after it to the card's child (or, for a blank card, to that card until the studio names the
@@ -128,48 +192,65 @@ export function tagBatch(
   photos: readonly TaggingPhoto[],
   options: { classGroupId: string | null },
 ): TaggingResult[] {
+  const legacy = isLegacyBatch(photos);
+  const live = photos.filter((p) => !p.binned);
   if (options.classGroupId) {
     const groupId = options.classGroupId;
-    return photos.map((photo) => {
+    return live.map((photo) => {
       if (photo.status !== "ready") return { photoId: photo.id, tag: null };
-      const qr = photo.qr;
+      const k = kindOf(photo.qr, legacy);
       // Cards inside class photos are hidden and otherwise ignored (Seenu, plan answer 8).
-      if (qr?.kind === "card")
-        return { photoId: photo.id, tag: { place: "card", cardId: qr.cardId, flag: null } };
-      const flag: PhotoFlag | null =
-        qr?.kind === "unreadable"
-          ? "unreadableCard"
-          : qr?.kind === "otherCard"
-            ? "otherCard"
-            : null;
-      return { photoId: photo.id, tag: { place: "classSet", groupId, flag } };
+      if (k.kind === "card")
+        return { photoId: photo.id, tag: { place: "card", cardId: k.cardId, flag: null } };
+      return {
+        photoId: photo.id,
+        tag: { place: "classSet", groupId, flag: k.kind === "doubt" ? k.flag : null },
+      };
     });
   }
 
   let target: TagTarget = { place: "leftovers" };
   let carried: PhotoFlag | null = null;
-  return photos.map((photo): TaggingResult => {
+  const apply = (step: TagStep) => {
+    if (step.card) {
+      const { cardId, childId } = step.card;
+      if (cardId === null) {
+        // A card deleted since (its child was removed): like another job's card, the photos after it are flagged.
+        carried = "afterUnreadable";
+      } else {
+        target = childId ? { place: "child", childId } : { place: "blankCard", cardId };
+        carried = null;
+      }
+    }
+    if (step.flag) carried = step.flag;
+  };
+  const results: TaggingResult[] = [];
+  for (const photo of photos) {
+    if (photo.before) apply(photo.before);
+    const step = tagStep(photo, legacy);
+    if (photo.binned) {
+      apply(step);
+      continue;
+    }
     if (photo.status !== "ready") {
-      carried = "afterFailed";
-      return { photoId: photo.id, tag: null };
+      apply(step);
+      results.push({ photoId: photo.id, tag: null });
+      continue;
     }
-    const qr = photo.qr;
-    if (qr?.kind === "card") {
-      target = qr.childId
-        ? { place: "child", childId: qr.childId }
-        : { place: "blankCard", cardId: qr.cardId };
-      carried = null;
-      return { photoId: photo.id, tag: { place: "card", cardId: qr.cardId, flag: null } };
+    const k = kindOf(photo.qr, legacy);
+    if (k.kind === "card") {
+      apply(step);
+      results.push({ photoId: photo.id, tag: { place: "card", cardId: k.cardId, flag: null } });
+      continue;
     }
-    if (qr?.kind === "unreadable" || qr?.kind === "otherCard") {
-      carried = "afterUnreadable";
-      return {
-        photoId: photo.id,
-        tag: { ...target, flag: qr.kind === "unreadable" ? "unreadableCard" : "otherCard" },
-      };
+    if (k.kind === "doubt") {
+      results.push({ photoId: photo.id, tag: { ...target, flag: k.flag } });
+      apply(step);
+      continue;
     }
-    return { photoId: photo.id, tag: { ...target, flag: carried } };
-  });
+    results.push({ photoId: photo.id, tag: { ...target, flag: carried } });
+  }
+  return results;
 }
 
 // ── Writing tags ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -234,6 +315,46 @@ export function tagCounts(tags: readonly (Tag | null)[]): {
     if (tag.flag) flagged++;
   }
   return { cards, leftovers, flagged, blankCards: blank.size };
+}
+
+// ── What people can do with a photo at review ────────────────────────────────────────────────────────────────────
+
+/**
+ * What the worker read about a photo, as the review screen sees it: removedCard is one of the job's cards that has
+ * since been removed (its child was deleted from a draft job); null: no result that reads cards.
+ */
+export type PhotoQrKind = "none" | "card" | "unreadable" | "otherCard" | "removedCard" | null;
+
+export interface ReviewPhoto {
+  status: TaggingPhoto["status"];
+  place: PhotoPlace;
+  flag: PhotoFlag | null;
+  qrKind: PhotoQrKind;
+}
+
+export interface ReviewActions {
+  /** Move to a child, a class's photo set or Leftovers (drag, or Move to…). */
+  move: boolean;
+  /** "Looks right" / "It's a normal photo": keep it where it is, visible to parents once tagged to a child. */
+  confirm: boolean;
+  /** "This is a card photo": hidden from parents for good. */
+  markCard: boolean;
+}
+
+/**
+ * The review actions a photo allows (the database refuses the rest; security review 3-4, code review M1):
+ * - card photos (read, or marked by a person) are never moved or confirmed again;
+ * - a photo of another job's card (or a removed card) shows that card's child: it can only be marked a card photo;
+ * - a photo that may be a card (unreadableCard) must be confirmed, either way, before it can be moved;
+ * - photos still processing or failed have nothing to do.
+ */
+export function reviewActions(p: ReviewPhoto): ReviewActions {
+  const none = { move: false, confirm: false, markCard: false };
+  if (p.status !== "ready" || p.place === "card" || p.qrKind === "card") return none;
+  if (p.qrKind === "otherCard" || p.qrKind === "removedCard" || p.flag === "otherCard")
+    return { move: false, confirm: false, markCard: true };
+  if (p.flag === "unreadableCard") return { move: false, confirm: true, markCard: true };
+  return { move: true, confirm: true, markCard: true };
 }
 
 // ── Review (D143's "Review tagging") ──────────────────────────────────────────────────────────────────────────────

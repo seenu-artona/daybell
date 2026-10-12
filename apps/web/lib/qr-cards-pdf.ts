@@ -19,6 +19,11 @@ import QRCode from "qrcode";
  * The QR card PDF (D32, D138; ADR 0015): four cards per US Letter page, cut along dashed lines. Built in memory on the
  * server in the studio's region and streamed to the browser; never stored, never logged. Text is Plus Jakarta Sans
  * (embedded, subset); the QR is drawn as vector squares, so it prints sharp at any size.
+ *
+ * Each card's front (the part photographed on picture day) holds only the child's name, class and QR. The access code,
+ * the studio's name and the instructions are on a tab below a dashed "Fold back before picture day" line (Seenu,
+ * answer 11 of Oct 12, 2026; ADR 0018): folded back, the tab stays attached for parents but is out of shot, so even a
+ * photo of a card whose QR isn't found shows no access code.
  */
 
 export interface PrintCard {
@@ -44,6 +49,8 @@ export interface CardTexts {
   accessCodeLabel: string;
   /** "Go to {link}, enter your code". */
   instructions: string;
+  /** "Fold back before picture day", under the fold line. */
+  foldBack: string;
 }
 
 const FONT_DIR = join(process.cwd(), "assets", "fonts");
@@ -127,6 +134,9 @@ export async function renderQrCardsPdf(
   return { pdf: await done, replacedCards };
 }
 
+/** The fold line's dashes: shorter than the cut lines', so the two are told apart (the fold is labelled in words too). */
+const FOLD_DASH = { dash: 2, space: 3 } as const;
+
 /** Dashed cut lines between the four cards. */
 function cutLines(doc: PDFKit.PDFDocument) {
   const { page, card } = CARD_LAYOUT;
@@ -151,18 +161,7 @@ function drawCard(
   const ink = color("ink");
   const muted = color("muted");
 
-  const studio = fitLine(
-    clean(texts.studioName),
-    width,
-    { max: CARD_LAYOUT.studio.size, min: 8 },
-    measure(BOLD),
-  );
-  doc
-    .font(BOLD)
-    .fontSize(studio.size)
-    .fillColor(muted)
-    .text(studio.text, x, top + AT.studio, { lineBreak: false });
-
+  // ── The front, photographed on picture day: name, class and QR only ──
   if (card.child) {
     const name = fitName(
       clean(card.child.firstName),
@@ -198,6 +197,41 @@ function drawCard(
   }
 
   drawQr(doc, card.qrPayload, origin.x + (size.width - qrSymbol) / 2, top + AT.qr, qrSymbol, ink);
+
+  // ── The fold line, then the tab that folds back: studio, access code, instructions ──
+  doc
+    .save()
+    .lineWidth(0.75)
+    .dash(FOLD_DASH.dash, { space: FOLD_DASH.space })
+    .strokeColor(color("line-strong"))
+    .moveTo(x, top + AT.fold)
+    .lineTo(x + width, top + AT.fold)
+    .stroke()
+    .undash()
+    .restore();
+  const fold = fitLine(
+    clean(texts.foldBack),
+    width,
+    { max: CARD_LAYOUT.foldLabel.size, min: 6 },
+    measure(REGULAR),
+  );
+  centered(doc, fold.text, origin.x, top + AT.foldLabel, size.width, {
+    font: REGULAR,
+    size: fold.size,
+    color: muted,
+  });
+
+  const studio = fitLine(
+    clean(texts.studioName),
+    width,
+    { max: CARD_LAYOUT.studio.size, min: 8 },
+    measure(BOLD),
+  );
+  centered(doc, studio.text, origin.x, top + AT.studio, size.width, {
+    font: BOLD,
+    size: studio.size,
+    color: muted,
+  });
 
   centered(doc, clean(texts.accessCodeLabel), origin.x, top + AT.codeLabel, size.width, {
     font: REGULAR,

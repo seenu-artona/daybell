@@ -587,7 +587,9 @@ export const workerResultInput = z.discriminatedUnion("status", [
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/)
       .nullable(),
-    qr: workerQr.optional(),
+    // Required (security review 2): a result from a worker that doesn't read cards is refused, and its message tried
+    // again, rather than tagging the photo as if it had no card.
+    qr: workerQr,
   }),
   z.object({
     status: z.literal("failed"),
@@ -649,14 +651,23 @@ export const claimBlankCardInput = z.object({
 });
 export type ClaimBlankCardInput = z.infer<typeof claimBlankCardInput>;
 
-export const TAGGING_PLACES = ["leftovers", "flagged", "child", "classSet", "blankCard"] as const;
+export const TAGGING_PLACES = [
+  "leftovers",
+  "flagged",
+  "child",
+  "classSet",
+  "blankCard",
+  "unlinkedCards",
+] as const;
+/** Places that list photos without an id. */
+const PLACES_WITHOUT_ID: readonly string[] = ["leftovers", "flagged", "unlinkedCards"];
 
 /** A page of the photos in one place on the review screen. Ids only in the URL (D96). */
 export const taggingPhotosQuery = z
   .object({
     place: z.enum(TAGGING_PLACES, { error: "validation.invalid" }).meta({
       description:
-        "leftovers, flagged, a child's photos (with their card photos), a class's Class photo set, or a blank card's photos.",
+        "leftovers, flagged, a child's photos (with their card photos), a class's Class photo set, a blank card's photos, or unlinkedCards (card photos linked to none of the job's cards, such as photos marked card photos in Leftovers).",
     }),
     id: z
       .uuid({ error: "validation.invalid" })
@@ -668,7 +679,7 @@ export const taggingPhotosQuery = z
       .meta({ description: "The nextCursor from the previous page (a photo's id)." }),
     limit: z.coerce.number().int().min(1).max(500).default(PHOTO_PAGE_SIZE),
   })
-  .refine((q) => ["leftovers", "flagged"].includes(q.place) === (q.id === undefined), {
+  .refine((q) => PLACES_WITHOUT_ID.includes(q.place) === (q.id === undefined), {
     error: "validation.invalid",
     path: ["id"],
   });

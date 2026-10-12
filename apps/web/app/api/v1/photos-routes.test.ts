@@ -610,13 +610,20 @@ describe("the image worker's routes accept signed requests only", () => {
       width: 10,
       height: 8,
       capturedAt: "2026-10-01T09:30:05.47",
+      qr: { kind: "none" },
     });
     const res = await result(await signed("POST", `${path}/result`, body));
     expect(await res.json()).toEqual({ recorded: true });
     expect(systemRpc).toHaveBeenCalledWith("ca", "record_photo_result", {
       p_photo_id: PHOTO,
       p_attempt: 2,
-      p_result: { status: "ready", width: 10, height: 8, captured_at: "2026-10-01T09:30:05.47" },
+      p_result: {
+        status: "ready",
+        width: 10,
+        height: 8,
+        captured_at: "2026-10-01T09:30:05.47",
+        qr: { kind: "none" },
+      },
     });
     // After the response, the photo's batch is tagged (ADR 0018).
     expect(afterCallbacks).toHaveLength(1);
@@ -629,6 +636,16 @@ describe("the image worker's routes accept signed requests only", () => {
       body: body.replace("ready", "failed"),
     });
     expect((await result(forged)).status).toBe(401);
+    expect(systemRpc).not.toHaveBeenCalled();
+    // A ready result from a worker that doesn't read cards is refused (its message is tried again; security review 2).
+    const old = JSON.stringify({
+      status: "ready",
+      attempt: 2,
+      width: 10,
+      height: 8,
+      capturedAt: null,
+    });
+    expect((await result(await signed("POST", `${path}/result`, old))).status).toBe(400);
     expect(systemRpc).not.toHaveBeenCalled();
   });
 

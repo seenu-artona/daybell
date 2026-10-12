@@ -2,13 +2,15 @@
 
 import {
   type MoveTarget,
+  PHOTO_CONFLICTS,
   type PhotosConfirmedResponse,
   type PhotosMovedResponse,
   TAGGING_CONFLICTS,
+  type TaggedPhoto,
   type TaggingSummary,
   type TaggingSummaryResponse,
 } from "@daybell/api";
-import { MAX_PHOTOS_PER_MOVE } from "@daybell/core";
+import { MAX_PHOTOS_PER_BIN_REQUEST, MAX_PHOTOS_PER_MOVE } from "@daybell/core";
 import { Banner, Button, Card } from "@daybell/ui";
 import { CheckCheck } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
@@ -36,23 +38,29 @@ const POLL_MS = 4000;
 const CONFLICT_KEYS = Object.fromEntries(
   Object.entries(TAGGING_CONFLICTS).map(([key, value]) => [value, key]),
 ) as Record<string, keyof typeof TAGGING_CONFLICTS>;
+const PHOTO_CONFLICT_KEYS = Object.fromEntries(
+  Object.entries(PHOTO_CONFLICTS).map(([key, value]) => [value, key]),
+) as Record<string, keyof typeof PHOTO_CONFLICTS>;
 
 /**
  * Photos' Review (D32, F16, D143; ADR 0018; Seenu's answers 1-8 and plan answers 1-10): QR tagging, fixed by hand.
  * Flagged photos and Leftovers at the top, then new children from blank cards, then one album per class with each
  * child's photos, and the children with no photos yet at the bottom. Photos move by drag, or select and Move to…
- * (WCAG 2.5.7); flagged photos are confirmed ("Looks right") or marked card photos. Mark reviewed is enabled only when
- * tagging is clean, and says why not in words. Owners, admins and photographers fix tagging; staff look.
+ * (WCAG 2.5.7); flagged photos are confirmed ("Looks right", or "It's a normal photo" for a photo that may be a card)
+ * or marked card photos, and junk goes to the bin (plan answer 4). The selection bar offers only what every ticked
+ * photo allows (core's reviewActions). Mark reviewed is enabled only when tagging is clean, and says why not in words.
+ * Owners, admins and photographers fix tagging; staff look.
  */
 export default function ReviewPage() {
   const t = useTranslations("app.photos.review");
+  const tp = useTranslations("app.photos");
   const text = useApiText();
   const format = useFormatter();
-  const { job, canEditRoster: canEdit, refreshSummary } = useJob();
+  const { job, canEditRoster: canEdit, refreshSummary, setTaggingReviewed } = useJob();
   const [summary, setSummary] = useState<TaggingSummary | null>(null);
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
-  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [checked, setChecked] = useState<ReadonlyMap<string, TaggedPhoto>>(new Map());
   const [moving, setMoving] = useState<string[] | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -64,11 +72,12 @@ export default function ReviewPage() {
     setFailed(!res.ok);
     if (!res.ok) return;
     setSummary(res.data.tagging);
+    setTaggingReviewed(res.data.tagging.done);
     // Anything new (a batch tagged, a photo processed) loads every section again.
     const key = JSON.stringify(res.data.tagging, (k, v) => (k.endsWith("Url") ? undefined : v));
     if (last.current && key !== last.current) setVersion((v) => v + 1);
     last.current = key;
-  }, [base]);
+  }, [base, setTaggingReviewed]);
 
   useEffect(() => {
     void loadSummary();
@@ -83,7 +92,7 @@ export default function ReviewPage() {
   }, [pending, loadSummary]);
 
   const changed = useCallback(async () => {
-    setChecked(new Set());
+    setChecked(new Map());
     setVersion((v) => v + 1);
     await loadSummary();
     refreshSummary();
@@ -92,9 +101,11 @@ export default function ReviewPage() {
   const problem = useCallback(
     (res: { code: string; fields: Record<string, string> }) => {
       const key = CONFLICT_KEYS[res.fields.form ?? ""];
-      return key ? t(`conflicts.${key}`) : text.error(res.code);
+      if (key) return t(`conflicts.${key}`);
+      const photoKey = PHOTO_CONFLICT_KEYS[res.fields.form ?? ""];
+      return photoKey ? tp(`conflicts.${photoKey}`) : text.error(res.code);
     },
-    [t, text],
+    [t, tp, text],
   );
 
   const move = useCallback(
@@ -121,7 +132,7 @@ export default function ReviewPage() {
 
   async function confirm(asCard: boolean) {
     setStatus("");
-    const ids = [...checked];
+    const ids = [...checked.keys()];
     let confirmed = 0;
     for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_MOVE) {
       const res = await api<PhotosConfirmedResponse>(`${base}/photos/confirm`, {
@@ -136,6 +147,27 @@ export default function ReviewPage() {
       confirmed += res.data.confirmed;
     }
     setStatus(t(asCard ? "announce.cards" : "announce.confirmed", { count: confirmed }));
+    await changed();
+  }
+
+  /** Junk goes to the bin (plan answer 4), from where it can be restored for 30 days; its upload is tagged again. */
+  async function moveToBin() {
+    setStatus("");
+    const ids = [...checked.keys()];
+    let moved = 0;
+    for (let i = 0; i < ids.length; i += MAX_PHOTOS_PER_BIN_REQUEST) {
+      const res = await api<PhotosMovedResponse>(`${base}/photos/bin`, {
+        method: "POST",
+        body: { photoIds: ids.slice(i, i + MAX_PHOTOS_PER_BIN_REQUEST) },
+      });
+      if (!res.ok) {
+        setStatus(problem(res));
+        await changed();
+        return;
+      }
+      moved += res.data.moved;
+    }
+    setStatus(tp("binned", { count: moved }));
     await changed();
   }
 
@@ -154,11 +186,11 @@ export default function ReviewPage() {
       canEdit,
       version,
       checked,
-      toggle: (photoId, on) =>
+      toggle: (photo, on) =>
         setChecked((current) => {
-          const next = new Set(current);
-          if (on) next.add(photoId);
-          else next.delete(photoId);
+          const next = new Map(current);
+          if (on) next.set(photo.id, photo);
+          else next.delete(photo.id);
           return next;
         }),
       move,
@@ -166,6 +198,12 @@ export default function ReviewPage() {
     }),
     [job.id, canEdit, version, checked, move],
   );
+
+  // What every ticked photo allows; "It's a normal photo" when one of them may be a card (Seenu, plan answer 1).
+  const selected = [...checked.values()];
+  const all = (action: keyof TaggedPhoto["actions"]) => selected.every((p) => p.actions[action]);
+  const mayBeCard = selected.some((p) => p.flag === "unreadableCard");
+  const someCannotMove = selected.length > 0 && !all("move");
 
   const s = summary;
   const subline = s
@@ -222,19 +260,35 @@ export default function ReviewPage() {
                 <span className="flex-1 text-sm font-semibold text-ink">
                   {t("selection.selected", { count: checked.size })}
                 </span>
-                <Button variant="secondary" shape="pill" onClick={() => setMoving([...checked])}>
-                  {t("selection.moveTo")}
+                {all("move") ? (
+                  <Button
+                    variant="secondary"
+                    shape="pill"
+                    onClick={() => setMoving([...checked.keys()])}
+                  >
+                    {t("selection.moveTo")}
+                  </Button>
+                ) : null}
+                {all("confirm") ? (
+                  <Button variant="secondary" shape="pill" onClick={() => void confirm(false)}>
+                    {mayBeCard ? t("selection.normalPhoto") : t("selection.looksRight")}
+                  </Button>
+                ) : null}
+                {all("markCard") ? (
+                  <Button variant="secondary" shape="pill" onClick={() => void confirm(true)}>
+                    {t("selection.isCard")}
+                  </Button>
+                ) : null}
+                <Button variant="secondary" shape="pill" onClick={() => void moveToBin()}>
+                  {t("selection.bin")}
                 </Button>
-                <Button variant="secondary" shape="pill" onClick={() => void confirm(false)}>
-                  {t("selection.looksRight")}
-                </Button>
-                <Button variant="secondary" shape="pill" onClick={() => void confirm(true)}>
-                  {t("selection.isCard")}
-                </Button>
-                <Button variant="ghost" shape="pill" onClick={() => setChecked(new Set())}>
+                <Button variant="ghost" shape="pill" onClick={() => setChecked(new Map())}>
                   {t("selection.clear")}
                 </Button>
               </div>
+            ) : null}
+            {canEdit && someCannotMove ? (
+              <p className="m-0 text-caption text-muted">{t("selection.confirmFirst")}</p>
             ) : null}
             {failed ? <Banner tone="danger" title={t("loadFailed")} /> : null}
           </>
@@ -254,6 +308,7 @@ export default function ReviewPage() {
             {s.flagged > 0 ? <Flagged count={s.flagged} /> : null}
             <Leftovers count={s.leftovers} />
             <BlankCards groups={s.blankCardGroups} onAnnounce={setStatus} onChanged={changed} />
+            {s.unlinkedCardPhotos > 0 ? <UnlinkedCards count={s.unlinkedCardPhotos} /> : null}
             <Albums albums={s.albums} />
             <NoPhotos count={s.noPhotos} />
           </div>
@@ -314,6 +369,38 @@ function Leftovers({ count }: { count: number }) {
             </Button>
           ) : null}
         </div>
+      </section>
+    </Card>
+  );
+}
+
+/**
+ * Card photos linked to none of the job's cards (security review 3): photos someone marked card photos in Leftovers or
+ * a class set, or another job's card. Kept for the studio, never shown to parents, and listed here so they don't
+ * vanish from the review.
+ */
+function UnlinkedCards({ count }: { count: number }) {
+  const t = useTranslations("app.photos.review.unlinkedCards");
+  const { jobId, version } = useReview();
+  const { photos, next, more } = usePlacePhotos(jobId, "place=unlinkedCards", version);
+  return (
+    <Card variant="sheet" asChild>
+      <section aria-labelledby="review-unlinked-cards" className="flex flex-col gap-3 px-5 py-4">
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <h3 id="review-unlinked-cards" className="m-0 text-h3">
+            {t("title")}
+          </h3>
+          <span className="text-sm text-muted">{t("count", { count })}</span>
+        </div>
+        <p className="m-0 text-sm text-muted">{t("intro")}</p>
+        {photos?.length ? (
+          <PhotoStrip photos={photos} where={t("title")} showFlags={false} />
+        ) : null}
+        {next ? (
+          <Button variant="ghost" className="self-start" onClick={() => void more()}>
+            {t("showMore")}
+          </Button>
+        ) : null}
       </section>
     </Card>
   );

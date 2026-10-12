@@ -4,6 +4,7 @@ import {
   type BlankCardGroup,
   type Child,
   type GroupsResponse,
+  QR_CARD_CONFLICTS,
   TAGGING_CONFLICTS,
 } from "@daybell/api";
 import { Button, Card, Field } from "@daybell/ui";
@@ -12,13 +13,14 @@ import { useEffect, useId, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { PhotoStrip } from "./photo-strip";
-import { usePlacePhotos, useReview } from "./review-context";
+import { allPlacePhotos, usePlacePhotos, useReview } from "./review-context";
 
 /**
  * New children from blank cards (Seenu, answer 2; plan answer 6): for each blank card in the photos, the card's photo,
  * the photos waiting for its child, and a form to name the child (first and last name, one of the job's classes). The
  * child joins the roster with the card's own access code. For a child already on the roster, "Give photos to an
- * existing child" opens Move to… with the card's photos, and the card's code stays unused.
+ * existing child" opens Move to… with every one of the card's photos (all pages, code review S4), and the card's code
+ * stays unused.
  */
 export function BlankCards({
   groups,
@@ -81,12 +83,10 @@ function BlankCard({
   const text = useApiText();
   const { jobId, canEdit, version, openMove } = useReview();
   const where = t("card", { n });
-  const { photos } = usePlacePhotos(
-    jobId,
-    `place=blankCard&id=${encodeURIComponent(group.cardId)}`,
-    version,
-  );
+  const query = `place=blankCard&id=${encodeURIComponent(group.cardId)}`;
+  const { photos } = usePlacePhotos(jobId, query, version);
   const waiting = (photos ?? []).filter((p) => p.place === "blankCard");
+  const [gathering, setGathering] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [groupId, setGroupId] = useState("");
@@ -112,8 +112,22 @@ function BlankCard({
     }
     setErrors(res.fields);
     if (res.fields.form === TAGGING_CONFLICTS.cardClaimed) setProblem(t("claimed"));
-    else if (res.fields.form) setProblem(t("unreadable"));
-    else if (res.code !== "invalid_input") setProblem(text.error(res.code));
+    else if (res.fields.form === QR_CARD_CONFLICTS.codesUnreadable) setProblem(t("unreadable"));
+    else if (res.code !== "invalid_input" || res.fields.form) setProblem(text.error(res.code));
+  }
+
+  /** Every photo waiting for this card's child, from every page, that can move (the rest are confirmed first). */
+  async function giveToExisting() {
+    setGathering(true);
+    setProblem("");
+    const all = await allPlacePhotos(jobId, query);
+    setGathering(false);
+    if (!all) {
+      setProblem(text.error("internal"));
+      return;
+    }
+    const ids = all.filter((p) => p.place === "blankCard" && p.actions.move).map((p) => p.id);
+    if (ids.length) openMove(ids);
   }
 
   const fieldError = (key: string) => text.field(errors[key]);
@@ -192,8 +206,9 @@ function BlankCard({
               <Button
                 type="button"
                 variant="secondary"
-                disabled={waiting.length === 0}
-                onClick={() => openMove(waiting.map((p) => p.id))}
+                disabled={group.photos === 0 || gathering}
+                aria-busy={gathering}
+                onClick={() => void giveToExisting()}
               >
                 {t("existing")}
               </Button>

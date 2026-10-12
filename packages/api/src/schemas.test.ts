@@ -482,6 +482,8 @@ describe("QR tagging and review (ADR 0018)", () => {
     expect(taggingPhotosQuery.safeParse({ place: "child", id: child }).success).toBe(true);
     expect(taggingPhotosQuery.safeParse({ place: "child" }).success).toBe(false);
     expect(taggingPhotosQuery.safeParse({ place: "flagged", id: child }).success).toBe(false);
+    expect(taggingPhotosQuery.safeParse({ place: "unlinkedCards" }).success).toBe(true);
+    expect(taggingPhotosQuery.safeParse({ place: "unlinkedCards", id: child }).success).toBe(false);
     expect(taggingChildrenQuery.parse({ noGroup: "true" }).noGroup).toBe(true);
     expect(taggingChildrenQuery.safeParse({}).success).toBe(false);
     expect(taggingChildrenQuery.safeParse({ groupId: child, noGroup: "true" }).success).toBe(false);
@@ -489,7 +491,10 @@ describe("QR tagging and review (ADR 0018)", () => {
 
   it("takes the worker's reading of a card: a code only for a card, never anything else", () => {
     const ready = { status: "ready", attempt: 1, width: 1, height: 1, capturedAt: null };
-    expect(workerResultInput.safeParse(ready).success).toBe(true);
+    // A ready result always says what was read (security review 2): an old worker's message is refused and retried.
+    expect(workerResultInput.safeParse(ready).success).toBe(false);
+    expect(workerResultInput.safeParse({ ...ready, qr: null }).success).toBe(false);
+    expect(workerResultInput.safeParse({ ...ready, qr: { kind: "none" } }).success).toBe(true);
     expect(
       workerResultInput.safeParse({
         ...ready,

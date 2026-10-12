@@ -5,14 +5,17 @@ import { expect, type Page, test } from "@playwright/test";
 import { createServerClient } from "@supabase/ssr";
 import QRCode from "qrcode";
 import sharp, { type OverlayOptions } from "sharp";
-import { signUpOwner } from "./helpers";
+import { PASSWORD, signUpOwner, VERIFY_LINK } from "./helpers";
+import { linkFromEmail } from "./mail";
 
 // Phase 1 step 5 "QR tagging and review" (D32, F16, D142 #7, D143; Seenu's answers of Oct 12 2026; ADR 0018), with
 // STORAGE_DRIVER=local (the web server reads the cards, as the Lambda does): a batch of photos with QR cards (one
 // before the first card, a card shot twice, a retake-free sequence, a damaged card, a blank card) is tagged; the
-// review moves a Leftover with Move to… by keyboard, drags a photo, confirms flagged photos, names the blank card's
-// child and marks tagging reviewed; the checklist ticks, a new upload reopens it; a class photo upload goes to its
-// class; another studio sees and changes nothing. Desktop only (D136). JPEGs and QR codes are made in the test.
+// review moves a Leftover with Move to… by keyboard, drags a photo, confirms flagged photos (a photo that may be a card
+// is confirmed before it can move), names the blank card's child and marks tagging reviewed; the checklist ticks; a
+// new upload that starts with a card (a retake, and a second blank card given to an existing child) reopens it without
+// Leftovers; a class photo upload goes to its class; staff see the review read-only; another studio sees and changes
+// nothing. Desktop only (D136). JPEGs and QR codes are made in the test.
 const run = `${Date.now()}`;
 
 /**
@@ -175,8 +178,19 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
     main.getByText("11 photos · 0 in Leftovers · 2 to check", { exact: true }),
   ).toBeVisible();
 
-  // 4. The damaged card is a card photo; the photo after it looks right.
+  // 4. The damaged card may be a card: it can't be moved until confirmed, either way (code review M1). It is a card
+  // photo; the photo after it looks right.
   await flagged.getByRole("checkbox", { name: "Select Flagged, photo 1", exact: true }).check();
+  await expect(main.getByRole("button", { name: "Move to…", exact: true })).toHaveCount(0);
+  await expect(
+    main.getByRole("button", { name: "It's a normal photo", exact: true }),
+  ).toBeVisible();
+  await expect(
+    main.getByText(
+      "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be moved.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await main.getByRole("button", { name: "This is a card photo", exact: true }).click();
   await expect(
     main.getByText("Marked 1 card photo. It is hidden from parents.", { exact: true }),
@@ -188,7 +202,9 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
 
   // 5. Drag one of Maya's photos onto Liam. Her strip starts with her two card photos, labelled "Card".
   const album = main.getByRole("region", { name: "Room 4", exact: true });
-  await album.getByRole("button", { name: /^Room 4/ }).click();
+  await album
+    .getByRole("button", { name: "Room 4 2 of 2 children with photos", exact: true })
+    .click();
   await expect(
     album.getByRole("img", { name: "Maya Johnson, photo 4", exact: true }),
   ).toBeVisible();
@@ -225,17 +241,64 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
   await expect(reviewRow).toContainText("Done");
 
-  // 8. A new upload reopens it (Seenu, answer 4).
-  const later = join(folder, "IMG_0100.JPG");
-  writeFileSync(later, await photo(100));
+  // 8. New photos reopen it, even with no Leftovers or flags (Seenu, answer 4): an upload that starts with Maya's card
+  // (a retake across uploads, plan answer 8) and has a second blank card, whose photo goes to Noah, already on the
+  // roster (plan answer 6).
+  expect(
+    (
+      await page.request.post(`/api/v1/jobs/${jobId}/qr-cards`, { data: { blankCards: 1 } })
+    ).status(),
+  ).toBe(200);
+  const secondBlank = (await cardCodes(page, jobId)).find((c) => c.child_id === null);
+  const retakes = join(folder, "Retakes");
+  mkdirSync(retakes);
+  for (const [i, card] of [
+    { payload: code(maya) },
+    undefined,
+    { payload: `DBC1:${secondBlank?.card_code ?? ""}` },
+    undefined,
+  ].entries())
+    writeFileSync(
+      join(retakes, `IMG_${String(i + 101).padStart(4, "0")}.JPG`),
+      await photo(i + 101, card),
+    );
   await page.goto(`/app/jobs/${jobId}/photos`);
   await main.getByRole("button", { name: "Upload photos", exact: true }).click();
-  await sheet.locator('input[type="file"][accept]').setInputFiles(later);
-  await expect(sheet.getByText("Done: 1 photo added", { exact: true })).toBeVisible({
+  await sheet.locator('input[type="file"][webkitdirectory]').setInputFiles(retakes);
+  await expect(sheet.getByText("Done: 4 photos added", { exact: true })).toBeVisible({
     timeout: 90_000,
   });
   await page.goto(`/app/jobs/${jobId}`);
   await expect(reviewRow).toContainText("Next");
+  await page.goto(`/app/jobs/${jobId}/photos/review`);
+  await expect(
+    main.getByText("15 photos · 0 in Leftovers · 0 to check", { exact: true }),
+  ).toBeVisible({ timeout: 120_000 });
+  const secondCard = main.getByRole("region", { name: "Blank card 1", exact: true });
+  await secondCard
+    .getByRole("button", { name: "Give photos to an existing child", exact: true })
+    .click();
+  const giving = page.getByRole("dialog", { name: "Move 1 photo", exact: true });
+  await giving.getByRole("searchbox", { name: "Find a child or class", exact: true }).fill("Noah");
+  await giving.getByRole("radio", { name: "Noah Garcia", exact: true }).check();
+  await giving.getByRole("button", { name: "Move", exact: true }).click();
+  await expect(main.getByText("Moved 1 photo to Noah Garcia.", { exact: true })).toBeVisible();
+  await expect(main.getByRole("region", { name: "Blank card 1", exact: true })).toHaveCount(0);
+  await expect(
+    main.getByText("Tagging looks clean. Mark it reviewed to tick Review tagging.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(markReviewed).toBeEnabled();
+  // The retake's photo went back to Maya: her one photo left after step 5, and this one.
+  await album
+    .getByRole("button", { name: "Room 4 3 of 3 children with photos", exact: true })
+    .click();
+  await expect(
+    album
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("heading", { name: "Maya Johnson", exact: true }) }),
+  ).toContainText("2 photos");
 
   // 9. A class photo upload goes to its class's Class photo set (answer 3).
   const classPhoto = join(folder, "CLASS_0001.JPG");
@@ -251,14 +314,68 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
     timeout: 90_000,
   });
   await page.goto(`/app/jobs/${jobId}/photos/review`);
-  await album.getByRole("button", { name: /^Room 4/ }).click();
+  await album
+    .getByRole("button", { name: "Room 4 3 of 3 children with photos", exact: true })
+    .click();
   await expect(
     album.getByRole("img", { name: "Room 4 class photo, photo 1", exact: true }),
   ).toBeVisible({
     timeout: 90_000,
   });
 
-  // 10. Another studio sees and changes nothing.
+  // 10. Staff see the review read-only (plan answer 10): no checkboxes, no Mark reviewed, and the API refuses.
+  const invite = await page.request.post("/api/v1/studio/invites", {
+    data: { email: `tagging-staff-${tag}@example.test`, role: "staff" },
+  });
+  expect(invite.status()).toBe(201);
+  const inviteLink = (await invite.json()).link as string;
+  const staffEmail = `tagging-staff-${tag}@example.test`;
+  const joining = await (await browser.newContext()).newPage();
+  await joining.goto(inviteLink);
+  await joining.getByRole("link", { name: "Create account", exact: true }).click();
+  await joining.getByLabel("Your email").fill(staffEmail);
+  await joining.getByRole("button", { name: "Email me a link", exact: true }).click();
+  await expect(
+    joining.getByRole("heading", { name: "Check your inbox", exact: true }),
+  ).toBeVisible();
+  const staffTab = await joining.context().newPage();
+  await staffTab.goto(await linkFromEmail(staffEmail, VERIFY_LINK));
+  await joining.close();
+  await staffTab.getByLabel("Password").fill(PASSWORD);
+  await staffTab.getByRole("button", { name: "Save and continue", exact: true }).click();
+  await expect(staffTab).toHaveURL(/\/invite$/);
+  await staffTab.getByRole("button", { name: "Join the team", exact: true }).click();
+  await expect(staffTab).toHaveURL(/\/app$/);
+  await staffTab.goto(`/app/jobs/${jobId}/photos/review`);
+  const staffMain = staffTab.getByRole("main");
+  await expect(
+    staffMain.getByText("Owners, admins and photographers fix tagging.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    staffMain.getByText("16 photos · 0 in Leftovers · 0 to check", { exact: true }),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect(staffMain.getByRole("button", { name: "Mark reviewed", exact: true })).toHaveCount(
+    0,
+  );
+  const staffAlbum = staffMain.getByRole("region", { name: "Room 4", exact: true });
+  await staffAlbum
+    .getByRole("button", { name: "Room 4 3 of 3 children with photos", exact: true })
+    .click();
+  await expect(
+    staffAlbum.getByRole("img", { name: "Maya Johnson, photo 1", exact: true }),
+  ).toBeVisible();
+  await expect(staffMain.getByRole("checkbox")).toHaveCount(0);
+  const anyPhoto = (await (await page.request.get(`/api/v1/jobs/${jobId}/photos`)).json()).photos[0]
+    .id as string;
+  expect(
+    (
+      await staffTab.request.post(`/api/v1/jobs/${jobId}/photos/move`, {
+        data: { photoIds: [anyPhoto], target: { kind: "leftovers" } },
+      })
+    ).status(),
+  ).toBe(403);
+
+  // 11. Another studio sees and changes nothing.
   const someone = (await (await page.request.get(`/api/v1/jobs/${jobId}/photos`)).json()).photos[0]
     .id as string;
   const outsiderTab = await (await browser.newContext()).newPage();

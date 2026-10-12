@@ -157,10 +157,29 @@ describe("pages", () => {
     const quiet = (qrSymbol / 25) * qrQuietModules;
     expect(qrSymbol + 2 * quiet).toBeLessThanOrEqual(card.width - 2 * padding);
     expect(at.qr - quiet).toBeGreaterThanOrEqual(at.group + CARD_LAYOUT.group.size * 1.25);
-    expect(at.qr + qrSymbol + quiet).toBeLessThanOrEqual(at.codeLabel);
+    expect(at.qr + qrSymbol + quiet).toBeLessThanOrEqual(at.fold);
     expect(at.instructions + CARD_LAYOUT.instructions.size * 2.6).toBeLessThanOrEqual(
       card.height - padding,
     );
+  });
+
+  it("keeps the access code off the photographed front: name, class and QR above the fold, the rest below (answer 11)", () => {
+    const { at } = CARD_LAYOUT;
+    expect(at.name + at.nameBlock).toBeLessThanOrEqual(at.group);
+    expect([at.name, at.group, at.qr].every((y) => y < at.fold)).toBe(true);
+    // Everything on the tab starts below the fold line, in order, without overlapping.
+    const tab = [
+      [at.foldLabel, CARD_LAYOUT.foldLabel.size],
+      [at.studio, CARD_LAYOUT.studio.size],
+      [at.codeLabel, CARD_LAYOUT.codeLabel.size],
+      [at.code, CARD_LAYOUT.code.size],
+      [at.instructions, CARD_LAYOUT.instructions.size],
+    ] as const;
+    expect(tab[0][0]).toBeGreaterThan(at.fold);
+    for (let i = 1; i < tab.length; i++) {
+      const [prevTop, prevSize] = tab[i - 1] as readonly [number, number];
+      expect((tab[i] as readonly [number, number])[0]).toBeGreaterThanOrEqual(prevTop + prevSize);
+    }
   });
 });
 

@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { cardQrPayload } from "@daybell/core";
 import QRCode from "qrcode";
 import sharp from "sharp";
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadQrReader, processOriginal, type QrReader, readCard } from "./index";
+import { ZXING_READER_SHA256 } from "./qr";
 
 // Reading QR cards (ADR 0018). Fixtures are made here: a card's QR (the payload a printed card holds, DBC1: + code)
 // composited into a 24-megapixel JPEG, as a camera would take a child holding a card at waist height.
@@ -186,8 +191,42 @@ describe("reading QR cards in photos (ADR 0018)", () => {
     expect(await readCard(broken, pixels, null)).toEqual({ kind: "unreadable" });
   });
 
+  it("keeps the first look's unread symbol when the larger look finds nothing (review S2)", async () => {
+    const pixels = { data: new Uint8Array(16), width: 2, height: 2 };
+    let calls = 0;
+    // First look: a symbol located but not read; the larger look: nothing at all.
+    const thenNothing: QrReader = async () => (calls++ === 0 ? [{ valid: false, text: "" }] : []);
+    expect(await readCard(thenNothing, pixels, async () => pixels)).toEqual({ kind: "unreadable" });
+    // The larger look reads only a code that isn't a card: the first look's doubt stands.
+    calls = 0;
+    const notACard: QrReader = async () =>
+      calls++ === 0 ? [{ valid: false, text: "" }] : [{ valid: true, text: "https://example.com" }];
+    expect(await readCard(notACard, pixels, async () => pixels)).toEqual({ kind: "unreadable" });
+  });
+
   it("refuses to start without its wasm file, rather than processing photos without cards", async () => {
     await expect(loadQrReader("/nonexistent/zxing_reader.wasm")).rejects.toThrow();
+  });
+
+  it("refuses a wasm file that doesn't match its pinned SHA-256, every time it loads (review 7)", async () => {
+    expect(sha(readFileSync(WASM))).toBe(ZXING_READER_SHA256);
+    const dir = await mkdtemp(join(tmpdir(), "daybell-qr-"));
+    const bad = join(dir, "zxing_reader.wasm");
+    const bytes = readFileSync(WASM);
+    bytes[bytes.length - 1] = (bytes[bytes.length - 1] ?? 0) ^ 1;
+    await writeFile(bad, bytes);
+    await expect(loadQrReader(bad)).rejects.toThrow(/SHA-256/);
+    // The right file still loads afterwards.
+    const again = await loadQrReader(WASM);
+    expect(await again({ data: new Uint8Array(64 * 64 * 4), width: 64, height: 64 })).toEqual([]);
+  });
+
+  it("pins the same SHA-256 as the Lambda build", () => {
+    const build = readFileSync(
+      new URL("../../../apps/image-worker/scripts/build.mjs", import.meta.url),
+      "utf8",
+    );
+    expect(build).toContain(`const ZXING_READER_SHA256 = "${ZXING_READER_SHA256}"`);
   });
 });
 

@@ -45,7 +45,8 @@ await build({
 cpSync(join(pipeline, "assets"), join(dist, "assets"), { recursive: true });
 
 // zxing-wasm's reader (ADR 0018), pinned in the pipeline at 3.1.4. Its checksum is pinned here too, so a changed file
-// is noticed before it ships; the package states the same checksum for itself.
+// is noticed before it ships; the package states the same checksum for itself. packages/image-pipeline/src/qr.ts pins
+// the same value and checks it again every time the Lambda loads the file (qr.test.ts keeps the two equal).
 const ZXING_READER_SHA256 = "e8af31edb56d0522f4de74495839385ef019ba8bc90d38e5ecb2f18795d86fb2";
 const fromPipeline = createRequire(join(pipeline, "package.json"));
 const wasm = fromPipeline.resolve("zxing-wasm/reader/zxing_reader.wasm");

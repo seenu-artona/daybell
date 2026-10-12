@@ -1,39 +1,25 @@
 "use client";
 
-import type { JobDetailResponse } from "@daybell/api";
 import { type SellChecklistItem, sellChecklist } from "@daybell/core";
 import { Circle, CircleCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
-import { api } from "@/lib/client-api";
 
 /**
  * "Before you can sell" (D138): Roster added and Tagging reviewed are real (ADR 0018: the checklist's Review tagging
- * task, from the server, the rule the sell transition will enforce); photos, price list and payouts arrive in later
- * steps and show "Coming soon". The state is always written out, never shown by colour alone (D91).
+ * task, from the job page's own checklist data, the rule the sell transition will enforce); photos, price list and
+ * payouts arrive in later steps and show "Coming soon". The state is always written out, never shown by colour alone
+ * (D91).
  */
 export function SellChecklist({
-  jobId,
   roster,
+  taggingReviewed,
 }: {
-  jobId: string;
   /** Children on the roster. */
   roster: number;
+  /** The checklist's Review tagging task is done. */
+  taggingReviewed: boolean;
 }) {
   const t = useTranslations("app.job.checklist");
-  const [taggingReviewed, setTaggingReviewed] = useState(false);
-  useEffect(() => {
-    let live = true;
-    void api<JobDetailResponse>(`/jobs/${encodeURIComponent(jobId)}`).then((res) => {
-      if (live && res.ok)
-        setTaggingReviewed(
-          res.data.job.checklist.tasks.some((task) => task.key === "reviewTagging" && task.done),
-        );
-    });
-    return () => {
-      live = false;
-    };
-  }, [jobId]);
   const items: SellChecklistItem[] = sellChecklist({ children: roster, taggingReviewed });
   return (
     <ul className="m-0 flex list-none flex-col gap-1 p-0">

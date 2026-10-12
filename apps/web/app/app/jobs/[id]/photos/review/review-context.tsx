@@ -3,7 +3,7 @@
 import type { MoveTarget, TaggedPhoto, TaggedPhotosResponse } from "@daybell/api";
 import { PHOTO_PAGE_SIZE } from "@daybell/core";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { api } from "@/lib/client-api";
+import { type ApiResult, api } from "@/lib/client-api";
 
 /** The drag-and-drop payload type: photo ids only, never names (D96). */
 export const DRAG_TYPE = "application/x-daybell-photos";
@@ -14,8 +14,9 @@ export interface ReviewContextValue {
   canEdit: boolean;
   /** Goes up after every change, so every section loads again. */
   version: number;
-  checked: ReadonlySet<string>;
-  toggle: (photoId: string, on: boolean) => void;
+  /** The ticked photos, with what each allows (the selection bar offers what every one of them allows). */
+  checked: ReadonlyMap<string, TaggedPhoto>;
+  toggle: (photo: TaggedPhoto, on: boolean) => void;
   /** Moves photos (from a drop, or the Move to… dialog) and announces the result. */
   move: (photoIds: string[], target: MoveTarget, targetName: string) => Promise<void>;
   /** Opens Move to… for these photos (the non-drag way, WCAG 2.5.7). */
@@ -30,9 +31,30 @@ export function useReview(): ReviewContextValue {
   return value;
 }
 
-/** The photos to move when a tile is dragged: every ticked photo if it is one of them, else just it. */
-export function dragIds(photoId: string, checked: ReadonlySet<string>): string[] {
-  return checked.has(photoId) ? [...checked] : [photoId];
+/**
+ * The photos to move when a tile is dragged: every ticked photo that can move if it is one of them, else just it. A
+ * photo that may be a card is confirmed before it moves (code review M1), so it never rides along.
+ */
+export function dragIds(photoId: string, checked: ReadonlyMap<string, TaggedPhoto>): string[] {
+  return checked.has(photoId)
+    ? [...checked.values()].filter((p) => p.actions.move).map((p) => p.id)
+    : [photoId];
+}
+
+/** Every page of a place's photos (up to 500 a page), for actions on all of them, e.g. a blank card's photos. */
+export async function allPlacePhotos(jobId: string, query: string): Promise<TaggedPhoto[] | null> {
+  const base = `/jobs/${encodeURIComponent(jobId)}/tagging/photos?${query}&limit=500`;
+  const photos: TaggedPhoto[] = [];
+  let cursor: string | null = null;
+  do {
+    const res: ApiResult<TaggedPhotosResponse> = await api<TaggedPhotosResponse>(
+      cursor ? `${base}&cursor=${encodeURIComponent(cursor)}` : base,
+    );
+    if (!res.ok) return null;
+    photos.push(...res.data.photos);
+    cursor = res.data.nextCursor;
+  } while (cursor);
+  return photos;
 }
 
 /** Photo ids from a drop, if it is ours: uuids only, at most 500. */

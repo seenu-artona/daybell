@@ -136,6 +136,11 @@ export function printableText(
  * not counting the light quiet zone around it) is at least 1.75 inches, the size tagging needs at arm's length. Long
  * names shrink to fit, then go on two lines (first, last), then are cut with "…": a card never prints over its
  * neighbour. `at` is each element's top, measured from the card's top edge.
+ *
+ * The card has two panels (Seenu, answer 11 of Oct 12, 2026; ADR 0015, ADR 0018): the front, which is photographed,
+ * holds only the child's name, class and QR; the access code, studio name and instructions are on a tab below a dashed
+ * "Fold back before picture day" line (at.fold). Folded back, the tab stays attached for parents but is out of shot,
+ * so a photo of a card whose QR isn't found never shows its access code.
  */
 export const CARD_LAYOUT = {
   page: { width: 612, height: 792 },
@@ -148,21 +153,26 @@ export const CARD_LAYOUT = {
   /** Light modules around the QR, as the QR standard asks; nothing is printed in them. */
   qrQuietModules: 4,
   at: {
-    studio: 22,
-    name: 42,
+    // The front panel: name, class, QR.
+    name: 20,
     nameBlock: 52,
-    group: 100,
-    qr: 136,
-    codeLabel: 286,
-    code: 300,
-    instructions: 338,
+    group: 76,
+    qr: 112,
+    // The fold line; below it, the tab that folds back.
+    fold: 264,
+    foldLabel: 268,
+    studio: 284,
+    codeLabel: 300,
+    code: 312,
+    instructions: 344,
   },
-  studio: { size: 11 },
+  foldLabel: { size: 8 },
+  studio: { size: 10 },
   name: { max: 22, min: 12, twoLineMin: 11, lineHeight: 1.15 },
   group: { size: 12 },
   codeLabel: { size: 9 },
-  code: { size: 26 },
-  instructions: { size: 10 },
+  code: { size: 24 },
+  instructions: { size: 9 },
 } as const;
 
 /** The top-left corner of the i-th card on its page (0..3: left to right, then top to bottom). */

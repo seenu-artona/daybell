@@ -18,11 +18,13 @@ const PLACE_TO_DB = {
   child: "child",
   classSet: "class_set",
   blankCard: "blank_card",
+  unlinkedCards: "unlinked_cards",
 } as const;
 
 /**
  * GET /api/v1/jobs/:id/tagging/photos — a page of the photos in one place on the review screen (ADR 0018): Leftovers,
- * flagged photos, a child's (with their card photos), a class's Class photo set, or a blank card's. In tagging order,
+ * flagged photos, a child's (with their card photos), a class's Class photo set, a blank card's, or the job's
+ * card photos linked to none of its cards. In tagging order,
  * keyset by photo id, with signed 400 px previews (studio only). Only ids go in the URL.
  */
 export const GET = handle(async (request: Request, ctx: Ctx) => {

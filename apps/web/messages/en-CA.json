@@ -937,8 +937,11 @@
           "selected": "{count, plural, one {# photo selected} other {# photos selected}}",
           "moveTo": "Move to…",
           "looksRight": "Looks right",
+          "normalPhoto": "It's a normal photo",
           "isCard": "This is a card photo",
-          "clear": "Clear"
+          "bin": "Move to bin",
+          "clear": "Clear",
+          "confirmFirst": "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be moved."
         },
         "announce": {
           "moved": "{count, plural, =0 {No photo was moved.} one {Moved # photo to {target}.} other {Moved # photos to {target}.}}",
@@ -950,7 +953,9 @@
           "cardPhoto": "Card photos stay card photos and can't be moved.",
           "photoNotReady": "Only processed photos that aren't in the bin can be moved or checked.",
           "cardClaimed": "This card's child has already been named.",
-          "notReady": "Tagging changed meanwhile and isn't clean yet. Check the counts above."
+          "notReady": "Tagging changed meanwhile and isn't clean yet. Check the counts above.",
+          "confirmFirst": "Confirm photos that may be a card first: mark them card photos, or say they're normal photos. Then move them.",
+          "otherCard": "A photo of another job's card can only be marked a card photo."
         },
         "tile": {
           "alt": "{where}, photo {n}",
@@ -963,19 +968,20 @@
           "unreadableCard": "Card unreadable",
           "otherCard": "Another job's card",
           "afterUnreadable": "Check: after a card",
-          "afterFailed": "Check: after a failed photo"
+          "afterFailed": "Check: after a failed photo",
+          "removedCard": "Removed card"
         },
         "flagged": {
           "title": "Flagged",
           "count": "{count, plural, one {# photo} other {# photos}}",
-          "intro": "Hidden from parents until you check them. Each stays where tagging guessed: tick the ones that look right, mark card photos, or move them.",
+          "intro": "Hidden from parents until you check them. Each stays where tagging guessed: confirm the ones that look right, mark card photos, or move them. A photo that may be a card is confirmed before it moves.",
           "where": "Flagged",
           "showMore": "Show more"
         },
         "leftovers": {
           "title": "Leftovers",
           "count": "{count, plural, one {# photo} other {# photos}}",
-          "intro": "Photos taken before the first card of an upload. Move them to a child or a class, or put junk in the bin from All photos.",
+          "intro": "Photos taken before the first card of an upload. Move them to a child or a class, or tick junk and move it to the bin.",
           "empty": "Nothing in Leftovers.",
           "showMore": "Show more"
         },
@@ -994,6 +1000,12 @@
           "created": "Added {first} {last} with the card's access code.",
           "claimed": "This card's child has already been named.",
           "unreadable": "This card's access code can't be read, so its child can't be added from it. Move its photos to a child instead."
+        },
+        "unlinkedCards": {
+          "title": "Other card photos",
+          "count": "{count, plural, one {# photo} other {# photos}}",
+          "intro": "Photos marked card photos that aren't linked to a child's card, such as another job's card. Parents never see them.",
+          "showMore": "Show more"
         },
         "albums": {
           "title": "Classes",
@@ -1084,7 +1096,8 @@
       "groupLabel": "{group, select, class {Class} team {Team} other {Group}}",
       "nameLabel": "Name",
       "accessCode": "Access code",
-      "instructions": "Go to {link}, enter your code"
+      "instructions": "Go to {link}, enter your code",
+      "foldBack": "Fold back before picture day"
     }
   }
 }

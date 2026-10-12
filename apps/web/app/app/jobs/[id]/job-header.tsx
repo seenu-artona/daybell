@@ -24,7 +24,7 @@ export function JobHeader() {
   const tj = useTranslations("app.jobs");
   const formatDay = useFormatDay();
   const { changed } = useStudio();
-  const { job, setJob, summary, canManage } = useJob();
+  const { job, setJob, summary, canManage, taggingReviewed } = useJob();
   const [editing, setEditing] = useState(false);
   const [selling, setSelling] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -101,7 +101,7 @@ export function JobHeader() {
       <Dialog open={selling} onClose={() => setSelling(false)} title={t("checklist.title")}>
         <div className="flex flex-col gap-4">
           <p className="m-0 text-muted">{t("sellIntro")}</p>
-          <SellChecklist jobId={job.id} roster={summary?.children ?? 0} />
+          <SellChecklist roster={summary?.children ?? 0} taggingReviewed={taggingReviewed} />
           <div className="flex justify-end">
             <Button variant="secondary" onClick={() => setSelling(false)}>
               {t("close")}

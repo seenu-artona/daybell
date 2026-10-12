@@ -6,8 +6,10 @@ vi.mock("server-only", () => ({}));
 const { systemRpc } = vi.hoisted(() => ({ systemRpc: vi.fn() }));
 vi.mock("./supabase/service", () => ({ photoSystemRpc: systemRpc, photoWriteRpc: vi.fn() }));
 const {
+  beforeStep,
   planBatch,
   photoQr,
+  qrKindOf,
   tagBatchNow,
   tagBatchesOfPhotos,
   taggingError,
@@ -31,6 +33,8 @@ const photo = (
   qr_kind: "none",
   card_id: null,
   card_child_id: null,
+  binned: false,
+  before: null,
   tag: null,
   ...over,
 });
@@ -126,6 +130,59 @@ describe("planBatch and writeRow", () => {
     );
     expect(writes).toEqual([{ photoId: "p3", tag: null }]);
     expect(writeRow(writes[0] as (typeof writes)[number])).toEqual({ photo_id: "p3", place: null });
+  });
+
+  it("keeps a binned card photo as a boundary: the photos after it stay with its child (security review 1)", () => {
+    const OTHER = "c1000000-0000-4000-8000-000000000002";
+    const CARD_B = "f1000000-0000-4000-8000-000000000002";
+    const writes = planBatch(
+      inputs([
+        photo("p1", { qr_kind: "card", card_id: CARD, card_child_id: CHILD }),
+        photo("p2"),
+        photo("p3", { qr_kind: "card", card_id: CARD_B, card_child_id: OTHER, binned: true }),
+        photo("p4"),
+      ]),
+    );
+    expect(
+      writes.map((w) => [w.photoId, w.tag?.place === "child" ? w.tag.childId : w.tag?.place]),
+    ).toEqual([
+      ["p1", "card"],
+      ["p2", CHILD],
+      ["p4", OTHER],
+    ]);
+  });
+
+  it("applies what purged photos did before a photo (security review 1)", () => {
+    expect(beforeStep(null)).toBeNull();
+    expect(
+      beforeStep({ card: true, card_id: CARD, card_child_id: CHILD, flag: "after_unreadable" }),
+    ).toEqual({ card: { cardId: CARD, childId: CHILD }, flag: "afterUnreadable" });
+    expect(
+      beforeStep({ card: false, card_id: null, card_child_id: null, flag: "after_failed" }),
+    ).toEqual({ card: null, flag: "afterFailed" });
+    const writes = planBatch(
+      inputs([
+        photo("p1"),
+        photo("p5", {
+          before: { card: true, card_id: CARD, card_child_id: CHILD, flag: "after_failed" },
+        }),
+      ]),
+    ).map(writeRow);
+    expect(writes.map((w) => [w.photo_id, w.place, w.child_id, w.flag])).toEqual([
+      ["p1", "leftovers", null, null],
+      ["p5", "child", CHILD, "after_failed"],
+    ]);
+  });
+
+  it("flags a photo without a QR result when others in the batch were read (security review 2)", () => {
+    const writes = planBatch(
+      inputs([
+        photo("p1", { qr_kind: "card", card_id: CARD, card_child_id: CHILD }),
+        photo("p2", { qr_kind: null }),
+        photo("p3"),
+      ]),
+    ).map(writeRow);
+    expect(writes.map((w) => w.flag)).toEqual([null, "unreadable_card", "after_unreadable"]);
   });
 
   it("puts a class-photo upload in the class's set", () => {
@@ -256,12 +313,63 @@ describe("toTaggedPhoto", () => {
       cardId: BLANK,
       manual: false,
       cardRead: false,
+      qrKind: "none",
+      actions: { move: true, confirm: true, markCard: true },
       thumbUrl: `https://s3.test/${ids.studioId}/${ids.jobId}/${row.id}/thumb.webp`,
     });
     expect(JSON.stringify(photo)).not.toContain("Maya");
     expect(
       (await toTaggedPhoto(storage as never, ids, { ...row, status: "processing" })).thumbUrl,
     ).toBeNull();
+  });
+});
+
+describe("what review allows for a photo", () => {
+  it("tells a removed card from another job's card", () => {
+    expect(qrKindOf({ qr_kind: "card", qr_card: true })).toBe("card");
+    expect(qrKindOf({ qr_kind: "card", qr_card: false })).toBe("removedCard");
+    expect(qrKindOf({ qr_kind: "other_card" })).toBe("otherCard");
+    expect(qrKindOf({ qr_kind: null })).toBeNull();
+  });
+
+  it("sends each photo's actions from core's rules (security review 3-4, code review M1)", async () => {
+    const storage = { presignGet: vi.fn(async (key: string) => `https://s3.test/${key}`) };
+    const ids = {
+      studioId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      jobId: "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e",
+    };
+    const base = {
+      id: "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f",
+      status: "ready" as const,
+      place: "child",
+      child_id: CHILD,
+      source: "auto" as const,
+    };
+    const actions = async (over: Record<string, unknown>) =>
+      (
+        await toTaggedPhoto(storage as never, ids, {
+          ...base,
+          qr_kind: "none",
+          flag: null,
+          ...over,
+        })
+      ).actions;
+    expect(await actions({})).toEqual({ move: true, confirm: true, markCard: true });
+    expect(await actions({ qr_kind: "unreadable", flag: "unreadable_card" })).toEqual({
+      move: false,
+      confirm: true,
+      markCard: true,
+    });
+    expect(await actions({ qr_kind: "other_card", flag: "other_card" })).toEqual({
+      move: false,
+      confirm: false,
+      markCard: true,
+    });
+    expect(await actions({ place: "card", source: "manual" })).toEqual({
+      move: false,
+      confirm: false,
+      markCard: false,
+    });
   });
 });
 
@@ -272,6 +380,8 @@ describe("taggingError", () => {
       ["photo_not_ready", "tagging.photoNotReady"],
       ["card_claimed", "tagging.cardClaimed"],
       ["tagging_not_ready", "tagging.notReady"],
+      ["confirm_first", "tagging.confirmFirst"],
+      ["other_card", "tagging.otherCard"],
     ] as const) {
       const e = taggingError({ code: "P0001", message });
       expect([e.status, e.fields]).toEqual([409, { form }]);

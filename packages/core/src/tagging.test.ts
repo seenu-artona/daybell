@@ -3,16 +3,22 @@ import { compareTaggingOrder } from "./photos";
 import {
   canMarkReviewed,
   classifyQr,
+  composeSteps,
+  isLegacyBatch,
+  NO_STEP,
   notReviewableReason,
   type PhotoQr,
   planTagWrites,
+  reviewActions,
   reviewTaggingDone,
   type StoredTag,
   type Tag,
   type TaggingFacts,
   type TaggingPhoto,
+  type TagStep,
   tagBatch,
   tagCounts,
+  tagStep,
 } from "./tagging";
 
 const CODE_A = "0123456789ABCDEFGHJK";
@@ -65,7 +71,8 @@ describe("classifyQr (what the worker reports)", () => {
 });
 
 // A compact way to write a batch: "p" a plain photo, "A"/"B" a child's card, "K" a blank card, "?" an unreadable card,
-// "X" a card from another job, "F" a failed photo, "P" a photo still processing, "o" a photo from an old worker.
+// "X" a card from another job, "F" a failed photo, "P" a photo still processing, "o" a photo from an old worker. A "~"
+// before a photo puts it in the bin.
 const CARDS: Record<string, { cardId: string; childId: string | null }> = {
   A: { cardId: "card-a", childId: "child-a" },
   B: { cardId: "card-b", childId: "child-b" },
@@ -73,8 +80,22 @@ const CARDS: Record<string, { cardId: string; childId: string | null }> = {
 };
 
 function batch(spec: string): TaggingPhoto[] {
-  return [...spec].map((c, i) => {
-    const id = `p${i + 1}`;
+  const photos: TaggingPhoto[] = [];
+  let binned = false;
+  for (const c of spec) {
+    if (c === "~") {
+      binned = true;
+      continue;
+    }
+    photos.push({ ...photo(c, photos.length + 1), ...(binned ? { binned } : {}) });
+    binned = false;
+  }
+  return photos;
+}
+
+function photo(c: string, n: number): TaggingPhoto {
+  {
+    const id = `p${n}`;
     const card = CARDS[c];
     const qr: PhotoQr = card
       ? { kind: "card", ...card }
@@ -87,7 +108,7 @@ function batch(spec: string): TaggingPhoto[] {
             : { kind: "none" };
     const status = c === "F" ? "failed" : c === "P" ? "processing" : "ready";
     return { id, status, qr: status === "ready" ? qr : null };
-  });
+  }
 }
 
 /** A readable summary of each photo's tag: "child-a", "leftovers!afterFailed", "card:card-a", "-" (untagged). */
@@ -202,12 +223,132 @@ describe("tagBatch: the sequence rules (D32, F16)", () => {
     ]);
   });
 
-  it("treats photos processed before cards were read (an older worker) as plain photos", () => {
-    expect(show("Aoo")).toEqual(["card:card-a", "child-a", "child-a"]);
+  it("treats a batch uploaded before cards were read (no photo read) as plain photos, in Leftovers", () => {
+    expect(show("ooo")).toEqual(["leftovers", "leftovers", "leftovers"]);
+    expect(show("oFo")).toEqual(["leftovers", "-", "leftovers!afterFailed"]);
+  });
+
+  it("flags a photo with no QR result in a batch where others were read (mixed workers; review 2)", () => {
+    expect(show("ApoppBp")).toEqual([
+      "card:card-a",
+      "child-a",
+      "child-a!unreadableCard",
+      "child-a!afterUnreadable",
+      "child-a!afterUnreadable",
+      "card:card-b",
+      "child-b",
+    ]);
+    expect(show("pop", "g1")).toEqual(["class:g1", "class:g1!unreadableCard", "class:g1"]);
+    expect(show("ooo", "g1")).toEqual(["class:g1", "class:g1", "class:g1"]);
   });
 
   it("tags an empty batch as nothing", () => {
     expect(tagBatch([], { classGroupId: null })).toEqual([]);
+  });
+});
+
+describe("tagBatch: photos in the bin still mark where cards were (security review 1)", () => {
+  it("binning a card photo never gives the next child's photos to the previous child", () => {
+    // Without the binned card B, the photos after it would silently become child A's.
+    expect(show("App~Bpp")).toEqual(["card:card-a", "child-a", "child-a", "child-b", "child-b"]);
+  });
+
+  it("binning a failed photo keeps the photos after it flagged", () => {
+    expect(show("Ap~Fpp")).toEqual([
+      "card:card-a",
+      "child-a",
+      "child-a!afterFailed",
+      "child-a!afterFailed",
+    ]);
+  });
+
+  it("binning an unreadable or another job's card keeps the photos after it flagged", () => {
+    expect(show("Ap~?pBp")).toEqual([
+      "card:card-a",
+      "child-a",
+      "child-a!afterUnreadable",
+      "card:card-b",
+      "child-b",
+    ]);
+    expect(show("Ap~Xp")).toEqual(["card:card-a", "child-a", "child-a!afterUnreadable"]);
+    expect(show("Ap~op")).toEqual(["card:card-a", "child-a", "child-a!afterUnreadable"]);
+  });
+
+  it("gives binned photos no result, and binning a plain photo changes nothing else", () => {
+    const tags = tagBatch(batch("A~pp"), { classGroupId: null });
+    expect(tags.map((t) => t.photoId)).toEqual(["p1", "p3"]);
+    expect(show("A~pp")).toEqual(["card:card-a", "child-a"]);
+  });
+
+  it("counts a binned photo with a QR result when deciding whether a batch is from before cards were read", () => {
+    expect(show("~Aoo")).toEqual(["child-a!unreadableCard", "child-a!unreadableCard"]);
+  });
+
+  it("ignores binned photos in class-photo uploads", () => {
+    expect(show("p~Ap", "g1")).toEqual(["class:g1", "class:g1"]);
+  });
+});
+
+describe("tagBatch: photos purged from the bin leave their step on the next photo (security review 1)", () => {
+  const purged = (spec: string, n: number) => tagStep(photo(spec, n), false);
+  const steps = (...specs: string[]) =>
+    specs.reduce((acc, c, i) => composeSteps(acc, purged(c, i + 1)), NO_STEP);
+
+  it("composes steps: the later card wins, a flag stays until a card clears it", () => {
+    const a: TagStep = { card: { cardId: "card-a", childId: "child-a" }, flag: null };
+    expect(steps("A", "F")).toEqual({ card: a.card, flag: "afterFailed" });
+    expect(steps("F", "A")).toEqual(a);
+    expect(steps("F", "p")).toEqual({ card: null, flag: "afterFailed" });
+    expect(steps("F", "?")).toEqual({ card: null, flag: "afterUnreadable" });
+    expect(steps("p", "p")).toEqual(NO_STEP);
+    expect(steps("?", "B", "p")).toEqual({
+      card: { cardId: "card-b", childId: "child-b" },
+      flag: null,
+    });
+  });
+
+  it("a purged card still sends the photos after it to its child", () => {
+    const photos = batch("Appp");
+    // Photos 5 (card B) and 6 were purged; photo 7 carries what they did.
+    photos.push({ ...photo("p", 7), before: steps("B", "p") }, photo("p", 8));
+    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag)).toEqual([
+      { place: "card", cardId: "card-a", flag: null },
+      { place: "child", childId: "child-a", flag: null },
+      { place: "child", childId: "child-a", flag: null },
+      { place: "child", childId: "child-a", flag: null },
+      { place: "child", childId: "child-b", flag: null },
+      { place: "child", childId: "child-b", flag: null },
+    ]);
+  });
+
+  it("a purged failed photo still flags the photos after it", () => {
+    const photos = [photo("A", 1), { ...photo("p", 3), before: steps("F") }];
+    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag?.flag)).toEqual([
+      null,
+      "afterFailed",
+    ]);
+  });
+
+  it("a purged card that was deleted since counts as another job's card", () => {
+    const photos = [
+      photo("A", 1),
+      { ...photo("p", 3), before: { card: { cardId: null, childId: null }, flag: null } },
+    ];
+    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag)).toEqual([
+      { place: "card", cardId: "card-a", flag: null },
+      { place: "child", childId: "child-a", flag: "afterUnreadable" },
+    ]);
+  });
+
+  it("applies before the photo itself, so a card right after a purged flag clears it", () => {
+    const photos = [{ ...photo("A", 2), before: steps("?") }, photo("p", 3)];
+    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag?.flag)).toEqual([null, null]);
+  });
+
+  it("knows a batch from before cards were read", () => {
+    expect(isLegacyBatch(batch("ooFo"))).toBe(true);
+    expect(isLegacyBatch(batch("oAo"))).toBe(false);
+    expect(isLegacyBatch([])).toBe(true);
   });
 });
 
@@ -379,5 +520,50 @@ describe("review (D143; answer 4, plan answers 4, 5, 7)", () => {
     expect(notReviewableReason({ ...clean, leftovers: 3, flagged: 1 })).toBe("leftovers");
     expect(notReviewableReason({ ...clean, flagged: 1, blankCardsPending: 1 })).toBe("flagged");
     expect(notReviewableReason({ ...clean, blankCardsPending: 1 })).toBe("blankCards");
+  });
+});
+
+describe("reviewActions (security review 3-4, code review M1)", () => {
+  const ready = {
+    status: "ready" as const,
+    place: "child" as const,
+    flag: null,
+    qrKind: "none" as const,
+  };
+  const all = { move: true, confirm: true, markCard: true };
+  const none = { move: false, confirm: false, markCard: false };
+
+  it("lets a plain photo be moved, confirmed or marked a card photo", () => {
+    expect(reviewActions(ready)).toEqual(all);
+    expect(reviewActions({ ...ready, flag: "afterUnreadable" })).toEqual(all);
+    expect(reviewActions({ ...ready, qrKind: null, place: "leftovers" })).toEqual(all);
+  });
+
+  it("never moves or confirms a card photo, read or marked by a person", () => {
+    expect(reviewActions({ ...ready, place: "card", qrKind: "card" })).toEqual(none);
+    expect(reviewActions({ ...ready, place: "card", qrKind: "unreadable" })).toEqual(none);
+  });
+
+  it("only lets another job's card (or a removed card) be marked a card photo", () => {
+    const cardOnly = { move: false, confirm: false, markCard: true };
+    expect(reviewActions({ ...ready, qrKind: "otherCard", flag: "otherCard" })).toEqual(cardOnly);
+    // Even after its flag is gone (its child was removed and it went to Leftovers).
+    expect(reviewActions({ ...ready, qrKind: "otherCard", place: "leftovers" })).toEqual(cardOnly);
+    expect(reviewActions({ ...ready, qrKind: "removedCard", flag: "otherCard" })).toEqual(cardOnly);
+  });
+
+  it("asks for a photo that may be a card to be confirmed before it moves", () => {
+    expect(reviewActions({ ...ready, qrKind: "unreadable", flag: "unreadableCard" })).toEqual({
+      move: false,
+      confirm: true,
+      markCard: true,
+    });
+    // Once confirmed as a normal photo, it moves like any other.
+    expect(reviewActions({ ...ready, qrKind: "unreadable" })).toEqual(all);
+  });
+
+  it("has nothing to do with photos that failed or are processing", () => {
+    expect(reviewActions({ ...ready, status: "failed" })).toEqual(none);
+    expect(reviewActions({ ...ready, status: "processing" })).toEqual(none);
   });
 });

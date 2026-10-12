@@ -167,9 +167,10 @@ select is((select duplicates_skipped from public.upload_batches where id = (sele
 
 -- The worker's result, idempotent.
 select ok(not public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 2,
-  '{"status":"ready","width":1,"height":1}'), 'a result for another round is ignored');
+  '{"status":"ready","width":1,"height":1,"qr":{"kind":"none"}}'), 'a result for another round is ignored');
 select ok(public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
-  '{"status":"ready","width":6000,"height":4000,"captured_at":"2026-10-01T09:30:05.47"}'), 'the worker records a result');
+  '{"status":"ready","width":6000,"height":4000,"captured_at":"2026-10-01T09:30:05.47","qr":{"kind":"none"}}'),
+  'the worker records a result');
 select ok(not public.record_photo_result((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
   '{"status":"failed","failure_reason":"unreadable"}'), 'a repeated message changes nothing');
 select is((select status::text || ' ' || width || 'x' || height || ' ' || captured_at::text from public.photos
@@ -181,10 +182,10 @@ select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
   '{"status":"failed","failure_reason":"Maya Johnson.jpg"}') $$, '22023', 'A result is ready (with a size) or failed',
   'an unknown failure reason is refused, with no values');
 select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
-  '{"status":"ready","width":1,"height":1,"captured_at":"yesterday"}') $$, '22023', null,
+  '{"status":"ready","width":1,"height":1,"captured_at":"yesterday","qr":{"kind":"none"}}') $$, '22023', null,
   'and so is a capture time that isn''t one');
 select ok(not public.record_photo_result((select (v -> 1 ->> 'photo_id')::uuid from out where k = 'r1'), 1,
-  '{"status":"ready","width":1,"height":1}'), 'a photo still uploading takes no result');
+  '{"status":"ready","width":1,"height":1,"qr":{"kind":"none"}}'), 'a photo still uploading takes no result');
 select is((select public.photo_for_worker((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) - 'id'),
   jsonb_build_object('studio_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_id', 'a0000000-0000-4000-8000-000000000001',
     'status', 'ready', 'sha256', encode(extensions.digest('two', 'sha256'), 'hex'), 'byte_size', 1000,

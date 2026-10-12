@@ -11,10 +11,13 @@ import {
   type PhotoFlag,
   type PhotoPlace,
   type PhotoQr,
+  type PhotoQrKind,
   planTagWrites,
+  reviewActions,
   type StoredTag,
   type Tag,
   type TaggingPhoto,
+  type TagStep,
   type TagWrite,
   tagBatch,
 } from "@daybell/core";
@@ -123,6 +126,15 @@ export interface TaggingInputs {
     qr_kind: "none" | "card" | "unreadable" | "other_card" | null;
     card_id: string | null;
     card_child_id: string | null;
+    /** In the bin: no tag, but it still marks where cards were (security review 1). */
+    binned: boolean;
+    /** What photos purged from the bin just before this one did. */
+    before: {
+      card: boolean;
+      card_id: string | null;
+      card_child_id: string | null;
+      flag: "after_unreadable" | "after_failed" | null;
+    } | null;
     tag: TagRow | null;
   }[];
 }
@@ -145,12 +157,28 @@ export function photoQr(p: TaggingInputs["photos"][number]): PhotoQr {
   }
 }
 
+/** What purged photos before a photo did, as tagging's rules see it. A card since removed keeps a null card id. */
+export function beforeStep(before: TaggingInputs["photos"][number]["before"]): TagStep | null {
+  if (!before) return null;
+  return {
+    card: before.card ? { cardId: before.card_id, childId: before.card_child_id } : null,
+    flag:
+      before.flag === null
+        ? null
+        : before.flag === "after_failed"
+          ? "afterFailed"
+          : "afterUnreadable",
+  };
+}
+
 /** The writes a batch needs: tagBatch's result, less what is already right and what people tagged by hand. */
 export function planBatch(inputs: TaggingInputs): TagWrite[] {
   const photos: TaggingPhoto[] = inputs.photos.map((p) => ({
     id: p.id,
     status: p.status,
     qr: photoQr(p),
+    binned: p.binned === true,
+    before: beforeStep(p.before ?? null),
   }));
   const current = new Map(
     inputs.photos.flatMap((p) => (p.tag ? [[p.id, tagFromRow(p.tag)] as const] : [])),
@@ -233,6 +261,24 @@ export interface TaggedPhotoRow {
   card_id?: string | null;
   source: "auto" | "manual";
   qr_kind: string | null;
+  /** Whether the photo's card is still one of the job's (qr_card_id is set). */
+  qr_card?: boolean;
+}
+
+/** What the worker read, for the review screen: a card of the job that has since gone is a removed card. */
+export function qrKindOf(row: Pick<TaggedPhotoRow, "qr_kind" | "qr_card">): PhotoQrKind {
+  switch (row.qr_kind) {
+    case "none":
+      return "none";
+    case "unreadable":
+      return "unreadable";
+    case "other_card":
+      return "otherCard";
+    case "card":
+      return row.qr_card === false ? "removedCard" : "card";
+    default:
+      return null;
+  }
 }
 
 /** A tagged photo for the review screen, with a signed 400 px preview (studio only). Never its filename. */
@@ -241,16 +287,22 @@ export async function toTaggedPhoto(
   ids: { studioId: string; jobId: string },
   row: TaggedPhotoRow,
 ): Promise<TaggedPhoto> {
+  const status = row.status === "uploading" ? "processing" : row.status;
+  const place = placeFromDb(row.place);
+  const flag = flagFromDb(row.flag);
+  const qrKind = qrKindOf(row);
   return {
     id: row.id,
-    status: row.status === "uploading" ? "processing" : row.status,
-    place: placeFromDb(row.place),
-    flag: flagFromDb(row.flag),
+    status,
+    place,
+    flag,
     childId: row.child_id ?? null,
     groupId: row.group_id ?? null,
     cardId: row.card_id ?? null,
     manual: row.source === "manual",
-    cardRead: row.qr_kind === "card",
+    cardRead: qrKind === "card",
+    qrKind,
+    actions: reviewActions({ status, place, flag, qrKind }),
     thumbUrl:
       row.status === "ready"
         ? await previewUrl(storage, { ...ids, photoId: row.id }, "thumb.webp")
@@ -284,6 +336,16 @@ const NAMED: Record<string, () => ApiError> = {
     ),
   card_claimed: () =>
     conflict("This card's child has already been named.", TAGGING_CONFLICTS.cardClaimed),
+  confirm_first: () =>
+    conflict(
+      "Photos that may be a card are confirmed (a card photo, or a normal photo) before they can be moved.",
+      TAGGING_CONFLICTS.confirmFirst,
+    ),
+  other_card: () =>
+    conflict(
+      "A photo of another job's card can only be marked a card photo.",
+      TAGGING_CONFLICTS.otherCard,
+    ),
   tagging_not_ready: () =>
     conflict(
       "Tagging can be marked reviewed once there are no Leftovers, flagged photos or blank cards to name.",

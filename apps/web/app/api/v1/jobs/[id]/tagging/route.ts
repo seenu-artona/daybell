@@ -28,6 +28,7 @@ interface Overview {
   flagged: number;
   blank_cards: number;
   card_photos: number;
+  unlinked_card_photos: number;
   reviewed_at: string | null;
   no_photos: number;
   albums: {
@@ -85,6 +86,7 @@ export const GET = handle(async (_request: Request, ctx: Ctx) => {
       flagged: facts.flagged,
       blankCards: facts.blankCardsPending,
       cardPhotos: Number(o.card_photos),
+      unlinkedCardPhotos: Number(o.unlinked_card_photos ?? 0),
       noPhotos: Number(o.no_photos),
       reviewedAt: o.reviewed_at,
       canMarkReviewed: canMarkReviewed(facts),

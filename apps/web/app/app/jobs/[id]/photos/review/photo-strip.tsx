@@ -7,9 +7,10 @@ import { DRAG_TYPE, dragIds, droppedIds, useReview } from "./review-context";
 
 /**
  * A row of photos on the review screen (ADR 0018; Seenu, answer 5). Each tile is the 400 px preview with its alt text
- * "{where}, photo {n}" (never a filename). Card photos say "Card" in words and can't be moved; flagged photos say why.
- * People who fix tagging get a 44px checkbox on each movable photo, and can drag it (or every ticked photo) onto a
- * child, a class or Leftovers; Move to… does the same without dragging (WCAG 2.5.7).
+ * "{where}, photo {n}" (never a filename). Card photos say "Card" in words and can't be moved or confirmed; flagged
+ * photos say why. People who fix tagging get a 44px checkbox on each photo they can act on (core's reviewActions), and
+ * can drag a photo that can move (or every ticked one) onto a child, a class or Leftovers; Move to… does the same
+ * without dragging (WCAG 2.5.7). A photo that may be a card is confirmed before it moves.
  */
 export function PhotoStrip({
   photos,
@@ -28,7 +29,12 @@ export function PhotoStrip({
       {photos.map((photo, i) => {
         const n = i + 1;
         const isCard = photo.cardRead || photo.place === "card";
-        const movable = canEdit && !photo.cardRead && photo.status === "ready";
+        const movable = canEdit && photo.actions.move;
+        const selectable =
+          canEdit && (photo.actions.move || photo.actions.confirm || photo.actions.markCard);
+        // A card of the job that has since been removed isn't "another job's card" (code review nice 3).
+        const flagKey =
+          photo.flag === "otherCard" && photo.qrKind === "removedCard" ? "removedCard" : photo.flag;
         return (
           <li
             key={photo.id}
@@ -66,17 +72,15 @@ export function PhotoStrip({
                   {t("tile.card")}
                 </Badge>
               ) : null}
-              {showFlags && photo.flag ? (
-                <Badge tone="warning">{t(`flags.${photo.flag}`)}</Badge>
-              ) : null}
+              {showFlags && flagKey ? <Badge tone="warning">{t(`flags.${flagKey}`)}</Badge> : null}
             </div>
-            {movable ? (
+            {selectable ? (
               <label className="absolute top-0 left-0 grid size-11 cursor-pointer place-items-center">
                 <span className="sr-only">{t("tile.select", { where, n })}</span>
                 <input
                   type="checkbox"
                   checked={checked.has(photo.id)}
-                  onChange={(e) => toggle(photo.id, e.target.checked)}
+                  onChange={(e) => toggle(photo, e.target.checked)}
                   className="size-5 cursor-pointer accent-primary shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 />
               </label>

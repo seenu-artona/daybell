@@ -5,7 +5,7 @@
 -- changes nothing.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(113);
+select plan(153);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -105,7 +105,7 @@ select is((select count(*) from unnest(array[
     'public.blank_card_code(uuid, uuid, uuid)', 'public.claim_blank_card(uuid, uuid, uuid, jsonb)',
     'public.mark_tagging_reviewed(uuid, uuid)', 'app.reopen_tagging_review(uuid[])',
     'app.on_photos_tagging_change()', 'app.on_child_removed_tags()', 'app.check_tag_request(uuid, uuid[])',
-    'app.job_tagging_state(uuid)']) f
+    'app.job_tagging_state(uuid)', 'app.carry_purged_steps(uuid[])', 'public.delete_purged_photos(uuid[])']) f
   where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
   0::bigint, 'no tagging write, worker or system function is executable by browsers');
 select is((select count(*) from unnest(array['public.job_tagging_overview(uuid)',
@@ -142,7 +142,7 @@ select ok(public.record_photo_result(pg_temp.p(2), 1,
   '{"status":"ready","width":10,"height":10,"qr":{"kind":"card","card_code":"AAAAAAAAAAAAAAAAAAAA"}}'), 'a card''s result');
 select public.record_photo_result(pg_temp.p(3), 1,
   '{"status":"ready","width":10,"height":10,"qr":{"kind":"card","card_code":"AAAAAAAAAAAAAAAAAAAA"}}');
-select public.record_photo_result(pg_temp.p(4), 1, '{"status":"ready","width":10,"height":10}');
+select public.record_photo_result(pg_temp.p(4), 1, '{"status":"ready","width":10,"height":10,"qr":{"kind":"none"}}');
 select public.record_photo_result(pg_temp.p(5), 1,
   '{"status":"ready","width":10,"height":10,"qr":{"kind":"card","card_code":"DDDDDDDDDDDDDDDDDDDD"}}');
 select public.record_photo_result(pg_temp.p(6), 1, '{"status":"ready","width":10,"height":10,"qr":{"kind":"none"}}');
@@ -155,7 +155,7 @@ select public.record_photo_result(pg_temp.p(10), 1, '{"status":"failed","failure
 select results_eq($$ select coalesce(qr_kind, '-') || ':' || coalesce(qr_card_id::text, '-') from public.photos
                      where batch_id = 'a2000000-0000-4000-8000-000000000001' order by original_filename $$,
   $$ values ('none:-'), ('card:f1000000-0000-4000-8000-000000000001'), ('card:f1000000-0000-4000-8000-000000000001'),
-            ('-:-'), ('other_card:-'), ('none:-'), ('card:f1000000-0000-4000-8000-000000000003'), ('none:-'),
+            ('none:-'), ('other_card:-'), ('none:-'), ('card:f1000000-0000-4000-8000-000000000003'), ('none:-'),
             ('other_card:-'), ('-:-') $$,
   'a card is found among the photo''s own job''s cards only: another job''s or another studio''s card is other_card');
 select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
@@ -167,6 +167,10 @@ select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
 select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
   '{"status":"failed","failure_reason":"unreadable","qr":{"kind":"none"}}') $$, '22023', null,
   'a failed photo has nothing read');
+select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1, '{"status":"ready","width":1,"height":1}') $$,
+  '22023', null, 'a ready result without what was read is refused, so an old worker''s message is tried again (security review 2)');
+select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
+  '{"status":"ready","width":1,"height":1,"qr":null}') $$, '22023', null, 'and so is one with qr null');
 select throws_ok($$ select public.record_photo_result(gen_random_uuid(), 1,
   '{"status":"ready","width":1,"height":1,"qr":{"kind":"none","card_code":"AAAAAAAAAAAAAAAAAAAA"}}') $$, '22023', null,
   'a code goes only with a card');
@@ -294,13 +298,41 @@ select throws_ok($$ select public.confirm_photos('44444444-4444-4444-8444-444444
 select throws_ok($$ select public.confirm_photos('22222222-2222-4222-8222-222222222222',
   'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)], false) $$, '42501', null,
   'nor can another studio''s owner');
+-- A photo of another job's card shows that card's child: never "Looks right", never moved (security review 4, code
+-- review M1).
+select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5), pg_temp.p(6)], false) $$, 'P0001', 'other_card',
+  'another job''s card photo can''t be confirmed as a normal photo');
+select throws_ok($$ select public.move_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)],
+  '{"kind":"child","id":"c1000000-0000-4000-8000-000000000002"}') $$, 'P0001', 'other_card', 'nor moved to a child');
+select throws_ok($$ select public.move_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(5)], '{"kind":"leftovers"}') $$, 'P0001', 'other_card',
+  'nor even to Leftovers');
+select ok(not public.photo_parent_visible(pg_temp.p(5)), 'and it stays hidden from parents');
 select is(public.confirm_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001',
-  array[pg_temp.p(5), pg_temp.p(6)], false), 2, '"Looks right" keeps flagged photos where they are');
+  array[pg_temp.p(6)], false), 1, '"Looks right" keeps a flagged photo where it is');
 select is(pg_temp.place(6), 'child:c1000000-0000-4000-8000-000000000001/manual', 'without the flag');
-select ok(public.photo_parent_visible(pg_temp.p(5)), 'and they may be shown to parents later');
+select ok(public.photo_parent_visible(pg_temp.p(6)), 'and it may be shown to parents later');
+select is(public.confirm_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001',
+  array[pg_temp.p(5)], true), 1, 'another job''s card photo can be marked a card photo');
+select is((select place::text || ':' || card_id::text from public.photo_tags where photo_id = pg_temp.p(5)),
+  'card:f1000000-0000-4000-8000-000000000001', 'and stays listed with the child it was with, as their card photo');
 select is(public.confirm_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001',
   array[pg_temp.p(9)], true), 1, '"This is a card photo" hides it');
 select is(pg_temp.place(9), 'card/manual', 'as a card photo');
+select is((select card_id from public.photo_tags where photo_id = pg_temp.p(9)),
+  'f1000000-0000-4000-8000-000000000003'::uuid, 'still with its blank card');
+-- A card photo stays one (security review 3).
+select throws_ok($$ select public.move_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(9)], '{"kind":"leftovers"}') $$, 'P0001', 'card_photo',
+  'a photo marked a card photo can''t be moved');
+select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(9)], false) $$, 'P0001', 'card_photo',
+  'nor confirmed as a normal photo');
+select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(9)], true) $$, 'P0001', 'card_photo',
+  'nor marked again');
 
 -- ── Mark reviewed (answer 4) ─────────────────────────────────────────────────────────────────────────────────────
 select throws_ok($$ select public.mark_tagging_reviewed('33333333-3333-4333-8333-333333333333',
@@ -319,6 +351,10 @@ select is(public.blank_card_code('33333333-3333-4333-8333-333333333333', 'a00000
 select throws_ok($$ select public.blank_card_code('33333333-3333-4333-8333-333333333333',
   'a0000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000001') $$, 'P0001', 'card_claimed',
   'a child''s card isn''t blank');
+select throws_ok($$ select public.claim_blank_card('44444444-4444-4444-8444-444444444444',
+  'a0000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000003',
+  '{"id":"c1000000-0000-4000-8000-000000000009","first_name":"Zoe","last_name":"New","access_code_ciphertext":"v1.ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"}') $$,
+  '42501', null, 'staff cannot claim a blank card (plan answer 10)');
 select throws_ok($$ select public.claim_blank_card('22222222-2222-4222-8222-222222222222',
   'a0000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000003',
   '{"id":"c1000000-0000-4000-8000-000000000009","first_name":"Zoe","last_name":"New","access_code_ciphertext":"v1.ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"}') $$,
@@ -331,6 +367,8 @@ select throws_ok($$ select public.claim_blank_card('33333333-3333-4333-8333-3333
   'a0000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000003',
   '{"id":"c1000000-0000-4000-8000-000000000009","first_name":"Zoe","last_name":"New","group_id":"e2000000-0000-4000-8000-000000000001","access_code_ciphertext":"v1.ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"}') $$,
   '22023', null, 'new children go only into the job''s own classes (plan answer 6)');
+create temp table before_claim as select pg_temp.round() as round;
+grant select on before_claim to service_role;
 select is(public.claim_blank_card('33333333-3333-4333-8333-333333333333', 'a0000000-0000-4000-8000-000000000001',
   'f1000000-0000-4000-8000-000000000003',
   '{"id":"c1000000-0000-4000-8000-000000000009","first_name":"Zoe","last_name":"New","group_id":"e1000000-0000-4000-8000-000000000001","access_code_ciphertext":"v1.ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"}'),
@@ -344,6 +382,15 @@ select is((select count(*) from public.access_code_hashes where access_code_hash
   'the code is registered once, for the child');
 select is(pg_temp.place(8), 'child:c1000000-0000-4000-8000-000000000009/auto', 'the card''s photos go to the child');
 select is(pg_temp.place(7), 'card/auto', 'and its card photo stays a card photo');
+-- A tagging run that read the batch before the claim can't hold photos for the claimed card (code review M2).
+select ok(pg_temp.round() > (select round from before_claim), 'the claim moves the card''s batch round on');
+select throws_ok($$ select public.apply_batch_tags('a2000000-0000-4000-8000-000000000001',
+  (select round from before_claim), jsonb_build_array(pg_temp.w(8, 'blank_card', card => 'f1000000-0000-4000-8000-000000000003'))) $$,
+  'P0001', 'tagging_stale', 'so a run that read it before the claim is refused');
+select throws_ok($$ select public.apply_batch_tags('a2000000-0000-4000-8000-000000000001', pg_temp.round(),
+  jsonb_build_array(pg_temp.w(8, 'blank_card', card => 'f1000000-0000-4000-8000-000000000003'))) $$,
+  'P0001', 'tagging_stale', 'and no run ever holds photos for a card that has its child');
+select is(pg_temp.place(8), 'child:c1000000-0000-4000-8000-000000000009/auto', 'the photo stays with the child');
 select throws_ok($$ select public.claim_blank_card('33333333-3333-4333-8333-333333333333',
   'a0000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000003',
   '{"id":"c1000000-0000-4000-8000-000000000010","first_name":"Zed","last_name":"Twice","access_code_ciphertext":"v1.ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"}') $$,
@@ -398,6 +445,12 @@ select is(public.bin_photos('11111111-1111-4111-8111-111111111111', 'a0000000-00
 select ok(pg_temp.round() > (select tagged_round from public.upload_batches
                              where id = 'a2000000-0000-4000-8000-000000000001'), 'and its batch is tagged again');
 select ok(not public.photo_parent_visible(pg_temp.p(6)), 'a photo in the bin is never shown');
+select ok(not public.photo_parent_visible(pg_temp.p(4)),
+  'nor, while its batch is due to be tagged again, any photo of the batch (security review 6)');
+select is((select x ->> 'binned' from jsonb_array_elements(
+             public.tagging_inputs('a2000000-0000-4000-8000-000000000001') -> 'photos') x
+           where x ->> 'id' = pg_temp.p(6)::text), 'true',
+  'tagging still reads a binned photo, marked binned, so it still marks where cards were (security review 1)');
 
 -- A class photo upload must name one of the job's classes.
 select throws_ok($$ select public.create_upload_batch('33333333-3333-4333-8333-333333333333',
@@ -433,6 +486,122 @@ select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as owner_a_again;
 delete from public.children where id = 'c1000000-0000-4000-8000-000000000002';
 reset role;
 select is(pg_temp.place(1), 'leftovers/manual', 'a removed child''s photos go to Leftovers, by hand');
+
+-- ── Job 2: photos that may be cards, the bin's purge, and closed jobs ────────────────────────────────────────────
+-- A second child with a card in job 2, and a batch of nine: 1 Ava's card, 2 a photo, 3 Noah's card, 4 an unreadable
+-- card, 5 a photo, 6 a failed photo, 7-8 photos, 9 an unreadable card.
+insert into public.children (id, studio_id, job_id, group_id, first_name, last_name, access_code_hash,
+  access_code_ciphertext) values
+  ('c2000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000002',
+   'e2000000-0000-4000-8000-000000000001', 'Noah', 'Kim', repeat('5', 64), 'v1.' || repeat('A', 48));
+insert into public.qr_cards (id, studio_id, job_id, child_id, card_code, access_code_hash, access_code_ciphertext) values
+  ('f2000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000002',
+   'c2000000-0000-4000-8000-000000000002', 'GGGGGGGGGGGGGGGGGGGG', null, null);
+insert into public.upload_batches (id, studio_id, job_id, created_by) values
+  ('a2000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000002',
+   '11111111-1111-4111-8111-111111111111');
+insert into public.photos (id, studio_id, job_id, batch_id, batch_seq, status, original_filename, byte_size, sha256,
+  created_by)
+select ('9c000000-0000-4000-8000-0000000000' || lpad(n::text, 2, '0'))::uuid, b.studio_id, b.job_id, b.id, b.seq,
+  'processing', 'IMG_' || lpad((2000 + n)::text, 4, '0') || '.JPG', 1, extensions.digest('a3-' || n, 'sha256'),
+  b.created_by
+from public.upload_batches b, generate_series(1, 9) n
+where b.id = 'a2000000-0000-4000-8000-000000000003';
+create function pg_temp.q(n int) returns uuid language sql as $$
+  select ('9c000000-0000-4000-8000-0000000000' || lpad(n::text, 2, '0'))::uuid $$;
+create function pg_temp.qw(n int, place text, child uuid default null, card uuid default null, flag text default null)
+returns jsonb language sql as $$
+  select jsonb_strip_nulls(jsonb_build_object('photo_id', pg_temp.q(n), 'place', place, 'child_id', child,
+    'card_id', card, 'flag', flag)) $$;
+create function pg_temp.qplace(n int) returns text language sql as $$
+  select t.place::text || coalesce(':' || t.child_id::text, '') || coalesce('!' || t.flag::text, '') || '/' || t.source
+  from public.photo_tags t where t.photo_id = pg_temp.q(n) $$;
+create function pg_temp.qbefore(n int) returns text language sql as $$
+  select x -> 'before' ->> 'card' || ':' || coalesce(x -> 'before' ->> 'card_child_id', '-') || ':'
+    || coalesce(x -> 'before' ->> 'flag', '-')
+  from jsonb_array_elements(public.tagging_inputs('a2000000-0000-4000-8000-000000000003') -> 'photos') x
+  where x ->> 'id' = pg_temp.q(n)::text $$;
+create function pg_temp.qround() returns bigint language sql as $$
+  select tag_round from public.upload_batches where id = 'a2000000-0000-4000-8000-000000000003' $$;
+select public.record_photo_result(pg_temp.q(1), 1,
+  '{"status":"ready","width":10,"height":10,"qr":{"kind":"card","card_code":"DDDDDDDDDDDDDDDDDDDD"}}');
+select public.record_photo_result(pg_temp.q(n), 1, '{"status":"ready","width":10,"height":10,"qr":{"kind":"none"}}')
+from unnest(array[2, 5, 7, 8]) n;
+select public.record_photo_result(pg_temp.q(3), 1,
+  '{"status":"ready","width":10,"height":10,"qr":{"kind":"card","card_code":"GGGGGGGGGGGGGGGGGGGG"}}');
+select public.record_photo_result(pg_temp.q(n), 1, '{"status":"ready","width":10,"height":10,"qr":{"kind":"unreadable"}}')
+from unnest(array[4, 9]) n;
+select public.record_photo_result(pg_temp.q(6), 1, '{"status":"failed","failure_reason":"unreadable"}');
+-- What core's tagBatch makes of it.
+select is(public.apply_batch_tags('a2000000-0000-4000-8000-000000000003', pg_temp.qround(), jsonb_build_array(
+  pg_temp.qw(1, 'card', card => 'f2000000-0000-4000-8000-000000000001'),
+  pg_temp.qw(2, 'child', child => 'c2000000-0000-4000-8000-000000000001'),
+  pg_temp.qw(3, 'card', card => 'f2000000-0000-4000-8000-000000000002'),
+  pg_temp.qw(4, 'child', child => 'c2000000-0000-4000-8000-000000000002', flag => 'unreadable_card'),
+  pg_temp.qw(5, 'child', child => 'c2000000-0000-4000-8000-000000000002', flag => 'after_unreadable'),
+  pg_temp.qw(7, 'child', child => 'c2000000-0000-4000-8000-000000000002', flag => 'after_failed'),
+  pg_temp.qw(8, 'child', child => 'c2000000-0000-4000-8000-000000000002', flag => 'after_failed'),
+  pg_temp.qw(9, 'child', child => 'c2000000-0000-4000-8000-000000000002', flag => 'unreadable_card'))), 8,
+  'job 2''s batch is tagged');
+
+-- A photo that may be a card is confirmed, either way, before it moves (Seenu, plan answer 1; code review M1).
+select throws_ok($$ select public.move_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000002', array[pg_temp.q(9)],
+  '{"kind":"child","id":"c2000000-0000-4000-8000-000000000001"}') $$, 'P0001', 'confirm_first',
+  'a photo that may be a card can''t be moved before it is confirmed');
+select ok(not public.photo_parent_visible(pg_temp.q(9)), 'and stays hidden');
+select is(public.move_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000002',
+  array[pg_temp.q(5)], '{"kind":"child","id":"c2000000-0000-4000-8000-000000000002"}'), 1,
+  'a photo flagged only for coming after one can be moved');
+
+-- Only rows actually written reopen the review (code review nice 2): a write skipped for a manual tag doesn't.
+insert into public.job_tagging_reviews (job_id, studio_id, reviewed_by) values
+  ('a0000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111');
+update public.upload_batches set tag_round = tag_round + 1 where id = 'a2000000-0000-4000-8000-000000000003';
+select is(public.apply_batch_tags('a2000000-0000-4000-8000-000000000003', pg_temp.qround(),
+  jsonb_build_array(pg_temp.qw(5, 'leftovers'))), 0, 'tagging never overwrites the manual move');
+select is((select count(*) from public.job_tagging_reviews where job_id = 'a0000000-0000-4000-8000-000000000002'),
+  1::bigint, 'so the review stays done');
+delete from public.job_tagging_reviews where job_id = 'a0000000-0000-4000-8000-000000000002';
+
+-- Binned photos stay in tagging's input; purged ones leave what they did on the next photo (security review 1).
+select is(public.bin_photos('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000002',
+  array[pg_temp.q(1), pg_temp.q(3), pg_temp.q(4), pg_temp.q(6)]), 4, 'four photos go to the bin');
+select is((select count(*)::int from jsonb_array_elements(
+             public.tagging_inputs('a2000000-0000-4000-8000-000000000003') -> 'photos') x
+           where (x ->> 'binned')::boolean), 4, 'tagging still reads them, marked binned');
+update public.photos set binned_at = now() - interval '31 days', purge_started_at = now()
+where id in (pg_temp.q(1), pg_temp.q(3), pg_temp.q(4), pg_temp.q(6));
+select is(public.delete_purged_photos(array[pg_temp.q(1), pg_temp.q(3), pg_temp.q(4), pg_temp.q(6)]), 4,
+  'the daily clean-up purges them');
+select is(pg_temp.qbefore(2), 'true:c2000000-0000-4000-8000-000000000001:-',
+  'the photo after Ava''s purged card still goes to Ava');
+select is(pg_temp.qbefore(5), 'true:c2000000-0000-4000-8000-000000000002:after_unreadable',
+  'after Noah''s purged card and a purged unreadable card: Noah, flagged');
+select is(pg_temp.qbefore(7), 'false:-:after_failed', 'after a purged failed photo: flagged');
+select is(pg_temp.qbefore(8), null, 'and a photo after none keeps nothing');
+select is((select count(*) from public.events where data::text ~ '(GGGGGGGGGGGGGGGGGGGG|IMG_2)'), 0::bigint,
+  'no event names a card code or a filename');
+
+-- Removing a child keeps "may be a card" flags (security review 3-4).
+delete from public.children where id = 'c2000000-0000-4000-8000-000000000002';
+select is(pg_temp.qplace(9), 'leftovers!unreadable_card/auto', 'a removed child''s photo that may be a card stays flagged');
+select is(pg_temp.qplace(8), 'leftovers/manual', 'other photos go to Leftovers by hand');
+select is(pg_temp.qbefore(5), 'true:-:after_unreadable', 'a purged card since removed is kept as a removed card');
+
+-- Closed jobs take no tagging changes (security review 9).
+update public.jobs set status = 'closed' where id = 'a0000000-0000-4000-8000-000000000002';
+select throws_ok($$ select public.move_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000002', array[pg_temp.q(2)], '{"kind":"leftovers"}') $$, 'P0001', 'job_closed',
+  'a closed job''s photos can''t be moved');
+select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000002', array[pg_temp.q(2)], false) $$, 'P0001', 'job_closed', 'nor confirmed');
+select throws_ok($$ select public.claim_blank_card('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000002', 'f2000000-0000-4000-8000-000000000001',
+  '{"id":"c2000000-0000-4000-8000-000000000009","first_name":"Zoe","last_name":"New","access_code_ciphertext":"v1.ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"}') $$,
+  'P0001', 'job_closed', 'nor its blank cards claimed');
+select throws_ok($$ select public.mark_tagging_reviewed('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000002') $$, 'P0001', 'job_closed', 'nor marked reviewed');
 
 -- ── Events never hold card codes, names or filenames ─────────────────────────────────────────────────────────────
 select is((select count(*) from public.events
