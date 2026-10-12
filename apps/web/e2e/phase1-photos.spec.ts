@@ -22,7 +22,7 @@ async function jpeg(
   if (options.noise) {
     const raw = randomFillSync(Buffer.alloc(width * height * 3));
     return sharp(raw, { raw: { width, height, channels: 3 } })
-      .jpeg({ quality: 100 })
+      .jpeg({ quality: 100, chromaSubsampling: "4:4:4", mozjpeg: false })
       .toBuffer();
   }
   return sharp({
