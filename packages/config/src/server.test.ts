@@ -92,19 +92,27 @@ describe("stripeWebhookSecrets (ADR 0020)", () => {
   const ONE = ["whsec", "a".repeat(24)].join("_");
   const TWO = ["whsec", "z".repeat(24)].join("_");
 
-  it("reads one or two signing secrets", () => {
+  it("reads one to four signing secrets (snapshot and thin destinations, each mid-rotation)", () => {
     expect(stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: ONE })).toEqual([ONE]);
     expect(stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: ` ${ONE} , ${TWO} ` })).toEqual([
       ONE,
       TWO,
     ]);
+    expect(stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: [ONE, TWO, ONE, TWO].join(",") })).toEqual(
+      [ONE, TWO, ONE, TWO],
+    );
   });
 
   it("refuses anything else, by name only", () => {
     expect(() => stripeWebhookSecrets({})).toThrow(/^STRIPE_WEBHOOK_SECRET is not set$/);
-    for (const value of ["secret", `${ONE},${TWO},${ONE}`, ["whsec", "short"].join("_")])
+    for (const value of [
+      "secret",
+      [ONE, TWO, ONE, TWO, ONE].join(","),
+      `${ONE},secret`,
+      ["whsec", "short"].join("_"),
+    ])
       expect(() => stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: value })).toThrow(
-        /^STRIPE_WEBHOOK_SECRET must be one or two whsec_ signing secrets$/,
+        /^STRIPE_WEBHOOK_SECRET must be one to four whsec_ signing secrets$/,
       );
   });
 });

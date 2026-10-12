@@ -144,8 +144,10 @@ export function stripeSettings(
 }
 
 /**
- * STRIPE_WEBHOOK_SECRET: the webhook endpoint's signing secret (whsec_…), or two comma-separated while one is being
- * rolled. The fake driver signs its simulated events with the first one, so CI sets a random one per run.
+ * STRIPE_WEBHOOK_SECRET: the signing secrets (whsec_…) of the event destinations that send to the webhook,
+ * comma-separated: one for the snapshot (v1) destination, one for the thin (Accounts v2) destination, and a second for
+ * either while it is being rolled; at most four (ADR 0020 amendment). The fake driver signs its simulated events with
+ * the first one, so CI sets a random one per run.
  */
 export function stripeWebhookSecrets(
   env: Record<string, string | undefined> = process.env,
@@ -156,9 +158,9 @@ export function stripeWebhookSecrets(
     .filter(Boolean);
   if (
     secrets.length === 0 ||
-    secrets.length > 2 ||
+    secrets.length > 4 ||
     secrets.some((s) => !/^whsec_[A-Za-z0-9+/=_-]{16,}$/.test(s))
   )
-    throw new Error("STRIPE_WEBHOOK_SECRET must be one or two whsec_ signing secrets");
+    throw new Error("STRIPE_WEBHOOK_SECRET must be one to four whsec_ signing secrets");
   return secrets;
 }

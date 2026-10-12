@@ -240,7 +240,7 @@ describe("POST /studio/payouts/onboarding-link", () => {
     expect(stripeCalls()).toBe(0);
   });
 
-  it("creates the account once (idempotency key, country only), records it for the owner, then links to Stripe", async () => {
+  it("creates the account once (the v2 idempotency key, country only), records it for the owner, then links to Stripe", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     signIn("owner", {});
     provider.createAccount.mockResolvedValue(
@@ -275,7 +275,8 @@ describe("POST /studio/payouts/onboarding-link", () => {
       studioId: STUDIO,
       region: "ca",
       country: "CA",
-      idempotencyKey: `daybell-payout-account-${STUDIO}`,
+      // A new key: the v1 one replays Stripe's refusal of v1 account creation for 24 hours (ADR 0020 amendment).
+      idempotencyKey: `daybell-payout-account-v2-${STUDIO}`,
     });
     expect(writeRpc).toHaveBeenCalledWith("ca", "create_payout_account", "user-1", {
       p_studio_id: STUDIO,
@@ -325,6 +326,26 @@ describe("POST /studio/payouts/onboarding-link", () => {
     const res = await routes.onboarding();
     expect(res.status).toBe(409);
     expect((await res.json()).error.fields).toEqual({ form: "payouts.alreadyConnected" });
+    expect(provider.createAccountLink).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /studio/payouts/onboarding-link: Stripe's platform setup (ADR 0020 amendment)", () => {
+  it("tells the owner Stripe needs the platform setup finished, recording nothing", async () => {
+    signIn("owner", {});
+    const { ApiError } = await import("@daybell/api");
+    provider.createAccount.mockRejectedValue(
+      new ApiError("internal", "Stripe needs the platform setup finished.", {
+        form: "payouts.platformSetup",
+      }),
+    );
+    const res = await routes.onboarding();
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toMatchObject({
+      code: "internal",
+      fields: { form: "payouts.platformSetup" },
+    });
+    expect(writeRpc).not.toHaveBeenCalled();
     expect(provider.createAccountLink).not.toHaveBeenCalled();
   });
 });
@@ -487,8 +508,11 @@ describe("Stripe links (security review N5)", () => {
     signIn("owner", { payout_accounts: accountRow() });
     provider.createLoginLink.mockResolvedValue({ url: "http://connect.stripe.com/express/x" });
     expect((await routes.dashboard()).status).toBe(500);
-    expect(errors).toHaveBeenCalledWith("stripe_link_unexpected", "stripe");
+    // A Stripe host is named (diagnosable if Stripe moves its pages); any other host is "other"; never the address.
+    expect(errors).toHaveBeenCalledWith("stripe_link_unexpected", "stripe", "other");
+    expect(errors).toHaveBeenCalledWith("stripe_link_unexpected", "stripe", "connect.stripe.com");
     expect(JSON.stringify(errors.mock.calls)).not.toContain("evil");
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("/express/x");
     errors.mockRestore();
   });
 });

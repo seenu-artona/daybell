@@ -20,6 +20,13 @@ describe("fakeDriver (ADR 0020)", () => {
     // The same idempotency key gives the same account.
     expect((await fake.createAccount(input)).id).toBe(a.id);
     expect(accountForDatabase(a).status).toBe("needs_info");
+    // Created with the default schedule, as the real driver sets it after the v2 create (D56; Q6).
+    expect(accountForDatabase(a).schedule).toMatchObject({
+      payout_interval: "weekly",
+      weekly_anchor: "friday",
+    });
+    // Another key (e.g. the v2 key after the v1 one) is another request.
+    expect((await fake.createAccount({ ...input, idempotencyKey: "k2" })).id).not.toBe(a.id);
     const link = await fake.createAccountLink({
       accountId: a.id,
       refreshUrl: "http://x/refresh",

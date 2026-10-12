@@ -12,6 +12,8 @@ import type {
  * The fake Stripe (STRIPE_DRIVER=fake; ADR 0020): development, CI and end-to-end tests only, refused on Vercel. It
  * keeps accounts and payouts in this server process's memory (one `next start` in end-to-end tests), behaves like the
  * parts of Stripe Daybell uses, and sends its "hosted onboarding" to /dev/stripe-onboarding. Ids look like Stripe's.
+ * Like the real driver since the Accounts v2 move (ADR 0020 amendment), a new account comes back as Daybell reads it
+ * through v1: needing its details, with the default schedule (weekly on Friday) already set.
  */
 interface FakeState {
   accounts: Map<string, StripeAccountData>;

@@ -1230,6 +1230,7 @@
       "notForRole": "Only the studio’s owner and admins can see payouts.",
       "unavailable": "Payouts aren’t available in this region yet.",
       "notConfigured": "Payouts aren’t set up in this environment.",
+      "platformSetup": "Stripe needs the platform setup finished. Please try again later.",
       "status": {
         "title": "Connection",
         "notStarted": "Not started",

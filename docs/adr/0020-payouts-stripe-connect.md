@@ -1,6 +1,7 @@
 # 0020 — Payouts with Stripe Connect
 
-- Status: Proposed, Oct 12, 2026 (accepted when Seenu merges the step 7 PR).
+- Status: Accepted with the step 7 PR. Amended Oct 12, 2026 by step 7b (section 16: accounts are created with Stripe
+  Accounts v2; proposed until Seenu merges that PR).
 - Amends:
   - 0017: onboarding gains "Set up payouts".
   - 0016: the region guard gains `PAYOUT_REGIONS`.
@@ -23,6 +24,9 @@ Seenu's answers:
 4. Settings › Payouts shows status, next payout, recent payouts and the fees. Nothing goes on Home.
 
 ## 1. Stripe configuration
+
+> **Superseded for account creation by section 16** (Stripe refuses Accounts v1 creation for new Connect platforms).
+> The responsibilities below are unchanged; they are now expressed in Accounts v2 terms.
 
 **Accounts v1 with `controller` properties (Seenu, Q1).** stripe-node marks `type` as deprecated in favour of
 `controller`. Every studio account is created with:
@@ -367,4 +371,104 @@ Setup steps are in `docs/stripe-staging.md`.
 - Trusting the payload's ordering.
 - Browsers writing payout rows.
 - A job checklist task for payouts: photographers would see it.
-- Accounts v2: its availability for Canadian platforms couldn't be checked, and Q1 chose v1 with controller properties.
+- ~~Accounts v2: its availability for Canadian platforms couldn't be checked, and Q1 chose v1 with controller
+  properties.~~ Reversed by section 16: Stripe refuses v1 account creation for new platforms.
+
+## 16. Amendment (step 7b, Oct 12, 2026): accounts created with Stripe Accounts v2
+
+Decisions: D106, D56, D113, D96. Seenu chose to rebuild on Accounts v2.
+
+**Why.** On staging, `POST /v1/accounts` answered 400: Stripe no longer recommends Accounts v1 for new Connect
+integrations and asks for `POST /v2/core/accounts`, unless v1 support is switched on in the Dashboard for a supported
+compatibility case (none applies to Daybell). The v1 limits that would keep an integration on v1 (OAuth, the recipient
+service agreement, Treasury or Issuing, deprecated capabilities) don't apply either.
+
+**New idempotency key.** Stripe keeps a key's first answer for 24 hours, so `daybell-payout-account-{studio}` would
+replay that 400. The key is now `daybell-payout-account-v2-{studio}`.
+
+**The account** (`POST /v2/core/accounts`, `stripe.v2.core.accounts.create` in stripe-node 22.6.2, which has it in its
+types; no package change):
+- `identity.country: "ca"` and `defaults.currency: "cad"` (the studio's region; Canada only in Phase 1).
+- `dashboard: "express"` (Q2).
+- `defaults.responsibilities: { fees_collector: "application", losses_collector: "application" }`. Stripe computes
+  `requirements_collector` as `stripe` (it is `application` only with losses on the platform and no dashboard). This is
+  exactly Seenu's Q1 combination (Stripe collects requirements; Daybell carries losses and pays Stripe's fees, passed on
+  per D98). `dashboard: "express"` requires both responsibilities on the application, and Stripe recommends that for
+  destination charges.
+- `configuration.merchant.capabilities.card_payments.requested` (the Canadian studio is the merchant of record with
+  D106's destination charges `on_behalf_of`) and `configuration.recipient.capabilities.stripe_balance.stripe_transfers
+  .requested` (v2's name for v1 `transfers`, needed for destination charges in step 10).
+- `metadata`: `daybell_studio_id`, `daybell_region`. No name, email or business details (Q4).
+- The v2 create can't set a payout schedule, so the driver then sets weekly on Friday through v1 (below). If that second
+  call fails after Stripe made the account, the driver logs `stripe_account_unrecorded` with the studio id (as in
+  section 14) and a retry replays the create and sets it again.
+
+**Which endpoints are v2 and which v1.** Stripe documents that a v2 account's id works on Accounts v1 endpoints: "the
+response is structured as a v1 Account, but any updates still apply to the v2 object".
+
+| Call | Endpoint | Why |
+|---|---|---|
+| Create the account | v2 `accounts.create` | v1 creation is refused. |
+| Onboarding links | v2 `accountLinks.create`, `use_case.type: account_onboarding`, `configurations: [merchant, recipient]` | In stripe-node 22.6.2's types. `expires_at` is RFC 3339 there and is turned into seconds. "Update details" also uses `account_onboarding`, as before. |
+| Status sync (refresh and webhooks) | v1 `accounts.retrieve` | One call gives every fact Daybell keeps (flags, requirements counts, `disabled_reason`, deadline, schedule, metadata), so `accountFacts`, `accountSchedule` and `payoutAccountStatus` are unchanged. A v2 read has no schedule and a different requirements shape: it would need a second call (a second Stripe call per event and per refresh) and a new mapping. |
+| Payout schedule | v1 `accounts.update` (`settings.payouts.schedule`) | Accounts v2 has no payout settings in stripe-node 22.6.2. |
+| Login link ("Manage on Stripe") | v1 `accounts.createLoginLink` | No v2 equivalent in stripe-node 22.6.2. |
+| Payouts | v1 `payouts.retrieve` on the connected account | Payouts aren't part of Accounts. |
+
+The status rule, the facts mapping, the database functions and the screens are unchanged.
+
+**Errors.** The driver now logs `stripe_error` with Stripe's error **type and code** (never the message or the request),
+so staging failures can be told apart; a code that isn't a lower-case identifier is logged as `other`. These codes mean
+Daybell's own platform setup isn't finished and are answered with `fields.form = "payouts.platformSetup"`, which the
+page shows as "Stripe needs the platform setup finished. Please try again later." (locale key
+`app.payouts.platformSetup`): `account_creation_liability_unacknowledged`, `connect_profile_not_submitted`,
+`account_create_activation_required`, `accounts_v2_access_blocked`, `capability_not_available_in_country` and
+`cross_border_connected_account_creation_not_allowed`. Anything else stays "We couldn't reach Stripe".
+
+**Links.** `assertStripeLink` is unchanged (`https://connect.stripe.com/` only). An unexpected link is now logged with
+its host when the host is Stripe's (e.g. `connect.stripe.com` over http), otherwise `other`; never the address. If
+Stripe's v2 links turn out to use another Stripe host, the log line says which.
+
+**Webhooks.** Whether Stripe sends v1 snapshot events (`account.updated`, `capability.updated`) for accounts created
+with v2 could not be checked. Both are supported:
+- The v1 snapshot destination stays as it is (7 events, payouts included).
+- A second destination with the **thin** payload style sends v2 account events to the same address. Handled:
+  `v2.core.account.updated`, `v2.core.account[requirements].updated`,
+  `v2.core.account[configuration.merchant].updated`, `v2.core.account[configuration.merchant].capability_status_updated`,
+  `v2.core.account[configuration.recipient].updated` and
+  `v2.core.account[configuration.recipient].capability_status_updated`. Other thin events are acknowledged and stored
+  nowhere.
+- The same rules apply to both: the signature is checked with stripe-node's own `webhooks.signature.verifyHeader` and
+  its default five-minute tolerance (what `constructEvent` and `parseEventNotification` both call), the body's
+  `object` (`event` or `v2.core.event`) says which style it is, the mode must match the key, the account id comes from
+  `related_object` (only when its type is `v2.core.account`), the function region is checked before any Stripe call,
+  the account is read again through v1 (the thin event's `fetchRelatedObject` is never used), and the inbox records
+  the event once by its id. Ids, the type and the time only.
+- `STRIPE_WEBHOOK_SECRET` takes one to four secrets: one per destination, plus one for each during a rotation.
+- Getting both a v1 and a v2 event for one change is harmless: each is a separate inbox row, the second read changes
+  nothing, and a sync that changes nothing writes no event.
+
+**Data.** Forward migration `20261012400000_stripe_thin_events.sql` widens two checks on `stripe_events`: types may
+hold digits and a bracketed part (`v2.core.account[requirements].updated`), and event ids may hold underscores (v2 ids
+such as `evt_test_…`). Both stay anchored and length-capped. pgTAP `017_stripe_thin_events` (12 tests): v2 events are
+recorded once for the account's own studio, a v2 event id never moves to another studio's account, and free text or
+trailing text in a type is still refused.
+
+**Not checked (follow-ups).**
+- Whether v1 snapshot events fire for v2-created accounts (section 16 supports both).
+- The exact host of v2 Account Link URLs (assumed `connect.stripe.com`, as for v1).
+- The restricted-key permission names for the v2 endpoints, if Seenu uses a restricted key.
+- The exact shape of v2 event ids (underscores allowed to be safe).
+- **Open question for Seenu:** a refused create may be replayed for 24 hours under the same per-studio key (as the v1
+  refusal was), so a studio whose first try hit a platform-setup code can't retry until then, even after the fix.
+  Changing the key scheme (e.g. a new key after a refusal that made no account) needs a decision, because a key that
+  changes too freely risks a second account. docs/stripe-staging.md tells Seenu to finish the platform profile before
+  the first try.
+
+**Sources** (fetched Oct 12, 2026 by the orchestrator; checked here against stripe-node 22.6.2's types:
+`resources/V2/Core/Accounts.d.ts`, `resources/V2/Core/AccountLinks.d.ts`, `resources/V2/Core/Events.d.ts`,
+`Webhooks.js`, `stripe.core.js`):
+- https://docs.stripe.com/connect/accounts-v2.md
+- https://docs.stripe.com/connect/accounts-v2/connected-account-configuration.md
+- https://docs.stripe.com/api/v2/core/accounts/create.md
+- https://docs.stripe.com/connect/migrate-to-controller-properties.md

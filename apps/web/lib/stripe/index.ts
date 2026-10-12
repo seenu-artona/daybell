@@ -48,15 +48,25 @@ export function isFakeStripe(): boolean {
   }
 }
 
+function stripeHost(url: string): string {
+  try {
+    const host = new URL(url).hostname;
+    return host === "stripe.com" || host.endsWith(".stripe.com") ? host : "other";
+  } catch {
+    return "other";
+  }
+}
+
 /**
  * Where a Stripe link may send the owner (security review N5): Stripe's own Connect pages for the real driver, this
  * deployment's fake pages for the fake one. Anything else is refused before it reaches the browser (logged by a fixed
- * name only, never the address).
+ * name and, if it is Stripe's, the host; never the address).
  */
 export function assertStripeLink(url: string, driver: PaymentsProvider["driver"]): string {
   const allowed = driver === "stripe" ? "https://connect.stripe.com/" : `${siteUrl()}/`;
   if (!url.startsWith(allowed)) {
-    console.error("stripe_link_unexpected", driver);
+    // The host only if it is one of Stripe's (so a link from a new Stripe host is diagnosable), never the address.
+    console.error("stripe_link_unexpected", driver, stripeHost(url));
     throw new ApiError("internal", "Something went wrong on our side. Please try again.");
   }
   return url;
@@ -72,23 +82,54 @@ export function webhookSecrets(): string[] {
   }
 }
 
+/** A v2 "thin" event notification: ids, the type and the time only; Daybell reads the object from Stripe itself. */
+export interface ThinStripeEvent {
+  id: string;
+  object: "v2.core.event";
+  type: string;
+  livemode: boolean;
+  /** RFC 3339. */
+  created: string;
+  related_object?: { id?: unknown; type?: unknown } | null;
+}
+
+export type VerifiedStripeEvent =
+  | { payload: "snapshot"; event: Stripe.Event }
+  | { payload: "thin"; event: ThinStripeEvent };
+
 /**
  * A Stripe event from a webhook body, if its Stripe-Signature matches one of the secrets within Stripe's default
- * five-minute tolerance (stripe-node's webhooks.constructEvent); otherwise null. Never logs the body.
+ * five-minute tolerance; otherwise null. Snapshot (v1, `object: "event"`) and thin (v2, `object: "v2.core.event"`)
+ * events are signed the same way (stripe-node's constructEvent and parseEventNotification both use
+ * webhooks.signature.verifyHeader), so one check covers both and the body's `object` says which it is. Never logs the
+ * body.
  */
-export function verifyStripeEvent(
+export function verifyStripeWebhook(
   body: string,
   signature: string | null,
   secrets: readonly string[],
-): Stripe.Event | null {
+): VerifiedStripeEvent | null {
   if (!signature) return null;
-  for (const secret of secrets) {
+  const check = Stripe.webhooks.signature;
+  if (!check) return null;
+  const verified = secrets.some((secret) => {
     try {
-      return Stripe.webhooks.constructEvent(body, signature, secret);
+      return check.verifyHeader(body, signature, secret, Stripe.webhooks.DEFAULT_TOLERANCE);
     } catch {
-      // Try the next secret (two during a rotation).
+      // Try the next secret (one per destination, and two during a rotation).
+      return false;
     }
+  });
+  if (!verified) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
   }
+  const object = (parsed as { object?: unknown } | null)?.object;
+  if (object === "event") return { payload: "snapshot", event: parsed as Stripe.Event };
+  if (object === "v2.core.event") return { payload: "thin", event: parsed as ThinStripeEvent };
   return null;
 }
 

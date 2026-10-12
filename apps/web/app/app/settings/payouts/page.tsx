@@ -2,6 +2,7 @@
 
 import {
   PAYOUT_NOT_CONFIGURED,
+  PAYOUT_PLATFORM_SETUP,
   type PayoutLinkResponse,
   type StudioPayoutsResponse,
 } from "@daybell/api";
@@ -46,7 +47,9 @@ export default function PayoutsPage() {
           ? t("conflicts.notConnected")
           : fields.form === PAYOUT_NOT_CONFIGURED
             ? t("notConfigured")
-            : text.error(code),
+            : fields.form === PAYOUT_PLATFORM_SETUP
+              ? t("platformSetup")
+              : text.error(code),
     [t, text],
   );
 

@@ -20,9 +20,9 @@ export const preferredRegion = "yul1";
 
 /**
  * POST /api/v1/studio/payouts/onboarding-link — the owner sets up (or carries on setting up) payouts on Stripe's own
- * pages (Seenu, answers 1 and 2). The first time, it creates the studio's Stripe account (country, controller
- * properties, capabilities and Daybell's ids only; Q1, Q4) with an idempotency key, so a retry never makes a second
- * account, then records it. If recording fails after Stripe made the account, a fixed alert line with the studio id
+ * pages (Seenu, answers 1 and 2). The first time, it creates the studio's Stripe account with Accounts v2 (country,
+ * currency, responsibilities, configurations and Daybell's ids only; Q1, Q4; ADR 0020 amendment) with an idempotency
+ * key, so a retry never makes a second account, then records it. If recording fails after Stripe made the account, a fixed alert line with the studio id
  * lets support find it on Stripe (its metadata has the same id) before Stripe's idempotency window ends. Each call
  * makes a new single-use Account Link, which must be Stripe's own address. Counts against the studio's Stripe budget.
  * The link is never logged.
@@ -41,7 +41,9 @@ export const POST = handle(async () => {
       studioId: studio.id,
       region: studio.region,
       country: countryForRegion(studio.region),
-      idempotencyKey: `daybell-payout-account-${studio.id}`,
+      // "-v2": Stripe keeps a key's first answer for 24 hours, and the v1 key replayed v1's refusal for new platforms
+      // (ADR 0020 amendment).
+      idempotencyKey: `daybell-payout-account-v2-${studio.id}`,
     });
     const { status, facts, schedule } = accountForDatabase(account);
     const recorded = await payoutWriteRpc(studio.region, "create_payout_account", userId, {

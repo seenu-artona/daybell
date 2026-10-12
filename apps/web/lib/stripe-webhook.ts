@@ -4,15 +4,19 @@ import { regionDatabase } from "@daybell/config";
 import { NextResponse } from "next/server";
 import { accountForDatabase, payoutForDatabase, regionOfAccount } from "./payouts";
 import { assertFunctionRegion, assertPayoutFunctionRegion } from "./region-guard";
-import { payments, verifyStripeEvent, webhookSecrets } from "./stripe";
+import { payments, type VerifiedStripeEvent, verifyStripeWebhook, webhookSecrets } from "./stripe";
 import { payoutSystemRpc } from "./supabase/service";
 import { readCapped } from "./worker-auth";
 
 /**
- * Stripe's webhook (ADR 0020; D96 "Stripe events queued with duplicate protection"). In order:
- * 1. read the raw body (at most 512 KB) and check Stripe-Signature against STRIPE_WEBHOOK_SECRET (one or two);
+ * Stripe's webhook (ADR 0020; D96 "Stripe events queued with duplicate protection"). It takes two payload styles on
+ * one address: v1 snapshot events (account.updated, payout.*) and, since studio accounts are created with Accounts v2,
+ * v2 thin events about the account (v2.core.account[requirements].updated and the like; ADR 0020 amendment). Both are
+ * handled the same way, in order:
+ * 1. read the raw body (at most 512 KB) and check Stripe-Signature against STRIPE_WEBHOOK_SECRET (one secret per
+ *    event destination, plus one during a rotation);
  * 2. refuse an event whose mode (live or test) isn't the key's;
- * 3. answer 200 and store nothing for events Daybell doesn't handle or that aren't from a connected account;
+ * 3. answer 200 and store nothing for events Daybell doesn't handle or that aren't about a connected account;
  * 4. refuse to go on outside the payout regions' function regions, before anything is asked of Stripe (D113);
  * 5. read the account from Stripe again and route by the region in its metadata (Claude's call Q11);
  * 6. record the event in that region's inbox (once; 404 for an account Daybell doesn't know yet, so Stripe tries
@@ -24,7 +28,9 @@ import { readCapped } from "./worker-auth";
  *    recorded by its code and answered with 500, so Stripe tries again; one that can never succeed (a payout in the
  *    wrong currency, an object Daybell can't read, a studio mismatch) is recorded as processed with its code, logged
  *    for an alert, and answered with 200.
- * The payload is never stored or logged: only fixed names, the event type and error codes.
+ * The payload is never stored or logged: only fixed names, the event type and error codes. A thin event carries ids
+ * only, and Daybell never calls its fetchRelatedObject: the account is read through the same v1 call as for snapshot
+ * events, so the facts mapping is the same.
  */
 
 export const STRIPE_WEBHOOK_MAX_BYTES = 512 * 1024;
@@ -39,9 +45,70 @@ export const HANDLED_EVENTS = new Set([
   "payout.canceled",
 ]);
 
+/**
+ * Accounts v2 thin events that can change what Daybell keeps (requirements, capabilities, the account itself). Each
+ * leads to the account being read again. They need their own event destination with the thin payload style
+ * (docs/stripe-staging.md).
+ */
+export const HANDLED_THIN_EVENTS = new Set([
+  "v2.core.account.updated",
+  "v2.core.account[requirements].updated",
+  "v2.core.account[configuration.merchant].updated",
+  "v2.core.account[configuration.merchant].capability_status_updated",
+  "v2.core.account[configuration.recipient].updated",
+  "v2.core.account[configuration.recipient].capability_status_updated",
+]);
+
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{1,250}$/;
 const PAYOUT_ID = /^po_[A-Za-z0-9]{1,250}$/;
 const EVENT_ID = /^evt_[A-Za-z0-9]{1,250}$/;
+/** v2 event ids can hold underscores (e.g. evt_test_…). */
+const THIN_EVENT_ID = /^evt_[A-Za-z0-9_]{1,250}$/;
+
+/** What Daybell needs from either payload style: ids, the type, the mode and the time. */
+interface Incoming {
+  id: string;
+  type: string;
+  livemode: unknown;
+  handled: boolean;
+  account: unknown;
+  /** The payout's id for payout events (checked below), else null. */
+  payoutId: unknown;
+  createdMs: number;
+  idPattern: RegExp;
+}
+
+function incoming(verified: VerifiedStripeEvent): Incoming {
+  if (verified.payload === "snapshot") {
+    const event = verified.event;
+    return {
+      id: event.id,
+      type: event.type,
+      livemode: event.livemode,
+      handled: HANDLED_EVENTS.has(event.type),
+      account: event.account,
+      payoutId:
+        typeof event.type === "string" && event.type.startsWith("payout.")
+          ? (event.data?.object as { id?: unknown } | undefined)?.id
+          : null,
+      createdMs: event.created * 1000,
+      idPattern: EVENT_ID,
+    };
+  }
+  const event = verified.event;
+  const related = event.related_object;
+  return {
+    id: event.id,
+    type: event.type,
+    livemode: event.livemode,
+    handled: HANDLED_THIN_EVENTS.has(event.type),
+    // The account the event is about. Its id is the same for v1 and v2 endpoints.
+    account: related?.type === "v2.core.account" ? related.id : null,
+    payoutId: null,
+    createdMs: typeof event.created === "string" ? Date.parse(event.created) : Number.NaN,
+    idPattern: THIN_EVENT_ID,
+  };
+}
 
 const refused = (log: string) => {
   console.error(log);
@@ -83,20 +150,29 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
   const body = await readCapped(request, STRIPE_WEBHOOK_MAX_BYTES, () =>
     refused("stripe_webhook_too_big"),
   );
-  const event = verifyStripeEvent(body, request.headers.get("stripe-signature"), webhookSecrets());
-  if (!event) throw refused("stripe_webhook_bad_signature");
+  const verified = verifyStripeWebhook(
+    body,
+    request.headers.get("stripe-signature"),
+    webhookSecrets(),
+  );
+  if (!verified) throw refused("stripe_webhook_bad_signature");
+  const event = incoming(verified);
   const provider = payments();
   if (event.livemode !== provider.livemode) throw refused("stripe_webhook_wrong_mode");
-  if (!HANDLED_EVENTS.has(event.type) || !event.account) {
-    console.warn("stripe_webhook_ignored", event.type);
+  if (!event.handled || !event.account) {
+    console.warn("stripe_webhook_ignored", typeof event.type === "string" ? event.type : "unknown");
     return received();
   }
-  if (!ACCOUNT_ID.test(event.account) || !EVENT_ID.test(event.id))
+  if (
+    typeof event.account !== "string" ||
+    !ACCOUNT_ID.test(event.account) ||
+    typeof event.id !== "string" ||
+    !event.idPattern.test(event.id)
+  )
     throw refused("stripe_webhook_bad_ids");
+  if (!Number.isFinite(event.createdMs)) throw refused("stripe_webhook_bad_time");
   const accountId = event.account;
-  const payoutId = event.type.startsWith("payout.")
-    ? (event.data.object as { id?: unknown }).id
-    : null;
+  const payoutId = event.payoutId;
   if (payoutId !== null && (typeof payoutId !== "string" || !PAYOUT_ID.test(payoutId)))
     throw refused("stripe_webhook_bad_ids");
 
@@ -116,8 +192,8 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
     p_event_id: event.id,
     p_type: event.type,
     p_stripe_account_id: accountId,
-    p_livemode: event.livemode,
-    p_created: new Date(event.created * 1000).toISOString(),
+    p_livemode: provider.livemode,
+    p_created: new Date(event.createdMs).toISOString(),
   });
   if (recorded.error) {
     console.error("stripe_webhook_inbox_failed", event.type);

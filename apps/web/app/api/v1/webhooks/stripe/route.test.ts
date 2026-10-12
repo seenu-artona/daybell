@@ -408,3 +408,115 @@ describe("POST /webhooks/stripe: studio backstop (security review N3)", () => {
     expect(provider.retrievePayout).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /webhooks/stripe: Accounts v2 thin events (ADR 0020 amendment)", () => {
+  // A thin event carries ids, the type and the time only; it may hold no personal data, but a test payload with some
+  // proves none of it would reach a log or the database.
+  const thin = (type: string, over: Record<string, unknown> = {}) => ({
+    id: `evt_test_65R${++n}`,
+    object: "v2.core.event",
+    type,
+    livemode: false,
+    created: "2026-10-12T17:00:00.123Z",
+    related_object: { id: "acct_A1", type: "v2.core.account", url: "/v2/core/accounts/acct_A1" },
+    reason: { type: "request", request: { id: "req_1", idempotency_key: "Maya Johnson" } },
+    ...over,
+  });
+
+  it.each([
+    "v2.core.account.updated",
+    "v2.core.account[requirements].updated",
+    "v2.core.account[configuration.merchant].updated",
+    "v2.core.account[configuration.merchant].capability_status_updated",
+    "v2.core.account[configuration.recipient].updated",
+    "v2.core.account[configuration.recipient].capability_status_updated",
+  ])("records %s once, reads the account again through v1 and syncs it", async (type) => {
+    const e = thin(type);
+    const res = await send(post(JSON.stringify(e)));
+    expect(res.status).toBe(200);
+    expect(provider.retrieveAccount).toHaveBeenCalledWith("acct_A1");
+    expect(systemRpc).toHaveBeenCalledWith("ca", "record_stripe_event", {
+      p_event_id: e.id,
+      p_type: type,
+      p_stripe_account_id: "acct_A1",
+      p_livemode: false,
+      p_created: "2026-10-12T17:00:00.123Z",
+    });
+    expect(systemRpc).toHaveBeenCalledWith("ca", "sync_payout_account", {
+      p_stripe_account_id: "acct_A1",
+      p_facts: expect.objectContaining({ charges_enabled: true }),
+      p_schedule: expect.objectContaining({ payout_interval: "weekly" }),
+      p_status: "active",
+      p_fetched_at: ISO,
+    });
+    expect(systemRpc).toHaveBeenLastCalledWith("ca", "finish_stripe_event", {
+      p_inbox_id: 7,
+      p_lease: LEASE,
+      p_error_code: null,
+      p_permanent: false,
+    });
+    expect(provider.retrievePayout).not.toHaveBeenCalled();
+    expect(JSON.stringify(systemRpc.mock.calls)).not.toContain("Maya");
+  });
+
+  it("acknowledges other v2 events and events about other objects, storing nothing and asking Stripe nothing", async () => {
+    for (const e of [
+      thin("v2.core.account_person.updated"),
+      thin("v2.core.account[identity].updated"),
+      thin("v2.core.account.updated", { related_object: null }),
+      thin("v2.core.account.updated", {
+        related_object: { id: "acct_A1", type: "v2.core.account_person", url: "/x" },
+      }),
+    ]) {
+      const res = await send(post(JSON.stringify(e)));
+      expect(res.status).toBe(200);
+    }
+    expect(systemRpc).not.toHaveBeenCalled();
+    expect(provider.retrieveAccount).not.toHaveBeenCalled();
+  });
+
+  it("checks the signature, the mode, the ids and the time like snapshot events", async () => {
+    const body = JSON.stringify(thin("v2.core.account.updated"));
+    expect((await send(post(body, signStripeBody(body, OTHER_SECRET)))).status).toBe(400);
+    expect(
+      (await send(post(JSON.stringify(thin("v2.core.account.updated", { livemode: true })))))
+        .status,
+    ).toBe(400);
+    expect(
+      (await send(post(JSON.stringify(thin("v2.core.account.updated", { livemode: "false" })))))
+        .status,
+    ).toBe(400);
+    for (const over of [
+      { related_object: { id: "acct-1; drop", type: "v2.core.account", url: "/x" } },
+      { related_object: { id: 7, type: "v2.core.account", url: "/x" } },
+      { id: "evt_test-1" },
+      { id: 7 },
+      { created: "yesterday" },
+      { created: 1_760_000_000 },
+    ]) {
+      const res = await send(post(JSON.stringify(thin("v2.core.account.updated", over))));
+      expect(res.status).toBe(400);
+    }
+    expect(systemRpc).not.toHaveBeenCalled();
+    expect(provider.retrieveAccount).not.toHaveBeenCalled();
+  });
+
+  it("refuses outside Montréal before anything is asked of Stripe or written (D113)", async () => {
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    const res = await send(post(JSON.stringify(thin("v2.core.account[requirements].updated"))));
+    expect(res.status).toBe(422);
+    expect(provider.retrieveAccount).not.toHaveBeenCalled();
+    expect(systemRpc).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for an account Daybell doesn't know yet, and 200 to a duplicate, like snapshot events", async () => {
+    systemRpc.mockImplementation(async () => ({ data: null, error: null }));
+    expect((await send(post(JSON.stringify(thin("v2.core.account.updated"))))).status).toBe(404);
+    systemRpc.mockImplementation(
+      database({ record_stripe_event: claim({ processed: true, claimed: false, lease: null }) }),
+    );
+    systemRpc.mockClear();
+    expect((await send(post(JSON.stringify(thin("v2.core.account.updated"))))).status).toBe(200);
+    expect(rpcNames()).toEqual(["record_stripe_event"]);
+  });
+});
