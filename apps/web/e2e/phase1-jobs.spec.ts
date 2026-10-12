@@ -75,7 +75,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await dialog.getByLabel(/^Subjects expected/).fill("120");
   await dialog.getByRole("button", { name: "Create job", exact: true }).click();
 
-  // The job page (D137, D140): title row with name, status and details; Overview with the Set up to-dos.
+  // The job page (D137, D140, D143): title row with name, status and details; Overview with the checklist at Set up.
   await expect(page).toHaveURL(/\/app\/jobs\/[0-9a-f-]{36}$/);
   await expect(main.getByRole("heading", { name: job, level: 1 })).toBeVisible();
   await expect(main.getByText("Draft", { exact: true })).toBeVisible();
@@ -88,10 +88,10 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   );
   await expect(
     main
-      .getByRole("region", { name: "Set up: to-dos" })
+      .getByRole("region", { name: "Checklist", exact: true })
       .getByRole("listitem")
-      .filter({ hasText: "Roster added" }),
-  ).toContainText("To do");
+      .filter({ hasText: "Add the roster" }),
+  ).toContainText("Next");
   // One green button: Start selling (owners and admins, while a draft).
   await expect(main.getByRole("button", { name: "Start selling" })).toBeVisible();
 
@@ -147,6 +147,12 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(first).toContainText(client);
   await expect(first).toContainText("JOB00001");
   await expect(first).toContainText("Draft");
+  // Each row shows its checklist (D143): the milestone, progress and the next task, linked to where it's done.
+  await expect(first.getByText("Set up", { exact: true })).toBeVisible();
+  await expect(first.getByText("1 of 5 done", { exact: true })).toBeVisible();
+  await expect(
+    first.getByRole("link", { name: `Next: Add the roster, ${job} (edited)`, exact: true }),
+  ).toHaveAttribute("href", /^\/app\/jobs\/[0-9a-f-]{36}\/people$/);
   await expect(main.getByRole("row").filter({ hasText: newClient })).toContainText("JOB00002");
 
   // Home's "Create job" link opens the same dialog.
@@ -162,6 +168,12 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   // The API refuses changing a job's status directly, Quebec clients, and duplicate job numbers.
   const jobs = await (await page.request.get("/api/v1/jobs")).json();
   const id = jobs.jobs[0].id as string;
+  expect(jobs.jobs[0].checklist).toEqual({
+    milestone: "setUp",
+    done: 1,
+    total: 5,
+    next: "addRoster",
+  });
   const status = await page.request.patch(`/api/v1/jobs/${id}`, { data: { status: "selling" } });
   expect(status.status()).toBe(400);
   const quebec = await page.request.post("/api/v1/clients", {

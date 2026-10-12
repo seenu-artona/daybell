@@ -7,7 +7,8 @@ import sharp from "sharp";
 import { signUpOwner } from "./helpers";
 
 // Phase 1 step 4 "Photo storage and upload" (D39, D60, D100, D140, D142; ADR 0016), with STORAGE_DRIVER=local: a
-// folder upload with a duplicate, a PNG and a hidden file; previews made once; the Overview to-do; the bin; a dropped
+// folder upload with a duplicate, a PNG and a hidden file; previews made once; the checklist's Upload photos task (D143;
+// ADR 0017); the bin; a dropped
 // connection; a reload and a second drop that resumes; and another studio that can't see any of it. Desktop only
 // (D136). JPEGs are made in the test.
 const run = `${Date.now()}`;
@@ -45,11 +46,11 @@ async function newJob(page: Page, tag: string, pictureDay: string): Promise<stri
   return (await created.json()).job.id as string;
 }
 
-// Yesterday in UTC: already past in every time zone, so the job is at Picture day wherever the browser runs (the app
-// counts days in the browser's own zone).
+// Yesterday in UTC: already past in every time zone, so the Picture day task has ticked itself wherever the browser
+// runs (the app counts days in the browser's own zone).
 const today = () => new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
-test("Photos: a folder upload, previews, the Overview to-do, the bin, and nothing for another studio", async ({
+test("Photos: a folder upload, previews, the checklist task, the bin, and nothing for another studio", async ({
   page: firstTab,
   browser,
 }, info) => {
@@ -62,7 +63,7 @@ test("Photos: a folder upload, previews, the Overview to-do, the bin, and nothin
   });
   const main = page.getByRole("main");
   const jobId = await newJob(page, tag, today());
-  // One child, so the job is at Picture day, whose to-dos include Upload photos.
+  // One child and no QR cards yet, so the checklist is still at Set up and shows every task.
   expect(
     (
       await page.request.post(`/api/v1/jobs/${jobId}/children`, {
@@ -71,14 +72,15 @@ test("Photos: a folder upload, previews, the Overview to-do, the bin, and nothin
     ).status(),
   ).toBe(201);
 
-  // 1. Overview: Upload photos is to do, with a link to Photos.
+  // 1. Overview: Picture day has passed, so it ticked itself; Upload photos is to do, and its row links to Photos.
   await page.goto(`/app/jobs/${jobId}`);
-  const todo = main
-    .getByRole("region", { name: "Picture day: to-dos" })
-    .getByRole("listitem")
-    .filter({ hasText: "Upload photos" });
+  const checklist = main.getByRole("region", { name: "Checklist", exact: true });
+  await expect(checklist.getByRole("listitem").filter({ hasText: /^Picture day/ })).toContainText(
+    "Done",
+  );
+  const todo = checklist.getByRole("listitem").filter({ hasText: "Upload photos" });
   await expect(todo).toContainText("To do");
-  await todo.getByRole("link", { name: "Upload photos", exact: true }).click();
+  await todo.getByRole("link").click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}/photos$`));
   await expect(main.getByRole("heading", { name: "No photos yet", exact: true })).toBeVisible();
 
@@ -130,14 +132,10 @@ test("Photos: a folder upload, previews, the Overview to-do, the bin, and nothin
   expect(page.url()).toMatch(/\?photo=[0-9a-f-]{36}$/);
   expect(page.url()).not.toContain("IMG_");
 
-  // 5. The Overview's to-do is done.
+  // 5. The checklist's Upload photos task ticked itself.
   await page.goto(`/app/jobs/${jobId}`);
-  const done = main
-    .getByRole("region", { name: "Picture day: to-dos" })
-    .getByRole("listitem")
-    .filter({ hasText: "Upload photos" });
-  await expect(done).toContainText("Done");
-  await expect(done).toContainText("2 photos ready");
+  await expect(todo).toContainText("Done");
+  await expect(checklist.getByText("4 of 5 done", { exact: true })).toBeVisible();
 
   // 6. The bin: move one photo there and back.
   await page.goto(`/app/jobs/${jobId}/photos`);
