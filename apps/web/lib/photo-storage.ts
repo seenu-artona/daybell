@@ -151,9 +151,9 @@ export function photoDownloadStorage(region: DataRegion): PhotoStorage {
 }
 
 /**
- * Asks for a ready photo's paid download to be made (the backfill, ADR 0023): a photo processed before downloads
- * existed. The message carries the photo's id only (D113). With the local driver there is no queue: the caller makes
- * it itself after responding.
+ * Asks for a sold photo's paid download to be made (lazily, ADR 0023; security review N1): when its order is paid,
+ * or again when a paid download finds it missing (the database limits how often). The message carries the photo's id
+ * only (D113). With the local driver there is no queue: the caller makes it itself after responding.
  */
 export async function queueDownloadForProcessing(
   region: DataRegion,

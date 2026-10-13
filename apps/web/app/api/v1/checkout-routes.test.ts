@@ -1,3 +1,4 @@
+import { ApiError } from "@daybell/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Checkout's parent routes (ADR 0023): the bag is priced by the database, never the browser; Stripe is asked only in
@@ -5,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // address is the only place a parent is sent; a replaced checkout is expired at Stripe first, and one paid meanwhile
 // becomes the parent's order; the confirmation page asks Stripe only for its own pending order, at most every 5
 // seconds (the database decides); downloads are download.jpg signed by the download role for 5 minutes under a
-// nameless file name, and a photo without one is queued and answered 409 with Retry-After. Nothing is ever logged.
+// nameless file name, and a photo without one is queued (at most as often as the database allows) and answered 409
+// with Retry-After. Review fixes: a replaced checkout Stripe failed to close is closed by the next Pay before anything
+// new is made (code M2); Stripe's fee is checked before any money moves (M1); a paid-meanwhile checkout leaves no
+// phantom order (S3); Pay asks Stripe at most every 3 seconds (security S2); paid photos' downloads are queued (N1).
+// Nothing personal is ever logged.
 vi.mock("server-only", () => ({}));
 const { rpc, sysRpc, provider, head, presign, downloadPresign, queue, databases } = vi.hoisted(
   () => ({
@@ -78,7 +83,8 @@ const BEGUN = {
   reference: "7KQ2M9XA",
   created_at: "2026-10-13T12:00:00.000Z",
   checkout_session_id: null,
-  superseded: [],
+  stripe_check: true,
+  superseded: [] as { order_id: string; checkout_session_id: string }[],
   studio_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   studio_name: "Maple Lane Photography",
   currency: "CAD",
@@ -112,6 +118,7 @@ const paid = (over: Record<string, unknown> = {}) => ({
   chargeId: "ch_1",
   transferId: "tr_1",
   destination: "acct_A1",
+  onBehalfOf: "acct_A1",
   applicationFeeAmount: 300,
   balanceTransaction: { id: "txn_1", feeCents: 397, currency: "cad" },
   receiptEmail: "parent@example.test",
@@ -214,7 +221,7 @@ describe("POST /shop/checkout", () => {
         description: "Payments processed by Daybell for Maple Lane Photography",
       },
       automatic_tax: { enabled: true, liability: { type: "account", account: "acct_A1" } },
-      expires_at: Date.parse(BEGUN.created_at) / 1000 + 31 * 60,
+      expires_at: Date.parse(BEGUN.created_at) / 1000 + 32 * 60,
       success_url: `${siteUrl()}/shop/orders/${ORDER}?gallery=${GALLERY}`,
     });
     expect(shopCalls("shop_checkout_attach")[0]?.[2]).toMatchObject({
@@ -289,12 +296,20 @@ describe("POST /shop/checkout", () => {
     expect(provider.createCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it("expires a replaced checkout at Stripe first, and one paid meanwhile becomes the parent's order", async () => {
-    shopDb({ shop_checkout_begin: { data: { ...BEGUN, superseded: ["cs_test_fakeOLD"] } } });
+  const OLD = { order_id: OTHER_ORDER, checkout_session_id: "cs_test_fakeOLD" };
+
+  it("closes a replaced checkout at Stripe first, then here, and one paid meanwhile becomes the parent's order", async () => {
+    shopDb({ shop_checkout_begin: { data: { ...BEGUN, superseded: [OLD] } } });
     provider.expireCheckoutSession.mockResolvedValueOnce({ status: "expired" });
     expect((await checkout(request("POST", "/checkout"))).status).toBe(201);
     expect(provider.expireCheckoutSession).toHaveBeenCalledWith("cs_test_fakeOLD");
+    // Marked closed only once Stripe said so (expire_order stamps it).
+    expect(sysCalls("expire_order").map((c) => c[2])).toEqual([{ p_order_id: OTHER_ORDER }]);
+    expect(provider.expireCheckoutSession.mock.invocationCallOrder[0]).toBeLessThan(
+      provider.createCheckoutSession.mock.invocationCallOrder[0] ?? 0,
+    );
 
+    sysRpc.mockClear();
     provider.expireCheckoutSession.mockResolvedValueOnce({ status: "complete" });
     provider.retrieveCheckoutSession.mockResolvedValueOnce(
       paid({ id: "cs_test_fakeOLD", orderId: OTHER_ORDER }),
@@ -307,6 +322,49 @@ describe("POST /shop/checkout", () => {
       orderId: OTHER_ORDER,
     });
     expect(sysCalls("complete_order")[0]?.[2].p_order_id).toBe(OTHER_ORDER);
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    // The order this Pay began is expired, never left pending (code review S3).
+    expect(sysCalls("expire_order").map((c) => c[2])).toEqual([{ p_order_id: ORDER }]);
+  });
+
+  it("never makes a new checkout while Stripe hasn't closed the old one: a failure is closed by the next Pay (code review M2)", async () => {
+    // The database hands the old checkout back until Stripe has closed it (pgTAP 022).
+    shopDb({ shop_checkout_begin: { data: { ...BEGUN, superseded: [OLD] } } });
+    provider.expireCheckoutSession.mockRejectedValueOnce(
+      new ApiError("internal", "We couldn't reach Stripe. Please try again."),
+    );
+    const failed = await checkout(request("POST", "/checkout"));
+    expect(failed.status).toBe(500);
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    expect(sysCalls("expire_order")).toHaveLength(0);
+
+    provider.expireCheckoutSession.mockResolvedValueOnce({ status: "expired" });
+    const res = await checkout(request("POST", "/checkout"));
+    expect(res.status).toBe(201);
+    expect(provider.expireCheckoutSession.mock.calls).toEqual([
+      ["cs_test_fakeOLD"],
+      ["cs_test_fakeOLD"],
+    ]);
+    expect(sysCalls("expire_order").map((c) => c[2])).toEqual([{ p_order_id: OTHER_ORDER }]);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    for (const spy of logs) spy.mockClear();
+  });
+
+  it("asks Stripe about a reused order at most every 3 seconds (security review S2)", async () => {
+    shopDb({
+      shop_checkout_begin: {
+        data: {
+          ...BEGUN,
+          outcome: "reuse",
+          checkout_session_id: "cs_test_fakeA",
+          stripe_check: false,
+        },
+      },
+    });
+    const res = await checkout(request("POST", "/checkout"));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("3");
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
     expect(provider.createCheckoutSession).not.toHaveBeenCalled();
   });
 
@@ -415,12 +473,21 @@ describe("GET /shop/orders/:orderId (the confirmation page)", () => {
 
   it("completes its own pending order from Stripe when the webhook is late: paid, receipt, fee recovered, ledger", async () => {
     shopDb({ shop_order_verify: { data: "cs_test_fakeA" }, shop_order: { data: ROW } });
+    systemDb({ order_downloads_to_make: { data: [PHOTO] } });
     provider.retrieveCheckoutSession.mockResolvedValueOnce(paid());
     expect((await get()).status).toBe(200);
     expect(sysCalls("complete_order")[0]?.[2]).toMatchObject({
       p_order_id: ORDER,
-      p_facts: { checkout_session_id: "cs_test_fakeA", amount_tax: 1455, destination: "acct_A1" },
+      p_facts: {
+        checkout_session_id: "cs_test_fakeA",
+        amount_tax: 1455,
+        destination: "acct_A1",
+        on_behalf_of: "acct_A1",
+      },
     });
+    // The sold photo's download is asked for now, by id only (made lazily: security review N1).
+    expect(sysCalls("order_downloads_to_make")[0]?.[2]).toEqual({ p_order_id: ORDER });
+    expect(queue).toHaveBeenCalledWith("ca", PHOTO);
     // The email goes to Stripe for its receipt (call 18) and nowhere else: not to the database.
     expect(JSON.stringify(sysRpc.mock.calls)).not.toContain("parent@example.test");
     expect(provider.setReceiptEmail).toHaveBeenCalledWith("pi_1", "parent@example.test");
@@ -437,6 +504,32 @@ describe("GET /shop/orders/:orderId (the confirmation page)", () => {
       p_balance_transaction_id: "txn_1",
       p_fee_reversal_id: "trr_1",
     });
+  });
+
+  it("moves no money when Stripe's fee is in another currency or more than the transfer: a problem for support (code review M1)", async () => {
+    for (const balanceTransaction of [
+      { id: "txn_1", feeCents: 397, currency: "usd" },
+      { id: "txn_1", feeCents: 12_351, currency: "cad" },
+      { id: "txn_1", feeCents: -1, currency: "cad" },
+    ]) {
+      shopDb({ shop_order_verify: { data: "cs_test_fakeA" }, shop_order: { data: ROW } });
+      systemDb();
+      provider.retrieveCheckoutSession.mockResolvedValueOnce(paid({ balanceTransaction }));
+      expect((await get()).status).toBe(200);
+      expect(provider.recoverCardFee).not.toHaveBeenCalled();
+      expect(sysCalls("settle_order_fees")).toHaveLength(0);
+      // Kept on the order, so the cron never retries it, and alerted by a fixed name and a code.
+      expect(sysCalls("note_checkout_failure")[0]?.[2]).toEqual({
+        p_order_id: ORDER,
+        p_code: balanceTransaction.currency === "usd" ? "fee_currency" : "fee_invalid",
+        p_permanent: true,
+      });
+      const logged = JSON.stringify(logs[3]?.mock.calls);
+      expect(logged).toContain("checkout_problem");
+      expect(logged).not.toMatch(/parent@|Priya|Maple Lane|cs_test|acct_/);
+      for (const spy of logs) spy.mockClear();
+      sysRpc.mockClear();
+    }
   });
 
   it("asks Stripe nothing more once the order's fees are settled", async () => {
@@ -491,15 +584,40 @@ describe("GET /shop/orders/:orderId/downloads/:photoId (calls 10, 11)", () => {
     expect(Date.parse(body.expiresAt) - Date.now()).toBeLessThanOrEqual(300_000);
   });
 
-  it("queues a photo processed before downloads existed and answers 409 with Retry-After (the backfill)", async () => {
-    shopDb({ shop_download_photo: { data: ROW } });
+  it("asks for a missing download's file once, then waits, answering 409 with Retry-After (code review S4)", async () => {
+    shopDb({ shop_download_photo: { data: ROW }, shop_download_request: { data: "queued" } });
     head.mockResolvedValue(null);
     const res = await get();
     expect(res.status).toBe(409);
     expect(res.headers.get("retry-after")).toBe("20");
     expect((await res.json()).error.fields).toEqual({ form: "shop.downloadPreparing" });
+    expect(shopCalls("shop_download_request")[0]?.[2]).toEqual({
+      p_session_hash: HASH,
+      p_order_id: ORDER,
+      p_photo_id: PHOTO,
+    });
     expect(queue).toHaveBeenCalledWith("ca", PHOTO);
     expect(downloadPresign).not.toHaveBeenCalled();
+
+    // Asked under 5 minutes ago: never queued again, however often the parent taps.
+    queue.mockClear();
+    shopDb({ shop_download_photo: { data: ROW }, shop_download_request: { data: "waiting" } });
+    const again = await get();
+    expect(again.status).toBe(409);
+    expect((await again.json()).error.fields).toEqual({ form: "shop.downloadPreparing" });
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("says a download is unavailable, and alerts, once its file was asked for 3 times without appearing", async () => {
+    shopDb({ shop_download_photo: { data: ROW }, shop_download_request: { data: "unavailable" } });
+    head.mockResolvedValue(null);
+    const res = await get();
+    expect(res.status).toBe(409);
+    expect(res.headers.get("retry-after")).toBeNull();
+    expect((await res.json()).error.fields).toEqual({ form: "shop.downloadUnavailable" });
+    expect(queue).not.toHaveBeenCalled();
+    expect(logs[3]?.mock.calls).toEqual([["download_unavailable"]]);
+    for (const spy of logs) spy.mockClear();
   });
 
   it("is not found for anything the database doesn't unlock for this gallery", async () => {

@@ -4,8 +4,8 @@
   reviews it (section 17 lists them all).
 - Amends:
   - 0006: ledger transactions get a header table (`ledger_transactions`, once per order and kind) and a sign convention.
-  - 0016: a fifth stored file per photo, `download.jpg`, made by the image worker; a separate AWS role signs it.
-    `photos.sold_at` is now set.
+  - 0016: a fifth stored file per photo, `download.jpg`, made by the image worker only once the photo is sold; a
+    separate AWS role signs it. `photos.sold_at` is now set.
   - 0019: orders copy what they sell (the snapshot is built).
   - 0020: a third webhook destination (the platform's own checkout events), two more inbox types, up to six signing
     secrets, and Daybell's fee rate moves into the database.
@@ -70,8 +70,9 @@ page to check before staging is trusted:
 - `app.platform_settings`, one row per regional database (in the `app` schema: the Data API can't reach it):
   `daybell_fee_bps` (0–2000; call 16) and `card_fee_recovery` (`per_sale` only until monthly recovery is built).
 - `app.platform_settings_changes`: every change with its old and new value and a note. Append-only.
-- `set_platform_fee(bps, note)` and `set_card_fee_recovery(method, note)`: service role and the database owner only.
-  Runbook: `docs/platform-fee.md`. `platform_fee_settings()` reads the current values (Settings › Payouts shows the
+- `set_platform_fee(bps, note)` and `set_card_fee_recovery(method, note)`: the database owner only (Seenu, in the SQL
+  editor); revoked from the service role so no API bug can change a fee (security review S1). Each change keeps
+  `changed_by` (the database role). Runbook: `docs/platform-fee.md`. `platform_fee_settings()` reads the current values (Settings › Payouts shows the
   rate from it; `packages/config` `DAYBELL_FEE_BASIS_POINTS` is only the launch value now).
 
 ## 4. Data model (forward migration `20261013000000_checkout.sql`)
@@ -91,12 +92,17 @@ page to check before staging is trusted:
 - `studio_tax_settings` (the head office's province and when it was set) and `studio_tax_registrations` (kind,
   province, the number as typed, Stripe's id; one active per kind and province).
 - `payout_accounts.card_prefix_set_at`.
+- On `orders` (review fixes): `stripe_closed_at` (Stripe said the checkout can't be paid any more; written once),
+  `backstop_attempts`, `backstop_error`, `backstop_next_at`, `problem` and `problem_at` (codes only).
+- `photo_download_requests` (photo, studio, job, a count and a time; row-level security on, service role only): when
+  each sold photo's `download.jpg` was last asked for.
 - Row-level security on every new table: owners and admins read (call 15); nobody signed in writes. Everything else
   goes through SECURITY DEFINER functions with an empty `search_path`, granted to the service role only:
   `shop_checkout_begin`, `shop_checkout_attach`, `shop_pending_checkouts`, `complete_order`, `expire_order`,
   `settle_order_fees`, `record_order_stripe_event`, `shop_orders`, `shop_order`, `shop_order_verify`,
-  `shop_download_photo`, `stale_checkouts`, `unsettled_orders`, `mark_card_prefix_set`, the tax functions
-  (`act_for_owner`) and the platform settings. `job_orders` and `studio_order` are SECURITY INVOKER (row-level security
+  `shop_download_photo`, `shop_download_request`, `order_downloads_to_make`, `note_checkout_failure`,
+  `stale_checkouts`, `unsettled_orders`, `mark_card_prefix_set`, the tax functions (`act_for_owner`) and
+  `platform_fee_settings` (the setters are the database owner's only). `job_orders` and `studio_order` are SECURITY INVOKER (row-level security
   decides).
 
 ## 5. Starting checkout (`POST /api/v1/shop/checkout`)
@@ -108,17 +114,26 @@ page to check before staging is trusted:
    Active with card payments on), `below_minimum` (call 13), or `checkout_limit` (10 new checkouts a session an hour,
    429). Delivery follows ADR 0022's rule.
 3. **Reuse and supersede.** The same bag (same fingerprint: lines, prices, delivery, destination, fee rate, tax on)
-   reuses its pending order while Stripe's checkout is open for 5 more minutes, or, if no checkout was saved, for a
-   minute (a retry). Otherwise the session's other pending orders expire and their Stripe checkouts are handed back:
-   the API expires each at Stripe **before** making the new one, and one Stripe says was paid becomes the parent's order
-   (409 `shop.alreadyPaid` with `fields.orderId`). Two open checkouts for one bag are never both payable.
+   reuses its pending order while Stripe's checkout is open for 5 more minutes, or, if no checkout was saved, for 45
+   seconds (a retry). Otherwise the session's other pending orders expire here and a new order is written. Either way
+   `shop_checkout_begin` hands back **every other checkout of the session that Stripe hasn't closed**
+   (`stripe_closed_at` null, not past its expiry, pending or expired here): the API closes each at Stripe **before**
+   making or reusing one, and only then marks it closed (`expire_order` stamps `stripe_closed_at`). A Stripe failure
+   part way stops the request with nothing new made, and the next Pay, "Payment canceled" or the cron closes it again
+   (code review M2, security review M1). One Stripe says was paid becomes the parent's order (409 `shop.alreadyPaid`
+   with `fields.orderId`) and the order this Pay began is closed too, so no phantom pending order is left (code review
+   S3). Two open checkouts for one bag are never both payable.
+   A reused order is asked about at Stripe at most every 3 seconds (`stripe_checked_at`; 429 with Retry-After 3
+   otherwise), so one code can't use up Daybell's shared Stripe rate limit (security review S2).
 4. The card prefix "DBL" is set on the studio's account at its first checkout (call 7); a failure never stops a parent.
 5. Stripe's checkout is created with the key `daybell-checkout-{order}`. Its expiry is fixed from the order's creation
-   (31 minutes after), so a retried create sends the same parameters (Stripe refuses a reused key with others).
+   (32 minutes after), so a retried create sends the same parameters (Stripe refuses a reused key with others), and a
+   retry at the end of the 45-second reuse window is still at least 30 minutes ahead, as Stripe requires (code review
+   S5).
 6. `shop_checkout_attach` saves it; the URL is checked (`checkout.stripe.com/` for the real driver, this deployment's
    fake page for the fake) and answered. The page goes there.
-7. `POST /api/v1/shop/checkout/cancel` (back from Stripe without paying): every open checkout of the gallery is expired
-   at Stripe and here; one paid meanwhile is completed instead.
+7. `POST /api/v1/shop/checkout/cancel` (back from Stripe without paying): every pending checkout of the gallery, and
+   every replaced one Stripe hasn't closed, is closed at Stripe and here; one paid meanwhile is completed instead.
 
 ## 6. Session parameters (`apps/web/lib/checkout/stripe-params.ts`)
 
@@ -137,15 +152,28 @@ name, a photo, an email or anything the browser sent.
 One function for the webhook, the confirmation page and the cron:
 1. Read the checkout from Stripe with `payment_intent.latest_charge.balance_transaction` expanded.
 2. Complete and paid: `complete_order` checks Stripe's answer against the snapshot (the checkout, mode, currency,
-   subtotal, shipping, tax only with Stripe Tax on, total = subtotal + shipping + tax, destination, application fee, a
-   Canadian recipient for home delivery). A mismatch raises `checkout_mismatch` and changes nothing. Otherwise: paid,
-   the recipient kept (home), "all digitals" fixed, every photo sold marked (`sold_at`: can't be binned), the bag's
-   bought lines removed, one `order.paid` event with no actor. Again: `already_paid`, or `already_settled`.
+   subtotal, shipping, tax only with Stripe Tax on, total = subtotal + shipping + tax, destination, the merchant of
+   record `on_behalf_of` (security review N5), application fee, a Canadian recipient for home delivery). The
+   recipient's text is cleaned first (`app.clean_address_text`: control characters become spaces, bidi characters go,
+   trimmed and cut to length), so its check constraint can never fail and Postgres never logs a row holding a name or
+   an address (security review M3); a recipient with nothing left is a mismatch. A mismatch raises `checkout_mismatch`
+   and changes nothing. Otherwise: paid, the checkout marked closed at Stripe, the recipient kept (home), "all
+   digitals" fixed, every photo sold marked (`sold_at`: can't be binned), the bag's bought lines removed, one
+   `order.paid` event with no actor. Again: `already_paid`, or `already_settled`.
 3. The first time only, `receipt_email` is set on the payment from the email the parent typed at Stripe (call 18),
    held in memory for that call only. A failure is logged by name; the order is paid either way.
-4. Once the balance transaction exists: Stripe's fee is reversed from the studio's transfer (once per order: an
-   earlier reversal is found by its metadata, the key is `daybell-fee-recovery-{order}`), then `settle_order_fees`
-   writes the ledger (section 8). Until then the order is paid with its fees pending.
+4. The sold photos' download files are asked for (`order_downloads_to_make`: each once, ids only; section 10).
+5. Once the balance transaction exists: Stripe's fee is **checked before any money moves** (the order's currency; a
+   whole number of cents from 0 to the total less Daybell's application fee, i.e. what the transfer holds), else a
+   permanent `fee_currency` or `fee_invalid` problem and nothing is reversed (code review M1, security review M2; D96:
+   no money moves without its ledger entry). Then it is reversed from the studio's transfer (once per order: an earlier
+   reversal is found by its metadata, the key is `daybell-fee-recovery-{order}`), and `settle_order_fees` writes the
+   ledger (section 8). Until then the order is paid with its fees pending.
+
+**Problems.** A refusal no retry can fix (`checkout_mismatch`, `fee_currency`, `fee_invalid`, or `completion_failed`:
+any data or integrity error from the database, SQLSTATE classes 22 and 23) is kept on the order
+(`note_checkout_failure`, permanent: `orders.problem`), logged as `checkout_problem` with its code for an alert, and
+never retried by the cron. Support resolves it (`docs/crons.md`).
 
 **Webhook, platform branch** (`stripe-webhook.ts`): a snapshot event with no `account` whose type is
 `checkout.session.completed` or `.expired`. Signature, mode, ids and time checked; `assertPayoutFunctionRegion` before
@@ -153,13 +181,18 @@ any Stripe call (D113); the checkout read again; routed by its metadata's region
 is acknowledged and left alone; `record_order_stripe_event` records it once for the order Stripe names (attaching a
 checkout the API hadn't saved yet; 404 for an order this database doesn't hold); the metadata's studio must be the
 order's. Fee pending is retried (500); a mismatch is permanent (200, `stripe_webhook_permanent_failure`); expired
-expires the order.
+expires the order (Stripe closed it). An event for another checkout than the order's, or an event id already recorded
+for another studio or type, can never succeed: `record_order_stripe_event` records it as processed with
+`event_mismatch` and the webhook answers 200 and alerts, rather than Stripe retrying for days (security review S3).
 
 **Confirmation page** (`GET /api/v1/shop/orders/{id}`): for the gallery's own pending order, asks Stripe at most every
 5 seconds (`shop_order_verify` stamps the time), so the page is right when the webhook is late.
 
 **Cron backstop** (`/api/v1/internal/cron/jobs`, payout regions with Stripe set up): paid orders unsettled after 10
-minutes are completed again; checkouts that ran out two hours ago are expired after asking Stripe.
+minutes are completed again; checkouts that ran out two hours ago, and replaced checkouts Stripe hasn't closed, are
+closed after asking Stripe. Each failed try is noted on the order (`backstop_attempts`, `backstop_error`) and backs off
+(1, 2, 4 … minutes, at most 6 hours, `backstop_next_at`); pages are ordered by when each is due, and orders with a
+problem are left out, so they can never crowd newer orders out (code review S1, security review M4).
 
 ## 8. Fees and the ledger (call 1; ADR 0006)
 
@@ -173,6 +206,9 @@ minutes are completed again; checkouts that ran out two hours ago are expired af
   3% is 300, Stripe's fee 397: +12,650, −1,455, −300, −397, −10,498. What reaches the studio's balance is
   total − 3% − Stripe's fee = 11,953 (tax included: the studio remits it). `packages/core` `orderLedger` and
   `studioReceivesCents` pin the identity.
+- **`tax_payable` is tax passed through to the studio** (security review N3): it is collected on the studio's behalf,
+  travels in Stripe's transfer to the studio, and the studio remits it (D106). So the studio's transfer is
+  `studio_payable + tax_payable` (10,498 + 1,455 = 11,953 above), and reconciling against transfers adds the two.
 - Daybell's fee is `round_half_up(products × bps / 10000)` (call 16), the same in SQL and TypeScript.
 - **No FK from `ledger_entries.transaction_id` to the header** (deviation from the plan): the step 5 test inserts
   header-less transactions, and later non-order money movements may too. The header and its entries are written by one
@@ -183,7 +219,9 @@ minutes are completed again; checkouts that ran out two hours ago are expired af
 - Settings › Taxes (owners and admins read; the owner changes, call 6): the business address goes to Stripe as the tax
   head office (`tax.settings.update`, in the studio's account; call 3); Daybell keeps its province only. Then GST/HST
   (`standard`) and PST in BC, MB or SK (`province_standard`). Stripe first, then the database; checked first so Stripe
-  isn't asked what would be refused; the idempotency key holds the number's hash, never the number.
+  isn't asked what would be refused. The idempotency key holds neither the number nor its hash (a GST/HST number's
+  hash can be reversed): it counts the studio's earlier registrations of that kind and province, ended ones included,
+  so a retry gets the same registration and adding one again after ending it gets a new one (code review S2).
 - Stripe Tax is on for a checkout only with a head office and a registration; otherwise no tax.
 - The numbers are shown on the parent's order page (full view; call 5). Not on Stripe's receipt (no field in the
   registration API types).
@@ -195,10 +233,14 @@ minutes are completed again; checkouts that ran out two hours ago are expired af
 
 - Parents download `download.jpg`: the original at full resolution, upright, sRGB with its profile, every other bit of
   metadata stripped (no EXIF, GPS, camera serial), JPEG quality 92 with full colour. Never the original.
-- The image worker makes it with the previews (`processOriginal` returns it; `runPhotoJob` stores it). **Backfill** for
-  photos processed before this step: when a paid download is missing, the API queues `{photoId, make: "download"}`
-  (S3: the photo-events queue; local driver: in this process) and answers 409 `shop.downloadPreparing` with
-  Retry-After 20; the worker's `runDownloadJob` makes only the file for a ready photo and reports nothing.
+- **Made lazily, only for sold photos** (security review N1): never while a photo is processed, so an unwatermarked
+  full-resolution copy exists only for photos a parent paid for. When an order is paid, `order_downloads_to_make`
+  marks each of its ready download photos asked for (once) and the API queues `{photoId, make: "download"}` for each
+  (S3: the photo-events queue; local driver: in this process, one at a time); the worker's `runDownloadJob` makes only
+  that file and reports nothing. A paid download that finds the file missing asks again through
+  `shop_download_request`: queued (and 409 `shop.downloadPreparing`, Retry-After 20) at most once every 5 minutes;
+  waiting (409 preparing, nothing queued) meanwhile; after 3 requests, or for a photo that isn't ready, 409
+  `shop.downloadUnavailable` and `download_unavailable` is logged for an alert (code review S4, security review S5).
 - `GET /api/v1/shop/orders/{id}/downloads/{photo}`: `shop_download_photo` must unlock it (a paid order the gallery
   may see, a digital line it shows); the link is signed for 5 minutes by a separate role, `AWS_DOWNLOAD_ROLE_ARN`,
   which may read `*/download.jpg` only (the app's usual role still never reads a full-resolution file), with
@@ -239,13 +281,15 @@ Vercel three ways, like the onboarding page: `next.config.ts`, `stripeSettings()
 
 ## 15. Tests
 
-- pgTAP 022 (145): shape and grants, platform settings, tax functions, every refusal, the snapshot, reuse and
-  supersede, attach, the fee setting applying to new orders only, completion and its checks, idempotency (one event,
+- pgTAP 022 (192): shape and grants, platform settings (owner only, `changed_by`), tax functions, every refusal, the
+  snapshot, reuse and supersede (an unclosed checkout handed back until Stripe closed it; the 3-second Pay throttle),
+  attach, the fee setting applying to new orders only, completion and its checks, idempotency (one event,
   one sold mark, bag lines removed), the ledger once and balanced in CAD, expiry, the inbox, parents' views and
-  downloads, **cross-studio and cross-session leak tests**, studio reads by role, the cron's backstops, no personal
-  data in events. pgTAP 023: CAD only, Quebec and Ontario PST refused.
+  downloads (lazy requests, 5 minutes, 3 tries), **cross-studio, cross-session and sibling leak tests**, studio reads by
+  role, the cron's backstops (backoff, problems never retried, unclosed checkouts), a cleaned bidi recipient, the
+  merchant of record, a permanent event mismatch, no personal data in events. pgTAP 023: CAD only, Quebec and Ontario PST refused.
 - Core: fee rounding, the ledger identity, statement suffix, references, blockers, tax formats. API: enums and refusals
-  equal to the migration's, inputs, routes. Storage, image pipeline, image worker: the download and the backfill.
+  equal to the migration's, inputs, routes. Storage, image pipeline, image worker: the download, made only when asked (never while processing).
 - Web: the parameter builder, the real and fake drivers, checkout, cancel, order page, downloads, studio orders and
   taxes routes, the webhook's platform branch, the cron backstops, the screens (jsdom), the fake routes' 404s.
 - e2e: `shop-checkout.spec.ts` (phone) and `phase1-orders.spec.ts` (desktop). `shop-gallery.spec.ts` now expects Pay.
@@ -256,7 +300,7 @@ Vercel three ways, like the onboarding page: `next.config.ts`, `stripeSettings()
   needed its own route).
 - No ledger header FK (section 8).
 - `job_orders` pages by an order id cursor (the repository's convention), not a time.
-- An unsaved checkout is reused for a minute, not 20 (Stripe's fixed expiry, section 5).
+- An unsaved checkout is reused for 45 seconds, not 20 minutes (Stripe's fixed expiry, section 5).
 - The fake checkout's route is `/api/dev-stripe/checkout`, not an action of `/api/dev-stripe` (that one needs a
   signed-in owner; parents aren't signed in).
 - "Your orders" is linked from the shop's ⋯ menu only, not from the galleries page (that would cost every visit a
@@ -275,7 +319,10 @@ up, 0–20%; 17 a checkout started before closing can be paid in its 30 minutes;
 in memory only; 19 Link off; 20 zip "Download all" and Home's sales numbers in step 11.
 
 Made while building (also for review):
-- The checkout expires 31 minutes after the order is made; an unsaved checkout is reused for a minute.
+- The checkout expires 32 minutes after the order is made; an unsaved checkout is reused for 45 seconds.
+- Pay asks Stripe about a reused order at most every 3 seconds (429 otherwise).
+- A missing paid download is asked for at most every 5 minutes and 3 times in all, then refused as unavailable.
+- The cron backs off 1, 2, 4 … minutes per order, at most 6 hours.
 - 10 new checkouts per gallery an hour (429).
 - An order Daybell expired that Stripe reports paid becomes paid.
 - `failed` is in the status list but not reached in Phase 1.
@@ -286,6 +333,32 @@ Made while building (also for review):
 - The Pay button reads "Pay securely"; the total is shown before tax ("+ tax"), as the bag already did.
 - The order page polls 1, 2, 4, 8, 15 seconds, then offers Try again.
 - The fake's tax (13%) and fee (2.9% + 30¢) are fixed test values.
+
+## 18. Review fixes (Oct 13)
+
+The step 10 code and security reviews' must-fix and should-fix items, as the orchestrator decided them:
+
+| Review item | Fix |
+|---|---|
+| Code M2 / security M1: a replaced checkout left payable after a Stripe failure | `stripe_closed_at`; close at Stripe first; begin, cancel and the cron hand back every unclosed checkout (section 5) |
+| Code M1 / security M2: fee reversed before its currency was checked | Currency and bounds checked before any reversal (section 7) |
+| Security M3: odd characters in the address | Cleaned in `complete_order`; other data errors are permanent, alerted problems (section 7) |
+| Code S1 / security M4: permanent failures clog the cron | Attempts, backoff, problems excluded (section 7) |
+| Code S2: re-adding a tax registration; number hash | A per-kind count as the key (section 9) |
+| Code S3: phantom pending order | The begun order is closed on `alreadyPaid` (section 5) |
+| Code S4 / security S5: download backfill re-queued | `photo_download_requests` stamp, 5 minutes, 3 tries (section 10) |
+| Code S5: reuse window vs Stripe's 30-minute minimum | 45-second reuse, 32-minute expiry (section 5) |
+| Security S1: fee functions open to the service role | Revoked; `changed_by` kept (section 3) |
+| Security S2: Stripe reads per session | 3-second throttle on Pay (section 5) |
+| Security S3: `event_mismatch` retried for days | Recorded as permanent, 200 (section 7) |
+| Security S4: head office line 2 | Same control and bidi refusal as line 1 |
+| Security N1: a full-resolution copy of every photo | Made lazily, sold photos only (section 10) |
+| Security N3: ledger naming of tax | `tax_payable` documented as passed through (section 8) |
+| Security N5: `on_behalf_of` | Checked in `complete_order` (section 7) |
+| Security N6 / code N5: test gaps | pgTAP 022 (192), route, webhook, cron, page tests |
+| Code N1–N4 | The bag's notice is `sr-only` when empty; the Orders card's names and dash from the locale file; one download at a time; a line whose item or list is gone is refused, never dropped |
+| Security N2: address purge | Kept for step 11, marked a launch blocker (Follow-ups) |
+| Security N4: selling a photo hidden after checkout started | Accepted; flagged for Seenu |
 
 ## Rejected
 
@@ -299,8 +372,12 @@ Made while building (also for review):
 
 ## Follow-ups
 
-- Refunds give the 3% back (step 11); the Orders tab and fulfilment (step 11); purge recipients 90 days after shipping
-  (step 11); zip "Download all"; Home's sales numbers (D127); the first-order celebration (D75).
+- Refunds give the 3% back (step 11); the Orders tab and fulfilment (step 11); zip "Download all"; Home's sales numbers
+  (D127); the first-order celebration (D75).
+- **Launch blocker:** purge home-delivery recipients 90 days after the order ships (step 11; security review N2). Until
+  it ships, recipients are kept indefinitely, so Daybell must not launch without it. Stripe keeps the email and address
+  on its Checkout Session and PaymentIntent (accepted: the decided processor); the privacy notice and retention docs
+  must say so.
 - Monthly card fee recovery; payout fees (D56); Klarna (`checkout.session.async_payment_*`).
 - US payments (D106's US setup).
 - Pruning the webhook inbox; showing `order.paid` in the activity log.
@@ -315,3 +392,7 @@ Made while building (also for review):
 - AWS (`docs/aws-staging-photos.md`, section 13): the download role, `AWS_DOWNLOAD_ROLE_ARN` in Vercel, and the
   worker's permission to write `download.jpg`; redeploy the worker.
 - Confirm the Stripe fee placeholders in `packages/config/src/payout-fees.ts` and the tax codes.
+- **Selling a photo hidden after checkout started** (security review N4): a pose binned, or a child marked Do not
+  publish, between the parent opening Stripe's checkout and paying is still sold (paid is paid; calls 11 and 17) and
+  marked `sold_at`, so it can no longer be binned. The orchestrator accepted this; Seenu to confirm, especially for a
+  binned photo.

@@ -78,6 +78,7 @@ const paidSession = (over: Record<string, unknown> = {}) => ({
   payment_intent: {
     id: "pi_1",
     application_fee_amount: 300,
+    on_behalf_of: "acct_A1",
     transfer_data: { destination: "acct_A1" },
     latest_charge: {
       id: "ch_1",
@@ -129,6 +130,8 @@ describe("checkout (ADR 0023)", () => {
       chargeId: "ch_1",
       transferId: "tr_1",
       destination: "acct_A1",
+      // The merchant of record, checked against the order by complete_order (security review N5).
+      onBehalfOf: "acct_A1",
       applicationFeeAmount: 300,
       balanceTransaction: { id: "txn_1", feeCents: 397, currency: "cad" },
     });

@@ -337,9 +337,11 @@ Run it once by hand (Actions › Staging photo clean-up › Run workflow) to che
 
 ## 13. Paid downloads (step 10)
 
-Since step 10 the worker also makes each photo's **paid download**, `download.jpg`: the original at full resolution,
-upright, sRGB, with every other bit of metadata stripped (ADR 0023, Claude's call 10). Parents get a 5-minute link to it
-after paying; never to the original. Signing those links needs read access to full-resolution files, which the app's
+Since step 10 the worker also makes a **sold** photo's **paid download**, `download.jpg`: the original at full
+resolution, upright, sRGB, with every other bit of metadata stripped (ADR 0023, Claude's call 10). It is made lazily,
+only once the photo is sold (security review N1): never while a photo is processed, so an unwatermarked
+full-resolution copy exists only for photos a parent paid for. Parents get a 5-minute link to it after paying; never to
+the original. Signing those links needs read access to full-resolution files, which the app's
 usual role (`daybell-staging-vercel`) must still never have, so a **second role** signs them and can read
 `*/download.jpg` and nothing else.
 
@@ -369,9 +371,12 @@ usual role (`daybell-staging-vercel`) must still never have, so a **second role*
 3. **Vercel.** Add `AWS_DOWNLOAD_ROLE_ARN` = the new role's ARN, for the staging environment (not a secret). It must
    differ from `AWS_ROLE_ARN`; the app refuses to sign download links otherwise. The photo-events queue is unchanged:
    the existing `RetryPhotos` permission (step 9) is what sends the backfill messages below. Redeploy.
-4. **Photos processed before step 10 (the backfill).** Nothing to run by hand. The first time a parent opens a paid
-   download whose file doesn't exist yet, Daybell queues `{photoId, make: "download"}` on the photo-events queue (the
-   photo's id only) and asks the parent to try again in about 20 seconds; the worker makes just that file.
+4. **How the file gets made.** Nothing to run by hand. When an order is paid, Daybell queues `{photoId, make:
+   "download"}` on the photo-events queue for each photo it sold (the photo's id only); the worker makes just that file.
+   If a parent opens a paid download before it exists, Daybell asks them to try again in about 20 seconds, and queues
+   the photo again only if it was last asked for over 5 minutes ago. After 3 requests without the file, the parent is
+   told the download isn't available and the app logs `download_unavailable` (look at the worker's logs for
+   `download_failed` or `download_skipped` with the photo's id).
 5. **Check.** Buy a download on staging (`docs/stripe-staging.md`, section 6) and open it: the file saves as
    `daybell-<reference>-1.jpg`. In S3, the photo's folder has `download.jpg` with `Cache-Control: private, no-store`.
 

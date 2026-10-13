@@ -270,8 +270,8 @@ export async function processLocally(
 }
 
 /**
- * Makes a ready photo's paid download in this server process (the backfill with the local driver: development, CI and
- * end-to-end tests; ADR 0023). The Lambda does the same for S3, from a queue message.
+ * Makes a sold photo's paid download in this server process (the local driver: development, CI and end-to-end tests;
+ * ADR 0023). The Lambda does the same for S3, from a queue message.
  */
 export async function makeDownloadLocally(
   region: DataRegion,

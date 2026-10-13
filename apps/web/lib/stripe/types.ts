@@ -117,6 +117,8 @@ export interface CheckoutSessionFacts {
   chargeId: string | null;
   transferId: string | null;
   destination: string | null;
+  /** The merchant of record (payment_intent.on_behalf_of): the studio's own account (D106; security review N5). */
+  onBehalfOf: string | null;
   applicationFeeAmount: number | null;
   /** Stripe's fee for the charge, once its balance transaction exists (call 1). */
   balanceTransaction: { id: string; feeCents: number; currency: string } | null;

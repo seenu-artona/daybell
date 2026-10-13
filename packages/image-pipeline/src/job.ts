@@ -112,28 +112,23 @@ export async function runPhotoJob(
     ...(options.qrWasmFile ? { qrWasmFile: options.qrWasmFile } : {}),
   });
   if (!result.ok) return fail(result.reason);
-  await Promise.all([
-    ...(Object.entries(result.derivatives) as [DerivativeVariant, Buffer][]).map(
-      ([variant, body]) =>
-        deps.put(photoKey(ids, variant), body, DERIVATIVE_CONTENT_TYPE, PREVIEW_CACHE_CONTROL),
+  // The previews only: the paid download is made once the photo is sold (runDownloadJob; security review N1).
+  await Promise.all(
+    (Object.entries(result.derivatives) as [DerivativeVariant, Buffer][]).map(([variant, body]) =>
+      deps.put(photoKey(ids, variant), body, DERIVATIVE_CONTENT_TYPE, PREVIEW_CACHE_CONTROL),
     ),
-    deps.put(
-      photoKey(ids, DOWNLOAD_VARIANT),
-      result.download,
-      DOWNLOAD_CONTENT_TYPE,
-      DOWNLOAD_CACHE_CONTROL,
-    ),
-  ]);
+  );
   await deps.report(photoId, { status: "ready", ...result.facts, attempt: photo.attempt });
   deps.log("photo_ready", photoId);
   return "ready";
 }
 
 /**
- * The backfill (ADR 0023): makes only `download.jpg` for a photo that is already ready (processed before downloads
- * existed, or whose download went missing). Asked for by the API when a paid download isn't there yet, with a queue
- * message `{photoId, make: "download"}`. Nothing is reported back: the API finds the file by looking. A photo that
- * isn't ready, or is gone, is skipped; a failure is logged with its reason and the photo is left as it is.
+ * Makes `download.jpg` for a sold photo (ADR 0023 §10), lazily: asked for by the API when the photo's order is paid,
+ * and again when a paid download finds it missing (at most every 5 minutes, 3 times), with a queue message
+ * `{photoId, make: "download"}` (ids only). Nothing is reported back: the API finds the file by looking. A photo that
+ * isn't ready, or is gone, is skipped; a failure is logged with its reason and the photo is left as it is (after 3
+ * requests the API answers that the download is unavailable, and alerts).
  */
 export async function runDownloadJob(
   photoId: string,

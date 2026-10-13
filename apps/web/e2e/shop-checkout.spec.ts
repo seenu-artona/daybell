@@ -110,13 +110,20 @@ test("checkout: package, print and download paid with a test card; downloads; ca
   await expect(main.getByRole("button", { name: /^Download photo \d$/ })).toHaveCount(2);
   await expect(header.getByRole("link", { name: "Bag, empty", exact: true })).toBeVisible();
 
-  // 6. A download: the link the API answers is a JPEG attachment named by the order, never the child (call 10).
-  const link = page.waitForResponse((r) =>
-    /\/api\/v1\/shop\/orders\/[^/]+\/downloads\//.test(r.url()),
-  );
-  const downloading: Promise<Download> = page.waitForEvent("download");
-  await main.getByRole("button", { name: "Download photo 1", exact: true }).click();
-  const { url } = (await (await link).json()) as { url: string };
+  // 6. A download: the link the API answers is a JPEG attachment named by the order, never the child (call 10). The
+  // file is made once the order is paid (lazily: security review N1), so a tap that comes first is told it is being
+  // prepared (409) and the parent taps again.
+  const downloading: Promise<Download> = page.waitForEvent("download", { timeout: 60_000 });
+  let url = "";
+  await expect(async () => {
+    const link = page.waitForResponse((r) =>
+      /\/api\/v1\/shop\/orders\/[^/]+\/downloads\//.test(r.url()),
+    );
+    await main.getByRole("button", { name: "Download photo 1", exact: true }).click();
+    const answer = await link;
+    expect(answer.status()).toBe(200);
+    url = ((await answer.json()) as { url: string }).url;
+  }).toPass({ intervals: [1_000, 2_000], timeout: 45_000 });
   const file = await page.request.get(url);
   expect(file.headers()["content-type"]).toBe("image/jpeg");
   expect(file.headers()["content-disposition"]).toMatch(

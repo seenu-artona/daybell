@@ -331,7 +331,7 @@ describe("Settings › Taxes (answer 2; calls 3, 6)", () => {
     expect(res.status).toBe(201);
     const [account, registration, key] = provider.createTaxRegistration.mock.calls[0] ?? [];
     expect([account, registration]).toEqual(["acct_A1", { kind: "pst", province: "BC" }]);
-    expect(key).toMatch(new RegExp(`^daybell-taxreg-${STUDIO}-pst-BC-[0-9a-f]{24}$`));
+    expect(key).toBe(`daybell-taxreg-${STUDIO}-pst-BC-1`);
     expect(key).not.toContain("1234");
     expect(taxRpc).toHaveBeenCalledWith("ca", "add_tax_registration", "user-1", {
       p_studio_id: STUDIO,
@@ -340,6 +340,29 @@ describe("Settings › Taxes (answer 2; calls 3, 6)", () => {
       p_number: "PST-1234-5678",
       p_stripe_registration_id: "taxreg_1",
     });
+  });
+
+  it("re-adds a registration ended earlier with a new key, so Stripe makes a new one (code review S2)", async () => {
+    const add = async (body: unknown) =>
+      (await import("./studio/taxes/registrations/route")).POST(json("POST", body));
+    // The active list has none; the studio's earlier ones hold an ended GST/HST registration.
+    signIn("owner", {
+      ...TAXES,
+      studio_tax_registrations: (n: number) =>
+        n === 1 ? [{ id: REG, kind: "gst_hst", province: null }] : [],
+    });
+    provider.createTaxRegistration.mockResolvedValueOnce({ id: "taxreg_2" });
+    const res = await add({ kind: "gst_hst", number: "123456789RT0001" });
+    expect(res.status).toBe(201);
+    const key = provider.createTaxRegistration.mock.calls[0]?.[2];
+    expect(key).toBe(`daybell-taxreg-${STUDIO}-gst_hst-ca-2`);
+    expect(key).not.toMatch(/123456789|[0-9a-f]{24}/);
+    expect(taxRpc).toHaveBeenCalledWith(
+      "ca",
+      "add_tax_registration",
+      "user-1",
+      expect.objectContaining({ p_stripe_registration_id: "taxreg_2" }),
+    );
   });
 
   it("ends a registration at Stripe first; another studio's is not found before Stripe is asked", async () => {

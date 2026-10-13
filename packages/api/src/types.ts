@@ -1408,8 +1408,10 @@ export const SHOP_CONFLICTS = {
   belowMinimum: "shop.belowMinimum",
   /** The bag's earlier checkout was paid meanwhile: see the order (`fields.orderId`). */
   alreadyPaid: "shop.alreadyPaid",
-  /** The paid download is being prepared (the backfill): try again in a minute (Retry-After). */
+  /** The paid download is being prepared (made lazily once sold): try again shortly (Retry-After). */
   downloadPreparing: "shop.downloadPreparing",
+  /** The paid download couldn't be made after several tries: support has been alerted. */
+  downloadUnavailable: "shop.downloadUnavailable",
 } as const;
 export type ShopConflict = (typeof SHOP_CONFLICTS)[keyof typeof SHOP_CONFLICTS];
 

@@ -242,6 +242,16 @@ describe("the bag's Pay (ADR 0023 §6)", () => {
       "Payment canceled. Your bag is unchanged.",
     );
   });
+
+  it("keeps its status notice in the accessibility tree while empty, so it is announced when it appears (WCAG 4.1.3)", async () => {
+    api.cart.mockResolvedValue(ok(cart(1900, "home")));
+    await render(<BagPage />);
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toBe("");
+    // Visually hidden, never display:none.
+    expect(status?.className).toContain("empty:sr-only");
+    expect(status?.className).not.toContain("empty:hidden");
+  });
 });
 
 describe("the order page (ADR 0023 §6)", () => {
@@ -276,6 +286,40 @@ describe("the order page (ADR 0023 §6)", () => {
     await wait(1100);
     expect(api.order).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("Thank you!");
+  });
+
+  it("ignores a second tap while a download is being signed: one link, one file (code review N3)", async () => {
+    api.order.mockResolvedValue(ok({ order: order() }));
+    let answer: (v: unknown) => void = () => {};
+    api.download.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    await render(<OrderPage />);
+    const download = button("Download photo 1");
+    await act(async () => {
+      download?.click();
+      download?.click();
+    });
+    await act(async () => button("Download photo 1")?.click());
+    expect(api.download).toHaveBeenCalledTimes(1);
+    await act(async () => answer(ok({ url: "https://photos.example.test/d", expiresAt: "x" })));
+    await wait(20);
+    expect(assign).toHaveBeenCalledTimes(1);
+    // Free again once the first has finished.
+    api.download.mockResolvedValue(ok({ url: "https://photos.example.test/d", expiresAt: "x" }));
+    await act(async () => button("Download photo 1")?.click());
+    await wait(20);
+    expect(api.download).toHaveBeenCalledTimes(2);
+  });
+
+  it("says a download is unavailable when its file couldn't be made", async () => {
+    api.order.mockResolvedValue(ok({ order: order() }));
+    api.download.mockResolvedValue(refused(409, "conflict", "shop.downloadUnavailable"));
+    await render(<OrderPage />);
+    await act(async () => button("Download photo 1")?.click());
+    await wait(20);
+    expect(container.textContent).toContain(
+      "This download isn’t available right now. We’ve been alerted. Try again later.",
+    );
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("says a download is being prepared instead of failing", async () => {

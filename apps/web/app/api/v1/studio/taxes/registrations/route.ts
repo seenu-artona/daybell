@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import { taxRegistrationInput } from "@daybell/api";
 import { NextResponse } from "next/server";
-import { handle, parseBody } from "@/lib/api";
+import { check, handle, parseBody } from "@/lib/api";
 import {
   ALREADY_REGISTERED,
   assertCanManageTaxes,
@@ -22,8 +21,10 @@ export const preferredRegion = "yul1";
 /**
  * POST /api/v1/studio/taxes/registrations — a GST/HST registration, or PST in BC, MB or SK (answer 2). The owner (call
  * 6). Checked here first (a business address, not already registered), so Stripe isn't asked for what would be
- * refused; registered with Stripe (GST/HST as "standard", PST as "province_standard"), then kept with its number. The
- * idempotency key holds the number's hash, never the number.
+ * refused; registered with Stripe (GST/HST as "standard", PST as "province_standard"), then kept with its number.
+ * The idempotency key holds neither the number nor its hash (a 15-character GST/HST number's hash can be reversed):
+ * it counts the studio's earlier registrations of that kind and province, ended ones included, so a retry gets the
+ * same registration and adding one again after ending it gets a new one (code review S2).
  */
 export const POST = handle(async (request: Request) => {
   const { supabase, studio, userId } = await studioScope();
@@ -40,11 +41,20 @@ export const POST = handle(async (request: Request) => {
     throw ALREADY_REGISTERED();
   const provider = payments();
   await takeStripeCall(studio);
-  const numberHash = createHash("sha256").update(input.number).digest("hex").slice(0, 24);
+  // Ended ones too (row-level security: the studio's own, read by its owner).
+  const earlier = (
+    (check(
+      await supabase
+        .from("studio_tax_registrations")
+        .select("id, kind, province")
+        .eq("studio_id", studio.id)
+        .eq("kind", input.kind),
+    ) ?? []) as { kind: string; province: string | null }[]
+  ).filter((r) => r.kind === input.kind && r.province === province);
   const created = await provider.createTaxRegistration(
     row.stripe_account_id,
     input.kind === "pst" ? { kind: "pst", province: input.province } : { kind: "gst_hst" },
-    `daybell-taxreg-${studio.id}-${input.kind}-${province ?? "ca"}-${numberHash}`,
+    `daybell-taxreg-${studio.id}-${input.kind}-${province ?? "ca"}-${earlier.length + 1}`,
   );
   try {
     taxResult(

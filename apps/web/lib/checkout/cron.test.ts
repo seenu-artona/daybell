@@ -1,8 +1,10 @@
+import { ApiError } from "@daybell/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The jobs cron's checkout backstops (ADR 0023 §5.5): paid orders whose Stripe fee came late are completed again and
 // settled; checkouts that ran out are expired at Stripe and here, or completed if Stripe says paid; a failure is logged
-// by a fixed name and left for the next run; the region's time is respected.
+// by a fixed name and noted on the order with its code, backing off, and a problem no retry can fix is noted as
+// permanent so it never comes back (code review S1, security review M4); the region's time is respected.
 vi.mock("server-only", () => ({}));
 const { sysRpc } = vi.hoisted(() => ({ sysRpc: vi.fn() }));
 vi.mock("../supabase/service", () => ({ checkoutSystemRpc: sysRpc }));
@@ -26,6 +28,8 @@ const paid = {
   orderId: ORDER,
   transferId: "tr_1",
   currency: "cad",
+  amountTotal: 10000,
+  applicationFeeAmount: 300,
   balanceTransaction: { id: "txn_1", feeCents: 100, currency: "cad" },
   receiptEmail: null,
 };
@@ -83,12 +87,59 @@ describe("runCheckoutBackstops", () => {
       expiredOrders: 0,
     });
     expect(errors.mock.calls).toEqual([
-      ["checkout_cron_failed", "settle", "error"],
-      ["checkout_cron_failed", "expire", "error"],
+      ["checkout_cron_failed", "settle", "unexpected_error"],
+      ["checkout_cron_failed", "expire", "unexpected_error"],
+    ]);
+    // Noted on each order, so the next run backs off instead of trying it first again.
+    expect(
+      sysRpc.mock.calls.filter((c) => c[1] === "note_checkout_failure").map((c) => c[2]),
+    ).toEqual([
+      { p_order_id: ORDER, p_code: "unexpected_error", p_permanent: false },
+      { p_order_id: STALE, p_code: "unexpected_error", p_permanent: false },
     ]);
     provider.retrieveCheckoutSession.mockClear();
     await runCheckoutBackstops("ca", provider as never, Date.now() - 1);
     expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("notes Stripe being down as a retry, a mismatch as a problem for good, and a fee still unknown as a retry", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const PROBLEM = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f";
+    sysRpc.mockImplementation(async (_region: string, fn: string) => ({
+      data:
+        fn === "unsettled_orders"
+          ? [
+              { order_id: ORDER, checkout_session_id: "cs_test_fakeA" },
+              { order_id: PROBLEM, checkout_session_id: "cs_test_fakeC" },
+            ]
+          : fn === "stale_checkouts"
+            ? [{ order_id: STALE, checkout_session_id: "cs_test_fakeB" }]
+            : fn === "complete_order"
+              ? "already_paid"
+              : true,
+      error: null,
+    }));
+    provider.retrieveCheckoutSession
+      // Paid, but Stripe's fee isn't known yet.
+      .mockResolvedValueOnce({ ...paid, balanceTransaction: null })
+      // Stripe names another order: a mismatch no retry can fix.
+      .mockResolvedValueOnce({ ...paid, id: "cs_test_fakeC" });
+    provider.expireCheckoutSession.mockRejectedValue(
+      new ApiError("internal", "We couldn't reach Stripe. Please try again."),
+    );
+    await runCheckoutBackstops("ca", provider as never, Date.now() + 60_000);
+    expect(
+      sysRpc.mock.calls.filter((c) => c[1] === "note_checkout_failure").map((c) => c[2]),
+    ).toEqual([
+      { p_order_id: ORDER, p_code: "fee_pending", p_permanent: false },
+      // Recorded by the completion itself, then by the cron.
+      { p_order_id: PROBLEM, p_code: "checkout_mismatch", p_permanent: true },
+      { p_order_id: PROBLEM, p_code: "checkout_mismatch", p_permanent: true },
+      { p_order_id: STALE, p_code: "stripe_unavailable", p_permanent: false },
+    ]);
+    expect(provider.recoverCardFee).not.toHaveBeenCalled();
+    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/cs_test|0f0f|0c0c|0d0d/);
     errors.mockRestore();
   });
 });

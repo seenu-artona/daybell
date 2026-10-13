@@ -157,8 +157,10 @@ describe("checkoutParams", () => {
   });
 
   it("lasts just over Stripe's 30 minutes from the order, so a retried create is the same request", () => {
-    expect(params.expires_at).toBe(ORDER.createdAt + 31 * 60);
-    expect(checkoutExpiresAt(100)).toBe(100 + 31 * 60);
+    expect(params.expires_at).toBe(ORDER.createdAt + 32 * 60);
+    expect(checkoutExpiresAt(100)).toBe(100 + 32 * 60);
+    // A retry at the end of the database's 45-second reuse window, 30 seconds on its way, is still 30 minutes ahead.
+    expect(checkoutExpiresAt(100) - (100 + 45 + 30)).toBeGreaterThanOrEqual(30 * 60);
     expect(checkoutParams(ORDER, TEXT, SITE)).toEqual(params);
   });
 });

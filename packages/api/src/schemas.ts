@@ -1080,10 +1080,15 @@ const addressLine = (error: string) =>
 export const taxHeadOfficeInput = z.strictObject(
   {
     line1: addressLine("validation.addressLine"),
+    // The same refusal of control and bidi characters as line 1 (security review S4): it goes straight to Stripe.
     line2: z
       .string()
       .trim()
       .max(100, { error: "validation.tooLong" })
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control and bidi characters is the point.
+      .refine((v) => !/[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/.test(v), {
+        error: "validation.addressLine",
+      })
       .nullable()
       .default(null)
       .transform((v) => v || null),

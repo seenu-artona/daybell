@@ -199,7 +199,8 @@ export type ShopRpc =
   | "shop_orders"
   | "shop_order"
   | "shop_order_verify"
-  | "shop_download_photo";
+  | "shop_download_photo"
+  | "shop_download_request";
 
 export function shopRpc(region: DataRegion, fn: ShopRpc, args: Record<string, unknown>) {
   return serviceClient(region).rpc(fn, args);
@@ -218,6 +219,8 @@ export type CheckoutSystemRpc =
   | "settle_order_fees"
   | "stale_checkouts"
   | "unsettled_orders"
+  | "note_checkout_failure"
+  | "order_downloads_to_make"
   | "mark_card_prefix_set";
 
 export function checkoutSystemRpc(

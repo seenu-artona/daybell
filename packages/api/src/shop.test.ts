@@ -77,6 +77,7 @@ describe("the parent shop matches the database (ADR 0022)", () => {
         "belowMinimum",
         "chooseDelivery",
         "downloadPreparing",
+        "downloadUnavailable",
         "lineUnavailable",
         "notAccepting",
       ].sort(),

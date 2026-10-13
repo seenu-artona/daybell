@@ -199,7 +199,8 @@ function Bag() {
         <p role="alert" className="m-0 min-h-5 text-caption text-danger">
           {error}
         </p>
-        <p role="status" className="m-0 text-body empty:hidden">
+        {/* sr-only when empty, never display:none, so screen readers announce the notice when it appears (WCAG 4.1.3). */}
+        <p role="status" className="m-0 text-body empty:sr-only">
           {notice}
         </p>
         {cart.lines.length === 0 ? (

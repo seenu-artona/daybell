@@ -206,14 +206,10 @@ describe("the Lambda handler (S3 and the API faked)", () => {
         attempt: 2,
       },
     ]);
-    for (const variant of [
-      "thumb.webp",
-      "view.webp",
-      "proof-thumb.webp",
-      "proof.webp",
-      "download.jpg",
-    ] as const)
+    for (const variant of ["thumb.webp", "view.webp", "proof-thumb.webp", "proof.webp"] as const)
       expect(await storage.head(photoKey(ids, variant))).not.toBeNull();
+    // Never the paid download while processing: only a sold photo gets one (security review N1).
+    expect(await storage.head(photoKey(ids, "download.jpg"))).toBeNull();
     expect(fetchFake.mock.calls.map(([url]) => String(url))).toEqual([
       `${config.callbackBaseUrl}/api/v1/internal/photo-worker/photos/${ids.photoId}`,
       `${config.callbackBaseUrl}/api/v1/internal/photo-worker/photos/${ids.photoId}/result`,
@@ -221,7 +217,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     expect(logs).toEqual([["photo_ready", ids.photoId]]);
   });
 
-  it("makes a ready photo's missing download when the API asks (the backfill, ADR 0023)", async () => {
+  it("makes a sold photo's download when the API asks (lazily, ADR 0023)", async () => {
     status = "ready";
     const logs: unknown[][] = [];
     const handler = createHandler({

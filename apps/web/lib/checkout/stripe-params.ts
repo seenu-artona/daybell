@@ -58,9 +58,14 @@ export function checkoutReturnUrls(siteUrl: string, orderId: string, galleryId: 
   };
 }
 
-/** The checkout lasts just over Stripe's 30-minute minimum, counted from the order (ADR 0023; call 17). */
+/**
+ * The checkout lasts just over Stripe's 30-minute minimum, counted from the order (ADR 0023; call 17): 2 minutes over,
+ * so a create retried up to the end of the database's 45-second reuse window (plus the trip to Stripe) is still at
+ * least 30 minutes ahead, as Stripe requires (code review S5).
+ */
+export const CHECKOUT_EXPIRY_MARGIN_MINUTES = 2;
 export function checkoutExpiresAt(createdAtSeconds: number): number {
-  return createdAtSeconds + (CHECKOUT_MINUTES + 1) * 60;
+  return createdAtSeconds + (CHECKOUT_MINUTES + CHECKOUT_EXPIRY_MARGIN_MINUTES) * 60;
 }
 
 export function checkoutParams(

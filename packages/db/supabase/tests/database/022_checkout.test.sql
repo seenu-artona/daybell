@@ -5,10 +5,14 @@
 -- CAD; checkout events are recorded once; parents see an order only from the session that paid or with its children
 -- (their lines only, no amounts, otherwise); downloads only for paid digital lines a session may see; owners and admins
 -- read orders, nobody else, and another studio sees nothing; tax registrations are the owner's; nothing personal goes
--- in an event.
+-- in an event. Review fixes: a replaced checkout stays in the list to close at Stripe until Stripe says it is closed
+-- (code M2); the recipient's text is cleaned so it can't fail its check (security M3); the cron backs off and never
+-- retries a problem (S1/M4); Pay asks Stripe at most every 3 seconds (S2); an event for another checkout is recorded as
+-- a permanent mismatch (S3); downloads are asked for at most every 5 minutes and 3 times (S4/S5); only the database
+-- owner changes the fee, and who did is kept (S1); the merchant of record is checked (N5).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(145);
+select plan(192);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -132,7 +136,7 @@ create function pg_temp.facts(p_order uuid, p_tax bigint, p_over jsonb default '
     'charge_id', 'ch_' || md5(o.id::text), 'transfer_id', 'tr_' || md5(o.id::text), 'livemode', false,
     'currency', 'cad', 'amount_subtotal', o.products_cents, 'amount_shipping', o.shipping_cents, 'amount_tax', p_tax,
     'amount_total', o.products_cents + o.shipping_cents + p_tax, 'destination', o.stripe_account_id,
-    'application_fee_amount', o.daybell_fee_cents,
+    'on_behalf_of', o.stripe_account_id, 'application_fee_amount', o.daybell_fee_cents,
     'shipping', jsonb_build_object('name', 'Priya Patel', 'line1', '12 Maple Lane', 'line2', null,
       'city', 'Toronto', 'state', 'ON', 'postal_code', 'M5V 2T6', 'country', 'CA')) || p_over
   from public.orders o where o.id = p_order $$;
@@ -147,15 +151,19 @@ create function pg_temp.events(p_type text) returns bigint language sql as $$
 select is((select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relrowsecurity and c.relname in ('orders', 'order_lines', 'order_line_contents',
     'order_line_photos', 'order_shipping_addresses', 'ledger_transactions', 'studio_tax_registrations',
-    'studio_tax_settings')), 8::bigint, 'every new table has row-level security on');
+    'studio_tax_settings', 'photo_download_requests')), 9::bigint, 'every new table has row-level security on');
 select is((select count(*) from pg_policies where tablename in ('orders', 'order_lines', 'order_line_contents',
     'order_line_photos', 'order_shipping_addresses', 'ledger_transactions', 'studio_tax_registrations',
     'studio_tax_settings') and cmd <> 'SELECT'), 0::bigint, 'with read policies only: nobody signed in writes');
 select is((select count(*) from unnest(array['public.orders', 'public.order_lines', 'public.order_line_contents',
     'public.order_line_photos', 'public.order_shipping_addresses', 'public.ledger_transactions',
-    'public.studio_tax_registrations', 'public.studio_tax_settings']) tb, unnest(array['anon', 'authenticated']) r
+    'public.studio_tax_registrations', 'public.studio_tax_settings', 'public.photo_download_requests']) tb,
+  unnest(array['anon', 'authenticated']) r
   where has_table_privilege(r, tb, 'insert') or has_table_privilege(r, tb, 'update')
      or has_table_privilege(r, tb, 'delete')), 0::bigint, 'browsers can''t insert, update or delete any of them');
+select ok(not has_table_privilege('authenticated', 'public.photo_download_requests', 'select')
+  and not has_table_privilege('anon', 'public.photo_download_requests', 'select'),
+  'nor read which photos'' downloads were asked for');
 select ok(not has_column_privilege('authenticated', 'public.orders', 'shop_session_id', 'select'),
   'nobody signed in reads which shop session paid');
 select is((select count(*) from unnest(array['app.platform_settings', 'app.platform_settings_changes']) tb,
@@ -168,7 +176,8 @@ select ok((select bool_and(prosecdef and proconfig @> array['search_path=""']) f
     'shop_order_verify', 'shop_download_photo', 'stale_checkouts', 'unsettled_orders', 'set_platform_fee',
     'set_card_fee_recovery', 'platform_fee_settings', 'set_tax_head_office', 'add_tax_registration',
     'end_tax_registration', 'mark_card_prefix_set', 'shop_order_view', 'shop_order_lines', 'order_line_downloads',
-    'guard_order', 'new_order_reference')),
+    'guard_order', 'new_order_reference', 'note_checkout_failure', 'shop_download_request',
+    'order_downloads_to_make', 'claim_download_request')),
   'every checkout function is SECURITY DEFINER with an empty search_path');
 create temp table system_fns on commit drop as select unnest(array[
   'public.shop_checkout_begin(text)', 'public.shop_checkout_attach(text, uuid, text, timestamptz)',
@@ -177,14 +186,19 @@ create temp table system_fns on commit drop as select unnest(array[
   'public.record_order_stripe_event(text, text, uuid, text, boolean, timestamptz)', 'public.shop_orders(text)',
   'public.shop_order(text, uuid)', 'public.shop_order_verify(text, uuid)',
   'public.shop_download_photo(text, uuid, uuid)', 'public.stale_checkouts(integer)',
-  'public.unsettled_orders(integer)', 'public.set_platform_fee(integer, text)',
-  'public.set_card_fee_recovery(public.card_fee_recovery, text)', 'public.set_tax_head_office(uuid, uuid, text)',
+  'public.unsettled_orders(integer)', 'public.set_tax_head_office(uuid, uuid, text)',
   'public.add_tax_registration(uuid, uuid, public.tax_registration_kind, text, text, text)',
-  'public.end_tax_registration(uuid, uuid, uuid)', 'public.mark_card_prefix_set(text)']) as f;
+  'public.end_tax_registration(uuid, uuid, uuid)', 'public.mark_card_prefix_set(text)',
+  'public.note_checkout_failure(uuid, text, boolean)', 'public.shop_download_request(text, uuid, uuid)',
+  'public.order_downloads_to_make(uuid)']) as f;
 select is((select count(*) from system_fns, unnest(array['anon', 'authenticated']) r
   where has_function_privilege(r, f, 'execute')), 0::bigint, 'browsers and logged-out visitors run none of them');
 select ok((select bool_and(has_function_privilege('service_role', f, 'execute')) from system_fns),
   'the service role (the API) runs them all');
+select is((select count(*) from unnest(array['public.set_platform_fee(integer, text)',
+    'public.set_card_fee_recovery(public.card_fee_recovery, text)']) f,
+  unnest(array['anon', 'authenticated', 'service_role']) r where has_function_privilege(r, f, 'execute')), 0::bigint,
+  'only the database owner changes Daybell''s fee or its recovery: not even the service role (security S1)');
 select ok(has_function_privilege('authenticated', 'public.job_orders(uuid, uuid, integer, uuid)', 'execute')
   and not (select prosecdef from pg_proc where proname = 'job_orders')
   and not (select prosecdef from pg_proc where proname = 'studio_order'),
@@ -322,8 +336,32 @@ insert into t (name, txt) select 'begin2', pg_temp.begin_('s1')::text;
 insert into t (name, id) select 'o2', ((select txt from t where name = 'begin2')::jsonb ->> 'order_id')::uuid;
 select isnt(pg_temp.v('o2'), pg_temp.v('o1'), 'a changed bag makes a new order');
 select is((select status::text from public.orders where id = pg_temp.v('o1')), 'expired', 'the old one expires');
-select is((select txt from t where name = 'begin2')::jsonb -> 'superseded', '["cs_test_O1"]'::jsonb,
-  'and its checkout is handed back to be expired at Stripe');
+select is((select txt from t where name = 'begin2')::jsonb -> 'superseded',
+  jsonb_build_array(jsonb_build_object('order_id', pg_temp.v('o1'), 'checkout_session_id', 'cs_test_O1')),
+  'and its checkout is handed back to be closed at Stripe');
+select is((select stripe_closed_at from public.orders where id = pg_temp.v('o1')), null,
+  'it isn''t closed at Stripe until Stripe says so');
+-- Stripe failed to close it (code M2): a second Pay of the same bag reuses the new order and hands the old one back again.
+insert into t (name, txt) select 'begin3', pg_temp.begin_('s1')::text;
+select is(((select txt from t where name = 'begin3')::jsonb ->> 'order_id')::uuid, pg_temp.v('o2'),
+  'a retried Pay reuses the order not yet sent to Stripe');
+select is((select txt from t where name = 'begin3')::jsonb -> 'superseded',
+  jsonb_build_array(jsonb_build_object('order_id', pg_temp.v('o1'), 'checkout_session_id', 'cs_test_O1')),
+  'and still hands back the checkout Stripe hasn''t closed, so it is never left payable');
+select is(((select txt from t where name = 'begin3')::jsonb ->> 'stripe_check')::boolean, true,
+  'the first reuse may ask Stripe');
+select is((pg_temp.begin_('s1') ->> 'stripe_check')::boolean, false,
+  'another within 3 seconds may not: one code can''t use up Stripe''s rate limit (security S2)');
+select is((select jsonb_agg(x ->> 'order_id' order by x ->> 'order_id') from jsonb_array_elements(
+  public.shop_pending_checkouts(pg_temp.h('s1'))) x),
+  (select jsonb_agg(id::text order by id::text) from public.orders where id in (pg_temp.v('o1'), pg_temp.v('o2'))),
+  '"Payment canceled" closes it too, with the pending one');
+select is(public.expire_order(pg_temp.v('o1')), false, 'once Stripe has closed it, it stays expired');
+select ok((select stripe_closed_at is not null from public.orders where id = pg_temp.v('o1')),
+  'and is marked closed at Stripe');
+select is(pg_temp.begin_('s1') -> 'superseded', '[]'::jsonb, 'so it is never handed back again');
+select ok(pg_temp.try(format($$ update public.orders set stripe_closed_at = now() - interval '1 day' where id = %L $$,
+  pg_temp.v('o1'))) like '23514%', 'and when it was closed never changes');
 select is((select products_cents from public.orders where id = pg_temp.v('o2')), 21000::bigint,
   'the new order has the new quantity');
 select is(pg_temp.try($$ select public.shop_checkout_attach(pg_temp.h('s1'), pg_temp.v('o1'), 'cs_test_O9',
@@ -333,6 +371,8 @@ select is(pg_temp.try($$ select public.shop_checkout_attach(pg_temp.h('s1'), pg_
 select lives_ok($$ select public.set_platform_fee(350, 'Test: 3.5%') $$, 'the fee is changed to 3.5%');
 select is((select count(*) from app.platform_settings_changes where setting = 'daybell_fee_bps'
   and old_value = '300' and new_value = '350'), 1::bigint, 'and the change is kept');
+select is((select changed_by from app.platform_settings_changes where setting = 'daybell_fee_bps'
+  and new_value = '350'), session_user::text, 'with the database role that made it (security S1)');
 select public.shop_cart_set_quantity(pg_temp.h('s1'), (select id from public.shop_cart_lines
   where session_id = 'd1000000-0000-4000-8000-000000000001' and kind = 'print'), 2);
 insert into t (name, id) select 'o3', (pg_temp.begin_('s1') ->> 'order_id')::uuid;
@@ -356,6 +396,13 @@ select is(pg_temp.try(format($$ select public.complete_order(%L, %L) $$, pg_temp
   pg_temp.facts(pg_temp.v('o3'), 3054, '{"destination": "acct_B1"}'))), 'P0001 checkout_mismatch',
   'and the destination');
 select is(pg_temp.try(format($$ select public.complete_order(%L, %L) $$, pg_temp.v('o3'),
+  pg_temp.facts(pg_temp.v('o3'), 3054, '{"on_behalf_of": null}'))), 'P0001 checkout_mismatch',
+  'and the studio as merchant of record (on_behalf_of; security N5)');
+select is(pg_temp.try(format($$ select public.complete_order(%L, %L) $$, pg_temp.v('o3'),
+  pg_temp.facts(pg_temp.v('o3'), 3054, '{"shipping": {"name": "\u202e\u0007", "line1": "12 Maple Lane",
+    "city": "Toronto", "postal_code": "M5V 2T6", "country": "CA"}}'))), 'P0001 checkout_mismatch',
+  'a recipient with nothing left once cleaned is a mismatch, never a failing row');
+select is(pg_temp.try(format($$ select public.complete_order(%L, %L) $$, pg_temp.v('o3'),
   pg_temp.facts(pg_temp.v('o3'), 3054, '{"checkout_session_id": "cs_test_O1"}'))), 'P0001 checkout_mismatch',
   'and the checkout');
 select is(pg_temp.try(format($$ select public.complete_order(%L, %L) $$, pg_temp.v('o3'),
@@ -367,7 +414,14 @@ select is(pg_temp.try(format($$ select public.complete_order(%L, %L) $$, pg_temp
   pg_temp.facts(pg_temp.v('o3'), 3054, '{"currency": "usd"}'))), 'P0001 checkout_mismatch', 'and CAD');
 select is((select status::text from public.orders where id = pg_temp.v('o3')), 'pending',
   'a mismatch changes nothing');
-select is(public.complete_order(pg_temp.v('o3'), pg_temp.facts(pg_temp.v('o3'), 3054)), 'paid', 'Stripe''s answer pays it');
+-- The parent typed control and bidi characters at Stripe (security M3): cleaned, never a failed check that would put
+-- the row in Postgres's log, and the order is paid.
+select is(public.complete_order(pg_temp.v('o3'), pg_temp.facts(pg_temp.v('o3'), 3054,
+  '{"shipping": {"name": "Pri\u202eya Patel\u0007", "line1": "12 Maple\nLane", "line2": "\u2066\u2069",
+    "city": "Toronto", "state": "ON", "postal_code": "M5V 2T6", "country": "CA"}}')), 'paid',
+  'Stripe''s answer pays it');
+select ok((select stripe_closed_at is not null from public.orders where id = pg_temp.v('o3')),
+  'and its checkout is closed at Stripe');
 select results_eq($$ select status::text, tax_cents, total_cents, payment_intent_id is not null, paid_at is not null
     from public.orders where id = pg_temp.v('o3') $$,
   $$ values ('paid', 3054::bigint, 26549::bigint, true, true) $$, 'paid, with tax and the total');
@@ -377,9 +431,9 @@ select is(pg_temp.events('order.paid'), 1::bigint, 'one order.paid event');
 select results_eq($$ select actor_id, subject_id, data from public.events where type = 'order.paid' $$,
   $$ values (null::uuid, pg_temp.v('o3'), '{"line_count": 4, "shipping_method": "home"}'::jsonb) $$,
   'with no actor, ids and kinds only: no amount, name or address (call 14)');
-select results_eq($$ select recipient_name, city, country::text from public.order_shipping_addresses
-    where order_id = pg_temp.v('o3') $$, $$ values ('Priya Patel', 'Toronto', 'CA') $$,
-  'the recipient is kept for home delivery (call 2)');
+select results_eq($$ select recipient_name, line1, line2, city, country::text from public.order_shipping_addresses
+    where order_id = pg_temp.v('o3') $$, $$ values ('Priya Patel', '12 Maple Lane', null::text, 'Toronto', 'CA') $$,
+  'the recipient is kept for home delivery (call 2), cleaned of control and bidi characters');
 select is((select count(*) from public.photos where sold_at is not null and id in (pg_temp.pid(1), pg_temp.pid(2),
   pg_temp.pid(3), pg_temp.pid(4))), 4::bigint, 'every photo sold is marked: poses and all of Ava''s digitals');
 select is(pg_temp.try($$ select public.bin_photos('11111111-1111-4111-8111-111111111111',
@@ -436,9 +490,13 @@ select is((public.record_order_stripe_event('evt_C1', 'checkout.session.complete
   false, now()) ->> 'claimed')::boolean, false, 'a duplicate delivery isn''t claimed again');
 select is(public.record_order_stripe_event('evt_C2', 'checkout.session.completed',
   '00000000-0000-4000-8000-000000000000', 'cs_test_X', false, now()), null, 'an unknown order: null (404, Stripe retries)');
-select is(pg_temp.try(format($$ select public.record_order_stripe_event('evt_C3', 'checkout.session.completed', %L,
-  'cs_test_OTHER', false, now()) $$, pg_temp.v('o3'))), '22023 event_mismatch',
-  'a checkout that isn''t the order''s is refused');
+select is((public.record_order_stripe_event('evt_C3', 'checkout.session.completed', pg_temp.v('o3'), 'cs_test_OTHER',
+  false, now()) ->> 'mismatch')::boolean, true, 'a checkout that isn''t the order''s is a mismatch');
+select results_eq($$ select processed_at is not null, last_error from public.stripe_events
+    where stripe_event_id = 'evt_C3' $$, $$ values (true, 'event_mismatch') $$,
+  'recorded as done with its code, so Stripe doesn''t retry it for days (security S3)');
+select is((public.record_order_stripe_event('evt_C3', 'checkout.session.expired', pg_temp.v('o3'), 'cs_test_O3',
+  false, now()) ->> 'mismatch')::boolean, true, 'an event id already recorded as another type is a mismatch too');
 select is(pg_temp.try(format($$ select public.record_order_stripe_event('evt_C4', 'payment_intent.succeeded', %L,
   'cs_test_O3', false, now()) $$, pg_temp.v('o3'))), '22023 Checkout events only', 'other types are refused');
 -- An order whose checkout Stripe made but the API didn't save gets it from the event.
@@ -518,6 +576,35 @@ select is(pg_temp.try(format($$ select public.shop_download_photo(pg_temp.h('s1'
 select is(public.shop_order_verify(pg_temp.h('s1'), pg_temp.v('o3')), null,
   'a paid order isn''t checked with Stripe again');
 
+-- download.jpg is made lazily, for sold photos only (security N1), and asked for at most every 5 minutes, 3 times
+-- (code S4, security S5).
+select is(public.order_downloads_to_make(pg_temp.v('o1')), '[]'::jsonb, 'an unpaid order asks for no download');
+select is(public.order_downloads_to_make(pg_temp.v('o3')),
+  jsonb_build_array(pg_temp.pid(1), pg_temp.pid(2), pg_temp.pid(3)),
+  'a paid order asks for its downloads'' files: the package''s, the single and all digitals (never the print''s)');
+select is(public.order_downloads_to_make(pg_temp.v('o3')), '[]'::jsonb, 'once');
+select is(public.shop_download_request(pg_temp.h('s1'), pg_temp.v('o3'), pg_temp.pid(2)), 'waiting',
+  'a download tapped while its file is being made isn''t queued again');
+update public.photo_download_requests set requested_at = now() - interval '6 minutes' where photo_id = pg_temp.pid(2);
+select is(public.shop_download_request(pg_temp.h('s1'), pg_temp.v('o3'), pg_temp.pid(2)), 'queued',
+  'after 5 minutes without it, it is asked for again');
+update public.photo_download_requests set requested_at = now() - interval '6 minutes' where photo_id = pg_temp.pid(2);
+select is(public.shop_download_request(pg_temp.h('s2'), pg_temp.v('o3'), pg_temp.pid(2)), 'queued',
+  'a third time (from Ava''s other parent)');
+update public.photo_download_requests set requested_at = now() - interval '6 minutes' where photo_id = pg_temp.pid(2);
+select is(public.shop_download_request(pg_temp.h('s1'), pg_temp.v('o3'), pg_temp.pid(2)), 'unavailable',
+  'then never again: the download is unavailable (alerted), not "being prepared" forever');
+select is((select requests from public.photo_download_requests where photo_id = pg_temp.pid(2)), 3,
+  'three times in all');
+select is(pg_temp.try(format($$ select public.shop_download_request(pg_temp.h('sb'), %L, %L) $$, pg_temp.v('o3'),
+  pg_temp.pid(2))), 'P0002 Download not found', 'another studio''s session asks for nothing');
+select is(pg_temp.try(format($$ select public.shop_download_request(pg_temp.h('s1'), %L, %L) $$, pg_temp.v('o3'),
+  pg_temp.pid(4))), 'P0002 Download not found', 'nor for a print''s photo');
+select is(app.claim_download_request('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001',
+  pg_temp.pid(6)), 'unavailable', 'a photo that isn''t that studio''s and job''s ready photo is never asked for');
+select is((select count(*) from public.photo_download_requests
+  where studio_id <> 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 0::bigint, 'and nothing was kept for another studio');
+
 -- ── Studio reads and leak tests (call 15; D96) ────────────────────────────────────────────────────────────────────
 set local role authenticated;
 select pg_temp.as_user('11111111-1111-4111-8111-111111111111');
@@ -556,6 +643,8 @@ select is(public.job_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-00
   '[]'::jsonb, 'nor A''s orders by asking for A''s job');
 select is(public.studio_order('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('o3')), null,
   'nor one of them by its id');
+select throws_ok($$ select count(*) from public.photo_download_requests $$, '42501', null,
+  'nor which photos'' downloads were asked for');
 set local role anon;
 select throws_ok($$ select count(*) from public.orders $$, '42501', null, 'logged-out visitors read nothing');
 reset role;
@@ -568,11 +657,53 @@ alter table public.orders enable trigger orders_guard;
 select is(public.unsettled_orders(10), jsonb_build_array(jsonb_build_object('order_id', pg_temp.v('o4'),
   'checkout_session_id', 'cs_test_O4')), 'a paid order unsettled after 10 minutes is retried');
 select is(public.stale_checkouts(10), '[]'::jsonb, 'no checkout has run out yet');
+-- Attempts and backoff (code S1, security M4).
+select lives_ok(format($$ select public.note_checkout_failure(%L, 'stripe_unavailable', false) $$, pg_temp.v('o4')),
+  'a failed try is noted');
+select results_eq($$ select backstop_attempts, backstop_error, backstop_next_at > now(), problem from public.orders
+    where id = pg_temp.v('o4') $$, $$ values (1, 'stripe_unavailable', true, null::text) $$,
+  'with its code and when to try next');
+select is(public.unsettled_orders(10), '[]'::jsonb, 'so the next run leaves it alone while it backs off');
+update public.orders set backstop_next_at = now() - interval '1 second' where id = pg_temp.v('o4');
+select is(jsonb_array_length(public.unsettled_orders(10)), 1, 'and tries again when it is due');
+select public.note_checkout_failure(pg_temp.v('o4'), 'fee_currency', true);
+update public.orders set backstop_next_at = now() - interval '1 second' where id = pg_temp.v('o4');
+select results_eq($$ select backstop_attempts, problem from public.orders where id = pg_temp.v('o4') $$,
+  $$ values (2, 'fee_currency') $$, 'a problem no retry can fix is kept for support');
+select is(public.unsettled_orders(10), '[]'::jsonb,
+  'and never retried, so problems can''t crowd newer orders out of the page');
+select is(pg_temp.try(format($$ select public.note_checkout_failure(%L, 'Has a message', true) $$, pg_temp.v('o4'))),
+  '22023 A code and whether it is permanent', 'codes only, never a message');
+-- A replaced checkout that Stripe hasn't closed (code M2): the cron closes it.
+update public.orders set checkout_session_id = 'cs_test_O2', checkout_expires_at = now() + interval '20 minutes'
+where id = pg_temp.v('o2');
+select is(public.stale_checkouts(10), jsonb_build_array(jsonb_build_object('order_id', pg_temp.v('o2'),
+  'checkout_session_id', 'cs_test_O2')), 'a replaced checkout still open at Stripe is closed by the cron');
+select public.note_checkout_failure(pg_temp.v('o2'), 'stripe_unavailable', false);
+select is(public.stale_checkouts(10), '[]'::jsonb, 'backing off after a failure');
+update public.orders set backstop_next_at = null where id = pg_temp.v('o2');
+select is(public.expire_order(pg_temp.v('o2')), false, 'closed at Stripe at last');
+select is(public.stale_checkouts(10), '[]'::jsonb, 'and never picked up again');
+
+-- ── Siblings (security N6): a session with one child never gets the other child's download ─────────────────────────
+select pg_temp.add('s1', 'c0000000-0000-4000-8000-000000000001', 'digital_single', null, 3, 1);
+select pg_temp.add('s1', 'c0000000-0000-4000-8000-000000000002', 'digital_single', null, 4, 1);
+insert into t (name, id) select 'o5', (pg_temp.begin_('s1') ->> 'order_id')::uuid;
+select public.shop_checkout_attach(pg_temp.h('s1'), pg_temp.v('o5'), 'cs_test_O5', now() + interval '30 minutes');
+select is(public.complete_order(pg_temp.v('o5'), pg_temp.facts(pg_temp.v('o5'), 858, '{"shipping": null}')), 'paid',
+  'Ava''s and Noah''s downloads are paid for together');
+select is(public.shop_order(pg_temp.h('s2'), pg_temp.v('o5')) ->> 'view', 'child', 'Ava''s other parent sees Ava''s part');
+select ok((public.shop_download_photo(pg_temp.h('s2'), pg_temp.v('o5'), pg_temp.pid(3)) ->> 'photo_id') is not null,
+  'and downloads Ava''s photo');
+select is(pg_temp.try(format($$ select public.shop_download_photo(pg_temp.h('s2'), %L, %L) $$, pg_temp.v('o5'),
+  pg_temp.pid(4))), 'P0002 Download not found', 'but never Noah''s');
+select is(pg_temp.try(format($$ select public.shop_download_request(pg_temp.h('s2'), %L, %L) $$, pg_temp.v('o5'),
+  pg_temp.pid(4))), 'P0002 Download not found', 'nor asks for his file to be made');
 
 -- ── Privacy ───────────────────────────────────────────────────────────────────────────────────────────────────────
 select is((select count(*) from public.events where data::text ~* '(@|patel|priya|maple|toronto|[0-9]{9}RT)'),
   0::bigint, 'no event holds an email, a name, an address or a tax number');
-select is((select count(*) from public.stripe_events where stripe_event_id like 'evt_C%'), 2::bigint,
+select is((select count(*) from public.stripe_events where stripe_event_id like 'evt_C%'), 3::bigint,
   'the inbox keeps ids and types only');
 
 select * from finish();

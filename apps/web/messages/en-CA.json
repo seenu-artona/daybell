@@ -1022,7 +1022,9 @@
           "none": "None (downloads only)"
         },
         "shipTo": "Ships to",
-        "cityLine": "{city} {province} {postalCode}"
+        "cityLine": "{city} {province} {postalCode}",
+        "childName": "{firstName} {lastName}",
+        "noChildren": "—"
       }
     },
     "people": {
@@ -1620,6 +1622,7 @@
       "belowMinimum": "Your order is below the minimum.",
       "alreadyPaid": "This bag has just been paid for.",
       "downloadPreparing": "Your download is being prepared. Try again in a minute.",
+      "downloadUnavailable": "This download isn’t available right now. We’ve been alerted. Try again later.",
       "checkoutNotConfigured": "Payments aren’t set up here."
     },
     "header": {

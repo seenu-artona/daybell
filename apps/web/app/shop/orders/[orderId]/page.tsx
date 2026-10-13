@@ -89,11 +89,17 @@ function OrderPage() {
     if (current?.status === "pending") setSlow(true);
   };
 
+  // One download at a time: a second tap while one is being signed is ignored (a ref, so even a tap before the next
+  // render is), so a double tap never signs twice or opens the file twice.
+  const downloadBusy = useRef(false);
   const download = async (photoId: string, n: number) => {
-    if (!galleryId || !order) return;
+    if (!galleryId || !order || downloadBusy.current) return;
+    downloadBusy.current = true;
     setDownloading(photoId);
     setDownloadNote(null);
-    const result = await shopApi.download(galleryId, order.id, photoId);
+    const result = await shopApi.download(galleryId, order.id, photoId).finally(() => {
+      downloadBusy.current = false;
+    });
     setDownloading(null);
     if (result.ok) {
       // The signed link saves the file (an attachment); the page stays.

@@ -159,6 +159,8 @@ const received = () =>
 type Claim = {
   inbox_id: number;
   studio_id: string;
+  /** Checkout events: the event can never apply to its order (recorded as processed by the database). */
+  mismatch?: boolean;
   processed: boolean;
   claimed: boolean;
   lease: string | null;
@@ -317,7 +319,9 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
  * 3. the checkout is read from Stripe again (never the payload), and routed by the region Daybell wrote in its
  *    metadata (else Canada, the Q11 precedent); a checkout that isn't Daybell's is acknowledged and left alone;
  * 4. the event is recorded once in that region's inbox for the order Stripe names (404 for an order this database
- *    doesn't hold, so Stripe tries again; 409 while another delivery holds it; 200 when already done);
+ *    doesn't hold, so Stripe tries again; 409 while another delivery holds it; 200 when already done); an event for
+ *    another checkout than the order's is recorded as a permanent event_mismatch and answered 200, alerted (security
+ *    review S3);
  * 5. the studio in Stripe's metadata must be the order's (a backstop);
  * 6. completed: the order is completed (lib/checkout/complete.ts). Stripe's fee not yet known is retried (500, Stripe's
  *    retries are the queue, with the jobs cron as the backstop); a mismatch with the order is recorded as permanent,
@@ -367,6 +371,11 @@ async function handleCheckoutEvent(
   if (!claim) {
     console.warn("stripe_webhook_unknown_order", event.type);
     throw new ApiError("not_found", "Unknown order.");
+  }
+  if (claim.mismatch) {
+    // Can never succeed, so Stripe isn't asked to retry it: a fixed name to alert on, the type and the code.
+    console.error("stripe_webhook_permanent_failure", event.type, "event_mismatch");
+    return received();
   }
   if (claim.processed) return received();
   if (!claim.claimed || !claim.lease)

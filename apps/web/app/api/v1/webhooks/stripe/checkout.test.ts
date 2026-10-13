@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // the order is the one its metadata names (never the payload's); each event is recorded once; a completed checkout is
 // paid, its receipt asked for, its fee recovered and settled; Stripe's fee not yet known is retried (500); a mismatch
 // with the order is permanent (200, alerted); an expired checkout expires the order; a checkout that isn't Daybell's is
-// acknowledged and left alone. Nothing from the payload or the parent is ever logged.
+// acknowledged and left alone. Review fixes: an event for another checkout is a permanent event_mismatch (security S3);
+// an unexpected database error completing it is a permanent, alerted problem (M3); Stripe's fee in another currency
+// moves no money (M1). Nothing from the payload or the parent is ever logged.
 vi.mock("server-only", () => ({}));
 const SECRET = ["whsec", "checkoutsecret".repeat(2)].join("_");
 const { sysRpc, provider } = vi.hoisted(() => ({
@@ -89,6 +91,7 @@ const facts = (over: Record<string, unknown> = {}) => ({
   chargeId: "ch_1",
   transferId: "tr_1",
   destination: "acct_A1",
+  onBehalfOf: "acct_A1",
   applicationFeeAmount: 300,
   balanceTransaction: { id: "txn_1", feeCents: 320, currency: "cad" },
   receiptEmail: "parent@example.test",
@@ -164,6 +167,7 @@ describe("POST /webhooks/stripe: parents' checkouts (the platform's own events)"
     expect(names()).toEqual([
       "record_order_stripe_event",
       "complete_order",
+      "order_downloads_to_make",
       "settle_order_fees",
       "finish_stripe_event",
     ]);
@@ -201,7 +205,12 @@ describe("POST /webhooks/stripe: parents' checkouts (the platform's own events)"
     provider.retrieveCheckoutSession.mockResolvedValue(facts({ balanceTransaction: null }));
     const res = await send(post(event("checkout.session.completed")));
     expect(res.status).toBe(500);
-    expect(names()).toEqual(["record_order_stripe_event", "complete_order", "finish_stripe_event"]);
+    expect(names()).toEqual([
+      "record_order_stripe_event",
+      "complete_order",
+      "order_downloads_to_make",
+      "finish_stripe_event",
+    ]);
     expect(finish()).toMatchObject({ p_error_code: "fee_pending", p_permanent: false });
     expect(provider.recoverCardFee).not.toHaveBeenCalled();
   });
@@ -216,6 +225,45 @@ describe("POST /webhooks/stripe: parents' checkouts (the platform's own events)"
     expect(res.status).toBe(200);
     expect(finish()).toMatchObject({ p_error_code: "checkout_mismatch", p_permanent: true });
     expect(JSON.stringify(logs[0]?.mock.calls)).toContain("stripe_webhook_permanent_failure");
+  });
+
+  it("acknowledges an event for another checkout than the order's for good: no retries for days (security review S3)", async () => {
+    sysRpc.mockImplementation(database({ record_order_stripe_event: claim({ mismatch: true }) }));
+    const res = await send(post(event("checkout.session.completed")));
+    expect(res.status).toBe(200);
+    // The database recorded it as processed with its code; nothing else is done.
+    expect(names()).toEqual(["record_order_stripe_event"]);
+    expect(logs[0]?.mock.calls).toEqual([
+      ["stripe_webhook_permanent_failure", "checkout.session.completed", "event_mismatch"],
+    ]);
+  });
+
+  it("makes an unexpected database error completing a paid checkout a permanent, alerted problem (security review M3)", async () => {
+    sysRpc.mockImplementation(
+      database({ complete_order: { data: null, error: { code: "23514", message: "check" } } }),
+    );
+    const res = await send(post(event("checkout.session.completed")));
+    expect(res.status).toBe(200);
+    expect(finish()).toMatchObject({ p_error_code: "completion_failed", p_permanent: true });
+    expect(sysRpc.mock.calls.find((c) => c[1] === "note_checkout_failure")?.[2]).toEqual({
+      p_order_id: ORDER,
+      p_code: "completion_failed",
+      p_permanent: true,
+    });
+    const logged = JSON.stringify(logs[0]?.mock.calls);
+    expect(logged).toContain("checkout_problem");
+    expect(logged).toContain("stripe_webhook_permanent_failure");
+  });
+
+  it("moves no money when Stripe's fee is in another currency: a permanent problem (code review M1)", async () => {
+    provider.retrieveCheckoutSession.mockResolvedValue(
+      facts({ balanceTransaction: { id: "txn_1", feeCents: 320, currency: "usd" } }),
+    );
+    const res = await send(post(event("checkout.session.completed")));
+    expect(res.status).toBe(200);
+    expect(provider.recoverCardFee).not.toHaveBeenCalled();
+    expect(names()).not.toContain("settle_order_fees");
+    expect(finish()).toMatchObject({ p_error_code: "fee_currency", p_permanent: true });
   });
 
   it("never pays an order of another studio than the checkout's own (a backstop)", async () => {

@@ -149,6 +149,7 @@ function facts(c: FakeCheckout): CheckoutSessionFacts {
     chargeId: paid?.chargeId ?? null,
     transferId: paid?.transferId ?? null,
     destination: paid ? (intent?.transfer_data?.destination ?? null) : null,
+    onBehalfOf: paid ? (intent?.on_behalf_of ?? null) : null,
     applicationFeeAmount: paid ? (intent?.application_fee_amount ?? null) : null,
     balanceTransaction: paid
       ? {

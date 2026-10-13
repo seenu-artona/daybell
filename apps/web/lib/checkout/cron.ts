@@ -1,4 +1,5 @@
 import "server-only";
+import { ApiError } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
 import type { PaymentsProvider } from "../stripe";
 import { checkoutSystemRpc } from "../supabase/service";
@@ -8,8 +9,11 @@ import { CheckoutProblem, closeCheckout, completeCheckout } from "./complete";
  * The jobs cron's checkout backstops (ADR 0023 §5.5), a page each, within the region's share of the time:
  * - paid orders whose Stripe fee is still unknown after 10 minutes are completed again (Stripe's own retries stop
  *   after a few days);
- * - checkouts that ran out two hours ago (or were never made) are expired, after asking Stripe, which may say paid.
- * Ids only; a failure is logged by a fixed name and left for the next run.
+ * - checkouts that ran out two hours ago (or were never made), and replaced ones Stripe hasn't closed yet (code review
+ *   M2), are closed at Stripe and here, after asking Stripe, which may say paid.
+ * Ids only. A failure is logged by a fixed name and noted on the order (note_checkout_failure): its code, and a backoff
+ * before the next try; a problem no retry can fix leaves both lists for good, so it can never crowd newer orders out
+ * of a page (code review S1, security review M4). The database orders each page by when it is due.
  */
 export const CHECKOUT_PAGE = 50;
 
@@ -24,8 +28,27 @@ async function due(region: DataRegion, fn: "unsettled_orders" | "stale_checkouts
   return (data ?? []) as Due[];
 }
 
-const failed = (step: string, err: unknown) =>
-  console.error("checkout_cron_failed", step, err instanceof CheckoutProblem ? err.code : "error");
+/** The failure's code, and whether a retry could ever fix it. */
+function failureOf(err: unknown): { code: string; permanent: boolean } {
+  if (err instanceof CheckoutProblem) return { code: err.code, permanent: true };
+  if (err instanceof ApiError) return { code: "stripe_unavailable", permanent: false };
+  return { code: "unexpected_error", permanent: false };
+}
+
+async function noteFailure(region: DataRegion, orderId: string, code: string, permanent: boolean) {
+  const { error } = await checkoutSystemRpc(region, "note_checkout_failure", {
+    p_order_id: orderId,
+    p_code: code,
+    p_permanent: permanent,
+  });
+  if (error) console.error("checkout_cron_failed", "note", error.code ?? "unknown");
+}
+
+async function failed(region: DataRegion, step: string, orderId: string, err: unknown) {
+  const { code, permanent } = failureOf(err);
+  console.error("checkout_cron_failed", step, code);
+  await noteFailure(region, orderId, code, permanent);
+}
 
 export async function runCheckoutBackstops(
   region: DataRegion,
@@ -41,8 +64,10 @@ export async function runCheckoutBackstops(
         expectedOrderId: order.order_id,
       });
       if (outcome === "settled") settledOrders += 1;
+      // Stripe's fee still unknown: tried again, backing off like any other failure.
+      else await noteFailure(region, order.order_id, "fee_pending", false);
     } catch (err) {
-      failed("settle", err);
+      await failed(region, "settle", order.order_id, err);
     }
   }
   for (const order of await due(region, "stale_checkouts")) {
@@ -54,7 +79,7 @@ export async function runCheckoutBackstops(
       )
         expiredOrders += 1;
     } catch (err) {
-      failed("expire", err);
+      await failed(region, "expire", order.order_id, err);
     }
   }
   return { settledOrders, expiredOrders };

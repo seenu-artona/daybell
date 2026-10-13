@@ -20,8 +20,9 @@ Daybell's fee is taken on products only (never shipping or tax), rounded half up
 
 ## Changing the fee
 
-Supabase › the region's project › **SQL Editor** (it runs as `postgres`; the functions are also open to the service
-role, never to signed-in users):
+Supabase › the region's project › **SQL Editor** (it runs as `postgres`). Only the database owner can run these
+functions: not the service role (so no bug in the API could ever change a fee) and never signed-in users. Each change
+is kept with the database role that made it (`changed_by`):
 
 ```sql
 select public.set_platform_fee(350, 'Moving to 3.5% from 1 Dec, as announced on 1 Nov');
@@ -46,7 +47,7 @@ transfer, ADR 0023). `monthly` is reserved for later and is refused until it is 
 ```sql
 select public.platform_fee_settings();
 
-select setting, old_value, new_value, note, changed_at
+select setting, old_value, new_value, note, changed_by, changed_at
 from app.platform_settings_changes
 order by changed_at desc;
 ```

@@ -17,7 +17,9 @@
 
 -- ── Platform settings (Seenu, answer 1) ──────────────────────────────────────────────────────────────────────────
 -- One row per regional database (the region is implied), in the app schema so the Data API can never reach it. Changed
--- only through set_platform_fee and set_card_fee_recovery (docs/platform-fee.md), each change kept in the history.
+-- only through set_platform_fee and set_card_fee_recovery (docs/platform-fee.md), each change kept in the history with
+-- the role that made it. Only the database owner (Seenu, in the SQL editor) runs them: not the service role, so no bug
+-- in the API can ever change a fee (security review S1).
 create type public.card_fee_recovery as enum ('per_sale', 'monthly');
 
 create table app.platform_settings (
@@ -40,9 +42,12 @@ create table app.platform_settings_changes (
   new_value text not null,
   note text not null check (char_length(note) between 1 and 200 and note = btrim(note)
     and note !~ '[\u0001-\u001F\u007F-\u009F]'),
+  -- Who made it: the database role of the SQL editor's session (security review S1). Never a person's email.
+  changed_by text not null default session_user check (char_length(changed_by) between 1 and 63),
   changed_at timestamptz not null default now()
 );
-comment on table app.platform_settings_changes is 'Every change of the platform settings, with a note. Append-only.';
+comment on table app.platform_settings_changes is
+  'Every change of the platform settings, with a note and the database role that made it. Append-only.';
 
 create function app.guard_platform_settings() returns trigger
 language plpgsql
@@ -315,8 +320,19 @@ create table public.orders (
   balance_transaction_id text check (char_length(balance_transaction_id) <= 255 and balance_transaction_id ~ '^txn_[A-Za-z0-9_]+$'),
   -- SHA-256 of the priced bag: the same bag reuses its open checkout.
   bag_fingerprint text not null check (bag_fingerprint ~ '^[0-9a-f]{64}$'),
-  -- When the confirmation page last asked Stripe about this order (at most every 5 seconds).
+  -- When the confirmation page or Pay last asked Stripe about this order (at most every 5 and 3 seconds: security
+  -- review S2).
   stripe_checked_at timestamptz,
+  -- When Stripe said this checkout can't be paid any more (expired there, or paid). Until then an order Daybell expired
+  -- is closed at Stripe by the next Pay, cancel or the cron, so a replaced checkout never stays payable (code review M2).
+  stripe_closed_at timestamptz,
+  -- The cron's backstops (code review S1, security review M4): its tries, the last error's code, when to try next
+  -- (backing off), and a problem no retry can fix (never retried; support resolves it: docs/crons.md).
+  backstop_attempts integer not null default 0 check (backstop_attempts between 0 and 1000000),
+  backstop_error text check (backstop_error ~ '^[a-z_]{1,100}$'),
+  backstop_next_at timestamptz,
+  problem text check (problem ~ '^[a-z_]{1,100}$'),
+  problem_at timestamptz,
   paid_at timestamptz,
   fees_settled_at timestamptz,
   created_at timestamptz not null default now(),
@@ -331,6 +347,7 @@ create table public.orders (
   constraint orders_paid_facts check (paid_at is null or (tax_cents is not null and total_cents is not null
     and payment_intent_id is not null and total_cents = products_cents + shipping_cents + tax_cents)),
   constraint orders_settled check (fees_settled_at is null or (paid_at is not null and stripe_fee_cents is not null)),
+  constraint orders_problem check ((problem is null) = (problem_at is null)),
   -- Only home delivery costs anything; school delivery and a bag with nothing to deliver are free.
   constraint orders_shipping check (coalesce(shipping_method = 'home', false) or shipping_cents = 0)
 );
@@ -338,6 +355,9 @@ create index orders_studio_paid_idx on public.orders (studio_id, paid_at desc) w
 create index orders_session_idx on public.orders (shop_session_id, created_at) where shop_session_id is not null;
 create index orders_pending_idx on public.orders (checkout_expires_at) where status = 'pending';
 create index orders_unsettled_idx on public.orders (paid_at) where status = 'paid' and fees_settled_at is null;
+create index orders_unclosed_idx on public.orders (shop_session_id)
+  where checkout_session_id is not null and stripe_closed_at is null and status in ('pending', 'expired');
+create index orders_problem_idx on public.orders (problem_at) where problem is not null;
 comment on table public.orders is
   'A parent''s order (ADR 0023): the bag as priced at checkout, Daybell''s fee rate, Stripe ids and amounts. No parent '
   'email, card or customer. Money in whole cents (D96).';
@@ -418,7 +438,9 @@ create index order_line_photos_studio_idx on public.order_line_photos (studio_id
 comment on table public.order_line_photos is 'The photos an "all digitals" line unlocked, fixed when it was paid.';
 
 -- Home delivery only (call 2): the recipient Stripe's checkout collected, for the studio's own fulfilment. Personal
--- data: owners and admins only, never in an event, a log or a URL. Purged 90 days after the order ships (step 11).
+-- data: owners and admins only, never in an event, a log or a URL. Purged 90 days after the order ships (step 11; a
+-- launch blocker: security review N2). complete_order cleans each value first (app.clean_address_text), so the text
+-- check below can never fail and Postgres never logs a failing row (security review M3).
 create table public.order_shipping_addresses (
   order_id uuid primary key,
   studio_id uuid not null references public.studios (id) on delete restrict,
@@ -440,6 +462,24 @@ create table public.order_shipping_addresses (
 create index order_shipping_addresses_studio_idx on public.order_shipping_addresses (studio_id);
 comment on table public.order_shipping_addresses is
   'Where a home-delivery order ships (personal data; owners and admins only; purged 90 days after shipping, step 11).';
+
+-- ── Paid downloads, made lazily (security review N1; ADR 0023 §10) ────────────────────────────────────────────────
+-- download.jpg (full resolution, no watermark) is made only for a photo that has been sold: queued when its order is
+-- paid, and again when a paid download finds it missing. One row per photo asked for, so a photo is queued at most
+-- once every 5 minutes and 3 times in all; after that the download is refused as unavailable and alerted (code review
+-- S4, security review S5). Ids, a time and a count only; nobody signed in reads it.
+create table public.photo_download_requests (
+  photo_id uuid primary key,
+  studio_id uuid not null references public.studios (id) on delete cascade,
+  job_id uuid not null,
+  requests integer not null default 1 check (requests between 1 and 1000),
+  requested_at timestamptz not null default now(),
+  constraint photo_download_requests_photo_fk foreign key (studio_id, job_id, photo_id)
+    references public.photos (studio_id, job_id, id) on delete cascade
+);
+create index photo_download_requests_studio_idx on public.photo_download_requests (studio_id);
+comment on table public.photo_download_requests is
+  'When each sold photo''s download.jpg was last asked for, and how often (ADR 0023). Service role only.';
 
 -- ── Guards ────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- An order's currency is its studio's region's (ADR 0006). The snapshot, the fee rate and the destination never change;
@@ -479,6 +519,7 @@ begin
      or (old.total_cents is not null and new.total_cents is distinct from old.total_cents)
      or (old.stripe_fee_cents is not null and new.stripe_fee_cents is distinct from old.stripe_fee_cents)
      or (old.paid_at is not null and new.paid_at is distinct from old.paid_at)
+     or (old.stripe_closed_at is not null and new.stripe_closed_at is distinct from old.stripe_closed_at)
      or (old.fees_settled_at is not null and new.fees_settled_at is distinct from old.fees_settled_at) then
     raise exception 'order_fixed' using errcode = 'check_violation';
   end if;
@@ -573,6 +614,9 @@ alter table public.order_line_contents enable row level security;
 alter table public.order_line_photos enable row level security;
 alter table public.order_shipping_addresses enable row level security;
 alter table public.ledger_transactions enable row level security;
+-- No policy: the service role only.
+alter table public.photo_download_requests enable row level security;
+revoke all on public.photo_download_requests from anon, authenticated;
 create policy "owners and admins read their studio's tax settings" on public.studio_tax_settings
   for select to authenticated using (app.has_role(studio_id, '{owner,admin}'));
 create policy "owners and admins read their studio's tax registrations" on public.studio_tax_registrations
@@ -599,8 +643,9 @@ grant select on public.studio_tax_settings, public.studio_tax_registrations, pub
 grant select (id, studio_id, reference, status, currency, shipping_method, products_cents, shipping_cents, tax_cents,
   total_cents, daybell_fee_bps, daybell_fee_cents, card_fee_recovery, stripe_fee_cents, tax_enabled, payout_account_id,
   stripe_account_id, checkout_session_id, checkout_expires_at, payment_intent_id, charge_id, transfer_id,
-  fee_reversal_id, balance_transaction_id, bag_fingerprint, stripe_checked_at, paid_at, fees_settled_at, created_at,
-  updated_at) on public.orders to authenticated;
+  fee_reversal_id, balance_transaction_id, bag_fingerprint, stripe_checked_at, stripe_closed_at, backstop_attempts,
+  backstop_error, backstop_next_at, problem, problem_at, paid_at, fees_settled_at, created_at, updated_at)
+  on public.orders to authenticated;
 
 -- ── The webhook inbox (amends ADR 0020) ───────────────────────────────────────────────────────────────────────────
 -- Checkout's events are the platform's own (destination charges): no connected account. Two more types.
@@ -628,7 +673,10 @@ alter table public.stripe_events
 -- The inbox for a checkout event: the order is the one Stripe's session names (its metadata, read from Stripe), and
 -- the session must be that order's (a session Daybell hadn't attached yet is attached here: the route may have stopped
 -- between Stripe's answer and saving it). Recorded with the order's studio and destination account, then claimed with
--- the same lease as record_stripe_event. Null for an order this database doesn't hold (404: Stripe tries again).
+-- the same lease as record_stripe_event. Null for an order this database doesn't hold (404: Stripe tries again). An
+-- event whose checkout isn't the order's, or whose id is already recorded for another studio or type, can never
+-- succeed: it is recorded as processed with event_mismatch (when it is new) and answered {mismatch: true}, which the
+-- webhook acknowledges and alerts on rather than letting Stripe retry for days (security review S3).
 create function public.record_order_stripe_event(p_event_id text, p_type text, p_order_id uuid,
   p_checkout_session_id text, p_livemode boolean, p_created timestamptz)
 returns jsonb
@@ -652,7 +700,12 @@ begin
   if v_order.checkout_session_id is null then
     update public.orders o set checkout_session_id = p_checkout_session_id where o.id = v_order.id;
   elsif v_order.checkout_session_id <> p_checkout_session_id then
-    raise exception 'event_mismatch' using errcode = '22023';
+    insert into public.stripe_events (stripe_event_id, type, stripe_account_id, studio_id, livemode, stripe_created_at,
+      processed_at, last_error)
+    values (p_event_id, p_type, v_order.stripe_account_id, v_order.studio_id, p_livemode, p_created, now(),
+      'event_mismatch')
+    on conflict (stripe_event_id) do nothing;
+    return jsonb_build_object('mismatch', true, 'studio_id', v_order.studio_id, 'order_id', v_order.id);
   end if;
   insert into public.stripe_events (stripe_event_id, type, stripe_account_id, studio_id, livemode, stripe_created_at)
   values (p_event_id, p_type, v_order.stripe_account_id, v_order.studio_id, p_livemode, p_created)
@@ -660,7 +713,7 @@ begin
   select e.id, e.studio_id, e.type, e.processed_at into v_row
   from public.stripe_events e where e.stripe_event_id = p_event_id;
   if v_row.studio_id is distinct from v_order.studio_id or v_row.type is distinct from p_type then
-    raise exception 'event_mismatch' using errcode = '22023';
+    return jsonb_build_object('mismatch', true, 'studio_id', v_order.studio_id, 'order_id', v_order.id);
   end if;
   update public.stripe_events e
   set processing_started_at = now(), attempts = e.attempts + 1, lease_token = gen_random_uuid()
@@ -668,7 +721,8 @@ begin
     and (e.processing_started_at is null or e.processing_started_at < now() - interval '2 minutes')
   returning e.id, e.lease_token into v_claimed, v_lease;
   return jsonb_build_object('inbox_id', v_row.id, 'studio_id', v_order.studio_id, 'order_id', v_order.id,
-    'processed', v_row.processed_at is not null, 'claimed', v_claimed is not null, 'lease', v_lease);
+    'mismatch', false, 'processed', v_row.processed_at is not null, 'claimed', v_claimed is not null,
+    'lease', v_lease);
 end;
 $$;
 
@@ -711,15 +765,31 @@ as $$
   select 50::bigint;
 $$;
 
+-- A checkout Stripe may still take payment for: made, not yet said closed by Stripe (expired there, or paid), not
+-- past its expiry (24 hours at most), and not paid here. Daybell's own "expired" doesn't close it at Stripe: until
+-- stripe_closed_at is set, the next Pay, cancel or the cron closes it there (code review M2, security review M1).
+create function app.checkout_unclosed(p_order public.orders) returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select p_order.checkout_session_id is not null and p_order.stripe_closed_at is null
+    and p_order.status in ('pending', 'expired')
+    and coalesce(p_order.checkout_expires_at, p_order.created_at + interval '1 day') > now();
+$$;
+
 -- Starts paying for the session's bag (ADR 0023 §5.1). The session is locked, so two taps can't make two orders. Every
 -- line is priced again from its job's current list, with the bag's own rules (shop_line_available, shop_line_physical,
 -- core cartTotals). Named refusals without values: bag_empty, shop_closed (a child's shop closed or is a draft),
 -- line_unavailable (anything else that can't be bought now: the parent removes it first), choose_delivery,
 -- not_accepting (the studio's payouts aren't Active with card payments on), below_minimum (call 13), checkout_limit
 -- (10 new checkouts a session an hour). The same bag as a pending order whose checkout is still open (or not yet
--- made) reuses it; otherwise the session's other pending orders expire (their Stripe sessions are returned so the API
--- expires them too) and a new order is written with its lines and package contents. Returns what the API needs to
--- ask Stripe for the checkout: amounts, names, kinds and Stripe's destination; never a child's name.
+-- made, under 45 seconds ago) reuses it, asking Stripe about it at most every 3 seconds (stripe_check; security review
+-- S2); otherwise the session's other pending orders expire here and a new order is written with its lines and package
+-- contents. Either way every other checkout of the session that Stripe hasn't closed is returned as superseded, so the
+-- API closes each at Stripe before making or reusing one: a Stripe failure part way leaves them in the list for the
+-- next Pay, cancel or the cron (code review M2, security review M1). Returns what the API needs to ask Stripe for the
+-- checkout: amounts, names, kinds and Stripe's destination; never a child's name. A line whose item or list is gone is
+-- unavailable (code review N4).
 create function public.shop_checkout_begin(p_session_hash text) returns jsonb
 language plpgsql security definer
 set search_path = ''
@@ -739,7 +809,8 @@ declare
   v_tax boolean;
   v_fingerprint text;
   v_existing record;
-  v_superseded text[];
+  v_superseded jsonb;
+  v_check boolean := true;
   v_order uuid;
   v_reference text;
   v_studio_name text;
@@ -751,15 +822,17 @@ begin
       jsonb_build_object('cart_line_id', l.id, 'job_id', l.job_id, 'child_id', l.child_id, 'photo_id', l.photo_id,
         'price_list_id', l.price_list_id, 'item_id', l.item_id, 'kind', l.kind, 'name', i.name,
         'print_size', i.print_size, 'unit_price_cents', i.price_cents, 'quantity', l.quantity,
-        'physical', app.shop_line_physical(l), 'available', app.shop_line_available(l),
+        'physical', app.shop_line_physical(l),
+        'available', i.id is not null and pl.id is not null and app.shop_line_available(l),
         'closed', app.shop_child_state(l.child_id) = 'closed',
         'home_shipping_cents', pl.home_shipping_cents, 'deliver_to_school', j.deliver_to_school) as line
     from public.shop_cart_lines l
     join public.shop_session_children sc on sc.session_id = l.session_id and sc.child_id = l.child_id
       and sc.studio_id = l.studio_id
-    join public.price_list_items i on i.id = l.item_id and i.studio_id = l.studio_id
-    join public.jobs j on j.id = l.job_id and j.studio_id = l.studio_id
-    join public.price_lists pl on pl.id = j.price_list_id and pl.studio_id = j.studio_id
+    -- Left joins: a line whose item, job or list is gone is refused as unavailable, never dropped silently.
+    left join public.price_list_items i on i.id = l.item_id and i.studio_id = l.studio_id
+    left join public.jobs j on j.id = l.job_id and j.studio_id = l.studio_id
+    left join public.price_lists pl on pl.id = j.price_list_id and pl.studio_id = j.studio_id
     where l.session_id = v.id and l.studio_id = v.studio_id) x;
 
   if jsonb_array_length(v_lines) = 0 then
@@ -810,29 +883,32 @@ begin
       'bps', v_settings.daybell_fee_bps, 'tax', v_tax)::text, 'sha256'), 'hex');
   v_studio_name := (select s.name from public.studios s where s.id = v.studio_id);
 
-  -- The same bag: its order, while Stripe's checkout is open for 5 minutes more, or not yet made and less than a minute
-  -- old (a retry: Stripe's checkout expiry is fixed from the order's creation, so a retried request is the same one).
+  -- The same bag: its order, while Stripe's checkout is open for 5 minutes more, or not yet made and less than 45
+  -- seconds old (a retry: Stripe's checkout expiry is fixed at the order's creation plus 32 minutes, so a retried
+  -- request is the same one and still at least 30 minutes ahead, as Stripe requires: code review S5).
   select o.id, o.reference, o.checkout_session_id, o.created_at into v_existing from public.orders o
   where o.studio_id = v.studio_id and o.shop_session_id = v.id and o.status = 'pending'
     and o.bag_fingerprint = v_fingerprint
     and ((o.checkout_session_id is not null and o.checkout_expires_at > now() + interval '5 minutes')
-      or (o.checkout_session_id is null and o.created_at > now() - interval '1 minute'))
+      or (o.checkout_session_id is null and o.created_at > now() - interval '45 seconds'))
   order by o.created_at desc limit 1;
   if v_existing.id is not null then
     v_order := v_existing.id;
     v_reference := v_existing.reference;
+    -- Pay asks Stripe about a reused order at most every 3 seconds, so one code can't use up Daybell's shared Stripe
+    -- rate limit (security review S2).
+    update public.orders o set stripe_checked_at = now()
+    where o.id = v_order and (o.stripe_checked_at is null or o.stripe_checked_at < now() - interval '3 seconds');
+    v_check := found;
   else
     if (select count(*) from public.orders o
         where o.studio_id = v.studio_id and o.shop_session_id = v.id
           and o.created_at > now() - interval '1 hour') >= 10 then
       raise exception 'checkout_limit' using errcode = 'P0001';
     end if;
-    with gone as (
-      update public.orders o set status = 'expired'
-      where o.studio_id = v.studio_id and o.shop_session_id = v.id and o.status = 'pending'
-      returning o.checkout_session_id)
-    select coalesce(array_agg(g.checkout_session_id) filter (where g.checkout_session_id is not null), '{}')
-    into v_superseded from gone g;
+    -- Replaced here; still open at Stripe until the API closes them (below).
+    update public.orders o set status = 'expired'
+    where o.studio_id = v.studio_id and o.shop_session_id = v.id and o.status = 'pending';
 
     v_reference := app.new_order_reference(v.studio_id);
     insert into public.orders (studio_id, reference, shop_session_id, currency, shipping_method, products_cents,
@@ -859,12 +935,20 @@ begin
     where ol.order_id = v_order and ol.studio_id = v.studio_id and ol.kind = 'package';
   end if;
 
+  -- Every other checkout of the session that Stripe hasn't closed, oldest first.
+  select coalesce(jsonb_agg(jsonb_build_object('order_id', o.id, 'checkout_session_id', o.checkout_session_id)
+                            order by o.created_at, o.id), '[]'::jsonb)
+  into v_superseded
+  from public.orders o
+  where o.studio_id = v.studio_id and o.shop_session_id = v.id and o.id <> v_order and app.checkout_unclosed(o);
+
   return jsonb_build_object(
     'outcome', case when v_existing.id is not null then 'reuse' else 'created' end,
     'order_id', v_order, 'reference', v_reference,
     'created_at', (select o.created_at from public.orders o where o.id = v_order),
     'checkout_session_id', v_existing.checkout_session_id,
-    'superseded', to_jsonb(coalesce(v_superseded, '{}')),
+    'stripe_check', v_check,
+    'superseded', v_superseded,
     'studio_id', v.studio_id, 'studio_name', v_studio_name, 'currency', v_currency,
     'stripe_account_id', v_account.stripe_account_id,
     'card_prefix_set', (select a.card_prefix_set_at is not null from public.payout_accounts a where a.id = v_account.id),
@@ -910,7 +994,8 @@ begin
 end;
 $$;
 
--- The session's pending orders with their Stripe checkouts ("Payment canceled": the API expires each at Stripe).
+-- The session's pending orders, and its replaced ones whose checkouts Stripe hasn't closed yet, with their Stripe
+-- checkouts ("Payment canceled": the API closes each at Stripe, then here).
 create function public.shop_pending_checkouts(p_session_hash text) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -921,7 +1006,8 @@ begin
   return coalesce((select jsonb_agg(jsonb_build_object('order_id', o.id, 'checkout_session_id', o.checkout_session_id)
                                     order by o.created_at)
                    from public.orders o
-                   where o.studio_id = v.studio_id and o.shop_session_id = v.id and o.status = 'pending'), '[]'::jsonb);
+                   where o.studio_id = v.studio_id and o.shop_session_id = v.id
+                     and (o.status = 'pending' or app.checkout_unclosed(o))), '[]'::jsonb);
 end;
 $$;
 
@@ -929,11 +1015,23 @@ $$;
 create type app.checkout_facts as (
   checkout_session_id text, payment_intent_id text, charge_id text, transfer_id text, livemode boolean, currency text,
   amount_subtotal bigint, amount_shipping bigint, amount_tax bigint, amount_total bigint, destination text,
-  application_fee_amount bigint, shipping jsonb);
+  on_behalf_of text, application_fee_amount bigint, shipping jsonb);
+
+-- A recipient's text as the studio keeps it: control and bidi characters taken out (a control character becomes a
+-- space), trimmed, at most p_max characters; null when nothing is left. So the address's text check can never fail,
+-- and Postgres never logs a failing row holding a name or an address (security review M3).
+create function app.clean_address_text(p_text text, p_max integer) returns text
+language sql immutable
+set search_path = ''
+as $$
+  select nullif(btrim(left(btrim(regexp_replace(regexp_replace(coalesce(p_text, ''),
+    '[\u0001-\u001F\u007F-\u009F]', ' ', 'g'), '[\u200E\u200F\u202A-\u202E\u2066-\u2069]', '', 'g')), p_max)), '');
+$$;
 
 -- Stripe took the money (ADR 0023 §5.2): checked against the snapshot (session, mode, currency, amounts, destination,
--- Daybell's fee), then paid, once. A mismatch raises checkout_mismatch and changes nothing (support resolves it). The
--- recipient's address is kept for home delivery; "all digitals" is fixed to the child's visible portraits now (call
+-- the merchant of record (on_behalf_of: security review N5), Daybell's fee), then paid, once, and its checkout marked
+-- closed at Stripe. A mismatch raises checkout_mismatch and changes nothing (support resolves it). The
+-- recipient's address is kept for home delivery, cleaned first (app.clean_address_text); "all digitals" is fixed to the child's visible portraits now (call
 -- 9); every photo sold is marked (so it can't be binned); the bag loses what was bought; one order.paid event with no
 -- actor (call 14). A second call for a paid order changes nothing and answers already_paid, or already_settled once
 -- Stripe's fee is settled (so the API asks Stripe nothing more).
@@ -960,7 +1058,15 @@ begin
     return case when v_order.fees_settled_at is null then 'already_paid' else 'already_settled' end;
   end if;
   f := jsonb_populate_record(null::app.checkout_facts, p_facts);
-  v_ship := f.shipping;
+  -- The recipient as it will be kept: cleaned, so checking it here is checking what is stored.
+  v_ship := case when jsonb_typeof(f.shipping) = 'object' then jsonb_build_object(
+      'name', app.clean_address_text(f.shipping ->> 'name', 200),
+      'line1', app.clean_address_text(f.shipping ->> 'line1', 200),
+      'line2', app.clean_address_text(f.shipping ->> 'line2', 200),
+      'city', app.clean_address_text(f.shipping ->> 'city', 100),
+      'state', app.clean_address_text(f.shipping ->> 'state', 100),
+      'postal_code', app.clean_address_text(f.shipping ->> 'postal_code', 20),
+      'country', f.shipping ->> 'country') end;
   select a.livemode into v_livemode from public.payout_accounts a where a.id = v_order.payout_account_id;
   if v_order.status not in ('pending', 'expired')
      or f.checkout_session_id is distinct from v_order.checkout_session_id
@@ -971,28 +1077,28 @@ begin
      or f.amount_tax is null or f.amount_tax < 0 or (not v_order.tax_enabled and f.amount_tax <> 0)
      or f.amount_total is distinct from v_order.products_cents + v_order.shipping_cents + f.amount_tax
      or f.destination is distinct from v_order.stripe_account_id
+     or f.on_behalf_of is distinct from v_order.stripe_account_id
      or f.application_fee_amount is distinct from v_order.daybell_fee_cents
      or coalesce(f.payment_intent_id, '') !~ '^pi_[A-Za-z0-9_]{1,250}$'
      or (f.charge_id is not null and f.charge_id !~ '^(ch|py)_[A-Za-z0-9_]{1,250}$')
      or (f.transfer_id is not null and f.transfer_id !~ '^tr_[A-Za-z0-9_]{1,250}$')
-     or (v_order.shipping_method = 'home' and (jsonb_typeof(v_ship) is distinct from 'object'
-         or coalesce(v_ship ->> 'country', '') <> 'CA' or coalesce(btrim(v_ship ->> 'name'), '') = ''
-         or coalesce(btrim(v_ship ->> 'line1'), '') = '' or coalesce(btrim(v_ship ->> 'city'), '') = ''
-         or coalesce(btrim(v_ship ->> 'postal_code'), '') = '')) then
+     or (v_order.shipping_method = 'home' and (v_ship is null
+         or coalesce(v_ship ->> 'country', '') <> 'CA' or v_ship ->> 'name' is null or v_ship ->> 'line1' is null
+         or v_ship ->> 'city' is null or v_ship ->> 'postal_code' is null)) then
     raise exception 'checkout_mismatch' using errcode = 'P0001';
   end if;
 
   update public.orders o
   set status = 'paid', tax_cents = f.amount_tax, total_cents = f.amount_total, payment_intent_id = f.payment_intent_id,
-    charge_id = f.charge_id, transfer_id = f.transfer_id, paid_at = now()
+    charge_id = f.charge_id, transfer_id = f.transfer_id, paid_at = now(),
+    stripe_closed_at = coalesce(o.stripe_closed_at, now())
   where o.id = v_order.id;
 
   if v_order.shipping_method = 'home' then
     insert into public.order_shipping_addresses (order_id, studio_id, recipient_name, line1, line2, city, province,
       postal_code, country)
-    values (v_order.id, v_order.studio_id, left(btrim(v_ship ->> 'name'), 200), left(btrim(v_ship ->> 'line1'), 200),
-      nullif(left(btrim(coalesce(v_ship ->> 'line2', '')), 200), ''), left(btrim(v_ship ->> 'city'), 100),
-      nullif(left(btrim(coalesce(v_ship ->> 'state', '')), 100), ''), left(btrim(v_ship ->> 'postal_code'), 20), 'CA');
+    values (v_order.id, v_order.studio_id, v_ship ->> 'name', v_ship ->> 'line1', v_ship ->> 'line2',
+      v_ship ->> 'city', v_ship ->> 'state', v_ship ->> 'postal_code', 'CA');
   end if;
 
   insert into public.order_line_photos (studio_id, order_line_id, job_id, photo_id, position)
@@ -1030,14 +1136,25 @@ begin
 end;
 $$;
 
--- A checkout that won't be paid: cancelled, replaced or run out. Only while pending; true when it changed.
+-- A checkout that won't be paid: cancelled, replaced or run out. Called only once Stripe has closed the checkout (or
+-- there is none), so it is marked closed at Stripe too (code review M2). A pending order expires; an expired one is
+-- only marked closed; a paid one is left alone. True when the status changed.
 create function public.expire_order(p_order_id uuid) returns boolean
 language plpgsql security definer
 set search_path = ''
 as $$
+declare
+  v_status public.order_status;
 begin
-  update public.orders o set status = 'expired' where o.id = p_order_id and o.status = 'pending';
-  return found;
+  select o.status into v_status from public.orders o where o.id = p_order_id for update;
+  if v_status is null or v_status not in ('pending', 'expired') then
+    return false;
+  end if;
+  update public.orders o set status = 'expired',
+    stripe_closed_at = case when o.checkout_session_id is null then o.stripe_closed_at
+                            else coalesce(o.stripe_closed_at, now()) end
+  where o.id = p_order_id;
+  return v_status = 'pending';
 end;
 $$;
 
@@ -1045,6 +1162,9 @@ $$;
 -- transaction, balanced in whole cents in the order's currency (ADR 0006; ADR 0023 §fees):
 --   parent_payments +total, tax_payable −tax, daybell_fees −Daybell's fee, payment_fees −Stripe's fee,
 --   studio_payable −(the rest). Zero lines are left out.
+-- tax_payable is the tax collected for the studio and passed through to it: Stripe's transfer to the studio holds it,
+-- and the studio remits it (D106). So what reaches the studio's balance is studio_payable + tax_payable, and
+-- reconciling against transfers adds the two (security review N3).
 -- Once: the header's unique (order_id, kind) makes a second call already_settled. Refusals: not_paid, fee_currency
 -- (Stripe's fee in another currency: never expected, support resolves it), checkout_mismatch (another transfer).
 create function public.settle_order_fees(p_order_id uuid, p_transfer_id text, p_stripe_fee_cents bigint,
@@ -1111,8 +1231,30 @@ as $$
   where a.stripe_account_id = p_stripe_account_id;
 $$;
 
--- The jobs cron's backstops (ids only): pending orders whose checkout ran out two hours ago (or was never made), and
--- paid orders whose fees aren't settled after 10 minutes.
+-- A backstop's try failed (the cron), or an order hit a problem no retry can fix (any path): the code is kept, the next
+-- try backs off (1, 2, 4 … minutes, at most 6 hours), and a permanent problem takes the order out of the backstops for
+-- good until support resolves it (code review S1, security review M4). Codes only, never a message.
+create function public.note_checkout_failure(p_order_id uuid, p_code text, p_permanent boolean) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(p_code, '') !~ '^[a-z_]{1,100}$' or p_permanent is null then
+    raise exception 'A code and whether it is permanent' using errcode = '22023';
+  end if;
+  update public.orders o
+  set backstop_attempts = least(o.backstop_attempts + 1, 1000000), backstop_error = p_code,
+    backstop_next_at = now() + least(interval '1 minute' * power(2, least(o.backstop_attempts, 10)),
+                                     interval '6 hours'),
+    problem = case when p_permanent then coalesce(o.problem, p_code) else o.problem end,
+    problem_at = case when p_permanent then coalesce(o.problem_at, now()) else o.problem_at end
+  where o.id = p_order_id;
+end;
+$$;
+
+-- The jobs cron's backstops (ids only), oldest due first, never an order with a problem or still backing off: pending
+-- orders whose checkout ran out two hours ago (or was never made), replaced orders whose checkout Stripe hasn't
+-- closed (code review M2), and paid orders whose fees aren't settled after 10 minutes.
 create function public.stale_checkouts(p_limit integer) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -1123,10 +1265,12 @@ begin
   end if;
   return coalesce((select jsonb_agg(jsonb_build_object('order_id', x.id, 'checkout_session_id', x.checkout_session_id))
                    from (select o.id, o.checkout_session_id from public.orders o
-                         where o.status = 'pending'
-                           and (o.checkout_expires_at < now() - interval '2 hours'
-                             or (o.checkout_expires_at is null and o.created_at < now() - interval '2 hours'))
-                         order by o.created_at limit p_limit) x), '[]'::jsonb);
+                         where o.problem is null and (o.backstop_next_at is null or o.backstop_next_at <= now())
+                           and ((o.status = 'pending'
+                                 and (o.checkout_expires_at < now() - interval '2 hours'
+                                   or (o.checkout_expires_at is null and o.created_at < now() - interval '2 hours')))
+                             or (o.status = 'expired' and app.checkout_unclosed(o)))
+                         order by coalesce(o.backstop_next_at, o.created_at), o.id limit p_limit) x), '[]'::jsonb);
 end;
 $$;
 
@@ -1142,7 +1286,8 @@ begin
                    from (select o.id, o.checkout_session_id from public.orders o
                          where o.status = 'paid' and o.fees_settled_at is null
                            and o.paid_at < now() - interval '10 minutes'
-                         order by o.paid_at limit p_limit) x), '[]'::jsonb);
+                           and o.problem is null and (o.backstop_next_at is null or o.backstop_next_at <= now())
+                         order by coalesce(o.backstop_next_at, o.paid_at), o.id limit p_limit) x), '[]'::jsonb);
 end;
 $$;
 
@@ -1354,6 +1499,80 @@ begin
 end;
 $$;
 
+-- Asks for a sold photo's download.jpg (security review N1, S5; code review S4): queued (the caller sends the queue
+-- message, ids only), waiting (asked under 5 minutes ago: the worker has it), or unavailable (the photo isn't ready, or
+-- was asked for 3 times and more than 5 minutes ago and still isn't there: the caller alerts).
+create function app.claim_download_request(p_studio_id uuid, p_job_id uuid, p_photo_id uuid) returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_row public.photo_download_requests;
+begin
+  select p.status::text into v_status from public.photos p
+  where p.id = p_photo_id and p.studio_id = p_studio_id and p.job_id = p_job_id;
+  if v_status is distinct from 'ready' then
+    return 'unavailable';
+  end if;
+  insert into public.photo_download_requests (photo_id, studio_id, job_id)
+  values (p_photo_id, p_studio_id, p_job_id)
+  on conflict (photo_id) do nothing;
+  if found then
+    return 'queued';
+  end if;
+  select * into v_row from public.photo_download_requests r where r.photo_id = p_photo_id for update;
+  if v_row.requested_at > now() - interval '5 minutes' then
+    return 'waiting';
+  end if;
+  if v_row.requests >= 3 then
+    return 'unavailable';
+  end if;
+  update public.photo_download_requests r set requests = r.requests + 1, requested_at = now()
+  where r.photo_id = p_photo_id;
+  return 'queued';
+end;
+$$;
+
+-- A paid download this session may have whose file isn't there yet (P0002 as shop_download_photo otherwise).
+create function public.shop_download_request(p_session_hash text, p_order_id uuid, p_photo_id uuid) returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_found jsonb := public.shop_download_photo(p_session_hash, p_order_id, p_photo_id);
+begin
+  return app.claim_download_request((v_found ->> 'studio_id')::uuid, (v_found ->> 'job_id')::uuid,
+    p_photo_id);
+end;
+$$;
+
+-- A paid order's photos whose download.jpg has never been asked for (ready ones only), marked asked: the caller queues
+-- each (ids only). Lazily, so a full-resolution file exists only for photos that were sold (security review N1).
+create function public.order_downloads_to_make(p_order_id uuid) returns jsonb
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_ids jsonb;
+begin
+  with wanted as (
+    select distinct d.photo_id, d.job_id, o.studio_id
+    from public.orders o
+    join public.order_lines ol on ol.order_id = o.id and ol.studio_id = o.studio_id
+    cross join lateral app.order_line_downloads(ol) d
+    join public.photos p on p.id = d.photo_id and p.studio_id = o.studio_id and p.job_id = d.job_id
+    where o.id = p_order_id and o.status = 'paid' and p.status = 'ready'),
+  made as (
+    insert into public.photo_download_requests (photo_id, studio_id, job_id)
+    select w.photo_id, w.studio_id, w.job_id from wanted w
+    on conflict (photo_id) do nothing
+    returning photo_id)
+  select coalesce(jsonb_agg(m.photo_id order by m.photo_id), '[]'::jsonb) into v_ids from made m;
+  return v_ids;
+end;
+$$;
+
 -- ── What studios see of orders (call 15: owners and admins; SECURITY INVOKER, so row-level security applies) ───────
 -- A job's paid orders, newest first, a page at a time (after the order p_cursor): reference, amounts, Daybell's fee and
 -- the rate used, Stripe's fee (null until known), what reaches the studio, items, and the children (full names: the
@@ -1426,7 +1645,8 @@ revoke all on function app.guard_platform_settings(), app.check_settings_note(te
   app.new_order_reference(uuid), app.daybell_fee_cents(bigint, integer), app.min_charge_cents(text),
   app.shop_order_view(public.shop_sessions, public.orders),
   app.shop_order_lines(public.shop_sessions, public.orders, text), app.order_line_downloads(public.order_lines),
-  app.shop_order_child(uuid)
+  app.shop_order_child(uuid), app.checkout_unclosed(public.orders), app.clean_address_text(text, integer),
+  app.claim_download_request(uuid, uuid, uuid)
   from public, anon, authenticated;
 revoke all on type app.checkout_facts from public;
 revoke all on function
@@ -1450,14 +1670,19 @@ revoke all on function
   public.shop_order(text, uuid),
   public.shop_order_verify(text, uuid),
   public.shop_download_photo(text, uuid, uuid),
+  public.shop_download_request(text, uuid, uuid),
+  public.order_downloads_to_make(uuid),
+  public.note_checkout_failure(uuid, text, boolean),
   public.job_orders(uuid, uuid, integer, uuid),
   public.studio_order(uuid, uuid)
   from public, anon, authenticated;
+-- Daybell's fee and its recovery method: the database owner only, from the SQL editor (security review S1).
+revoke all on function public.set_platform_fee(integer, text),
+  public.set_card_fee_recovery(public.card_fee_recovery, text)
+  from service_role;
 -- Parents, Stripe's webhook, owners' Stripe-first writes and the cron: the service role only (the API's routes).
 grant execute on function
   public.platform_fee_settings(),
-  public.set_platform_fee(integer, text),
-  public.set_card_fee_recovery(public.card_fee_recovery, text),
   public.set_tax_head_office(uuid, uuid, text),
   public.add_tax_registration(uuid, uuid, public.tax_registration_kind, text, text, text),
   public.end_tax_registration(uuid, uuid, uuid),
@@ -1474,7 +1699,10 @@ grant execute on function
   public.shop_orders(text),
   public.shop_order(text, uuid),
   public.shop_order_verify(text, uuid),
-  public.shop_download_photo(text, uuid, uuid)
+  public.shop_download_photo(text, uuid, uuid),
+  public.shop_download_request(text, uuid, uuid),
+  public.order_downloads_to_make(uuid),
+  public.note_checkout_failure(uuid, text, boolean)
   to service_role;
 -- Owners' and admins' reads under row-level security; the fee rate for Settings › Payouts.
 grant execute on function public.job_orders(uuid, uuid, integer, uuid), public.studio_order(uuid, uuid),

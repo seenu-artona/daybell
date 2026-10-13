@@ -142,6 +142,22 @@ describe("tax inputs (answer 2; call 3)", () => {
     });
   });
 
+  it("refuses control and bidi characters in the second address line too (security review S4)", () => {
+    for (const line2 of ["Suite 4\u202E", "Unit\n5", "\u2066Rear\u2069"]) {
+      expect(
+        errors(
+          taxHeadOfficeInput.safeParse({
+            line1: "12 Maple Lane",
+            line2,
+            city: "Toronto",
+            province: "ON",
+            postalCode: "M5V 2T6",
+          }),
+        ),
+      ).toEqual({ line2: "validation.addressLine" });
+    }
+  });
+
   it("lists a job's orders by its id", () => {
     expect(orderListQuery.safeParse({ jobId: "nope" }).success).toBe(false);
     expect(orderListQuery.parse({ jobId: "a0000000-0000-4000-8000-000000000001" }).limit).toBe(50);

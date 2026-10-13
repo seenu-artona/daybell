@@ -83,13 +83,21 @@ describe("processOriginal (D60, D100)", () => {
     });
   });
 
-  it("makes the paid download: full resolution, upright, sRGB JPEG, no EXIF or GPS (ADR 0023, call 10)", async () => {
-    const bytes = await jpeg(2400, 1600, { exif: true });
+  it("never makes the paid download while processing: only sold photos get one (security review N1)", async () => {
+    const bytes = await jpeg(800, 600);
     const result = await processOriginal(bytes, {
       qrWasmFile: WASM,
       studioName,
       expectedSha256: sha(bytes),
     });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result).not.toHaveProperty("download");
+    expect(Object.keys(result.derivatives)).not.toContain("download.jpg");
+  });
+
+  it("makes the paid download: full resolution, upright, sRGB JPEG, no EXIF or GPS (ADR 0023, call 10)", async () => {
+    const bytes = await jpeg(2400, 1600, { exif: true });
+    const result = await processDownload(bytes, { expectedSha256: sha(bytes) });
     if (!result.ok) throw new Error(result.reason);
     const meta = await sharp(result.download).metadata();
     expect(meta.format).toBe("jpeg");
@@ -324,11 +332,11 @@ describe("runPhotoJob", () => {
     return { deps, stored };
   }
 
-  it("stores the four previews and the download under ID-only keys and reports the facts", async () => {
+  it("stores the four previews under ID-only keys, never the download (made once sold), and reports the facts", async () => {
     const { deps, stored } = await setup({});
     expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("ready");
     expect([...stored.keys()].sort()).toEqual(
-      ["download.jpg", "original", "proof-thumb.webp", "proof.webp", "thumb.webp", "view.webp"].map(
+      ["original", "proof-thumb.webp", "proof.webp", "thumb.webp", "view.webp"].map(
         (v) => `${ids.studioId}/${ids.jobId}/${ids.photoId}/${v}`,
       ),
     );
@@ -338,11 +346,11 @@ describe("runPhotoJob", () => {
       "image/webp",
       "private, max-age=3600",
     );
-    expect(deps.put).toHaveBeenCalledWith(
+    expect(deps.put).not.toHaveBeenCalledWith(
       expect.stringMatching(/\/download\.jpg$/),
       expect.anything(),
-      "image/jpeg",
-      "private, no-store",
+      expect.anything(),
+      expect.anything(),
     );
     expect(deps.report).toHaveBeenCalledWith(ids.photoId, {
       status: "ready",
@@ -402,7 +410,7 @@ describe("runPhotoJob", () => {
   });
 });
 
-describe("runDownloadJob (the backfill, ADR 0023)", () => {
+describe("runDownloadJob (a sold photo's download, made lazily: ADR 0023)", () => {
   const ids = {
     studioId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     jobId: "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e",

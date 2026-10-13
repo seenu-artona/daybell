@@ -130,8 +130,9 @@ export function partsComplete(
 /**
  * What is stored for a photo. The original as uploaded; plain previews for the studio only; watermarked previews
  * (the studio's name tiled across) for parents (D60); and the file a parent downloads once they have paid
- * (`download.jpg`: full resolution, upright, sRGB, every bit of metadata stripped; ADR 0023, call 10). Previews and
- * the download are made once, at upload (D100). Parents never get the original.
+ * (`download.jpg`: full resolution, upright, sRGB, every bit of metadata stripped; ADR 0023, call 10). Previews are
+ * made once, at upload (D100); the download only once the photo is sold (security review N1). Parents never get the
+ * original.
  */
 export const PHOTO_VARIANTS = [
   "original",

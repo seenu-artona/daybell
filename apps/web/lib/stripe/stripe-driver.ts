@@ -172,6 +172,7 @@ export function checkoutFacts(session: Stripe.Checkout.Session): CheckoutSession
     chargeId: charge?.id ?? idOf(intent?.latest_charge),
     transferId: idOf(charge?.transfer),
     destination: idOf(intent?.transfer_data?.destination),
+    onBehalfOf: idOf(intent?.on_behalf_of),
     applicationFeeAmount: intent?.application_fee_amount ?? null,
     balanceTransaction: balance
       ? { id: balance.id, feeCents: balance.fee, currency: balance.currency }

@@ -97,8 +97,8 @@ export function secretsFromJson(text: string | undefined): {
 }
 
 /**
- * What a queue message asks for: `process` a photo (its previews and download, reported back), or make only its paid
- * `download` (the backfill, ADR 0023).
+ * What a queue message asks for: `process` a photo (its previews, reported back), or make only its paid `download`
+ * once it is sold (made lazily: ADR 0023, security review N1).
  */
 export interface PhotoTask {
   photoId: string;
@@ -107,7 +107,7 @@ export interface PhotoTask {
 
 /**
  * The work a queue message asks for. S3 events name the original's key (IDs only): process it. The API names a photo:
- * process it (a retry), or with `make: "download"` make only its paid download (the backfill). S3's test event and
+ * process it (a retry), or with `make: "download"` make only its paid download (a sold photo). S3's test event and
  * anything else ask for nothing.
  */
 export function photoTasksFromMessage(body: string, bucket: string): PhotoTask[] {

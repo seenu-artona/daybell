@@ -31,13 +31,7 @@ export interface PhotoFacts {
 }
 
 export type ProcessResult =
-  | {
-      ok: true;
-      facts: PhotoFacts;
-      derivatives: Record<DerivativeVariant, Buffer>;
-      /** The paid download (`download.jpg`; ADR 0023, call 10). */
-      download: Buffer;
-    }
+  | { ok: true; facts: PhotoFacts; derivatives: Record<DerivativeVariant, Buffer> }
   | { ok: false; reason: FailureReason };
 
 export const DERIVATIVE_CONTENT_TYPE = "image/webp";
@@ -203,8 +197,9 @@ async function inspectOriginal(
 }
 
 /**
- * Only the paid download, for a photo processed before downloads existed (the backfill; ADR 0023). The same checks as
- * processOriginal, then download.jpg.
+ * The paid download of a sold photo, made lazily (ADR 0023 §10; security review N1): only once the photo is sold, so
+ * an unwatermarked full-resolution copy exists only for photos a parent paid for. The same checks as processOriginal,
+ * then download.jpg.
  */
 export async function processDownload(
   bytes: Uint8Array<ArrayBuffer>,
@@ -260,7 +255,8 @@ async function tileFor(
 
 /**
  * Checks an uploaded original and makes its four previews: 400 px and 1600 px plain (the studio's screens) and the
- * same sizes watermarked with the studio's name (parents); and the paid download (ADR 0023). The original must be the file the browser hashed
+ * same sizes watermarked with the studio's name (parents). Never the paid download: that is made only once the photo is
+ * sold (processDownload; ADR 0023, security review N1). The original must be the file the browser hashed
  * (SHA-256), JPEG (Seenu, answer 1), at most 50 MB and at most MAX_INPUT_PIXELS. It is decoded once, to 2048 px,
  * where its QR card is read (ADR 0018; a second, larger decode only when a symbol is found but not read); the previews
  * are made from those pixels. Previews are upright (EXIF orientation applied), sRGB WebP, with every bit of metadata
@@ -360,9 +356,7 @@ export async function processOriginal(
       "proof.webp": proofBuf,
       "proof-thumb.webp": proofThumbBuf,
     };
-    // After the previews, so the full-resolution decode doesn't overlap theirs (the Lambda's memory).
-    const download = await makeDownload(input, limit);
-    return { ok: true, facts: { ...facts, qr }, derivatives, download };
+    return { ok: true, facts: { ...facts, qr }, derivatives };
   } catch {
     return { ok: false, reason: "unreadable" };
   }

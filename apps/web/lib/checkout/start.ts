@@ -6,7 +6,7 @@ import { createTranslator } from "next-intl";
 import enCA from "@/messages/en-CA.json";
 import enUS from "@/messages/en-US.json";
 import { assertFunctionRegion, assertPayoutRegion } from "../region-guard";
-import { callShopFunction } from "../shop/http";
+import { callShopFunction, RetryLater } from "../shop/http";
 import type { ShopCookieSession } from "../shop/session";
 import { assertCheckoutLink, type PaymentsProvider, payments } from "../stripe";
 import { checkoutSystemRpc } from "../supabase/service";
@@ -16,9 +16,15 @@ import { checkoutParams } from "./stripe-params";
 /**
  * Starting and cancelling a parent's checkout (ADR 0023 §5.1). The database prices the bag and writes the order; Stripe
  * is asked only after that, in the session's region's function region (D113), and never with anything the browser
- * sent. Two open checkouts for one bag are never both payable: a replaced checkout is expired at Stripe first, and
- * one Stripe says was paid meanwhile becomes the parent's order (409 shop.alreadyPaid).
+ * sent. Two open checkouts for one bag are never both payable: every older checkout of the gallery that Stripe hasn't
+ * closed is closed at Stripe before a checkout is made or reused, and the database keeps handing it back until Stripe
+ * has (code review M2, security review M1); one Stripe says was paid meanwhile becomes the parent's order (409
+ * shop.alreadyPaid), and the order this request began is expired so no phantom pending order is left (code review S3).
+ * A reused checkout is asked about at most every 3 seconds per order (security review S2).
  */
+
+/** How long a parent waits before Pay asks Stripe about the same order again (security review S2). */
+export const CHECKOUT_RECHECK_SECONDS = 3;
 
 /** Stripe for the shop: payouts' provider, with the shop's own "not set up here" refusal. */
 export function checkoutPayments(): PaymentsProvider {
@@ -45,7 +51,10 @@ interface Begun {
   reference: string;
   created_at: string;
   checkout_session_id: string | null;
-  superseded: string[];
+  /** Whether this request may ask Stripe about a reused order (at most every 3 seconds). */
+  stripe_check: boolean;
+  /** The gallery's other checkouts Stripe hasn't closed yet: closed at Stripe first. */
+  superseded: { order_id: string; checkout_session_id: string }[];
   studio_id: string;
   studio_name: string;
   currency: Currency;
@@ -98,11 +107,20 @@ export async function startCheckout(
   let begun = await begin(session);
 
   for (let tries = 0; ; tries++) {
+    if (!begun.stripe_check)
+      throw new RetryLater(
+        CHECKOUT_RECHECK_SECONDS,
+        "Your checkout is on its way. Try again in a moment.",
+      );
+    // Older checkouts first: closed at Stripe, then here. A Stripe failure stops here, and the next Pay (or cancel, or
+    // the cron) closes them again: nothing new is made while one may still be paid.
     for (const old of begun.superseded) {
-      const { status } = await provider.expireCheckoutSession(old);
-      if (status === "complete") {
-        const paid = await completeCheckout(region, provider, old);
-        if (paid.outcome !== "unpaid") throw alreadyPaid(paid.orderId);
+      const closed = await closeCheckout(region, provider, old.order_id, old.checkout_session_id);
+      if (closed === "paid") {
+        // That one is the parent's order; the one this request began is closed too, so no phantom pending order is
+        // left polling "Confirming" (code review S3).
+        await closeCheckout(region, provider, begun.order_id, begun.checkout_session_id);
+        throw alreadyPaid(old.order_id);
       }
     }
     if (begun.outcome !== "reuse" || !begun.checkout_session_id) break;

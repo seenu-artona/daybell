@@ -1,5 +1,5 @@
 import { ApiError } from "@daybell/api";
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { downloadLink } from "@/lib/checkout/downloads";
 import { requireShopSession, shopHandle } from "@/lib/shop/http";
@@ -20,5 +20,5 @@ export const GET = shopHandle(async (request: Request, ctx: Ctx) => {
   const { orderId, photoId } = await ctx.params;
   if (!z.uuid().safeParse(orderId).success || !z.uuid().safeParse(photoId).success)
     throw new ApiError("not_found", "Download not found.");
-  return NextResponse.json(await downloadLink(session, orderId, photoId, after));
+  return NextResponse.json(await downloadLink(session, orderId, photoId));
 });

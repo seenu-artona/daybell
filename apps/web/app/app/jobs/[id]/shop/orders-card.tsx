@@ -21,7 +21,6 @@ import { api } from "@/lib/client-api";
 import { Dialog } from "../../../dialog";
 
 const money = (m: MoneyAmount) => formatMoney(m, localeForCurrency(m.currency));
-const fullName = (p: { firstName: string; lastName: string }) => `${p.firstName} ${p.lastName}`;
 
 /**
  * The job's paid orders on its Shop tab (ADR 0023 §5.8; until the Orders tab arrives in step 11): reference, date,
@@ -31,6 +30,8 @@ const fullName = (p: { firstName: string; lastName: string }) => `${p.firstName}
  */
 export function OrdersCard({ jobId }: { jobId: string }) {
   const t = useTranslations("app.job.orders");
+  const fullName = (p: { firstName: string; lastName: string }) =>
+    t("childName", { firstName: p.firstName, lastName: p.lastName });
   const text = useApiText();
   const format = useFormatter();
   const titleId = useId();
@@ -117,7 +118,9 @@ export function OrdersCard({ jobId }: { jobId: string }) {
                     </TableCell>
                     <TableCell>{paid(o.paidAt)}</TableCell>
                     <TableCell>
-                      {o.children.length > 0 ? format.list(o.children.map(fullName)) : "—"}
+                      {o.children.length > 0
+                        ? format.list(o.children.map(fullName))
+                        : t("noChildren")}
                     </TableCell>
                     <TableCell numeric>{o.items}</TableCell>
                     <TableCell numeric>{money(o.total)}</TableCell>
@@ -164,6 +167,8 @@ export function OrdersCard({ jobId }: { jobId: string }) {
 
 function OrderDetail({ order }: { order: StudioOrderDetail }) {
   const t = useTranslations("app.job.orders");
+  const fullName = (p: { firstName: string; lastName: string }) =>
+    t("childName", { firstName: p.firstName, lastName: p.lastName });
   const ts = useTranslations("shop");
   const format = useFormatter();
   return (
