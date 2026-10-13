@@ -92,9 +92,10 @@ harmless (Daybell reads the account from Stripe again either way, and records ea
 
 ## 4. Vercel environment variables
 
-**Vercel › Project › Settings › Environment Variables**. Scope: **Preview, branch `main` only** (staging). Not
-Production, and not every PR preview (Claude's call Q13). PR previews without these variables say payouts aren't set up
-there.
+**Vercel › Project › Settings › Environment Variables**. Scope: **Production** only. Staging is Vercel's Production
+environment: the `main` branch, served at `https://daybell.vercel.app`, where every webhook destination points and
+where Vercel Cron runs. Not Preview: PR previews without these variables say payouts aren't set up there (Claude's call
+Q13).
 
 | Name | Value | Sensitive |
 |---|---|---|
@@ -102,19 +103,19 @@ there.
 | `STRIPE_SECRET_KEY` | the test key from step 2 | **yes** |
 | `STRIPE_WEBHOOK_SECRET` | the signing secrets from step 3 and section 6, comma-separated (`whsec_A,whsec_B,whsec_C`) | **yes** |
 
-Since step 11 every destination points at `https://daybell.vercel.app`. **Seenu to confirm** that these variables are
-set for the deployment that answers at that address (the scope above was written when staging was the `main` branch's
-preview); a webhook that reaches a deployment without them is refused.
 
 Notes:
-- The app refuses a live key (`sk_live_`/`rk_live_`) anywhere but production, and refuses `STRIPE_DRIVER=fake` on
-  Vercel, both at build time and at run time.
+- The app refuses `STRIPE_DRIVER=fake` on Vercel, at build time and at run time. It refuses a live key
+  (`sk_live_`/`rk_live_`) only where `VERCEL_ENV` isn't `production`, and staging **is** Vercel's Production
+  environment, so that guard doesn't separate staging from production: staging would accept a live key. Until a real
+  production project exists, staging uses **test-mode keys only, by process**: never paste a live key here (ADR 0024,
+  launch to-dos).
 - `STRIPE_WEBHOOK_SECRET` takes one to six secrets (three destinations since step 10). To roll one, add the new one
   next to the old (e.g. `A,B,C,B-new`), redeploy, roll it in Stripe, then remove the old one.
 
 ## 5. Redeploy and smoke test
 
-1. Redeploy staging (the `main` branch).
+1. Redeploy staging (the `main` branch, Vercel's Production environment).
 2. Sign in to staging as a **Canadian** studio's owner. Go to **Settings › Payouts** and click **Set up payouts**.
 3. On Stripe's test onboarding, use Stripe's test data. The usual values (check them on Stripe's "Testing Connect"
    page, since they weren't checked from here):
@@ -223,7 +224,7 @@ must be done first.
    | **Refunds** | write | `refunds.create`, `refunds.retrieve`, `refunds.list` (a refund an earlier try made is found by its metadata) |
    | **Disputes** | read | `disputes.retrieve` (to find the payment a dispute is about; Daybell only flags the order) |
    | **PaymentIntents** | read (write is already granted in section 6) | `paymentIntents.retrieve` (Daybell's ids in the payment's metadata) |
-   | **Transfers** | read and write (write is already granted in section 6) | `transfers.retrieve` (what the transfer still holds), `transfers.listReversals`, `transfers.createReversal` |
+   | **Transfers** | read and write (write is already granted in section 6) | `transfers.retrieve` (what the transfer still holds), `transfers.listReversals`, `transfers.createReversal`, and `transfers.list` and `transfers.create` (a refund Stripe fails after the studio's share was taken back sends that share back to the studio's account) |
 
    Check the exact permission names on the restricted-key screen. If unsure, use the test secret key.
 3. **Smoke test** (after the change; Stripe's test cards are on its "Testing" page, check them there):
@@ -239,6 +240,9 @@ must be done first.
    - Optional: with a test card whose refund fails (Stripe documents one), the refund shows as Failed and the owner's
      bell says the parent wasn't refunded; with a test card that opens a dispute, the order is flagged as disputed and
      the bell says so.
+   - Optional: refund a paid (not yet printed) test order from the Stripe Dashboard instead of Daybell. The order page
+     says a refund was made outside Daybell, the owner's bell rings, and Mark printed is refused until an owner or admin
+     clicks **Mark as checked**.
 
 ## What Daybell keeps
 
@@ -249,7 +253,9 @@ delivery only, the recipient's name and Canadian address (to ship the order). Ne
 the parent's email (Stripe keeps it for the receipt), and never webhook payloads. Since step 11, also each refund's and
 its transfer reversal's ids, amounts, status and Stripe's failure reason code, the date a dispute was opened (a flag
 only), and the carrier and tracking number of a shipped order. A home delivery address is deleted 90 days after the
-order ships (or 90 days after payment when it is canceled or fully refunded, and at the latest 180 days after payment). (The owner's sign-in email is sent to Stripe as the account's contact email
+order ships (or 90 days after payment when it is canceled or fully refunded, and at the latest 365 days after payment),
+and its tracking number with it. Since the step 11 reviews, also a failed refund's share-return transfer id and amount,
+and when a refund made outside Daybell was found and checked. (The owner's sign-in email is sent to Stripe as the account's contact email
 when it is created; Daybell doesn't copy it anywhere.)
 
 ## If setting up payouts fails

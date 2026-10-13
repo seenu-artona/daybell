@@ -1,7 +1,8 @@
 # Scheduled jobs
 
 What runs on a schedule, where, and what Seenu sets up (ADR 0016, 0021, 0024). Every cron route needs a bearer token:
-Vercel Cron sends `CRON_SECRET`, compared in constant time. Every cron route answers counts only and never logs
+Vercel Cron sends `CRON_SECRET`, compared in constant time. It is the only token accepted: GitHub's retired
+`GITHUB_CRON_SECRET` is no longer read (step 11 security review S2). Every cron route answers counts only and never logs
 anything about studios or people. Secrets live in Vercel only, never in the repository or chat.
 
 | Route | What it does | Schedule |
@@ -23,13 +24,14 @@ set it). Each run, a page at a time and within each region's share of the time:
 - finishes checkouts whose Stripe event never arrived (paid ones completed, abandoned ones expired), closes at Stripe
   any replaced checkout Stripe hasn't closed yet, and settles paid orders' card fees still owed (ADR 0023);
 - since step 11 (ADR 0024):
-  - **deletes home delivery addresses** 90 days after the order shipped; 90 days after payment when the order was
-    canceled or fully refunded without shipping; and at the latest 180 days after payment, whatever happened. The order
-    keeps the date (`ship_to_purged_at`) and the studio sees "Address removed";
+  - **deletes home delivery addresses and tracking numbers** 90 days after the order shipped; 90 days after payment
+    when the order was canceled or fully refunded without shipping; and at the latest 365 days after payment, whatever
+    happened. The carrier stays; the order keeps the date (`ship_to_purged_at`) and the studio sees "Address removed";
   - **retries refunds** Stripe hasn't accepted after a minute, finishes accepted ones whose transfer reversal isn't
-    done, and asks Stripe about pending ones;
+    done, asks Stripe about pending ones, and sends back to the studio what it gave for a refund Stripe then failed;
   - **recovers refund shortfalls** (what a refund took beyond what the sale's transfer still held) from the studio's
-    latest settled sale, and **absorbs** any still owed after 180 days (ledger `refund_shortfall`).
+    latest settled sale, and **absorbs** any still owed after 180 days without a settled sale (ledger
+    `refund_shortfall`; never one with a problem).
 
 A failed try is noted and backs off (1, 2, 4 … minutes, at most 6 hours); a problem no retry can fix is kept for support
 and never retried. Support looks at `select id, reference, problem, problem_at from public.orders where problem is not
@@ -39,15 +41,15 @@ null`.
 It answers counts, e.g. `{"closedJobs":…,"prunedNotifications":…,"prunedShop":…,"settledOrders":…,"expiredOrders":…,
 "retriedRefunds":…,"purgedAddresses":…,"absorbedShortfalls":…}`.
 
-## The GitHub workflow is retired (step 11)
+## The GitHub workflow and its token are retired (step 11)
 
 Until step 11, staging's hourly run came from GitHub Actions (`.github/workflows/jobs-cron.yml`) because the Hobby plan
-allowed only daily Vercel crons. With the Pro plan the hourly schedule lives in `apps/web/vercel.json`, and the workflow
-was removed. What Seenu can tidy up (nothing breaks if left):
+allowed only daily Vercel crons. With the Pro plan the hourly schedule lives in `apps/web/vercel.json`, the workflow was
+removed, and since the jobs cron now moves money (refunds, reversals, shortfalls) the code no longer accepts GitHub's
+token at all. **Seenu deletes both stored copies** (required, so a leaked copy is worth nothing):
 
 1. GitHub › the repository › Settings › Environments › `staging`: delete the secret `STAGING_ACTIONS_CRON_SECRET`.
-2. Vercel › the Daybell project › Settings › Environment Variables: delete `GITHUB_CRON_SECRET`. The cron routes still
-   accept it while it is set (ADR 0021, security review M1); removing that code is a follow-up.
+2. Vercel › the Daybell project › Settings › Environment Variables: delete `GITHUB_CRON_SECRET`.
 
 To run the jobs cron by hand: Vercel › the Daybell project › Settings › Cron Jobs › **Run** next to
 `/api/v1/internal/cron/jobs`.
