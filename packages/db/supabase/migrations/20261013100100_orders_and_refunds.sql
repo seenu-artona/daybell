@@ -1343,7 +1343,7 @@ end;
 $$;
 
 -- The cron's retries of recovery: each open shortfall with the studio's latest settled sale after it that hasn't been
--- tried for it (ids only).
+-- tried for it, and that sale's transfer (ids only).
 create function public.refund_shortfalls_due(p_limit integer) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -1353,11 +1353,12 @@ begin
     raise exception 'The limit must be 1 to 1000' using errcode = '22023';
   end if;
   return coalesce((
-    select jsonb_agg(jsonb_build_object('refund_id', x.refund_id, 'order_id', x.order_id))
-    from (select r.id as refund_id, s.id as order_id
+    select jsonb_agg(jsonb_build_object('refund_id', x.refund_id, 'order_id', x.order_id,
+      'transfer_id', x.transfer_id))
+    from (select r.id as refund_id, s.id as order_id, s.transfer_id
           from public.order_refunds r
           cross join lateral (
-            select o.id from public.orders o
+            select o.id, o.transfer_id from public.orders o
             where o.studio_id = r.studio_id and o.status = 'paid' and o.fees_settled_at is not null
               and o.transfer_id is not null and o.paid_at > r.accepted_at and o.id <> r.order_id
               and not exists (select 1 from public.order_refund_recoveries x
@@ -1848,8 +1849,9 @@ as $$
         'refunded_cents', coalesce(sum(r.amount_cents) filter (where r.status in ('pending', 'succeeded')), 0))
       from public.order_refunds r
       where r.order_id = o.id and r.studio_id = o.studio_id and r.status in ('requested', 'pending', 'succeeded')),
-    'ledger', (select coalesce(jsonb_agg(jsonb_build_object('kind', t.kind, 'created_at', t.created_at,
-        'entries', (select coalesce(jsonb_agg(jsonb_build_object('account', e.account, 'amount_cents', e.amount_cents)
+    'ledger', (select coalesce(jsonb_agg(jsonb_build_object('id', t.id, 'kind', t.kind, 'created_at', t.created_at,
+        'entries', (select coalesce(jsonb_agg(jsonb_build_object('id', e.id, 'account', e.account,
+                      'amount_cents', e.amount_cents)
                       order by e.id), '[]'::jsonb)
                     from public.ledger_entries e where e.transaction_id = t.id and e.studio_id = t.studio_id))
         order by t.created_at, t.id), '[]'::jsonb)

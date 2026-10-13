@@ -542,10 +542,11 @@ alter table public.order_refunds enable trigger order_refunds_guard;
 select is(public.refund_shortfalls_for_sale(pg_temp.v('oP')),
   jsonb_build_array(jsonb_build_object('refund_id', pg_temp.v('r5'), 'unrecovered_cents', 97)),
   'the next settled sale lists what is owed');
-select is(public.refund_shortfalls_due(10), jsonb_build_array(jsonb_build_object('refund_id', pg_temp.v('r5'),
-  'order_id', (select id from public.orders where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-    and fees_settled_at is not null and id <> pg_temp.v('oH') order by paid_at desc, id limit 1))),
-  'and the cron finds it too');
+select is(public.refund_shortfalls_due(10), (select jsonb_build_array(jsonb_build_object('refund_id', pg_temp.v('r5'),
+  'order_id', o.id, 'transfer_id', o.transfer_id)) from public.orders o
+  where o.studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and o.fees_settled_at is not null
+    and o.id <> pg_temp.v('oH') order by o.paid_at desc, o.id limit 1),
+  'and the cron finds it too, with the sale''s transfer');
 select is(public.refund_shortfall_recovered(pg_temp.v('r5'), pg_temp.v('oP'), 97, 'trr_short'), 0::bigint,
   'recovered from that sale''s transfer');
 select is(public.refund_shortfall_recovered(pg_temp.v('r5'), pg_temp.v('oP'), 97, 'trr_short'), 0::bigint, 'once');
