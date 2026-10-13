@@ -143,6 +143,8 @@ describe("payoutProblemKey (code review N5)", () => {
   it("shows each payout form code's own words in both locales, and the general text otherwise", () => {
     expect(payoutProblemKey({ form: "payouts.platformSetup" })).toBe("platformSetup");
     expect(payoutProblemKey({ form: "payouts.notConfigured" })).toBe("notConfigured");
+    expect(payoutProblemKey({ form: "payouts.noContactEmail" })).toBe("noContactEmail");
+    expect(payoutProblemKey({ form: "payouts.createConflict" })).toBe("createConflict");
     expect(payoutProblemKey({ form: "payouts.alreadyConnected" })).toBe(
       "conflicts.alreadyConnected",
     );
@@ -151,6 +153,8 @@ describe("payoutProblemKey (code review N5)", () => {
     expect(payoutProblemKey({ form: "something.else" })).toBeNull();
     for (const key of [
       "platformSetup",
+      "noContactEmail",
+      "createConflict",
       "notConfigured",
       "conflicts.alreadyConnected",
       "conflicts.notConnected",

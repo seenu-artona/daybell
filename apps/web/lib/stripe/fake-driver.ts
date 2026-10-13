@@ -59,6 +59,7 @@ export function fakeDriver(): PaymentsProvider {
   return {
     driver: "fake",
     livemode: false,
+    // contactEmail is accepted and ignored: the fake never keeps anything personal.
     async createAccount({ studioId, region, idempotencyKey }) {
       const s = state();
       const known = s.idempotency.get(idempotencyKey);

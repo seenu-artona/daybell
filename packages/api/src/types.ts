@@ -1045,3 +1045,16 @@ export const PAYOUT_NOT_CONFIGURED = "payouts.notConfigured";
  * can fix: Daybell finishes the setup in the Stripe Dashboard.
  */
 export const PAYOUT_PLATFORM_SETUP = "payouts.platformSetup";
+
+/**
+ * In the error's `fields.form` (409 conflict) when the owner's sign-in account has no email: Stripe needs one as the new
+ * account's contact email (ADR 0020 section 16, step 7c), so nothing is sent to Stripe.
+ */
+export const PAYOUT_NO_CONTACT_EMAIL = "payouts.noContactEmail";
+
+/**
+ * In the error's `fields.form` when Stripe refuses the account create as an idempotency conflict: the studio's key was
+ * used before with other parameters (e.g. a different contact email). Retrying won't help; Daybell support finishes the
+ * setup (ADR 0020 section 16; security review N1).
+ */
+export const PAYOUT_CREATE_CONFLICT = "payouts.createConflict";

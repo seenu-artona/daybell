@@ -1,5 +1,5 @@
 import "server-only";
-import { ApiError, PAYOUT_PLATFORM_SETUP } from "@daybell/api";
+import { ApiError, PAYOUT_CREATE_CONFLICT, PAYOUT_PLATFORM_SETUP } from "@daybell/api";
 import Stripe from "stripe";
 import { StripeCallError, type StripeOutcome, type StripeStage } from "./errors";
 import {
@@ -50,6 +50,10 @@ export const PLATFORM_SETUP_CODES = new Set([
 ]);
 
 const ERROR_CODE = /^[a-z0-9_]{1,100}$/;
+/** A Stripe field path such as configuration.recipient or identity.individual.address[line1]. */
+const FIELD_NAME = /^[a-z0-9_.[\]]{1,100}$/;
+/** At most this many field names are logged from one error. */
+const MAX_FIELDS = 20;
 
 /** Stripe's own identifier, or "none" when there is none, or "other" when it isn't an identifier (never free text). */
 const identifier = (value: unknown) =>
@@ -58,6 +62,20 @@ const identifier = (value: unknown) =>
     : typeof value === "string" && ERROR_CODE.test(value)
       ? value
       : "other";
+
+/**
+ * The field names of a v2 `invalid_fields` error (the list in Stripe's answer, each with a `field` and a `message`):
+ * names only, each one Stripe's own path or "other" (never the message, which can echo request data), or "none".
+ */
+function invalidFieldNames(raw: unknown): string {
+  const list = (raw as { invalid_fields?: unknown } | null)?.invalid_fields;
+  if (!Array.isArray(list) || list.length === 0) return "none";
+  const names = list.slice(0, MAX_FIELDS).map((item: unknown) => {
+    const field = (item as { field?: unknown } | null)?.field;
+    return typeof field === "string" && FIELD_NAME.test(field) ? field : "other";
+  });
+  return [...new Set(names)].join(",");
+}
 
 /**
  * Stripe errors that mean Stripe refused the request outright, so nothing was made (code review S1): invalid request
@@ -85,6 +103,9 @@ function failed(stage: StripeStage, err: unknown): never {
   const rawType = identifier(stripeError?.rawType);
   const code = identifier(stripeError?.code);
   console.error("stripe_error", stage, type, rawType, code);
+  // v2 names the fields it refused (e.g. "the Account must have a contact email"): their names only (step 7c).
+  if (code === "invalid_fields" || rawType === "invalid_fields")
+    console.error("stripe_invalid_fields", stage, invalidFieldNames(stripeError?.raw));
   const outcome: StripeOutcome = stripeError && REFUSALS.has(type) ? "refused" : "unknown";
   if (PLATFORM_SETUP_CODES.has(code) || PLATFORM_SETUP_CODES.has(rawType))
     throw new StripeCallError(
@@ -93,6 +114,12 @@ function failed(stage: StripeStage, err: unknown): never {
       outcome,
       { form: PAYOUT_PLATFORM_SETUP },
     );
+  // The create's idempotency key was used before with other parameters (e.g. the owner's email changed since a failed
+  // try; security review N1). Retrying won't help: support finds the account by its daybell_studio_id metadata.
+  if (stage === "create" && type === "StripeIdempotencyError")
+    throw new StripeCallError("Payout setup needs Daybell support to finish.", stage, outcome, {
+      form: PAYOUT_CREATE_CONFLICT,
+    });
   throw new StripeCallError("We couldn't reach Stripe. Please try again.", stage, outcome);
 }
 
@@ -117,15 +144,18 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
   return {
     driver: "stripe",
     livemode,
-    async createAccount({ studioId, region, country, idempotencyKey }: NewAccount) {
+    async createAccount({ studioId, region, country, contactEmail, idempotencyKey }: NewAccount) {
       // Canada only in Phase 1 (US payouts not decided; Seenu, Q3): the region guard refuses US studios before this.
       if (country !== "CA")
         throw new ApiError("region_unavailable", "Payouts aren't available here yet.");
-      // Country, currency and Daybell's ids only: no business name, email or person is sent (Claude's call Q4). Only
-      // the create: the payout schedule is a separate step, after Daybell has recorded the account (security review 1).
+      // Country, currency, the owner's sign-in email as contact_email (Stripe requires one with the recipient
+      // configuration; Seenu, Oct 12, replacing Claude's Q4 call) and Daybell's ids. No business name or person. The
+      // email is never logged and never in metadata or the key. Only the create: the payout schedule is a separate
+      // step, after Daybell has recorded the account (security review 1).
       const created = await call(
         stripe.v2.core.accounts.create(
           {
+            contact_email: contactEmail,
             identity: { country: "ca" },
             dashboard: "express",
             defaults: { currency: "cad", responsibilities: RESPONSIBILITIES },

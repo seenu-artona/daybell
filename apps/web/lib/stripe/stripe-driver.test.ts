@@ -33,15 +33,21 @@ vi.mock("stripe", () => {
     type: string;
     code: string | undefined;
     rawType: string | undefined;
+    raw: unknown;
     constructor(
       message: string,
       code?: string,
-      { type = "StripeInvalidRequestError", rawType }: { type?: string; rawType?: string } = {},
+      {
+        type = "StripeInvalidRequestError",
+        rawType,
+        raw = {},
+      }: { type?: string; rawType?: string; raw?: unknown } = {},
     ) {
       super(message);
       this.code = code;
       this.type = type;
       this.rawType = rawType;
+      this.raw = raw;
     }
   }
   function Stripe(this: unknown, ...args: unknown[]) {
@@ -61,7 +67,7 @@ const StripeError = (
       StripeError: new (
         message: string,
         code?: string,
-        options?: { type?: string; rawType?: string },
+        options?: { type?: string; rawType?: string; raw?: unknown },
       ) => Error;
     };
   }
@@ -88,7 +94,8 @@ describe("stripeDriver", () => {
     studioId: "studio-1",
     region: "ca" as const,
     country: "CA" as const,
-    idempotencyKey: "daybell-payout-account-v2-studio-1",
+    contactEmail: "maya.owner@example.test",
+    idempotencyKey: "daybell-payout-account-v2b-studio-1",
   };
 
   it("pins the API version and turns telemetry off", () => {
@@ -99,11 +106,13 @@ describe("stripeDriver", () => {
     ]);
   });
 
-  it("creates the account with Accounts v2: Seenu's responsibilities, express dashboard, country, currency and ids only", async () => {
+  it("creates the account with Accounts v2: Seenu's responsibilities, express dashboard, country, currency, ids and the owner's contact email", async () => {
     // The id only: nothing else happens in the same step (security review 1).
     expect(await driver.createAccount(newAccount)).toEqual({ id: "acct_1" });
     expect(client.v2.core.accounts.create).toHaveBeenCalledWith(
       {
+        // Stripe requires a contact email with the recipient configuration (step 7c).
+        contact_email: "maya.owner@example.test",
         identity: { country: "ca" },
         dashboard: "express",
         defaults: {
@@ -118,13 +127,20 @@ describe("stripeDriver", () => {
         },
         metadata: { daybell_studio_id: "studio-1", daybell_region: "ca" },
       },
-      { idempotencyKey: "daybell-payout-account-v2-studio-1" },
+      { idempotencyKey: "daybell-payout-account-v2b-studio-1" },
     );
-    // No v1 account creation, and nothing personal (no name, email or business details; Q4).
+    // No v1 account creation, and nothing else personal (no name, business details or person).
     expect(client.accounts.create).not.toHaveBeenCalled();
     const sent = JSON.stringify(client.v2.core.accounts.create.mock.calls);
-    for (const field of ["display_name", "contact_email", "business_details", "individual"])
+    for (const field of ["display_name", "business_details", "individual"])
       expect(sent).not.toContain(field);
+    // The email is the contact email only: never in the metadata or the idempotency key.
+    const [body, options] = client.v2.core.accounts.create.mock.calls[0] as [
+      { metadata: unknown },
+      unknown,
+    ];
+    expect(JSON.stringify(body.metadata)).not.toContain("maya");
+    expect(JSON.stringify(options)).not.toContain("maya");
     // The schedule is not part of the create (security review 1).
     expect(client.accounts.update).not.toHaveBeenCalled();
     expect(client.accounts.retrieve).not.toHaveBeenCalled();
@@ -249,6 +265,75 @@ describe("stripeDriver", () => {
     log.mockRestore();
   });
 
+  it("logs a v2 invalid_fields error's code and field names only, never its messages or the email (step 7c)", async () => {
+    const spies = (["error", "warn", "log", "info", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    const invalid = (fields: unknown) =>
+      new StripeError("Invalid fields for maya.owner@example.test", "invalid_fields", {
+        raw: {
+          code: "invalid_fields",
+          message: "Invalid fields for maya.owner@example.test",
+          invalid_fields: fields,
+        },
+      });
+    client.v2.core.accounts.create.mockRejectedValueOnce(
+      invalid([
+        {
+          field: "configuration.recipient",
+          message: "If configuration.recipient is supplied, the Account must have a contact email.",
+        },
+        { field: "identity.individual.address[line1]", message: "Required." },
+        { field: "maya.owner@example.test", message: "bad" },
+        { field: "Contact Email", message: "bad" },
+        { field: 42 },
+        "configuration.merchant",
+        null,
+      ]),
+    );
+    const err = await driver.createAccount(newAccount).catch((e: unknown) => e);
+    // Stripe refused it outright: nothing was made.
+    expect(err).toMatchObject({ code: "internal", stage: "create", outcome: "refused" });
+    expect(spies[0]).toHaveBeenCalledWith(
+      "stripe_error",
+      "create",
+      "StripeInvalidRequestError",
+      "none",
+      "invalid_fields",
+    );
+    expect(spies[0]).toHaveBeenCalledWith(
+      "stripe_invalid_fields",
+      "create",
+      "configuration.recipient,identity.individual.address[line1],other",
+    );
+    // No list, or not a list: "none".
+    for (const fields of [undefined, "configuration.recipient", []]) {
+      client.v2.core.accounts.create.mockRejectedValueOnce(invalid(fields));
+      await driver.createAccount(newAccount).catch(() => undefined);
+      expect(spies[0]).toHaveBeenLastCalledWith("stripe_invalid_fields", "create", "none");
+    }
+    // At most 20 names, each logged once.
+    client.v2.core.accounts.create.mockRejectedValueOnce(
+      invalid(Array.from({ length: 30 }, (_, i) => ({ field: `f${i}` }))),
+    );
+    await driver.createAccount(newAccount).catch(() => undefined);
+    expect(String(spies[0]?.mock.lastCall?.[2]).split(",")).toHaveLength(20);
+    // Other errors have no field line.
+    spies[0]?.mockClear();
+    client.accounts.retrieve.mockRejectedValueOnce(new StripeError("x", "resource_missing"));
+    await driver.retrieveAccount("acct_1").catch(() => undefined);
+    expect(spies[0]).not.toHaveBeenCalledWith(
+      "stripe_invalid_fields",
+      expect.anything(),
+      expect.anything(),
+    );
+    const logged = JSON.stringify(spies.map((s) => s.mock.calls));
+    expect(logged).not.toContain("maya");
+    expect(logged).not.toContain("contact email");
+    expect(logged).not.toContain("Required");
+    for (const s of spies) s.mockRestore();
+  });
+
   describe("typed failures (code review S1; security review 1)", () => {
     it.each([
       ["StripeInvalidRequestError", "refused"],
@@ -259,7 +344,7 @@ describe("stripeDriver", () => {
       // A 5xx, a lost connection or timeout, or the same key still running: an account may exist.
       ["StripeAPIError", "unknown"],
       ["StripeConnectionError", "unknown"],
-      ["StripeIdempotencyError", "unknown"],
+      // StripeIdempotencyError (also unknown) has its own test below.
     ])("a create failing with %s is stage create, %s", async (type, outcome) => {
       const log = vi.spyOn(console, "error").mockImplementation(() => {});
       client.v2.core.accounts.create.mockRejectedValueOnce(
@@ -270,6 +355,39 @@ describe("stripeDriver", () => {
       expect(err).toMatchObject({ code: "internal", stage: "create", outcome, fields: undefined });
       expect(log).toHaveBeenCalledWith("stripe_error", "create", type, "none", "none");
       expect(JSON.stringify(log.mock.calls)).not.toContain("jane");
+      log.mockRestore();
+    });
+
+    it("an idempotency conflict on the create asks for Daybell support; elsewhere it's the general error (security review N1)", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const conflict = () =>
+        new StripeError(
+          "Keys for idempotent requests can only be used with the same parameters",
+          undefined,
+          {
+            type: "StripeIdempotencyError",
+          },
+        );
+      client.v2.core.accounts.create.mockRejectedValueOnce(conflict());
+      await expect(driver.createAccount(newAccount)).rejects.toMatchObject({
+        code: "internal",
+        message: "Payout setup needs Daybell support to finish.",
+        stage: "create",
+        outcome: "unknown",
+        fields: { form: "payouts.createConflict" },
+      });
+      expect(log).toHaveBeenCalledWith(
+        "stripe_error",
+        "create",
+        "StripeIdempotencyError",
+        "none",
+        "none",
+      );
+      client.accounts.retrieve.mockRejectedValueOnce(conflict());
+      await expect(driver.retrieveAccount("acct_1")).rejects.toMatchObject({
+        message: "We couldn't reach Stripe. Please try again.",
+        fields: undefined,
+      });
       log.mockRestore();
     });
 

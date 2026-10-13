@@ -64,6 +64,12 @@ export interface NewAccount {
   /** ISO country of the studio's region. Only CA is created in Phase 1 (Seenu, Q3); the drivers refuse US. */
   country: "CA" | "US";
   /**
+   * The owner's sign-in email, sent as the v2 account's contact_email: Stripe requires one with the recipient
+   * configuration (Seenu, Oct 12, replacing Claude's Q4 call; ADR 0020 section 16). From the verified auth user, never
+   * the request. Personal data: never logged, and never in metadata, events, URLs or the idempotency key.
+   */
+  contactEmail: string;
+  /**
    * Stripe's idempotency key, so a retried request never makes a second account. Accounts v2 replays a successful
    * create for 30 days and re-executes a failed one (docs.stripe.com/api-v2-overview).
    */

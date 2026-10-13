@@ -66,7 +66,8 @@ export async function me(
 
 /**
  * The signed-in person's studio and a client acting as them; every query is still filtered by RLS (D96). userId is
- * the verified person, for the server-only code writes that act for them (ADR 0011).
+ * the verified person, for the server-only code writes that act for them (ADR 0011). No email here (security review
+ * N2): the one route that needs it asks userEmail().
  */
 export async function studioScope(): Promise<{
   supabase: SupabaseClient;
@@ -78,6 +79,18 @@ export async function studioScope(): Promise<{
   const studio = await currentStudio(supabase, user, region);
   if (!studio) throw new ApiError("not_found", "You're not part of a studio yet.");
   return { supabase, studio, userId: user.id };
+}
+
+/**
+ * The signed-in person's sign-in email from the verified auth user (getUser(), never the cookie, the request or
+ * user_metadata), or null when the account has none. Personal data: never logged. Only the payouts onboarding link
+ * calls it, after the owner check, to send Stripe its contact email (ADR 0020 section 16; security review N2).
+ */
+export async function userEmail(supabase: {
+  auth: { getUser: () => Promise<{ data: { user: User | null } }> };
+}): Promise<string | null> {
+  const user = await requireUser(supabase);
+  return user.email || null;
 }
 
 /** Owners and admins only. The database enforces this too; checking first gives a clear error instead of no change. */

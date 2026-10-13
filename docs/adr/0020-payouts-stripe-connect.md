@@ -1,7 +1,8 @@
 # 0020 — Payouts with Stripe Connect
 
 - Status: Accepted with the step 7 PR. Amended Oct 12, 2026 by step 7b (section 16: accounts are created with Stripe
-  Accounts v2; proposed until Seenu merges that PR).
+  Accounts v2) and by step 7c (section 16, "Contact email": the owner's sign-in email is sent as the account's contact
+  email; Q4 changed by Seenu; proposed until Seenu merges that PR).
 - Amends:
   - 0017: onboarding gains "Set up payouts".
   - 0016: the region guard gains `PAYOUT_REGIONS`.
@@ -39,7 +40,8 @@ Seenu's answers:
   Canada).
 - `metadata`: `daybell_studio_id` and `daybell_region`.
 - A default schedule: weekly, Friday, with Stripe's own delay.
-- No name, email or business details are prefilled (Q4).
+- No name, email or business details are prefilled (Q4). *Changed by Seenu in step 7c (section 16, "Contact email"):
+  the owner's sign-in email is sent as the v2 account's `contact_email`, which Stripe requires.*
 
 The brief's "Stripe handles losses" is superseded by Q1.
 
@@ -300,7 +302,7 @@ sets a reason or something is past due.
 - Payout routes run in yul1 with `assertFunctionRegion`.
 - Data stays in the studio's regional database.
 - Stripe is the payment processor (already decided). Only the country and Daybell's ids are sent when an account is
-  created.
+  created, plus the owner's sign-in email as its contact email since step 7c (section 16, "Contact email").
 - The webhook checks the function region before any Stripe call (section 4, step 5).
 - Account Link and login link URLs are never logged or stored, and must be Stripe's own (section 5b).
 - Stripe errors are logged by error type only.
@@ -408,7 +410,8 @@ types; no package change):
 - `configuration.merchant.capabilities.card_payments.requested` (the Canadian studio is the merchant of record with
   D106's destination charges `on_behalf_of`) and `configuration.recipient.capabilities.stripe_balance.stripe_transfers
   .requested` (v2's name for v1 `transfers`, needed for destination charges in step 10).
-- `metadata`: `daybell_studio_id`, `daybell_region`. No name, email or business details (Q4).
+- `metadata`: `daybell_studio_id`, `daybell_region`. No name, email or business details (Q4). The owner's email is
+  sent as `contact_email` only, since step 7c (below).
 - The v2 create can't set a payout schedule, and the create is the only thing `createAccount` does: it returns the new
   account's id (security review 1). The route then reads the account back through v1, records it
   (`create_payout_account`), and only then sets Daybell's default schedule (weekly on Friday; D56, Q6) through v1 as
@@ -502,6 +505,50 @@ types and trailing text are refused. No new column or table: the schedule marker
 - Idempotency (settled, not open): v2 re-executes failed requests and replays successful ones for 30 days
   (https://docs.stripe.com/api-v2-overview), so a refused create doesn't lock a studio out and no key rotation is
   built.
+
+**Contact email (step 7c, Oct 12, 2026; D106, D113).** On staging, `POST /v2/core/accounts` answered 400
+`invalid_fields`: "If configuration.recipient is supplied, the Account must have a contact email." **Q4 changed by
+Seenu:** Claude's call "country only, no email" is replaced; the create sends the studio owner's sign-in email as
+`contact_email`.
+- Where it comes from: the verified Supabase auth user of the session, read by `userEmail(supabase)` in
+  `apps/web/lib/studio.ts` (`getUser()`; `user.email` only, never `user_metadata` or the request body; `""` or missing
+  is null). `studioScope()` doesn't carry the email (security review N2): only the onboarding link calls `userEmail`,
+  after the owner check (`assertCanManagePayouts`) and only when it is about to create the account. If the sign-in has
+  no email, the route answers 409 `conflict` with `fields.form = "payouts.noContactEmail"` (locale key
+  `app.payouts.noContactEmail`, whose words the API message matches) and Stripe isn't called.
+- Where it never goes: logs, events, URLs, Sentry, Stripe metadata, the idempotency key, Daybell's database. The fake
+  driver accepts it and ignores it. Tests assert that the email is in the create body and in no console call.
+- **Privacy.** The email is personal data about the studio owner (an adult business contact, not a child). Seenu
+  explicitly accepted (Oct 12, 2026) sending it to Stripe as Daybell's payment processor (D106) under D113, for the
+  account Stripe holds for that studio, for both regions. No data is copied to any other service.
+- **New idempotency key: `daybell-payout-account-v2b-{studio}`.** API v2 re-executes a failed request and replays a
+  successful one, but the request body changed (it now has `contact_email`). Reusing `-v2-` for a studio that already
+  tried could be refused with an `idempotency_error` for mismatched parameters, which the driver treats as an unknown
+  outcome. The `-v2-` creates on staging were refused (that is this step's cause), so as far as known no account exists
+  under the old key and the new key doesn't make a second one; if one did, `stripe_account_create_unknown` and the
+  account's `daybell_studio_id` metadata would show it. The key holds the studio id only, never the email.
+- **Idempotency conflicts (security review N1).** The key stays studio-id only. So a retry after the owner's email
+  changed (or after the studio's owner changed) sends different parameters under the same key, and Stripe may refuse
+  it as an idempotency error. On the create, the driver turns `StripeIdempotencyError` into a `StripeCallError`
+  (outcome `unknown`) with `fields.form = "payouts.createConflict"` and the message "Payout setup needs Daybell support
+  to finish." (locale key `app.payouts.createConflict`, same words, en-US and en-CA); the route logs
+  `stripe_account_create_conflict <studioId>` instead of `stripe_account_create_unknown`. Support finds the account on
+  Stripe by its `daybell_studio_id` metadata and finishes the setup. The same error on any other call is the general
+  one. Stripe's `contact_email` is set once at create: it isn't updated if the studio's owner changes later.
+- **`invalid_fields` errors.** As well as the `stripe_error` line, the driver logs
+  `stripe_invalid_fields <stage> <names>` when the code or raw type is `invalid_fields`: the `field` of each entry in
+  Stripe's `invalid_fields` list, each matched against `^[a-z0-9_.\[\]]{1,100}$` or logged as `other`, at most 20,
+  without repeats; `none` without a list. Never the messages (they can echo request data). The shape of the list (an
+  array of `{ field, message }` on the raw error) is assumed: stripe-node 22.6.2 maps code `invalid_fields` to
+  `StripeInvalidRequestError` but doesn't declare the list. Anything else is logged as `none` or `other` (follow-up:
+  confirm on the next staging refusal). The error is a refusal (`StripeInvalidRequestError`):
+  nothing was made.
+- **Follow-ups (contact email).**
+  - Keep Stripe's `contact_email` in step with the owner once ownership transfer exists (update the v2 account when the
+    owner changes).
+  - When Sentry is added: scrub emails (and the rest of the personal data) before events leave the app, and check the
+    onboarding route's errors carry none (security review N4).
+  - List Stripe as a sub-processor in the privacy policy (PIPEDA; security review N5).
 
 **Sources** (fetched Oct 12, 2026 by the orchestrator; checked here against stripe-node 22.6.2's types:
 `resources/V2/Core/Accounts.d.ts`, `resources/V2/Core/AccountLinks.d.ts`, `resources/V2/Core/Events.d.ts`,
