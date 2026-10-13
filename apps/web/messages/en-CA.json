@@ -902,13 +902,13 @@
       "live": "{job} is live. Parents can order now.",
       "reopened": "{job} is selling again.",
       "closedNow": "{job} is closed.",
-      "notReady": "Not everything is ready yet. The list shows what’s missing.",
       "conflicts": {
         "notReady": "Not everything is ready yet. The list shows what’s missing.",
         "alreadySelling": "This job is already selling.",
         "notSelling": "This shop isn’t selling, so it can’t be closed.",
         "notClosed": "This shop isn’t closed, so it can’t be reopened.",
-        "closed": "This shop is closed. Reopen it first."
+        "closed": "This shop is closed. Reopen it first.",
+        "closesAtPassed": "The closing date has passed. Change or remove it first."
       },
       "closeDialog": {
         "title": "Close the shop?",
@@ -924,7 +924,8 @@
         "remove": "Remove closing date",
         "saved": "Closing date saved.",
         "removed": "Closing date removed.",
-        "line": "Closes {when}"
+        "line": "Closes {when}",
+        "linePassed": "Closing date passed ({when})"
       },
       "liveNote": "This shop is live: changes show to parents straight away; orders already placed keep what they bought.",
       "close": "Close",

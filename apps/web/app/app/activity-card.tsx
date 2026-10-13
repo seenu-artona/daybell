@@ -55,8 +55,9 @@ export function ActivityCard({
       subject: item.subjectEmail ?? t("aTeammate"),
       role: item.role ? tr(item.role).toLowerCase() : "",
       name: item.subjectName ?? t(unnamedSubject(item.type)),
-      // A shop closed by its closing date has no actor (ADR 0021): the sentence says so instead of "Someone".
-      hasActor: item.actorEmail ? "yes" : "no",
+      // A shop closed by its closing date has no actor (ADR 0021): the sentence says so instead of "Someone". Someone
+      // who has since left the team still did it (code review S3): "Someone closed the shop".
+      hasActor: item.hasActor ? "yes" : "no",
     });
   const when = (item: ActivityItem) => (
     <time className="shrink-0 text-caption text-muted" dateTime={item.occurredAt}>

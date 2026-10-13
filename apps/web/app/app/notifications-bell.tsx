@@ -11,6 +11,9 @@ import { api } from "@/lib/client-api";
 import { notificationHref } from "./notification-links";
 import { MENU_ROW, Popover } from "./popover";
 
+/** Two asks for the count closer together than this are one (focus and visibilitychange arrive together). */
+const REFRESH_GAP_MS = 2000;
+
 /**
  * The bell (D143: information only, never tasks; ADR 0021, call 4): the person's unread count on the menu, asked for
  * every minute while the page is visible and again when it comes back into view (no live connection; Claude's call).
@@ -23,6 +26,10 @@ export function NotificationsBell({ folded }: { folded: boolean }) {
   const [unread, setUnread] = useState<number | null>(null);
   const [news, setNews] = useState("");
   const previous = useRef<number | null>(null);
+  const announceTimer = useRef<number | undefined>(undefined);
+  // When the count was last asked for: coming back to the tab fires both focus and visibilitychange, and that should
+  // be one request, not two (code review N5).
+  const lastAsked = useRef(0);
 
   const setCount = useCallback(
     (count: number, announce: boolean) => {
@@ -32,13 +39,19 @@ export function NotificationsBell({ folded }: { folded: boolean }) {
       if (added) {
         // Emptied first, so the same words are read out again next time (WCAG 4.1.3).
         setNews("");
-        window.setTimeout(() => setNews(t("notificationsNew", { count: added })), 100);
+        window.clearTimeout(announceTimer.current);
+        announceTimer.current = window.setTimeout(
+          () => setNews(t("notificationsNew", { count: added })),
+          100,
+        );
       }
     },
     [t],
   );
 
   const refresh = useCallback(async () => {
+    if (Date.now() - lastAsked.current < REFRESH_GAP_MS) return;
+    lastAsked.current = Date.now();
     const res = await api<UnreadCountResponse>("/notifications/unread-count");
     if (res.ok) setCount(res.data.unread, true);
   }, [setCount]);
@@ -53,6 +66,7 @@ export function NotificationsBell({ folded }: { folded: boolean }) {
     document.addEventListener("visibilitychange", visible);
     return () => {
       window.clearInterval(timer);
+      window.clearTimeout(announceTimer.current);
       window.removeEventListener("focus", visible);
       document.removeEventListener("visibilitychange", visible);
     };
@@ -71,7 +85,7 @@ export function NotificationsBell({ folded }: { folded: boolean }) {
           <span className="relative grid place-items-center">
             <Bell aria-hidden="true" />
             {count > 0 ? (
-              <span className="absolute -top-2 -right-2.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-lime px-1 text-[11px] leading-none font-bold text-ink tabular-nums">
+              <span className="absolute -top-2 -right-2.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-lime px-1 text-micro leading-none text-ink tabular-nums">
                 {count > 99 ? t("unreadMany") : count}
               </span>
             ) : null}

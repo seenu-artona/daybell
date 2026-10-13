@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { JOB_CONFLICTS } from "@daybell/api";
 import { MILESTONES, ONBOARDING_TASKS, TASK_KEYS, UP_NEXT_REASONS } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import enCA from "../messages/en-CA.json";
@@ -33,6 +34,16 @@ describe("locale files", () => {
       expect(messages.app.checklist.nextTask).toBe("Next: {task}");
       expect(messages.app.home.upNext.row).toBe("{job} · {reason}");
     }
+  });
+
+  it("have words for every refusal of Start selling, Close shop and Reopen shop (ADR 0021)", () => {
+    for (const messages of [enUS, enCA])
+      expect(Object.keys(messages.app.job.conflicts).sort()).toEqual(
+        Object.keys(JOB_CONFLICTS).sort(),
+      );
+    expect(enUS.app.job.conflicts.closesAtPassed).toBe(
+      "The closing date has passed. Change or remove it first.",
+    );
   });
 
   it("name every milestone, task, onboarding task and Up next reason (D143)", () => {

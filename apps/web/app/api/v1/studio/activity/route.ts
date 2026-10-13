@@ -83,6 +83,7 @@ export const GET = handle(async (request: Request) => {
         id: e.id,
         type: activityType(e.type) as ActivityItem["type"],
         actorEmail: e.actor_id ? (emails.get(e.actor_id) ?? null) : null,
+        hasActor: e.actor_id !== null,
         subjectEmail:
           e.subject_id && e.type.startsWith("member.") ? (emails.get(e.subject_id) ?? null) : null,
         role: data.to ?? data.role ?? null,

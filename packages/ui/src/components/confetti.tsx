@@ -70,7 +70,7 @@ export function ConfettiBurst({ onDone, className }: ConfettiBurstProps) {
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed list.
           key={i}
           className={cn(
-            "absolute top-[28%] left-1/2 block rounded-[2px] opacity-0 animate-[daybell-confetti_1500ms_var(--ease-out)_forwards]",
+            "absolute top-[28%] left-1/2 block opacity-0 animate-[daybell-confetti_1500ms_var(--ease-out)_forwards]",
             p.wide ? "h-1.5 w-3" : "h-2.5 w-2",
             p.tone,
           )}

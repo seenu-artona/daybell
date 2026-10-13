@@ -113,4 +113,9 @@ describe("going-live routes and words", () => {
     expect(ACTIVITY_TYPES).toContain("job.closed");
     expect(Object.values(JOB_CONFLICTS).every((k) => k.startsWith("jobs."))).toBe(true);
   });
+
+  it("names every refusal go_live raises (orchestrator's M3: closes_at_passed)", () => {
+    expect(sql).toContain("raise exception 'closes_at_passed'");
+    expect(JOB_CONFLICTS.closesAtPassed).toBe("jobs.closesAtPassed");
+  });
 });

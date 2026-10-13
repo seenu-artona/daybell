@@ -1,5 +1,7 @@
 import { ACTIVITY_TYPES } from "@daybell/api";
+import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
+import messages from "@/messages/en-US.json";
 import {
   activityChip,
   activityType,
@@ -82,5 +84,18 @@ describe("activityChip", () => {
     expect(activityChip("job.selling")).toEqual({ tone: "primary", icon: "selling" });
     expect(activityChip("job.closed")).toEqual({ tone: "neutral", icon: "closed" });
     expect(activityChip("studio.updated").icon).toBe("studio");
+  });
+});
+
+describe("who closed a shop (ADR 0021; code review S3)", () => {
+  const t = createTranslator({ locale: "en-US", messages, namespace: "app.activity" });
+  it("says nobody did it only for a scheduled close, not when the person has left the team", () => {
+    // The card passes hasActor from the item itself, and "Someone" when the person's email is gone.
+    expect(t("job.closed", { actor: t("someone"), name: "Fall", hasActor: "yes" })).toBe(
+      "Someone closed the shop for Fall",
+    );
+    expect(t("job.closed", { actor: t("someone"), name: "Fall", hasActor: "no" })).toBe(
+      "The shop for Fall closed",
+    );
   });
 });

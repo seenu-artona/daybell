@@ -88,6 +88,10 @@ export const activityItem = z
     id: z.number().int(),
     type: z.enum(ACTIVITY_TYPES),
     actorEmail: z.email().nullable().meta({ description: "Who did it, if still on the team." }),
+    hasActor: z.boolean().meta({
+      description:
+        "Whether a person did it. False for things that happened on their own (a shop closed by its closing date); actorEmail is also null when the person has left the team.",
+    }),
     subjectEmail: z
       .email()
       .nullable()
@@ -1089,6 +1093,8 @@ export const JOB_CONFLICTS = {
   notClosed: "jobs.notClosed",
   /** The shop is closed: reopen it first. */
   closed: "jobs.closed",
+  /** The job's closing date has already passed: change or remove it before the shop opens. */
+  closesAtPassed: "jobs.closesAtPassed",
 } as const;
 export type JobConflict = (typeof JOB_CONFLICTS)[keyof typeof JOB_CONFLICTS];
 

@@ -298,6 +298,11 @@ export function jobStatusError(error: {
         return conflict("Only a closed shop can be reopened.", JOB_CONFLICTS.notClosed);
       case "job_closed":
         return JOB_CLOSED();
+      case "closes_at_passed":
+        return conflict(
+          "The closing date has passed. Change or remove it first.",
+          JOB_CONFLICTS.closesAtPassed,
+        );
     }
   }
   return fromDatabaseError(error);

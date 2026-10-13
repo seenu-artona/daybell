@@ -23,15 +23,17 @@ import { JobForm } from "../job-form";
 import { StatusBadge, useFormatDay } from "../status-badge";
 import {
   blockersFromFields,
+  closingDatePassed,
   jobConflictKey,
   readyToSell,
   sellItems,
   shopAction,
+  shopChangedElsewhere,
 } from "./going-live";
 import { useJob } from "./job-context";
 import { SellChecklist } from "./sell-checklist";
 
-type Open = "edit" | "sell" | "close" | "closing" | null;
+type Open = "edit" | "sell" | "closeShop" | "closingDate" | null;
 
 /**
  * The job's title row (D137, D140), on the canvas with no white block: a round back button, the job's name and its shop
@@ -65,6 +67,11 @@ export function JobHeader() {
   const [confetti, setConfetti] = useState(false);
   const [focusHeading, setFocusHeading] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  // After a refusal the dialog's footer can change (Cancel + Start selling become Close): focus goes to its last
+  // button rather than falling to the page (WCAG 2.4.3; code review M3).
+  const [focusFooter, setFocusFooter] = useState(false);
+  const sellFooter = useRef<HTMLDivElement>(null);
+  const closeFooter = useRef<HTMLDivElement>(null);
   // Which opening of the dialog a reply belongs to: one that arrives after the dialog closed (or reopened) is ignored.
   const opening = useRef(0);
   const action = shopAction(job.status);
@@ -110,6 +117,15 @@ export function JobHeader() {
     setFocusHeading(false);
   }, [focusHeading, open]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the refused dialog has re-rendered.
+  useEffect(() => {
+    if (!focusFooter) return;
+    setFocusFooter(false);
+    const footer = open === "sell" ? sellFooter.current : closeFooter.current;
+    const buttons = footer?.querySelectorAll<HTMLButtonElement>("button");
+    buttons?.[buttons.length - 1]?.focus();
+  }, [focusFooter, blockers]);
+
   /** Runs one state change; true when it worked. Never twice at once; nothing is disabled meanwhile (D91). */
   async function changeStatus(path: "start-selling" | "close" | "reopen"): Promise<Job | null> {
     if (working.current) return null;
@@ -121,8 +137,22 @@ export function JobHeader() {
     setBusy(false);
     if (res.ok) return res.data.job;
     const conflict = jobConflictKey(res.fields.form);
+    const message = conflict ? t(`conflicts.${conflict}`) : text.error(res.code);
+    if (shopChangedElsewhere(conflict)) {
+      // Someone else (or the jobs cron) moved the shop on: show it as it is now and say why (code review S1).
+      const fresh = await api<{ job: Job }>(`/jobs/${job.id}`);
+      if (fresh.ok) {
+        setJob(fresh.data.job);
+        closeDialog();
+        setFocusHeading(true);
+        setAnnouncement(message);
+        changed();
+        return null;
+      }
+    }
     if (conflict === "notReady") setBlockers(blockersFromFields(res.fields));
-    setDialogStatus(conflict ? t(`conflicts.${conflict}`) : text.error(res.code));
+    setDialogStatus(message);
+    setFocusFooter(true);
     return null;
   }
 
@@ -154,13 +184,18 @@ export function JobHeader() {
     job.client?.name ?? null,
     formatDay(job.pictureDay),
     job.internalNumber,
-    job.closesAt ? t("closing.line", { when: formatClosing(job.closesAt) }) : null,
+    job.closesAt
+      ? t(closingDatePassed(job, Date.now()) ? "closing.linePassed" : "closing.line", {
+          when: formatClosing(job.closesAt),
+        })
+      : null,
   ].filter(Boolean);
 
+  // Until the job's summary has loaded, the roster and photos rows say "Checking…" (code review S4).
   const items = sellItems(
     {
-      children: summary?.children ?? 0,
-      hasReadyPhoto: (summary?.photos?.ready ?? 0) > 0,
+      children: summary ? summary.children : undefined,
+      hasReadyPhoto: summary ? (summary.photos?.ready ?? 0) > 0 : undefined,
       taggingReviewed,
       hasPriceList: hasItems,
       payoutsConnected: payouts,
@@ -223,7 +258,7 @@ export function JobHeader() {
                     onClick={() => {
                       close();
                       setAnnouncement("");
-                      setOpen("closing");
+                      setOpen("closingDate");
                     }}
                   >
                     <CalendarClock aria-hidden="true" />
@@ -243,7 +278,7 @@ export function JobHeader() {
               variant="secondary"
               onClick={() => {
                 setDialogStatus("");
-                setOpen("close");
+                setOpen("closeShop");
               }}
             >
               {t("closeShop")}
@@ -281,10 +316,10 @@ export function JobHeader() {
               : t(reopening ? "reopenIntro" : "sellIntro")}
           </p>
           <SellChecklist items={items} />
-          <p role="status" className="m-0 text-sm font-semibold text-ink empty:hidden">
+          <p role="status" className="m-0 text-sm font-semibold text-ink empty:sr-only">
             {dialogStatus}
           </p>
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <div ref={sellFooter} className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             {ready ? (
               <>
                 <Button variant="secondary" onClick={closeDialog}>
@@ -303,13 +338,13 @@ export function JobHeader() {
         </div>
       </Dialog>
 
-      <Dialog open={open === "close"} onClose={closeDialog} title={t("closeDialog.title")}>
+      <Dialog open={open === "closeShop"} onClose={closeDialog} title={t("closeDialog.title")}>
         <div className="flex flex-col gap-4" aria-busy={busy}>
           <p className="m-0">{t("closeDialog.body")}</p>
-          <p role="status" className="m-0 text-sm font-semibold text-ink empty:hidden">
+          <p role="status" className="m-0 text-sm font-semibold text-ink empty:sr-only">
             {dialogStatus}
           </p>
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <div ref={closeFooter} className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={closeDialog}>
               {t("cancel")}
             </Button>
@@ -318,7 +353,7 @@ export function JobHeader() {
         </div>
       </Dialog>
 
-      <Dialog open={open === "closing"} onClose={closeDialog} title={t("closing.title")}>
+      <Dialog open={open === "closingDate"} onClose={closeDialog} title={t("closing.title")}>
         <ClosingDateForm
           job={job}
           onCancel={closeDialog}
@@ -375,7 +410,7 @@ function ClosingDateForm({
   return (
     <form onSubmit={submit} noValidate className="flex flex-col gap-4">
       <ClosingDateField value={day} onChange={setDay} error={error} />
-      <p role="status" className="m-0 text-sm font-semibold text-ink empty:hidden">
+      <p role="status" className="m-0 text-sm font-semibold text-ink empty:sr-only">
         {problem}
       </p>
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

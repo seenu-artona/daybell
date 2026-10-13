@@ -188,8 +188,8 @@ test("job page layout, menu search and studio separation", async ({
   ).toBeVisible();
   await expect(recent.getByText(otherName)).toHaveCount(0);
   // Start selling is never disabled; while something is missing it lists what (ADR 0021: photos are real now).
-  await main.getByRole("button", { name: "Start selling" }).click();
-  const sell = page.getByRole("dialog", { name: "Before you can sell" });
+  await main.getByRole("button", { name: "Start selling", exact: true }).click();
+  const sell = page.getByRole("dialog", { name: "Before you can sell", exact: true });
   await expect(sell.getByRole("listitem").filter({ hasText: "Photos uploaded" })).toContainText(
     "To do",
   );

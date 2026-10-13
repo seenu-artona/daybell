@@ -45,6 +45,7 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
     data: { firstName: "Maya", lastName: "Johnson" },
   });
   expect(added.status()).toBe(201);
+  const childId = (await added.json()).child.id as string;
   expect((await page.request.post(`/api/v1/jobs/${jobId}/qr-cards`, { data: {} })).status()).toBe(
     200,
   );
@@ -108,6 +109,44 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
     }),
   ).toBeVisible();
 
+  // 2b. Tagging stops being clean behind the open dialog's back (a photo moved to Leftovers): Start selling is refused
+  // by the server, the dialog says so in its status, Tagging reviewed reads To do, and focus stays in the dialog on
+  // the footer's remaining button (D91, WCAG 2.4.3; code review M3). Then the photo goes back and is reviewed again.
+  const photos = (await (await page.request.get(`/api/v1/jobs/${jobId}/photos`)).json()).photos as {
+    id: string;
+    originalFilename: string;
+  }[];
+  const loose = photos.find((p) => p.originalFilename === "IMG_0002.JPG")?.id as string;
+  const move = (target: Record<string, string>) =>
+    page.request.post(`/api/v1/jobs/${jobId}/photos/move`, {
+      data: { photoIds: [loose], target },
+    });
+  expect((await move({ kind: "leftovers" })).status()).toBe(200);
+  await sell.getByRole("button", { name: "Start selling", exact: true }).click();
+  await expect(
+    sell
+      .getByRole("status")
+      .filter({ hasText: whole("Not everything is ready yet. The list shows what’s missing.") }),
+  ).toBeVisible();
+  await expect(
+    sell
+      .getByRole("listitem")
+      .filter({ has: page.getByText("Tagging reviewed", { exact: true }) })
+      .getByText("To do", { exact: true }),
+  ).toBeVisible();
+  // The footer's Close (the dialog's own × is also named Close, and comes first).
+  await expect(sell.getByRole("button", { name: "Close", exact: true }).last()).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(sell).toBeHidden();
+  expect((await move({ kind: "child", childId })).status()).toBe(200);
+  expect((await page.request.post(`/api/v1/jobs/${jobId}/tagging/review`)).status()).toBe(200);
+  await main.getByRole("button", { name: "Start selling", exact: true }).click();
+  await expect(
+    sell.getByText("Everything’s ready. Once you start selling, parents can order.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+
   // 3. Start selling: Selling, said in words, focus on the job's name, no confetti with reduced motion.
   await sell.getByRole("button", { name: "Start selling", exact: true }).click();
   await expect(sell).toBeHidden();
@@ -126,7 +165,7 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   await expect(
     checklist
       .getByRole("listitem")
-      .filter({ hasText: "Start selling" })
+      .filter({ has: page.getByText("Start selling", { exact: true }) })
       .getByText("Done", { exact: true }),
   ).toBeVisible();
 

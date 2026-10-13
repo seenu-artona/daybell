@@ -171,7 +171,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   expect(jobs.jobs[0].checklist).toEqual({
     milestone: "setUp",
     done: 1,
-    total: 6,
+    total: 7,
     next: "addRoster",
   });
   const status = await page.request.patch(`/api/v1/jobs/${id}`, { data: { status: "selling" } });

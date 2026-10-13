@@ -2,11 +2,11 @@
 -- reopen a shop, through the service-role functions that re-check their role before anything is read; the server
 -- refuses Start selling unless the roster, a ready photo, reviewed tagging, a price list with an item and Active
 -- payouts are all there, naming what is missing by key; a job never goes back to Draft, whoever writes; a closing date
--- is in the future, at most 400 days away and never on a closed job; the cron closes due selling jobs of every studio
--- and nothing else; events carry ids only, and a status change writes no job.updated; another studio can do nothing.
+-- is in the future, at most 400 days away and never on a closed job, and a draft whose date has passed can't start
+-- selling until it is changed; the cron closes due selling jobs of every studio and nothing else; events carry ids only, and a status change writes no job.updated; another studio can do nothing.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(73);
+select plan(76);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -161,8 +161,9 @@ select throws_ok($$ select public.start_selling(null, 'a0000000-0000-4000-8000-0
 select is(pg_temp.try_sell('22222222-2222-4222-8222-222222222222', 'a0000000-0000-4000-8000-000000000002'),
   '42501 Owners, admins and photographers only',
   'another studio''s owner learns nothing about what blocks A''s job');
-select throws_ok($$ select public.start_selling('11111111-1111-4111-8111-111111111111',
-  'f0000000-0000-4000-8000-000000000009') $$, 'P0002', 'Job not found', 'an unknown job is not found');
+select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'f0000000-0000-4000-8000-000000000009'),
+  '42501 Owners, admins and photographers only',
+  'an unknown job is refused exactly like another studio''s (nobody learns whether it exists)');
 select throws_ok($$ select public.close_job('33333333-3333-4333-8333-333333333333',
   'a0000000-0000-4000-8000-000000000001') $$, '42501', null, 'photographers can''t close a shop');
 select throws_ok($$ select public.reopen_job('44444444-4444-4444-8444-444444444444',
@@ -292,6 +293,14 @@ select is((select studio_id from public.events where type = 'job.closed'
   and subject_id = 'b0000000-0000-4000-8000-000000000001'), 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'::uuid,
   'B''s event is B''s');
 select is(public.close_due_jobs(500), 0, 'nothing left to close');
+-- A draft whose closing date has passed (M3): refused by name before anything else, so it can't go live only to be
+-- closed by the next run.
+select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000002'),
+  'P0001 closes_at_passed', 'Start selling a draft whose closing date has passed is refused');
+select is(pg_temp.status('a0000000-0000-4000-8000-000000000002'), 'draft', 'it stays a draft');
+update public.jobs set closes_at = null where id = 'a0000000-0000-4000-8000-000000000002';
+select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000002'),
+  'P0001 not_ready roster,photos,tagging', 'once the date is removed, only the usual checks remain');
 select set_config('request.jwt.claim.sub', '', true) is not null as done_acting;
 set local role authenticated;
 select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;

@@ -369,7 +369,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Jobs",
     summary: "Start selling",
     description:
-      "Opens a draft job's shop (D75, D143). The server checks, atomically with the change, everything the Start selling dialog lists: a roster, a ready photo, tagging reviewed, a price list with at least one item and the studio's payouts Active. Missing items come back as 409 jobs.notReady with one field per item (roster, photos, tagging, priceList, payouts). A selling job is 409 jobs.alreadySelling; a closed one 409 jobs.closed (reopen it). Writes one job.selling event; tells the rest of the team through the bell.",
+      "Opens a draft job's shop (D75, D143). The server checks, atomically with the change, everything the Start selling dialog lists: a roster, a ready photo, tagging reviewed, a price list with at least one item and the studio's payouts Active. Missing items come back as 409 jobs.notReady with one field per item (roster, photos, tagging, priceList, payouts). A selling job is 409 jobs.alreadySelling; a closed one 409 jobs.closed (reopen it). A draft whose closing date has already passed is 409 jobs.closesAtPassed (change or remove the date first). Writes one job.selling event; tells the rest of the team through the bell.",
     access: "owner-admin",
     success: { status: 200, schema: jobResponse, description: "The job, now selling." },
     errors: ["not_signed_in", "forbidden", "not_found", "conflict"],
@@ -1153,7 +1153,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Close shops whose closing date has passed",
     description:
-      "Not for integrations. Hourly (GitHub Actions) and daily (Vercel Cron), with CRON_SECRET as a bearer token. Closes every selling job whose closing date has passed, in every region's database (job.closed events with no actor), then removes read notifications over 90 days old and any over 180.",
+      "Not for integrations. Hourly (GitHub Actions, with GITHUB_CRON_SECRET) and daily (Vercel Cron, with CRON_SECRET), as a bearer token. Closes every selling job whose closing date has passed, in every region's database (job.closed events with no actor), then removes read notifications over 90 days old and any over 180.",
     access: "internal",
     success: { status: 200, schema: cronJobsResponse, description: "What was done." },
     errors: ["not_signed_in", "internal", "region_unavailable"],
@@ -1164,7 +1164,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Daily photo clean-up",
     description:
-      "Not for integrations. Vercel Cron, with CRON_SECRET as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
+      "Not for integrations. Vercel Cron with CRON_SECRET (staging: GitHub Actions with GITHUB_CRON_SECRET), as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
     access: "internal",
     success: { status: 200, schema: cronPhotosResponse, description: "What was cleaned up." },
     errors: ["not_signed_in", "internal"],

@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // its secret, works page by page in each region's function region, and answers counts only. Scope, database and
 // service role are faked; nothing is ever logged.
 vi.mock("server-only", () => ({}));
-const { scope, statusRpc, systemRpc } = vi.hoisted(() => ({
+const { scope, statusRpc, systemRpc, databases } = vi.hoisted(() => ({
   scope: vi.fn(),
   statusRpc: vi.fn(),
   systemRpc: vi.fn(),
+  /** The regions with a database in this test (Canada only unless a test says otherwise). */
+  databases: { regions: ["ca"] as string[] },
 }));
 vi.mock("@/lib/studio", async (original) => ({
   ...(await original<typeof import("@/lib/studio")>()),
@@ -20,7 +22,9 @@ vi.mock("@/lib/supabase/service", () => ({ jobStatusRpc: statusRpc, jobSystemRpc
 vi.mock("@daybell/config", async (original) => ({
   ...(await original<typeof import("@daybell/config")>()),
   regionDatabase: (region: string) =>
-    region === "ca" ? { region, url: "http://127.0.0.1:54321", publishableKey: "pk" } : null,
+    databases.regions.includes(region)
+      ? { region, url: "http://127.0.0.1:54321", publishableKey: "pk" }
+      : null,
 }));
 
 const STUDIO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -196,6 +200,7 @@ describe("Start selling, Close shop and Reopen shop (calls 1 and 2)", () => {
       [{ code: "P0001", message: "job_not_selling" }, 409, "jobs.notSelling"],
       [{ code: "P0001", message: "job_not_closed" }, 409, "jobs.notClosed"],
       [{ code: "P0001", message: "job_closed" }, 409, "jobs.closed"],
+      [{ code: "P0001", message: "closes_at_passed" }, 409, "jobs.closesAtPassed"],
       [{ code: "P0002", message: "Job not found" }, 404, undefined],
       [{ code: "42501", message: "Owners and admins only" }, 403, undefined],
       [{ code: "P0001", message: "something_else" }, 500, undefined],
@@ -424,7 +429,12 @@ describe("GET /internal/cron/jobs", () => {
         headers: auth ? { authorization: auth } : {},
       }),
     );
-  beforeEach(() => vi.stubEnv("CRON_SECRET", SECRET));
+  const GITHUB = "g".repeat(40);
+  beforeEach(() => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    vi.stubEnv("GITHUB_CRON_SECRET", "");
+    databases.regions = ["ca"];
+  });
 
   it("refuses anyone without the cron secret", async () => {
     // The refusal is logged by name only (no secret, no request details); cleared below.
@@ -453,6 +463,61 @@ describe("GET /internal/cron/jobs", () => {
       ["ca", "close_due_jobs", { p_limit: 500 }],
       ["ca", "prune_notifications", { p_limit: 1000 }],
     ]);
+  });
+
+  it("accepts GitHub's own secret once it is set, and Vercel's still (security review M1)", async () => {
+    systemRpc.mockResolvedValue({ data: 0, error: null });
+    expect((await cron(`Bearer ${GITHUB}`)).status).toBe(401);
+    for (const spy of logs) spy.mockClear();
+    vi.stubEnv("GITHUB_CRON_SECRET", GITHUB);
+    expect((await cron(`Bearer ${GITHUB}`)).status).toBe(200);
+    expect((await cron(`Bearer ${SECRET}`)).status).toBe(200);
+    expect((await cron(`Bearer ${GITHUB}x`)).status).toBe(401);
+    for (const spy of logs) spy.mockClear();
+  });
+
+  it("refuses everyone when GITHUB_CRON_SECRET is misconfigured, naming only the variable", async () => {
+    vi.stubEnv("GITHUB_CRON_SECRET", SECRET);
+    const res = await cron(`Bearer ${SECRET}`);
+    expect(res.status).toBe(500);
+    expect(systemRpc).not.toHaveBeenCalled();
+    const logged = JSON.stringify(logs.flatMap((spy) => spy.mock.calls));
+    expect(logged).toContain("GITHUB_CRON_SECRET must be different");
+    expect(logged).not.toContain(SECRET);
+    for (const spy of logs) spy.mockClear();
+  });
+
+  it("gives each region its share of the time, so a backlog in one never starves the next (S2)", async () => {
+    databases.regions = ["us", "ca"];
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    systemRpc.mockImplementation(async (region: string, fn: string) => {
+      if (fn === "close_due_jobs" && region === "us") {
+        now += 10_000; // a full page every time: the US backlog never ends
+        return { data: 500, error: null };
+      }
+      return { data: fn === "close_due_jobs" ? 2 : 1, error: null };
+    });
+    const res = await cron(`Bearer ${SECRET}`);
+    clock.mockRestore();
+    expect(res.status).toBe(200);
+    const calls = systemRpc.mock.calls.map((c) => `${c[0]} ${c[1]}`);
+    expect(calls.filter((c) => c === "us close_due_jobs")).toHaveLength(3);
+    expect(calls).toContain("ca close_due_jobs");
+    expect(calls).toContain("ca prune_notifications");
+  });
+
+  it("skips a region this function can't serve but still runs the others (D113)", async () => {
+    databases.regions = ["us", "ca"];
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    systemRpc.mockResolvedValue({ data: 1, error: null });
+    const res = await cron(`Bearer ${SECRET}`);
+    expect(res.status).toBe(200);
+    expect(new Set(systemRpc.mock.calls.map((c) => c[0]))).toEqual(new Set(["us"]));
+    expect(JSON.stringify(logs.flatMap((spy) => spy.mock.calls))).toContain(
+      "jobs_cron_region_skipped",
+    );
+    for (const spy of logs) spy.mockClear();
   });
 
   it("refuses to work on Canadian data outside Montréal (D113)", async () => {

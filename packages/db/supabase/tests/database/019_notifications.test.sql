@@ -6,7 +6,7 @@
 -- and reading them writes no event (Q3).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(58);
+select plan(60);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -170,6 +170,13 @@ select is((select count(*) from public.notifications n join public.studio_member
   'every notification is for a member of its own studio');
 select is((select count(*) from public.events), (select n from counts where k = 'events') + 13,
   'making them writes no event of its own (Q3): only the 13 events above');
+-- 9. An event whose subject isn't one of its studio's jobs (a future emitter's mistake) makes no notification and
+-- doesn't fail the write that caused it.
+select lives_ok($$ insert into public.events (studio_id, type, actor_id, subject_id, data)
+  values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'job.selling', null, 'a0000000-0000-4000-8000-000000000001',
+  '{"from": "draft"}') $$, 'an event pointing at another studio''s job is still written');
+select is((select count(*) from public.notifications where studio_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'),
+  1::bigint, 'and tells nobody');
 
 -- ── Ids and counts only (D96) ─────────────────────────────────────────────────────────────────────────────────────
 select is((select count(*) from public.notifications where data::text ~ '(Maya|Johnson|example|A Fall|acct_)'),

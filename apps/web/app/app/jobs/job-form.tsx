@@ -69,7 +69,7 @@ export function JobForm({
   const t = useTranslations("app.jobs");
   const ta = useTranslations("app");
   const tc = useTranslations("app.contacts");
-  const tc2 = useTranslations("app.job.closing");
+  const tClosing = useTranslations("app.job.closing");
   const text = useApiText();
   const [name, setName] = useState(job?.name ?? "");
   const [pictureDay, setPictureDay] = useState(job?.pictureDay ?? "");
@@ -221,7 +221,7 @@ export function JobForm({
             {showClosing ? (
               <div className="sm:col-span-2">
                 <ClosingDateField
-                  label={ta("optionalLabel", { label: tc2("label") })}
+                  label={ta("optionalLabel", { label: tClosing("label") })}
                   value={closing}
                   onChange={setClosing}
                   error={text.field(errors.closesAt)}

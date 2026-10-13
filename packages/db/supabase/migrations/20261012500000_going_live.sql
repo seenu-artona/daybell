@@ -153,8 +153,10 @@ $$;
 -- Opens a draft's shop (expected 'draft') or reopens a closed one (expected 'closed'), once nothing blocks it. The
 -- job's tagging lock first (as Mark reviewed and tagging runs take it), so a review can't reopen between the check and
 -- the write; then the job's row, FOR NO KEY UPDATE so photo and roster writes (which only key-share it) never wait on
--- it. Named errors without values: already_selling, job_closed (use Reopen), job_not_closed, and not_ready, whose
--- DETAIL lists the blockers' keys.
+-- it. Named errors without values: already_selling, job_closed (use Reopen), job_not_closed, closes_at_passed (a
+-- closing date that has already gone by: the owner changes or removes it first, rather than a shop the next cron run
+-- closes at once; orchestrator's M3 call), and not_ready, whose DETAIL lists the blockers' keys. An unknown job is
+-- refused exactly like another studio's (42501), so nobody learns whether a job id exists.
 create function app.go_live(p_actor uuid, p_job_id uuid, p_expected public.job_status) returns timestamptz
 language plpgsql security definer
 set search_path = ''
@@ -163,14 +165,15 @@ declare
   v_studio uuid := (select j.studio_id from public.jobs j where j.id = p_job_id);
   v_previous text;
   v_status public.job_status;
+  v_closes_at timestamptz;
   v_blockers text[];
 begin
   if v_studio is null then
-    raise exception 'Job not found' using errcode = 'P0002';
+    raise exception 'Owners, admins and photographers only' using errcode = '42501';
   end if;
   v_previous := app.act_for_manager(p_actor, v_studio);
   perform pg_advisory_xact_lock(hashtextextended('tagging:' || p_job_id::text, 0));
-  select j.status into v_status from public.jobs j where j.id = p_job_id for no key update;
+  select j.status, j.closes_at into v_status, v_closes_at from public.jobs j where j.id = p_job_id for no key update;
   if v_status is distinct from p_expected then
     if p_expected = 'closed' then
       raise exception 'job_not_closed' using errcode = 'P0001';
@@ -179,6 +182,9 @@ begin
     else
       raise exception 'job_closed' using errcode = 'P0001';
     end if;
+  end if;
+  if v_closes_at <= now() then
+    raise exception 'closes_at_passed' using errcode = 'P0001';
   end if;
   v_blockers := app.sell_blockers(p_job_id);
   if cardinality(v_blockers) > 0 then
@@ -208,6 +214,7 @@ as $$
 $$;
 
 -- Close shop (call 2): a selling job closes now, and its closing date goes. One job.closed {scheduled: false} event.
+-- An unknown job is refused like another studio's (42501), as in go_live.
 create function public.close_job(p_actor uuid, p_job_id uuid) returns timestamptz
 language plpgsql security definer
 set search_path = ''
@@ -218,7 +225,7 @@ declare
   v_status public.job_status;
 begin
   if v_studio is null then
-    raise exception 'Job not found' using errcode = 'P0002';
+    raise exception 'Owners, admins and photographers only' using errcode = '42501';
   end if;
   v_previous := app.act_for_manager(p_actor, v_studio);
   select j.status into v_status from public.jobs j where j.id = p_job_id for no key update;
@@ -365,7 +372,9 @@ as $$
 $$;
 
 -- One notification per member of the event's studio in the kind's audience; the person who did it isn't told about
--- their own action when p_exclude_actor. A repeat (same event, or same batch and kind) adds nothing.
+-- their own action when p_exclude_actor. A repeat (same event, or same batch and kind) adds nothing. A job id that
+-- isn't one of the studio's jobs (a future emitter passing some other subject) makes no notification rather than
+-- failing the composite key, which would roll back the change that wrote the event: a missing bell never blocks work.
 create function app.notify(p_event_id bigint, p_studio_id uuid, p_actor uuid, p_kind public.notification_kind,
   p_job_id uuid, p_batch_id uuid, p_data jsonb, p_exclude_actor boolean) returns void
 language sql security definer
@@ -376,6 +385,8 @@ as $$
   from public.studio_members m
   where m.studio_id = p_studio_id and m.role = any (app.notification_audience(p_kind))
     and (not p_exclude_actor or m.user_id is distinct from p_actor)
+    and (p_job_id is null
+      or exists (select 1 from public.jobs j where j.id = p_job_id and j.studio_id = p_studio_id))
   on conflict do nothing;
 $$;
 
