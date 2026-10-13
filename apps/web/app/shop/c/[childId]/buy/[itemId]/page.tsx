@@ -2,7 +2,6 @@
 
 import type { ShopGalleryResponse, ShopPriceListResponse } from "@daybell/api";
 import { hasQuantity } from "@daybell/core";
-import { cn } from "@daybell/ui";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -10,6 +9,7 @@ import { bagCount, shopApi } from "@/lib/shop-client";
 import { DockedCta } from "../../../../_components/docked-cta";
 import { money, useContents, useRefusal } from "../../../../_components/format";
 import { Loading, MessageScreen } from "../../../../_components/message-screen";
+import { PosePicker } from "../../../../_components/pose-picker";
 import { ProtectedImage } from "../../../../_components/protected-image";
 import { Quantity } from "../../../../_components/quantity";
 import { useShop } from "../../../../_components/shop-context";
@@ -132,35 +132,12 @@ function Pose() {
                 />
               </div>
             ) : null}
-            <fieldset className="m-0 mt-5 border-0 p-0">
-              <legend className="mb-2 p-0 text-title-sm">{t("pose.legend")}</legend>
-              <div className="grid grid-cols-4 gap-2">
-                {portraits.map((p, index) => (
-                  <label key={p.id} className="relative block cursor-pointer">
-                    <input
-                      type="radio"
-                      name="pose"
-                      value={p.id}
-                      checked={pose === p.id}
-                      onChange={() => setPose(p.id)}
-                      className="peer absolute inset-0 size-full cursor-pointer opacity-0"
-                    />
-                    <span
-                      className={cn(
-                        "block aspect-[4/5] overflow-hidden rounded-md bg-subtle outline-offset-2 peer-focus-visible:outline-3 peer-focus-visible:outline-studio-ring",
-                        pose === p.id && "outline-3 outline-studio-ring",
-                      )}
-                    >
-                      <ProtectedImage
-                        src={p.thumbUrl}
-                        alt={t("pose.poseAlt", { n: index + 1, total: portraits.length })}
-                        onError={onImageError}
-                      />
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <PosePicker
+              portraits={portraits}
+              value={pose}
+              onChange={setPose}
+              onImageError={onImageError}
+            />
             {hasQuantity(item.kind) ? (
               <div className="mt-5 flex items-center justify-between gap-3">
                 <span className="text-title-sm" aria-hidden="true">
