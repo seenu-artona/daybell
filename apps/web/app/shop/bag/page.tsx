@@ -1,7 +1,7 @@
 "use client";
 
 import type { ShopCartLine, ShopCartResponse } from "@daybell/api";
-import { hasQuantity } from "@daybell/core";
+import { hasQuantity, type ShopShippingMethod } from "@daybell/core";
 import { cn } from "@daybell/ui";
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -21,7 +21,8 @@ import { shopButton, shopIconButton } from "../_components/styles";
 /**
  * A gallery's bag (`?gallery=`, else the device's first): lines by child, priced now; lines that can't be bought any
  * more are marked and not counted; delivery to school or home (call 9); the total before tax, announced when it
- * changes (code review S2). Paying arrives with checkout (step 10).
+ * changes (code review S2). A delivery choice shows at once and goes back if the bag refuses it, with the reason
+ * announced (D91). Paying arrives with checkout (step 10).
  *
  * The bag is read once when the page opens (and again only after a change the parent makes): code review M1 found the
  * first version refetching in a loop, using up the network's request budget.
@@ -38,6 +39,10 @@ function Bag() {
   const [cart, setCart] = useState<ShopCartResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The delivery the parent just chose, shown checked at once while the bag saves it (e2e: a radio that waited for
+  // the answer didn't change when clicked); cleared when the answer comes, so a refusal puts the saved one back.
+  const [choosing, setChoosing] = useState<ShopShippingMethod | null>(null);
+  const choice = useRef(0);
   const deliveryId = useId();
 
   // The latest way to apply an answer, without making the load below depend on it.
@@ -75,6 +80,17 @@ function Bag() {
     setBusy(true);
     apply.current(await call(galleryId));
     setBusy(false);
+  };
+
+  // Only the latest choice's answer counts. The radios stay enabled while it saves so focus and arrow keys keep working.
+  const choose = async (method: ShopShippingMethod) => {
+    if (!galleryId) return;
+    const mine = ++choice.current;
+    setChoosing(method);
+    const result = await shopApi.setShipping(galleryId, method);
+    if (mine !== choice.current) return;
+    apply.current(result);
+    setChoosing(null);
   };
 
   const children = gallery?.children ?? [];
@@ -202,11 +218,10 @@ function Bag() {
                           type="radio"
                           name="delivery"
                           value={method}
-                          checked={cart.shipping.method === method}
-                          disabled={busy}
+                          checked={(choosing ?? cart.shipping.method) === method}
                           aria-labelledby={`${deliveryId}-${method}`}
                           aria-describedby={`${deliveryId}-${method}-price`}
-                          onChange={() => void act((g) => shopApi.setShipping(g, method))}
+                          onChange={() => void choose(method)}
                           className="size-5 accent-studio-ring"
                         />
                         <span id={`${deliveryId}-${method}`} className="flex-1 text-sm">

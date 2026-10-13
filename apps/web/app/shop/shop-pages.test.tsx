@@ -165,6 +165,32 @@ describe("the bag (code review M1, S2)", () => {
     expect(live?.textContent).toContain("Total $19.00");
   });
 
+  it("checks a delivery radio as soon as it's clicked, and puts the saved one back if the bag refuses (D91)", async () => {
+    api.cart.mockResolvedValue(ok(cart(1, "home")));
+    let answer: (r: unknown) => void = () => {};
+    api.setShipping.mockReturnValue(
+      new Promise((r) => {
+        answer = r;
+      }),
+    );
+    await render(<BagPage />);
+    const school = container.querySelector<HTMLInputElement>('input[value="school"]');
+    const home = container.querySelector<HTMLInputElement>('input[value="home"]');
+    expect(home?.checked).toBe(true);
+    await act(async () => school?.click());
+    expect(school?.checked).toBe(true);
+    expect(home?.checked).toBe(false);
+    expect(school?.disabled).toBe(false);
+    expect(api.setShipping).toHaveBeenCalledWith(G, "school");
+    await act(async () =>
+      answer({ ok: false, status: 503, code: "network", form: null, retryAfter: null }),
+    );
+    await wait(20);
+    expect(school?.checked).toBe(false);
+    expect(home?.checked).toBe(true);
+    expect(container.querySelector('[role="alert"]')?.textContent).not.toBe("");
+  });
+
   it("names each delivery radio by its words alone, its price as its description (S4)", async () => {
     api.cart.mockResolvedValue(ok(cart(1)));
     await render(<BagPage />);
