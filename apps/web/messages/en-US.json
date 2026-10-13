@@ -1232,6 +1232,7 @@
       "notConfigured": "Payouts aren’t set up in this environment.",
       "platformSetup": "Daybell’s platform setup with Stripe isn’t finished yet, so payouts can’t be set up. Please contact Daybell support.",
       "noContactEmail": "Stripe needs an email address for your payout account, and your sign-in has none. Please contact Daybell support.",
+      "createConflict": "Payout setup needs Daybell support to finish.",
       "status": {
         "title": "Connection",
         "notStarted": "Not started",

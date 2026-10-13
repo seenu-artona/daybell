@@ -8,8 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // account is recorded before Daybell's default schedule is set, as its own step (security review 1).
 // Stripe and the database are faked; row-level security is covered by 015_payouts.test.sql.
 vi.mock("server-only", () => ({}));
-const { scope, writeRpc, systemRpc, provider } = vi.hoisted(() => ({
+const { scope, emailOf, writeRpc, systemRpc, provider } = vi.hoisted(() => ({
   scope: vi.fn(),
+  emailOf: vi.fn(),
   writeRpc: vi.fn(),
   systemRpc: vi.fn(),
   provider: {
@@ -26,6 +27,7 @@ const { scope, writeRpc, systemRpc, provider } = vi.hoisted(() => ({
 vi.mock("@/lib/studio", async (original) => ({
   ...(await original<typeof import("@/lib/studio")>()),
   studioScope: () => scope(),
+  userEmail: () => emailOf(),
 }));
 vi.mock("@/lib/supabase/service", () => ({ payoutWriteRpc: writeRpc, payoutSystemRpc: systemRpc }));
 vi.mock("@/lib/stripe", async (original) => ({
@@ -126,12 +128,9 @@ function signIn(
   email: string | null = EMAIL,
 ) {
   const db = fakeDatabase(rows);
-  scope.mockResolvedValue({
-    supabase: db.supabase,
-    studio: as(role, region),
-    userId: "user-1",
-    email,
-  });
+  scope.mockResolvedValue({ supabase: db.supabase, studio: as(role, region), userId: "user-1" });
+  // Only the onboarding link asks for it (security review N2).
+  emailOf.mockResolvedValue(email);
   return db;
 }
 
@@ -517,6 +516,28 @@ describe("POST /studio/payouts/onboarding-link: Stripe's platform setup (ADR 002
       ["stripe_account_create_unknown", STUDIO],
     ]);
     expect(writeRpc).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("an idempotency conflict on the create tells the owner support must finish, and logs the studio id only (security review N1)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    signIn("owner", {});
+    const { StripeCallError } = await import("@/lib/stripe");
+    provider.createAccount.mockRejectedValueOnce(
+      new StripeCallError("Payout setup needs Daybell support to finish.", "create", "unknown", {
+        form: "payouts.createConflict",
+      }),
+    );
+    const res = await routes.onboarding();
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toMatchObject({
+      code: "internal",
+      fields: { form: "payouts.createConflict" },
+    });
+    expect(log.mock.calls).toEqual([["stripe_account_create_conflict", STUDIO]]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("maya");
+    expect(writeRpc).not.toHaveBeenCalled();
+    expect(provider.createAccountLink).not.toHaveBeenCalled();
     log.mockRestore();
   });
 });

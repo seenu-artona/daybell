@@ -1,5 +1,5 @@
 import "server-only";
-import { ApiError, PAYOUT_PLATFORM_SETUP } from "@daybell/api";
+import { ApiError, PAYOUT_CREATE_CONFLICT, PAYOUT_PLATFORM_SETUP } from "@daybell/api";
 import Stripe from "stripe";
 import { StripeCallError, type StripeOutcome, type StripeStage } from "./errors";
 import {
@@ -114,6 +114,12 @@ function failed(stage: StripeStage, err: unknown): never {
       outcome,
       { form: PAYOUT_PLATFORM_SETUP },
     );
+  // The create's idempotency key was used before with other parameters (e.g. the owner's email changed since a failed
+  // try; security review N1). Retrying won't help: support finds the account by its daybell_studio_id metadata.
+  if (stage === "create" && type === "StripeIdempotencyError")
+    throw new StripeCallError("Payout setup needs Daybell support to finish.", stage, outcome, {
+      form: PAYOUT_CREATE_CONFLICT,
+    });
   throw new StripeCallError("We couldn't reach Stripe. Please try again.", stage, outcome);
 }
 

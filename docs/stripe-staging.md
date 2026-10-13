@@ -181,6 +181,10 @@ Other alert lines (the studio id only, never the Stripe id):
 - `stripe_account_create_unknown <studio>`: the create timed out or Stripe answered 5xx, so an account may exist. The
   owner's next click gets the same account (same key, within 30 days). If nobody retries, find the account in the
   Stripe Dashboard by its `daybell_studio_id` metadata.
+- `stripe_account_create_conflict <studio>`: Stripe refused the create as an idempotency conflict (the studio's key was
+  used before with other parameters, e.g. the owner's email changed after a failed try). Retrying won't help; the owner
+  sees "Payout setup needs Daybell support to finish." Find the account (if any) by its `daybell_studio_id` metadata
+  and finish the setup (ADR 0020 section 16).
 - `stripe_account_unrecorded <studio>`: Stripe made the account but Daybell couldn't read it back or record it. The same
   applies: the next click records it; otherwise support finds it by its metadata.
 - `stripe_schedule_default_failed`: the account is recorded but its default schedule couldn't be set. Refresh (coming

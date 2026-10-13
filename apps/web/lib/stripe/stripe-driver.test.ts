@@ -344,7 +344,7 @@ describe("stripeDriver", () => {
       // A 5xx, a lost connection or timeout, or the same key still running: an account may exist.
       ["StripeAPIError", "unknown"],
       ["StripeConnectionError", "unknown"],
-      ["StripeIdempotencyError", "unknown"],
+      // StripeIdempotencyError (also unknown) has its own test below.
     ])("a create failing with %s is stage create, %s", async (type, outcome) => {
       const log = vi.spyOn(console, "error").mockImplementation(() => {});
       client.v2.core.accounts.create.mockRejectedValueOnce(
@@ -355,6 +355,39 @@ describe("stripeDriver", () => {
       expect(err).toMatchObject({ code: "internal", stage: "create", outcome, fields: undefined });
       expect(log).toHaveBeenCalledWith("stripe_error", "create", type, "none", "none");
       expect(JSON.stringify(log.mock.calls)).not.toContain("jane");
+      log.mockRestore();
+    });
+
+    it("an idempotency conflict on the create asks for Daybell support; elsewhere it's the general error (security review N1)", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const conflict = () =>
+        new StripeError(
+          "Keys for idempotent requests can only be used with the same parameters",
+          undefined,
+          {
+            type: "StripeIdempotencyError",
+          },
+        );
+      client.v2.core.accounts.create.mockRejectedValueOnce(conflict());
+      await expect(driver.createAccount(newAccount)).rejects.toMatchObject({
+        code: "internal",
+        message: "Payout setup needs Daybell support to finish.",
+        stage: "create",
+        outcome: "unknown",
+        fields: { form: "payouts.createConflict" },
+      });
+      expect(log).toHaveBeenCalledWith(
+        "stripe_error",
+        "create",
+        "StripeIdempotencyError",
+        "none",
+        "none",
+      );
+      client.accounts.retrieve.mockRejectedValueOnce(conflict());
+      await expect(driver.retrieveAccount("acct_1")).rejects.toMatchObject({
+        message: "We couldn't reach Stripe. Please try again.",
+        fields: undefined,
+      });
       log.mockRestore();
     });
 

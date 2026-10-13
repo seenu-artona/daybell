@@ -2,6 +2,7 @@
 
 import {
   PAYOUT_CONFLICTS,
+  PAYOUT_CREATE_CONFLICT,
   PAYOUT_NO_CONTACT_EMAIL,
   PAYOUT_NOT_CONFIGURED,
   PAYOUT_PLATFORM_SETUP,
@@ -77,8 +78,8 @@ function CardSection({ title, children }: { title: string; children: React.React
 
 /**
  * The app.payouts message for a payout error's form code, or null for the general error text (code review N5): already
- * connected, not connected, not set up in this environment, Daybell's Stripe platform setup not finished, and no
- * sign-in email for Stripe's contact email.
+ * connected, not connected, not set up in this environment, Daybell's Stripe platform setup not finished, no
+ * sign-in email for Stripe's contact email, and an account create only Daybell support can finish.
  */
 export function payoutProblemKey(
   fields: Record<string, string>,
@@ -88,6 +89,7 @@ export function payoutProblemKey(
   | "notConfigured"
   | "platformSetup"
   | "noContactEmail"
+  | "createConflict"
   | null {
   switch (fields.form) {
     case PAYOUT_CONFLICTS.alreadyConnected:
@@ -100,6 +102,8 @@ export function payoutProblemKey(
       return "platformSetup";
     case PAYOUT_NO_CONTACT_EMAIL:
       return "noContactEmail";
+    case PAYOUT_CREATE_CONFLICT:
+      return "createConflict";
     default:
       return null;
   }

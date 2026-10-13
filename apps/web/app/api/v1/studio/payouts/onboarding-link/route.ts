@@ -1,4 +1,9 @@
-import { ApiError, PAYOUT_NO_CONTACT_EMAIL, type PayoutLinkResponse } from "@daybell/api";
+import {
+  ApiError,
+  PAYOUT_CREATE_CONFLICT,
+  PAYOUT_NO_CONTACT_EMAIL,
+  type PayoutLinkResponse,
+} from "@daybell/api";
 import { NextResponse } from "next/server";
 import { handle } from "@/lib/api";
 import {
@@ -14,7 +19,7 @@ import {
 } from "@/lib/payouts";
 import { assertFunctionRegion, assertPayoutRegion } from "@/lib/region-guard";
 import { assertStripeLink, payments, type StripeAccountData, StripeCallError } from "@/lib/stripe";
-import { assertCanManagePayouts, studioScope } from "@/lib/studio";
+import { assertCanManagePayouts, studioScope, userEmail } from "@/lib/studio";
 import { payoutWriteRpc } from "@/lib/supabase/service";
 
 export const runtime = "nodejs";
@@ -38,7 +43,7 @@ export const preferredRegion = "yul1";
  * link is never logged.
  */
 export const POST = handle(async () => {
-  const { supabase, studio, userId, email } = await studioScope();
+  const { supabase, studio, userId } = await studioScope();
   assertCanManagePayouts(studio);
   assertPayoutRegion(studio.region);
   assertFunctionRegion(studio.region);
@@ -47,10 +52,12 @@ export const POST = handle(async () => {
   let accountId = (await loadPayoutAccountRow(supabase, studio.id))?.stripe_account_id ?? null;
   if (!accountId) {
     // Stripe requires a contact email with the recipient configuration (step 7c): without one, Stripe isn't asked.
+    // Asked only here, after the owner check (security review N2).
+    const email = await userEmail(supabase);
     if (!email)
       throw new ApiError(
         "conflict",
-        "Stripe needs an email address for your payout account. Please contact Daybell support.",
+        "Stripe needs an email address for your payout account, and your sign-in has none. Please contact Daybell support.",
         { form: PAYOUT_NO_CONTACT_EMAIL },
       );
     const fetchedAt = stripeFetchTime();
@@ -68,8 +75,11 @@ export const POST = handle(async () => {
       });
     } catch (err) {
       // Refused: Stripe made nothing. Otherwise an account may exist: the studio id only (never anything personal), so
-      // support can match it to the account's daybell_studio_id metadata.
-      if (!(err instanceof StripeCallError && err.outcome === "refused"))
+      // support can match it to the account's daybell_studio_id metadata. An idempotency conflict (the key's earlier
+      // request had other parameters, e.g. a different email; security review N1) has its own line: support finishes.
+      if (err instanceof StripeCallError && err.fields?.form === PAYOUT_CREATE_CONFLICT)
+        console.error("stripe_account_create_conflict", studio.id);
+      else if (!(err instanceof StripeCallError && err.outcome === "refused"))
         console.error("stripe_account_create_unknown", studio.id);
       throw err;
     }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const { ensureStudio } = await import("./studio");
+const { ensureStudio, userEmail } = await import("./studio");
 
 type RpcResult = { data: unknown; error: { code: string } | null };
 
@@ -48,5 +48,32 @@ describe("ensureStudio", () => {
     const invited = fakeSupabase([], []);
     await ensureStudio(invited.supabase, user({}));
     expect(invited.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("userEmail (security review N2, N3)", () => {
+  const auth = (user: Record<string, unknown> | null) => ({
+    auth: { getUser: vi.fn(async () => ({ data: { user: user as never } })) },
+  });
+
+  it("returns the verified user's sign-in email, never user_metadata.email", async () => {
+    const supabase = auth({
+      id: "u1",
+      email: "owner@example.test",
+      user_metadata: { email: "forged@example.test" },
+    });
+    expect(await userEmail(supabase)).toBe("owner@example.test");
+    expect(supabase.auth.getUser).toHaveBeenCalledOnce();
+  });
+
+  it("returns null when the account has no email, even if user_metadata has one", async () => {
+    for (const email of ["", undefined])
+      expect(
+        await userEmail(auth({ id: "u1", email, user_metadata: { email: "forged@example.test" } })),
+      ).toBeNull();
+  });
+
+  it("refuses when nobody is signed in", async () => {
+    await expect(userEmail(auth(null))).rejects.toMatchObject({ code: "not_signed_in" });
   });
 });
