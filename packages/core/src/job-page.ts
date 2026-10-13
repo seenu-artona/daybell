@@ -127,13 +127,50 @@ export function closingDateAllowed(closesAt: Date, now: Date = new Date()): bool
  * date is stored as this moment, in the time zone of whoever set it (ADR 0021, Q2); daylight saving is handled by the
  * platform's local time.
  */
-export function endOfLocalDay(day: string): Date {
+export function endOfLocalDay(day: string, timeZone?: string): Date {
   const [y, m, d] = day.split("-").map(Number) as [number, number, number];
-  return new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+  if (!timeZone) return new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+  // Midnight starting the next day in `timeZone`: guess it as UTC, then correct by that zone's offset (twice, for DST edges).
+  const target = Date.UTC(y, m - 1, d + 1, 0, 0, 0, 0);
+  let at = target;
+  for (let i = 0; i < 2; i += 1) at = target - zoneOffsetMs(new Date(at), timeZone);
+  return new Date(at);
+}
+
+/** The zone's offset from UTC at `date`, in milliseconds (positive east of Greenwich). */
+function zoneOffsetMs(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour"),
+    get("minute"),
+    get("second"),
+  );
+  return asUtc - Math.floor(date.getTime() / 1000) * 1000;
 }
 
 /** The local calendar day a closing moment ends (the day before its local midnight), for the date field. */
-export function closingDay(closesAt: string | Date): string {
-  const at = new Date(closesAt);
-  return localDay(new Date(at.getTime() - 1));
+export function closingDay(closesAt: string | Date, timeZone?: string): string {
+  const at = new Date(new Date(closesAt).getTime() - 1);
+  if (!timeZone) return localDay(at);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(at);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   campaignsMaySend,
   closingDateAllowed,
@@ -119,34 +119,37 @@ describe("closingDateAllowed", () => {
 });
 
 describe("endOfLocalDay and closingDay (ADR 0021, Q2)", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
+  // Time zones are passed explicitly: switching process TZ at run time is not reliable across Node builds.
   it("is the next local midnight, in the setter's own time zone", () => {
-    vi.stubEnv("TZ", "America/Toronto");
-    expect(endOfLocalDay("2026-11-20").toISOString()).toBe("2026-11-21T05:00:00.000Z");
-    vi.stubEnv("TZ", "America/Vancouver");
-    expect(endOfLocalDay("2026-11-20").toISOString()).toBe("2026-11-21T08:00:00.000Z");
+    expect(endOfLocalDay("2026-11-20", "America/Toronto").toISOString()).toBe(
+      "2026-11-21T05:00:00.000Z",
+    );
+    expect(endOfLocalDay("2026-11-20", "America/Vancouver").toISOString()).toBe(
+      "2026-11-21T08:00:00.000Z",
+    );
   });
 
   it("handles daylight saving days and month and year ends", () => {
-    vi.stubEnv("TZ", "America/Toronto");
-    // Clocks go back on Nov 1, 2026: the day after still ends at local midnight (EST, UTC−5).
-    expect(endOfLocalDay("2026-10-31").toISOString()).toBe("2026-11-01T04:00:00.000Z");
-    expect(endOfLocalDay("2026-11-01").toISOString()).toBe("2026-11-02T05:00:00.000Z");
+    const tz = "America/Toronto";
+    // Clocks go back on Nov 1, 2026.
+    expect(endOfLocalDay("2026-10-31", tz).toISOString()).toBe("2026-11-01T04:00:00.000Z");
+    expect(endOfLocalDay("2026-11-01", tz).toISOString()).toBe("2026-11-02T05:00:00.000Z");
     // Clocks go forward on Mar 14, 2027.
-    expect(endOfLocalDay("2027-03-14").toISOString()).toBe("2027-03-15T04:00:00.000Z");
-    expect(endOfLocalDay("2026-12-31").toISOString()).toBe("2027-01-01T05:00:00.000Z");
+    expect(endOfLocalDay("2027-03-14", tz).toISOString()).toBe("2027-03-15T04:00:00.000Z");
+    expect(endOfLocalDay("2026-12-31", tz).toISOString()).toBe("2027-01-01T05:00:00.000Z");
   });
 
   it("gives back the chosen day for the date field", () => {
     for (const tz of ["America/Toronto", "America/Vancouver", "America/Halifax"]) {
-      vi.stubEnv("TZ", tz);
       for (const day of ["2026-10-31", "2026-11-01", "2027-03-14", "2027-02-28"])
-        expect(closingDay(endOfLocalDay(day))).toBe(day);
-      expect(closingDay(endOfLocalDay("2026-11-20").toISOString())).toBe("2026-11-20");
+        expect(closingDay(endOfLocalDay(day, tz), tz)).toBe(day);
+      expect(closingDay(endOfLocalDay("2026-11-20", tz).toISOString(), tz)).toBe("2026-11-20");
     }
+  });
+
+  it("uses the runtime's own zone when none is given", () => {
+    for (const day of ["2026-10-31", "2026-11-20", "2027-03-14"])
+      expect(closingDay(endOfLocalDay(day))).toBe(day);
   });
 });
 
