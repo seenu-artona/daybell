@@ -193,6 +193,18 @@ export function stripeWebhookSecrets(
 // ── The parent shop (Phase 1 step 9; ADR 0022) ───────────────────────────────────────────────────────────────────────
 
 /**
+ * SHOP_TRUST_XFF: "1" lets the parent shop count requests by the `x-forwarded-for` header (security review R6). Only for
+ * development, CI and end-to-end runs behind a local server that sets it; ignored on Vercel (VERCEL or VERCEL_ENV set),
+ * where only Vercel's own `x-vercel-forwarded-for` is read. Unset anywhere else, every request shares one strict bucket,
+ * so a deployment a client can send the header to can't be spoofed into fresh counts.
+ */
+export function shopTrustForwardedFor(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return env.SHOP_TRUST_XFF?.trim() === "1" && !env.VERCEL && !env.VERCEL_ENV;
+}
+
+/**
  * SHOP_THROTTLE_KEY: keys the HMACs the parent shop counts wrong access codes and requests by (a network, and a network
  * with a device; answer 2 and call 4 of the step 9 brief), so no address is ever stored. Standard base64 of exactly 32
  * random bytes (`openssl rand -base64 32`), different from both access code keys. Server-only, never NEXT_PUBLIC_*;

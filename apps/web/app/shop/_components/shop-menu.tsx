@@ -20,6 +20,7 @@ export function ShopMenu({ gallery }: { gallery: string | null }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
   const panelId = useId();
   const wrapper = useRef<HTMLDivElement>(null);
   const galleries = shop.state.status === "ready" ? shop.state.galleries : [];
@@ -44,10 +45,19 @@ export function ShopMenu({ gallery }: { gallery: string | null }) {
     };
   }, [open]);
 
-  /** Forgets one gallery (by id) or, with null, every gallery on the device. */
+  /**
+   * Forgets one gallery (by id) or, with null, every gallery on the device. A refusal (a busy shared address's 429, a
+   * lost connection) says so and keeps the dialog open, so a parent on a shared phone never believes it is gone (R7).
+   */
   const forget = async (which: string | null) => {
     setBusy(true);
-    await shopApi.forget(which);
+    setFailed(false);
+    const result = await shopApi.forget(which);
+    if (!result.ok) {
+      setBusy(false);
+      setFailed(true);
+      return;
+    }
     await shop.refresh();
     setBusy(false);
     setConfirming(false);
@@ -84,7 +94,10 @@ export function ShopMenu({ gallery }: { gallery: string | null }) {
       </div>
       <ShopDialog
         open={confirming}
-        onClose={() => setConfirming(false)}
+        onClose={() => {
+          setConfirming(false);
+          setFailed(false);
+        }}
         title={t("menu.forgetTitle")}
       >
         <p className="mt-2 mb-5 text-body text-muted">
@@ -92,10 +105,18 @@ export function ShopMenu({ gallery }: { gallery: string | null }) {
             ? t("menu.forgetBodyMany", { studio: current.studio.name })
             : t("menu.forgetBody")}
         </p>
+        {failed ? (
+          <p role="alert" className="mb-4 text-body text-danger">
+            {t("menu.forgetFailed")}
+          </p>
+        ) : null}
         <div className="flex flex-wrap justify-end gap-2">
           <button
             type="button"
-            onClick={() => setConfirming(false)}
+            onClick={() => {
+              setConfirming(false);
+              setFailed(false);
+            }}
             className={shopSecondaryButton}
           >
             {t("menu.cancel")}

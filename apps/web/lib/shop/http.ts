@@ -1,7 +1,7 @@
 import "server-only";
 import { ApiError, fromDatabaseError, SHOP_CONFLICTS } from "@daybell/api";
 import { availableRegions, type DataRegion } from "@daybell/config";
-import { SHOP_REQUESTS_PER_MINUTE } from "@daybell/core";
+import { SHOP_REQUESTS_PER_MINUTE, SHOP_WIDE_REQUESTS_PER_MINUTE } from "@daybell/core";
 import { NextResponse } from "next/server";
 import { handle } from "../api";
 import { assertFunctionRegion } from "../region-guard";
@@ -15,7 +15,7 @@ import {
   shopCookieSessions,
   shopCookieValue,
 } from "./session";
-import { DEVICE_COOKIE, deviceCookieOptions, networkKey } from "./throttle";
+import { budgetKeys, DEVICE_COOKIE, deviceCookieOptions } from "./throttle";
 
 /**
  * The parent shop's HTTP plumbing (ADR 0022). Every /api/v1/shop route goes through shopHandle: same-origin writes
@@ -92,12 +92,17 @@ export function shopError(error: NonNullable<DbError>): ApiError {
   return fromDatabaseError(error);
 }
 
-/** Runs one of the shop's database functions and returns its data, or throws the matching API error. */
+/**
+ * Runs one of the shop's database functions and returns its data, or throws the matching API error. Every call is
+ * first checked against the region's function region (D113; security review R5): Canadian data only from Montréal,
+ * whichever session or code named the region.
+ */
 export async function callShopFunction<T>(
   region: DataRegion,
   fn: ShopRpc,
   args: Record<string, unknown>,
 ): Promise<T> {
+  assertFunctionRegion(region);
   const { data, error } = await shopRpc(region, fn, args);
   if (error) throw shopError(error);
   return data as T;
@@ -112,18 +117,20 @@ export function fallbackRegion(): DataRegion {
 
 /**
  * Every shop request, first: in its region's function region (Canadian data in Montréal, D113), and at most 120 a
- * minute per network (Claude's call), counted in that region's database (the device's first session's, else the first
- * region's).
+ * minute per network (Claude's call) and 1,200 per IPv4 /24 or IPv6 /48 (R4), counted in that region's database (the
+ * device's first session's, else the first region's).
  */
 export async function admitShopRequest(
   request: Request,
   sessions: readonly ShopCookieSession[] = shopCookieSessions(request),
 ): Promise<void> {
   const region = sessions[0]?.region ?? fallbackRegion();
-  assertFunctionRegion(region);
+  const keys = budgetKeys(request);
   const ok = await callShopFunction<boolean>(region, "take_shop_request", {
-    p_ip_key: networkKey(request),
+    p_ip_key: keys.networkKey,
     p_limit: SHOP_REQUESTS_PER_MINUTE,
+    p_wide_key: keys.wideKey,
+    p_wide_limit: SHOP_WIDE_REQUESTS_PER_MINUTE,
   });
   if (!ok) throw new RetryLater(60, "Too many requests. Wait a minute and try again.");
 }
@@ -150,11 +157,18 @@ export async function requireShopSession(request: Request): Promise<ShopCookieSe
   return session;
 }
 
-/** Sets the device's sessions (or clears the cookie when none is left), and a new device cookie. */
+/**
+ * Sets the device's sessions (or clears the cookie when none is left), and a new device cookie, or clears the device
+ * cookie ("Forget this device", every gallery; R7).
+ */
 export function setShopCookies(
   request: Request,
   res: NextResponse,
-  cookies: { sessions?: readonly ShopCookieSession[]; device?: string | null },
+  cookies: {
+    sessions?: readonly ShopCookieSession[];
+    device?: string | null;
+    clearDevice?: boolean;
+  },
 ): NextResponse {
   const name = shopCookieName(request, SHOP_COOKIE);
   if (cookies.sessions && cookies.sessions.length === 0)
@@ -165,7 +179,9 @@ export function setShopCookies(
       shopCookieValue(cookies.sessions),
       shopCookieOptions(request, SHOP_COOKIE_MAX_AGE),
     );
-  if (cookies.device)
+  if (cookies.clearDevice)
+    res.cookies.set(shopCookieName(request, DEVICE_COOKIE), "", shopCookieOptions(request, 0));
+  else if (cookies.device)
     res.cookies.set(
       shopCookieName(request, DEVICE_COOKIE),
       cookies.device,

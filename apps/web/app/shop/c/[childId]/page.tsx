@@ -52,7 +52,8 @@ export default function GalleryPage() {
   }, [showCover]);
 
   const name = childName(child);
-  const title = <ShopTitle>{t("titles.gallery", { name })}</ShopTitle>;
+  // Never the child's name in the title: titles reach history and tab sync, and outlive "Forget this device" (R8).
+  const title = <ShopTitle>{t("titles.gallery")}</ShopTitle>;
 
   if (!child || !data || showCover === null)
     return (

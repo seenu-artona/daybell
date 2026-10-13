@@ -38,6 +38,8 @@ const key = (fill: number) => btoa(String.fromCharCode(...new Uint8Array(32).fil
 vi.stubEnv("ACCESS_CODE_HMAC_KEY", key(1));
 vi.stubEnv("ACCESS_CODE_ENCRYPTION_KEY", key(2));
 vi.stubEnv("SHOP_THROTTLE_KEY", key(3));
+// Off Vercel, x-forwarded-for is read only with SHOP_TRUST_XFF=1, as in CI (security review R6).
+vi.stubEnv("SHOP_TRUST_XFF", "1");
 
 const { galleryId } = await import("@/lib/shop/session");
 const { signDevice } = await import("@/lib/shop/throttle");
@@ -106,6 +108,7 @@ afterEach(() => {
   vi.stubEnv("ACCESS_CODE_HMAC_KEY", key(1));
   vi.stubEnv("ACCESS_CODE_ENCRYPTION_KEY", key(2));
   vi.stubEnv("SHOP_THROTTLE_KEY", key(3));
+  vi.stubEnv("SHOP_TRUST_XFF", "1");
   vi.restoreAllMocks();
 });
 
@@ -283,7 +286,8 @@ describe("POST /shop/access (answers 1–3; calls 4, 5; S5, S6)", () => {
     ]);
   });
 
-  it("gives a locked caller 429 with Retry-After, and still sets an issued device", async () => {
+  it("gives a locked caller 429 with Retry-After, and never a device cookie (R1)", async () => {
+    // Even if a database answered device_issued with locked, no device cookie is set.
     database({
       shop_enter_code: { data: { outcome: "locked", retry_after: 840, device_issued: true } },
     });
@@ -294,8 +298,15 @@ describe("POST /shop/access (answers 1–3; calls 4, 5; S5, S6)", () => {
       code: "rate_limited",
       fields: { form: "shop.locked" },
     });
-    expect(setCookie(res, "daybell_device")).toBeDefined();
+    expect(setCookie(res, "daybell_device")).toBeUndefined();
     expect(setCookie(res, "daybell_shop")).toBeUndefined();
+  });
+
+  it("sets an issued device's cookie with a wrong code's answer", async () => {
+    database({ shop_enter_code: { data: { outcome: "not_found", device_issued: true } } });
+    const res = await (await access())(request("POST", { code: CODE }));
+    expect(res.status).toBe(404);
+    expect(setCookie(res, "daybell_device")).toMatch(/^daybell_device=[A-Za-z0-9_-]{43}\.\d+\./);
   });
 
   it("logs one code-free alert when a wrong code trips the region's breaker (H1)", async () => {
@@ -314,7 +325,7 @@ describe("POST /shop/access (answers 1–3; calls 4, 5; S5, S6)", () => {
       expect(res.headers.get("retry-after")).toBe("60");
     }
     expect(calls("take_shop_request")).toHaveLength(3);
-    expect(calls("take_shop_request")[0]?.[2]).toMatchObject({ p_limit: 120 });
+    expect(calls("take_shop_request")[0]?.[2]).toMatchObject({ p_limit: 120, p_wide_limit: 1200 });
     expect(calls("shop_enter_code")).toHaveLength(0);
   });
 
@@ -341,6 +352,47 @@ describe("POST /shop/access (answers 1–3; calls 4, 5; S5, S6)", () => {
     );
     expect(form.status).toBe(400);
     expect(calls("shop_enter_code")).toHaveLength(0);
+  });
+
+  it("also counts requests per IPv4 /24 and IPv6 /48, across their addresses (R4)", async () => {
+    database({});
+    const route = await access();
+    for (const address of ["203.0.113.7", "203.0.113.99", "198.51.100.7"])
+      await route(request("POST", { code: "" }, { "x-forwarded-for": address }));
+    for (const address of ["2001:db8:1:2::1", "2001:db8:1:ff00::1", "2001:db8:2::1"])
+      await route(request("POST", { code: "" }, { "x-forwarded-for": address }));
+    const keys = calls("take_shop_request").map((c) => c[2]);
+    for (const k of keys) {
+      expect(k.p_ip_key).toMatch(HEX);
+      expect(k.p_wide_key).toMatch(HEX);
+      expect(k.p_wide_key).not.toBe(k.p_ip_key);
+    }
+    const [a, b, c, d, e, f] = keys;
+    expect([b.p_wide_key, b.p_ip_key === a.p_ip_key]).toEqual([a.p_wide_key, false]);
+    expect(c.p_wide_key).not.toBe(a.p_wide_key);
+    expect([e.p_wide_key, e.p_ip_key === d.p_ip_key]).toEqual([d.p_wide_key, false]);
+    expect(f.p_wide_key).not.toBe(d.p_wide_key);
+  });
+
+  it("off Vercel, reads x-forwarded-for only with SHOP_TRUST_XFF=1 and no VERCEL_ENV; otherwise one strict bucket (R6)", async () => {
+    database({ shop_enter_code: { data: { outcome: "not_found" } } });
+    const route = await access();
+    const netKeys = async () => {
+      rpc.mockClear();
+      for (const address of ["198.51.100.1", "198.51.100.2"])
+        await route(request("POST", { code: CODE }, { "x-forwarded-for": address }));
+      return calls("shop_enter_code").map((c) => c[2].p_net_key);
+    };
+    const [trusted1, trusted2] = await netKeys();
+    expect(trusted1).not.toBe(trusted2);
+    vi.stubEnv("SHOP_TRUST_XFF", "");
+    const [plain1, plain2] = await netKeys();
+    expect(plain1).toBe(plain2);
+    vi.stubEnv("SHOP_TRUST_XFF", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const [preview1, preview2] = await netKeys();
+    expect(preview1).toBe(preview2);
+    expect(preview1).toBe(plain1);
   });
 
   it("on Vercel, counts by Vercel's own address header only; without it, one strict bucket (L4)", async () => {
@@ -489,10 +541,10 @@ describe("GET and DELETE /shop/session (answer 3, call 11; S6)", () => {
     expect(setCookie(res, "daybell_shop")).toMatch(new RegExp(`^daybell_shop=ca\\.${TOKEN_B};`));
   });
 
-  it("forgets one gallery, keeping the others, or every gallery", async () => {
+  it("forgets one gallery, keeping the others, or every gallery and the device (R7)", async () => {
     database({ shop_forget: { data: true } });
     const { DELETE } = await routes();
-    const both = { cookie: `daybell_shop=ca.${TOKEN}~ca.${TOKEN_B}` };
+    const both = { cookie: `daybell_shop=ca.${TOKEN}~ca.${TOKEN_B}; daybell_device=${DEVICE}` };
     const one = await DELETE(
       request(
         "DELETE",
@@ -504,6 +556,9 @@ describe("GET and DELETE /shop/session (answer 3, call 11; S6)", () => {
     expect(one.status).toBe(204);
     expect(calls("shop_forget").map((c) => c[2])).toEqual([{ p_session_hash: sha(TOKEN_B) }]);
     expect(setCookie(one, "daybell_shop")).toMatch(new RegExp(`^daybell_shop=ca\\.${TOKEN};`));
+    // One gallery leaves the device alone.
+    expect(calls("shop_forget_device")).toHaveLength(0);
+    expect(setCookie(one, "daybell_device")).toBeUndefined();
     rpc.mockClear();
     const all = await DELETE(request("DELETE", undefined, both));
     expect(calls("shop_forget").map((c) => c[2])).toEqual([
@@ -511,6 +566,47 @@ describe("GET and DELETE /shop/session (answer 3, call 11; S6)", () => {
       { p_session_hash: sha(TOKEN_B) },
     ]);
     expect(setCookie(all, "daybell_shop")).toMatch(/Max-Age=0/);
+    // Every gallery: the device is no longer known, and its cookie is cleared.
+    expect(calls("shop_forget_device").map((c) => [c[0], c[2].p_device_key])).toEqual([
+      ["ca", expect.stringMatching(HEX)],
+    ]);
+    expect(setCookie(all, "daybell_device")).toMatch(/^daybell_device=;.*Max-Age=0/);
+  });
+
+  it("is 404 for a gallery not on this device, forgetting nothing (R7)", async () => {
+    database({ shop_forget: { data: true } });
+    const res = await (await routes()).DELETE(
+      request(
+        "DELETE",
+        undefined,
+        { cookie: `daybell_shop=ca.${TOKEN}; daybell_device=${DEVICE}` },
+        `http://localhost/api/v1/shop/session?gallery=${galleryId(TOKEN_B)}`,
+      ),
+    );
+    expect(res.status).toBe(404);
+    expect(calls("shop_forget")).toHaveLength(0);
+    expect(calls("shop_forget_device")).toHaveLength(0);
+    expect(setCookie(res, "daybell_shop")).toBeUndefined();
+    expect(setCookie(res, "daybell_device")).toBeUndefined();
+  });
+});
+
+describe("callShopFunction (D113; R5)", () => {
+  it("checks the function region on every call, whichever region a session or code named", async () => {
+    const { callShopFunction } = await import("@/lib/shop/http");
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    database({});
+    await expect(
+      callShopFunction("ca", "shop_cart", { p_session_hash: sha(TOKEN) }),
+    ).rejects.toMatchObject({
+      code: "region_unavailable",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(logs.flatMap((s) => s.mock.calls)).toEqual([["wrong_function_region", "ca", "iad1"]]);
+    for (const spy of logs) spy.mockClear();
+    vi.stubEnv("VERCEL_REGION", "yul1");
+    await callShopFunction("ca", "shop_cart", { p_session_hash: sha(TOKEN) });
+    expect(calls("shop_cart")).toHaveLength(1);
   });
 });
 

@@ -122,28 +122,36 @@ alter table public.shop_session_children enable row level security;
 alter table public.shop_cart_lines enable row level security;
 revoke all on public.shop_sessions, public.shop_session_children, public.shop_cart_lines from anon, authenticated;
 
--- ── Wrong codes, new devices and request counts (answer 2, call 4; security review H1, M2, M3) ─────────────────────
+-- ── Wrong codes, new devices and request counts (answer 2, call 4; security review H1, M2, M3, R1–R3, R9) ──────────
 -- In the app schema: never reachable through the Data API. A wrong guess belongs to no studio, so there is no
--- studio_id. key_hash is an HMAC made by the API (SHOP_THROTTLE_KEY), never an address or a device id. Kinds:
+-- studio_id. key_hash is an HMAC made by the API (SHOP_THROTTLE_KEY), never an address or a device id, or (the
+-- per-child counts) the SHA-256 of a label and a child's id, never a name or a code. Kinds:
 -- - device: a device the server issued (its signed cookie checked by the API), wherever it is: 5 wrong codes in 24
 --   hours lock it for 15 minutes. known: it has opened a gallery (M3); locked_at: when it was last locked.
 -- - nodevice: the one shared bucket of a network's requests without such a device: 5, like a device.
 -- - net (an IPv4 address or an IPv6 /64), wide (IPv4 /24, IPv6 /56), wider (IPv6 /48): 30, 100 and 300 wrong codes in
---   15 minutes lock the network for 15 minutes; a third of that while the breaker is tripped.
--- - issue_net, issue_wide, issue_wider: hits counts new devices issued per network in 24 hours (50, 200, 500).
--- - region: the circuit breaker, one row: 600 wrong codes in a minute across the region trip it for 15 minutes.
--- Rows are written only on a wrong code, a new device or a known device's right code: never on a locked or refused
--- request (M2). They go after 24 hours untouched (a known device's after 30 days; prune_shop).
+--   15 minutes lock the network for 15 minutes; while the breaker is tripped, a third of that for a network whose last
+--   wrong code before its current count (earlier_at) was within the hour (R2).
+-- - issue_net, issue_wide, issue_wider: hits counts new devices issued per network in 24 hours (IPv4: 500 an address,
+--   5,000 a /24; IPv6: 50 a /64, 200 a /56, 500 a /48; R1).
+-- - known_child: devices one child's code newly made known in 24 hours (3 at most; R3).
+-- - child_sessions: sessions newly showing one child in 24 hours (10 at most; R3).
+-- - region_shard: the circuit breaker's count, in 16 rows summed (R9); region: one row, whether it is tripped: 600
+--   wrong codes in a minute across the region trip it for 15 minutes.
+-- Rows are written only on a wrong code, a new device or a right code: never on a locked or refused request (M2, R1).
+-- They go after 24 hours untouched (a known device's after 30 days; prune_shop).
 create table app.shop_code_attempts (
   kind text not null check (kind in ('device', 'nodevice', 'net', 'wide', 'wider', 'issue_net', 'issue_wide',
-    'issue_wider', 'region')),
+    'issue_wider', 'known_child', 'child_sessions', 'region_shard', 'region')),
   key_hash text not null check (key_hash ~ '^[0-9a-f]{64}$'),
-  -- Wrong codes in the window (issue_* rows: devices issued).
+  -- Wrong codes in the window (issue_*, known_child and child_sessions rows: how many in 24 hours).
   hits integer not null default 0 check (hits between 0 and 1000000),
   window_start timestamptz not null default now(),
   locked_until timestamptz,
   locked_at timestamptz,
   known boolean not null default false,
+  -- The last wrong code before the current count began (R2).
+  earlier_at timestamptz,
   updated_at timestamptz not null default now(),
   primary key (kind, key_hash)
 );
@@ -151,13 +159,14 @@ comment on table app.shop_code_attempts is
   'Wrong access codes per device, network and region, and devices issued per network (HMACs only), for the lockout (ADR 0022).';
 create index shop_code_attempts_updated_idx on app.shop_code_attempts (updated_at);
 
--- Shop requests per network per minute (Claude's call: 120), the stripe_call_budget pattern.
+-- Shop requests per minute (Claude's call: 120 per network; R4: 1,200 per IPv4 /24 or IPv6 /48), the
+-- stripe_call_budget pattern.
 create table app.shop_rate (
   key_hash text primary key check (key_hash ~ '^[0-9a-f]{64}$'),
   window_start timestamptz not null,
   hits integer not null check (hits between 0 and 1000000)
 );
-comment on table app.shop_rate is 'Shop requests per network in the current minute (HMACs only; ADR 0022).';
+comment on table app.shop_rate is 'Shop requests per network and wider network in the current minute (HMACs only; ADR 0022).';
 create index shop_rate_window_idx on app.shop_rate (window_start);
 revoke all on app.shop_code_attempts, app.shop_rate from public, anon, authenticated, service_role;
 
@@ -278,9 +287,13 @@ $$;
 
 -- A wrong code for one key (the caller holds its advisory lock): counts it, and locks the key for 15 minutes when the
 -- count reaches p_limit in p_window. A lock that has run out, or (unlocked) a window that has passed, starts the count
--- again; a running lock is never extended or cleared (a known device's misses still count on a locked network, M3). A right code never resets the count, so one real code can't clear it between
--- guesses. Returns when the key is locked until, or null. (packages/core's lockoutStep is the same rule.)
-create function app.shop_code_failed(p_kind text, p_key text, p_limit integer, p_window interval)
+-- again, remembering the key's last wrong code (earlier_at). p_tripped_limit (a network's, while the breaker is
+-- tripped) applies instead only when that earlier wrong code was within the hour (R2): a network that keeps coming
+-- back is tightened, a network with a first typo isn't. A running lock is never extended or cleared (a known device's
+-- misses still count on a locked network, M3). A right code never resets the count, so one real code can't clear it
+-- between guesses. Returns when the key is locked until, or null. (packages/core's lockoutStep is the same rule.)
+create function app.shop_code_failed(p_kind text, p_key text, p_limit integer, p_window interval,
+  p_tripped_limit integer default null)
 returns timestamptz
 language plpgsql security definer
 set search_path = ''
@@ -288,66 +301,85 @@ as $$
 declare
   v app.shop_code_attempts;
   v_locking boolean := false;
+  v_limit integer;
 begin
   select * into v from app.shop_code_attempts a where a.kind = p_kind and a.key_hash = p_key;
   if v.kind is null or v.locked_until <= now()
      or (v.locked_until is null and v.window_start + p_window <= now()) then
+    v.earlier_at := v.updated_at;
     v.hits := 0;
     v.window_start := now();
     v.locked_until := null;
   end if;
+  v_limit := case when p_tripped_limit is not null and v.earlier_at > now() - interval '1 hour'
+                  then p_tripped_limit else p_limit end;
   v.hits := least(v.hits + 1, 1000000);
-  if v.locked_until is null and v.hits >= p_limit then
+  if v.locked_until is null and v.hits >= v_limit then
     v.locked_until := now() + interval '15 minutes';
     v_locking := true;
   end if;
-  insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start, locked_until, locked_at, updated_at)
-  values (p_kind, p_key, v.hits, v.window_start, v.locked_until, case when v_locking then now() end, now())
+  insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start, locked_until, locked_at, earlier_at,
+    updated_at)
+  values (p_kind, p_key, v.hits, v.window_start, v.locked_until, case when v_locking then now() end, v.earlier_at,
+    now())
   on conflict (kind, key_hash) do update
   set hits = excluded.hits, window_start = excluded.window_start, locked_until = excluded.locked_until,
-    locked_at = coalesce(excluded.locked_at, a.locked_at), updated_at = now();
+    locked_at = coalesce(excluded.locked_at, a.locked_at), earlier_at = excluded.earlier_at, updated_at = now();
   return v.locked_until;
 end;
 $$;
 
--- The region's circuit breaker (H1): every wrong code counts here; the 600th in a minute trips it for 15 minutes.
--- Returns true only on the wrong code that trips it, so the API logs one code-free alert.
-create function app.shop_breaker_failed() returns boolean
+-- The region's circuit breaker (H1): every wrong code counts here, in one of 16 rows (p_shard, 0 to 15) so wrong codes
+-- from different networks don't queue on one row (R9); the rows counted in the last minute are summed, and reaching
+-- 600 trips the breaker for 15 minutes. Returns true only on the wrong code that trips it (the region row is updated
+-- only when it isn't tripped), so the API logs one code-free alert per trip.
+create function app.shop_breaker_failed(p_shard integer) returns boolean
 language plpgsql security definer
 set search_path = ''
 as $$
 declare
-  v_hits integer;
+  v_total bigint;
 begin
   insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start)
-  values ('region', repeat('0', 64), 1, now())
+  values ('region_shard', lpad(to_hex(p_shard & 15), 64, '0'), 1, now())
   on conflict (kind, key_hash) do update
   set hits = case when a.window_start + interval '1 minute' <= now() then 1 else least(a.hits + 1, 1000000) end,
     window_start = case when a.window_start + interval '1 minute' <= now() then now() else a.window_start end,
-    updated_at = now()
-  returning a.hits into v_hits;
-  if v_hits = 600 then
-    update app.shop_code_attempts a set locked_until = now() + interval '15 minutes', locked_at = now()
-    where a.kind = 'region' and a.key_hash = repeat('0', 64);
-    return true;
+    updated_at = now();
+  select coalesce(sum(a.hits), 0) into v_total from app.shop_code_attempts a
+  where a.kind = 'region_shard' and a.window_start > now() - interval '1 minute';
+  if v_total < 600 then
+    return false;
   end if;
-  return false;
+  insert into app.shop_code_attempts as a (kind, key_hash, locked_until, locked_at)
+  values ('region', repeat('0', 64), now() + interval '15 minutes', now())
+  on conflict (kind, key_hash) do update
+  set locked_until = excluded.locked_until, locked_at = excluded.locked_at, updated_at = now()
+  where a.locked_until is null or a.locked_until <= now();
+  return found;
 end;
 $$;
 
--- A new device for a request that had none (H1): yes while the network has had fewer than 50 new devices in 24 hours
--- (its IPv4 /24 or IPv6 /56 fewer than 200, its IPv6 /48 fewer than 500), and counts it. Otherwise the request stays
--- in its network's shared no-device bucket.
+-- A new device for a request that had none (H1, R1; the caller holds the issue keys' advisory locks and has found the
+-- request not locked): yes while the network has had fewer new devices in 24 hours than its cap, and counts it. IPv4
+-- (no /48 key): 500 an address, 5,000 a /24, as a carrier's shared address can see hundreds of parents a day; IPv6: 50
+-- a /64, 200 a /56, 500 a /48. Otherwise the request stays in its network's shared no-device bucket. An unknown
+-- device never gets past the networks' ceilings, so the cap only bounds how many devices can become known (and R3
+-- bounds that per child).
 create function app.shop_issue_device(p_net_key text, p_wide_key text, p_wider_key text) returns boolean
 language plpgsql security definer
 set search_path = ''
 as $$
+declare
+  v_ipv4 boolean := p_wider_key is null;
 begin
   if exists (select 1 from app.shop_code_attempts a
              where (a.kind, a.key_hash) in (('issue_net', p_net_key), ('issue_wide', p_wide_key),
                                             ('issue_wider', p_wider_key))
                and a.window_start > now() - interval '24 hours'
-               and a.hits >= case a.kind when 'issue_net' then 50 when 'issue_wide' then 200 else 500 end) then
+               and a.hits >= case a.kind when 'issue_net' then case when v_ipv4 then 500 else 50 end
+                                         when 'issue_wide' then case when v_ipv4 then 5000 else 200 end
+                                         else 500 end) then
     return false;
   end if;
   insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start)
@@ -362,38 +394,80 @@ begin
 end;
 $$;
 
--- At most 10 sessions show a child (M2): the session just used (p_keep) and the 9 newest others; older ones go, with
--- their bags.
+-- At most 10 sessions show a child (M2, R3): the session just used (p_keep) and 9 others. When more do, the oldest
+-- others with an empty bag go; a session with anything in its bag is never forgotten here, so someone else holding the
+-- card can't empty a parent's bag (R3). The rate of new sessions per child (child_sessions, in shop_enter_code) bounds
+-- how many such sessions there can be.
 create function app.shop_trim_child_sessions(p_studio_id uuid, p_child_id uuid, p_keep uuid) returns void
 language sql security definer
 set search_path = ''
 as $$
+  with others as (
+    select sc.session_id, sc.added_at,
+      exists (select 1 from public.shop_cart_lines l
+              where l.session_id = sc.session_id and l.studio_id = p_studio_id) as has_bag
+    from public.shop_session_children sc
+    where sc.child_id = p_child_id and sc.studio_id = p_studio_id and sc.session_id <> p_keep)
   delete from public.shop_sessions s
   where s.studio_id = p_studio_id and s.id in (
-    select sc.session_id from public.shop_session_children sc
-    where sc.child_id = p_child_id and sc.studio_id = p_studio_id and sc.session_id <> p_keep
-    order by sc.added_at desc, sc.session_id desc
-    offset 9);
+    select o.session_id from others o where not o.has_bag
+    order by o.added_at, o.session_id
+    limit greatest((select count(*) from others) - (10 - 1), 0));
 $$;
 
--- A parent enters an access code (answers 1–3; calls 1, 4, 5; security review H1, M2, M3; code review S5, S6, N1).
--- The API sends HMACs only: the device (p_device_key, a device it issued and signed; or p_new_device_key, one it offers
--- when the request had none), the network (p_net_key: IPv4 address or IPv6 /64), the wider networks (p_wide_key: IPv4
--- /24 or IPv6 /56; p_wider_key: IPv6 /48, null for IPv4), the device's session hashes in this region (at most 3, one
--- per studio) and a new session's hash. In order:
--- 1. A device for a request without one, within the day's caps for its networks (never while the breaker is tripped).
--- 2. Every key's advisory lock, in one order, then any session row (N1): parallel guesses take turns, and the order is
---    the same for every call, so two tabs can't deadlock.
--- 3. The lock, before any lookup, so a locked caller learns nothing: the device's own bucket (or the network's shared
---    no-device bucket) and the networks'. A known device (one that has opened a gallery and hasn't been locked in 24
---    hours) keeps its own 5 tries while its network is locked (M3), unless the breaker is tripped.
+-- A device that opened a gallery with a right code becomes known (M3): it keeps its own allowance on a locked network.
+-- At most 3 devices a day become known through one child's code (R3), so a card can't vouch for a crowd of devices; a
+-- device already known stays so. Nothing without a device. The caller holds the child's lock (shop_enter_code).
+create function app.shop_mark_known(p_device_key text, p_child_id uuid) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_key text := encode(extensions.digest('daybell:shop:known_child:' || p_child_id::text, 'sha256'), 'hex');
+begin
+  if p_device_key is null or exists (select 1 from app.shop_code_attempts a
+                                     where a.kind = 'device' and a.key_hash = p_device_key and a.known) then
+    return;
+  end if;
+  if exists (select 1 from app.shop_code_attempts a
+             where a.kind = 'known_child' and a.key_hash = v_key
+               and a.window_start > now() - interval '24 hours' and a.hits >= 3) then
+    return;
+  end if;
+  insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start)
+  values ('known_child', v_key, 1, now())
+  on conflict (kind, key_hash) do update
+  set hits = case when a.window_start <= now() - interval '24 hours' then 1 else least(a.hits + 1, 1000000) end,
+    window_start = case when a.window_start <= now() - interval '24 hours' then now() else a.window_start end,
+    updated_at = now();
+  insert into app.shop_code_attempts as a (kind, key_hash, known) values ('device', p_device_key, true)
+  on conflict (kind, key_hash) do update set known = true, updated_at = now();
+end;
+$$;
+
+-- A parent enters an access code (answers 1–3; calls 1, 4, 5; security review H1, M2, M3, R1–R3, R9; code review S5,
+-- S6, N1). The API sends HMACs only: the device (p_device_key, a device it issued and signed; or p_new_device_key, one
+-- it offers when the request had none), the network (p_net_key: IPv4 address or IPv6 /64), the wider networks
+-- (p_wide_key: IPv4 /24 or IPv6 /56; p_wider_key: IPv6 /48, null for IPv4), the device's session hashes in this region
+-- (at most 3, one per studio) and a new session's hash. In order:
+-- 1. Every key's advisory lock, in one order, then any session row (N1): the device's bucket (or, without a device,
+--    the network's shared no-device bucket), the networks, and (when a device may be issued) the networks' issue
+--    counts. Parallel guesses take turns, and the order is the same for every call, so two tabs can't deadlock.
+-- 2. The lock, before any lookup or write, so a locked caller learns nothing and writes nothing (M2, R1): the device's
+--    own bucket (or the no-device bucket) and the networks'. A known device (one that has opened a gallery and hasn't
+--    been locked in 24 hours) keeps its own 5 tries while its network is locked (M3), breaker or not (R2).
+-- 3. Only then, for a request without a device, a new one within the day's caps for its networks (R1), breaker or not
+--    (R2); its wrong codes count on it from this one on.
 -- 4. The code's HMAC among children only (never a blank card's code, call 5; never a card code). A miss (or a null
 --    hash: a code of a region not set up here, or not a code at all) counts against the device's bucket, every network
---    and the region's breaker. A hit never resets a count.
+--    (a third while the breaker is tripped, for a network that keeps coming back, R2) and the region's breaker. A hit
+--    never resets a count.
 -- 5. A hit: a session of the code's studio on this device gets the child (added, already, limit: 5 children); else a
---    new session (opened), while the device has fewer than 3 (gallery_limit).
+--    new session (opened), while the device has fewer than 3 (gallery_limit). A child newly shown in more than 10
+--    sessions in 24 hours is refused as locked, writing nothing (R3). Opening or adding (or already) makes the device
+--    known, while the child's code has made fewer than 3 devices known in 24 hours (R3).
 -- Answers carry no codes or names: outcome, child_id, session_hash, live (the device's sessions here that still
--- last), retry_after, device_issued, and alert (this miss tripped the breaker).
+-- last), retry_after, device_issued (never with locked, R1), and alert (this miss tripped the breaker).
 create function public.shop_enter_code(p_code_hash text, p_device_key text, p_new_device_key text, p_net_key text,
   p_wide_key text, p_wider_key text, p_session_hashes text[], p_new_session_hash text)
 returns jsonb
@@ -403,6 +477,7 @@ as $$
 declare
   v_hashes text[] := coalesce(p_session_hashes, '{}');
   v_tripped boolean;
+  v_may_issue boolean := p_device_key is null and p_new_device_key is not null;
   v_device text := p_device_key;
   v_issued boolean := false;
   v_own_kind text;
@@ -413,6 +488,7 @@ declare
   v_network_until timestamptz;
   v_alert boolean;
   v_child public.children;
+  v_child_key text;
   v_session public.shop_sessions;
   v_live text[];
   v_result jsonb;
@@ -426,24 +502,21 @@ begin
     raise exception 'Send the keys and a session' using errcode = '22023';
   end if;
 
-  v_tripped := exists (select 1 from app.shop_code_attempts a
-                       where a.kind = 'region' and a.key_hash = repeat('0', 64) and a.locked_until > now());
-  if v_device is null and p_new_device_key is not null and not v_tripped
-     and app.shop_issue_device(p_net_key, p_wide_key, p_wider_key) then
-    v_device := p_new_device_key;
-    v_issued := true;
-  end if;
   v_own_kind := case when v_device is null then 'nodevice' else 'device' end;
   v_own_key := coalesce(v_device, p_net_key);
-
   for v_lock in
     select distinct hashtextextended(k, 0) from unnest(array[v_own_kind || ':' || v_own_key, 'net:' || p_net_key,
-      'wide:' || p_wide_key, 'wider:' || p_wider_key]) k where k is not null order by 1
+      'wide:' || p_wide_key, 'wider:' || p_wider_key,
+      case when v_may_issue then 'issue_net:' || p_net_key end,
+      case when v_may_issue then 'issue_wide:' || p_wide_key end,
+      case when v_may_issue then 'issue_wider:' || p_wider_key end]) k where k is not null order by 1
   loop
     perform pg_advisory_xact_lock(v_lock);
   end loop;
 
-  if v_device is not null and not v_tripped then
+  v_tripped := exists (select 1 from app.shop_code_attempts a
+                       where a.kind = 'region' and a.key_hash = repeat('0', 64) and a.locked_until > now());
+  if v_device is not null then
     select a.known and (a.locked_at is null or a.locked_at <= now() - interval '24 hours') into v_known
     from app.shop_code_attempts a where a.kind = 'device' and a.key_hash = v_device;
     v_known := coalesce(v_known, false);
@@ -454,8 +527,15 @@ begin
          or (not v_known and (a.kind, a.key_hash) in (('net', p_net_key), ('wide', p_wide_key),
                                                      ('wider', p_wider_key))));
   if v_until is not null then
-    return jsonb_build_object('outcome', 'locked', 'device_issued', v_issued,
+    return jsonb_build_object('outcome', 'locked', 'device_issued', false,
       'retry_after', greatest(ceil(extract(epoch from v_until - now()))::int, 1));
+  end if;
+
+  if v_may_issue and app.shop_issue_device(p_net_key, p_wide_key, p_wider_key) then
+    v_device := p_new_device_key;
+    v_issued := true;
+    v_own_kind := 'device';
+    v_own_key := v_device;
   end if;
 
   if p_code_hash is not null then
@@ -464,28 +544,26 @@ begin
   if v_child.id is null then
     v_until := app.shop_code_failed(v_own_kind, v_own_key, 5, interval '24 hours');
     v_network_until := greatest(
-      app.shop_code_failed('net', p_net_key, case when v_tripped then 10 else 30 end, interval '15 minutes'),
-      app.shop_code_failed('wide', p_wide_key, case when v_tripped then 30 else 100 end, interval '15 minutes'),
+      app.shop_code_failed('net', p_net_key, 30, interval '15 minutes', case when v_tripped then 10 end),
+      app.shop_code_failed('wide', p_wide_key, 100, interval '15 minutes', case when v_tripped then 30 end),
       case when p_wider_key is not null then
-        app.shop_code_failed('wider', p_wider_key, case when v_tripped then 100 else 300 end, interval '15 minutes')
+        app.shop_code_failed('wider', p_wider_key, 300, interval '15 minutes', case when v_tripped then 100 end)
       end);
-    v_alert := app.shop_breaker_failed();
+    v_alert := app.shop_breaker_failed((hashtextextended(p_net_key, 1) & 15)::integer);
     if not v_known then
       v_until := greatest(v_until, v_network_until);
     end if;
     if v_until is not null then
-      return jsonb_build_object('outcome', 'locked', 'device_issued', v_issued, 'alert', v_alert,
+      return jsonb_build_object('outcome', 'locked', 'device_issued', false, 'alert', v_alert,
         'retry_after', greatest(ceil(extract(epoch from v_until - now()))::int, 1));
     end if;
     return jsonb_build_object('outcome', 'not_found', 'device_issued', v_issued, 'alert', v_alert);
   end if;
 
-  -- A device that opens a gallery is known: it keeps its own allowance on a locked network (M3).
-  if v_device is not null then
-    insert into app.shop_code_attempts as a (kind, key_hash, known) values ('device', v_device, true)
-    on conflict (kind, key_hash) do update set known = true, updated_at = now();
-  end if;
-
+  -- One right code of a child at a time, before any session row: trimming forgets other sessions of the child, so two
+  -- devices entering the same child's code take turns rather than deadlock.
+  v_child_key := encode(extensions.digest('daybell:shop:child_sessions:' || v_child.id::text, 'sha256'), 'hex');
+  perform pg_advisory_xact_lock(hashtextextended('child_sessions:' || v_child_key, 0));
   select array_agg(s.token_hash order by s.created_at, s.id) into v_live from public.shop_sessions s
   where s.token_hash = any (v_hashes) and s.expires_at > now();
   v_live := coalesce(v_live, '{}');
@@ -494,27 +572,46 @@ begin
   order by s.created_at desc, s.id limit 1
   for update;
 
-  if v_session.id is not null then
-    v_result := jsonb_build_object('child_id', v_child.id, 'session_hash', v_session.token_hash, 'live', v_live,
-      'device_issued', v_issued);
-    if exists (select 1 from public.shop_session_children sc
+  if v_session.id is not null and exists (select 1 from public.shop_session_children sc
                where sc.session_id = v_session.id and sc.studio_id = v_session.studio_id
                  and sc.child_id = v_child.id) then
-      return v_result || jsonb_build_object('outcome', 'already');
-    end if;
-    if (select count(*) from public.shop_session_children sc
+    perform app.shop_mark_known(v_device, v_child.id);
+    return jsonb_build_object('outcome', 'already', 'child_id', v_child.id, 'session_hash', v_session.token_hash,
+      'live', v_live, 'device_issued', v_issued);
+  end if;
+  if v_session.id is not null and (select count(*) from public.shop_session_children sc
         where sc.session_id = v_session.id and sc.studio_id = v_session.studio_id) >= 5 then
-      return jsonb_build_object('outcome', 'limit', 'live', v_live, 'device_issued', v_issued);
-    end if;
+    return jsonb_build_object('outcome', 'limit', 'live', v_live, 'device_issued', v_issued);
+  end if;
+  if v_session.id is null and cardinality(v_live) >= 3 then
+    return jsonb_build_object('outcome', 'gallery_limit', 'live', v_live, 'device_issued', v_issued);
+  end if;
+
+  -- At most 10 new sessions show one child in 24 hours (R3): beyond that, locked until the day is over. Forgetting a
+  -- session doesn't give the allowance back.
+  select a.window_start + interval '24 hours' into v_until from app.shop_code_attempts a
+  where a.kind = 'child_sessions' and a.key_hash = v_child_key
+    and a.window_start > now() - interval '24 hours' and a.hits >= 10;
+  if v_until is not null then
+    return jsonb_build_object('outcome', 'locked', 'device_issued', false,
+      'retry_after', greatest(ceil(extract(epoch from v_until - now()))::int, 1));
+  end if;
+  insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start)
+  values ('child_sessions', v_child_key, 1, now())
+  on conflict (kind, key_hash) do update
+  set hits = case when a.window_start <= now() - interval '24 hours' then 1 else least(a.hits + 1, 1000000) end,
+    window_start = case when a.window_start <= now() - interval '24 hours' then now() else a.window_start end,
+    updated_at = now();
+  perform app.shop_mark_known(v_device, v_child.id);
+
+  if v_session.id is not null then
     insert into public.shop_session_children (session_id, studio_id, job_id, child_id)
     values (v_session.id, v_session.studio_id, v_child.job_id, v_child.id);
     perform app.shop_trim_child_sessions(v_child.studio_id, v_child.id, v_session.id);
-    return v_result || jsonb_build_object('outcome', 'added');
+    return jsonb_build_object('outcome', 'added', 'child_id', v_child.id, 'session_hash', v_session.token_hash,
+      'live', v_live, 'device_issued', v_issued);
   end if;
 
-  if cardinality(v_live) >= 3 then
-    return jsonb_build_object('outcome', 'gallery_limit', 'live', v_live, 'device_issued', v_issued);
-  end if;
   insert into public.shop_sessions (studio_id, token_hash) values (v_child.studio_id, p_new_session_hash)
   returning * into v_session;
   insert into public.shop_session_children (session_id, studio_id, job_id, child_id)
@@ -811,16 +908,46 @@ begin
 end;
 $$;
 
--- Counts one shop request for a network in the current minute; false once p_limit is used up (the API answers 429).
-create function public.take_shop_request(p_ip_key text, p_limit integer) returns boolean
+-- "Forget this device", every gallery (security review R7): the device is no longer known, so it loses its own
+-- allowance on a locked network. Its counts and any lock stay: forgetting never earns fresh tries.
+create function public.shop_forget_device(p_device_key text) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(p_device_key, '') !~ '^[0-9a-f]{64}$' then
+    raise exception 'Send the device key' using errcode = '22023';
+  end if;
+  update app.shop_code_attempts a set known = false, updated_at = now()
+  where a.kind = 'device' and a.key_hash = p_device_key and a.known;
+end;
+$$;
+
+-- Counts one shop request in the current minute for its wider network (an IPv4 /24 or IPv6 /48, p_wide_key, R4) and
+-- then its network (p_ip_key); false once either's limit is used up (the API answers 429). The wider network is
+-- counted first and, once it is used up, nothing is written for its networks, so rotating addresses inside it neither
+-- escapes the budget nor fills the table.
+create function public.take_shop_request(p_ip_key text, p_limit integer, p_wide_key text, p_wide_limit integer)
+returns boolean
 language plpgsql security definer
 set search_path = ''
 as $$
 declare
   v_hits integer;
 begin
-  if p_limit is null or p_limit not between 1 and 10000 or coalesce(p_ip_key, '') !~ '^[0-9a-f]{64}$' then
-    raise exception 'A key and a limit of 1 to 10000' using errcode = '22023';
+  if p_limit is null or p_limit not between 1 and 10000 or coalesce(p_ip_key, '') !~ '^[0-9a-f]{64}$'
+     or p_wide_limit is null or p_wide_limit not between 1 and 100000
+     or coalesce(p_wide_key, '') !~ '^[0-9a-f]{64}$' then
+    raise exception 'Keys and limits of 1 to 10000 (100000 for the wider network)' using errcode = '22023';
+  end if;
+  insert into app.shop_rate as r (key_hash, window_start, hits)
+  values (p_wide_key, date_trunc('minute', now()), 1)
+  on conflict (key_hash) do update
+  set hits = case when r.window_start = excluded.window_start then least(r.hits + 1, 1000000) else 1 end,
+    window_start = excluded.window_start
+  returning r.hits into v_hits;
+  if v_hits > p_wide_limit then
+    return false;
   end if;
   insert into app.shop_rate as r (key_hash, window_start, hits)
   values (p_ip_key, date_trunc('minute', now()), 1)
@@ -869,8 +996,9 @@ $$;
 revoke all on function app.guard_shop_session_child(), app.parent_visible_photos(uuid, uuid, uuid),
   app.shop_child_state(uuid), app.shop_line_available(public.shop_cart_lines),
   app.shop_line_physical(public.shop_cart_lines), app.shop_session_row(text, boolean),
-  app.shop_session_child(public.shop_sessions, uuid), app.shop_code_failed(text, text, integer, interval),
-  app.shop_breaker_failed(), app.shop_issue_device(text, text, text),
+  app.shop_session_child(public.shop_sessions, uuid),
+  app.shop_code_failed(text, text, integer, interval, integer), app.shop_breaker_failed(integer),
+  app.shop_issue_device(text, text, text), app.shop_mark_known(text, uuid),
   app.shop_trim_child_sessions(uuid, uuid, uuid)
   from public, anon, authenticated;
 -- The parent shop's work: the service role only (the /api/v1/shop routes), never browsers.
@@ -885,7 +1013,8 @@ revoke all on function
   public.shop_cart_remove(text, uuid),
   public.shop_set_shipping(text, public.shop_shipping_method),
   public.shop_forget(text),
-  public.take_shop_request(text, integer),
+  public.shop_forget_device(text),
+  public.take_shop_request(text, integer, text, integer),
   public.prune_shop(integer)
   from public, anon, authenticated;
 grant execute on function
@@ -899,7 +1028,8 @@ grant execute on function
   public.shop_cart_remove(text, uuid),
   public.shop_set_shipping(text, public.shop_shipping_method),
   public.shop_forget(text),
-  public.take_shop_request(text, integer),
+  public.shop_forget_device(text),
+  public.take_shop_request(text, integer, text, integer),
   public.prune_shop(integer)
   to service_role;
 

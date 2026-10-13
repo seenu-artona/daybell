@@ -3,9 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const key = btoa(String.fromCharCode(...new Uint8Array(32).fill(3)));
 vi.stubEnv("SHOP_THROTTLE_KEY", key);
-const { clientAddress, codeKeys, networksOf, signDevice, verifiedDevice } = await import(
-  "./throttle"
-);
+vi.stubEnv("SHOP_TRUST_XFF", "1");
+const {
+  budgetKeys,
+  clientAddress,
+  codeKeys,
+  networksOf,
+  requestDeviceKey,
+  signDevice,
+  verifiedDevice,
+} = await import("./throttle");
 const { galleryId, requestCookie, shopCookieName, shopCookieOptions, tokenHash } = await import(
   "./session"
 );
@@ -13,6 +20,7 @@ const { galleryId, requestCookie, shopCookieName, shopCookieOptions, tokenHash }
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.stubEnv("SHOP_THROTTLE_KEY", key);
+  vi.stubEnv("SHOP_TRUST_XFF", "1");
 });
 
 describe("networksOf (call 4; security review H1, L4)", () => {
@@ -55,7 +63,7 @@ describe("networksOf (call 4; security review H1, L4)", () => {
   });
 });
 
-describe("clientAddress (security review L4)", () => {
+describe("clientAddress (security review L4, R6)", () => {
   const req = (headers: Record<string, string>) => new Request("http://x", { headers });
 
   it("on Vercel, trusts only Vercel's own header", () => {
@@ -66,11 +74,57 @@ describe("clientAddress (security review L4)", () => {
     expect(clientAddress(req({ "x-forwarded-for": "1.2.3.4", "x-real-ip": "1.2.3.4" }))).toBeNull();
   });
 
-  it("off Vercel (development, CI), the local server's x-forwarded-for, then x-real-ip", () => {
+  it("off Vercel with SHOP_TRUST_XFF=1 (development, CI), the local server's x-forwarded-for, then x-real-ip", () => {
     vi.stubEnv("VERCEL", "");
     expect(clientAddress(req({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }))).toBe("203.0.113.7");
     expect(clientAddress(req({ "x-real-ip": "198.51.100.2" }))).toBe("198.51.100.2");
     expect(clientAddress(req({}))).toBeNull();
+  });
+
+  it("otherwise trusts no header: one strict bucket (R6)", () => {
+    vi.stubEnv("VERCEL", "");
+    const spoofed = req({ "x-forwarded-for": "203.0.113.7", "x-real-ip": "198.51.100.2" });
+    vi.stubEnv("SHOP_TRUST_XFF", "");
+    expect(clientAddress(spoofed)).toBeNull();
+    vi.stubEnv("SHOP_TRUST_XFF", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    expect(clientAddress(spoofed)).toBeNull();
+  });
+});
+
+describe("the request budget's keys (security review R4)", () => {
+  const req = (address: string) =>
+    new Request("http://x", { headers: { "x-forwarded-for": address } });
+
+  it("counts an IPv4 address with its /24 and an IPv6 /64 with its /48", () => {
+    const [a, b, c] = ["203.0.113.7", "203.0.113.8", "203.0.114.7"].map((x) => budgetKeys(req(x)));
+    expect(a?.wideKey).toBe(b?.wideKey);
+    expect(a?.networkKey).not.toBe(b?.networkKey);
+    expect(c?.wideKey).not.toBe(a?.wideKey);
+    const [d, e, f] = ["2001:db8:1:1::1", "2001:db8:1:ffff::1", "2001:db8:2:1::1"].map((x) =>
+      budgetKeys(req(x)),
+    );
+    expect(d?.wideKey).toBe(e?.wideKey);
+    expect(d?.networkKey).not.toBe(e?.networkKey);
+    expect(f?.wideKey).not.toBe(d?.wideKey);
+    for (const k of [a, d]) {
+      expect(k?.networkKey).toMatch(/^[0-9a-f]{64}$/);
+      expect(k?.wideKey).not.toBe(k?.networkKey);
+    }
+  });
+});
+
+describe("requestDeviceKey (security review R7)", () => {
+  it("is the device's HMAC for a signed cookie, the same one code entry counts, and null otherwise", () => {
+    const now = Date.now();
+    const cookie = `daybell_device=${signDevice("D".repeat(43), Math.floor(now / 1000))}`;
+    const signed = new Request("http://localhost/x", { headers: { cookie } });
+    expect(requestDeviceKey(signed, now)).toBe(codeKeys(signed, now).deviceKey);
+    expect(requestDeviceKey(signed, now)).toMatch(/^[0-9a-f]{64}$/);
+    const forged = new Request("http://localhost/x", {
+      headers: { cookie: `daybell_device=${"D".repeat(43)}` },
+    });
+    expect(requestDeviceKey(forged, now)).toBeNull();
   });
 });
 

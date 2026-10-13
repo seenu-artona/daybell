@@ -126,7 +126,24 @@ describe("stripeWebhookSecrets (ADR 0020)", () => {
   });
 });
 
-const { shopThrottleKey } = await import("./server");
+const { shopThrottleKey, shopTrustForwardedFor } = await import("./server");
+
+describe("shopTrustForwardedFor (ADR 0022; security review R6)", () => {
+  it("is true only for SHOP_TRUST_XFF=1 off Vercel", () => {
+    expect(shopTrustForwardedFor({ SHOP_TRUST_XFF: "1" })).toBe(true);
+    expect(shopTrustForwardedFor({ SHOP_TRUST_XFF: " 1 " })).toBe(true);
+    for (const env of [
+      {},
+      { SHOP_TRUST_XFF: "" },
+      { SHOP_TRUST_XFF: "true" },
+      { SHOP_TRUST_XFF: "0" },
+      { SHOP_TRUST_XFF: "1", VERCEL: "1" },
+      { SHOP_TRUST_XFF: "1", VERCEL_ENV: "preview" },
+      { SHOP_TRUST_XFF: "1", VERCEL_ENV: "production" },
+    ])
+      expect(shopTrustForwardedFor(env)).toBe(false);
+  });
+});
 
 describe("shopThrottleKey (ADR 0022)", () => {
   // Made at run time, so no key-shaped value is ever committed.

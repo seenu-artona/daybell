@@ -14,8 +14,9 @@
 - Inputs: the Phase 1 spec step 9 ("Code entry with lockout; full-screen cover and photo grid in the default look with
   the studio's name and colour; up to 5 sibling codes in one cart; package, then pose"), Seenu's answers 1–4 of Oct 12,
   2026, Claude's calls 1–13 on the architect's questions, the architect's plan, and the ShopFlow v5 board.
-- Review fixes (Oct 12–13): the security review (H1, M1, M2, M3, L1–L7) and the code review (M1, M2, S1–S6, N1–N12),
-  with the orchestrator's calls on both, are in this ADR as amended below; §12 lists each finding and where it went.
+- Review fixes (Oct 12–13): the security review (H1, M1, M2, M3, L1–L7), the code review (M1, M2, S1–S6, N1–N12) and the
+  security re-review (R1–R9), with the orchestrator's calls on all three, are in this ADR as amended below; §12 lists
+  each finding and where it went.
 
 ## Context
 
@@ -36,7 +37,7 @@ studio); previews have been made at upload since step 4, including watermarked `
 - Every shop request is counted against its network's budget **before its body is read** (security review L7), so
   malformed bodies count too.
 
-## 2. Lockout (answer 2, call 4; security review H1, M2, M3, L4, L6)
+## 2. Lockout (answer 2, call 4; security review H1, M2, M3, L4, L6; re-review R1–R4, R6, R9)
 
 The first version counted "5 per network and device" by a device id the caller chose, so a script without cookies was
 only ever limited per network: about 2,880 guesses a day per IPv4 address or IPv6 /64, and about 1.9×10⁸ a day from one
@@ -48,47 +49,76 @@ IPv6 /48 (H1). It now counts:
   doesn't reset it.
 - **One shared no-device bucket per network.** Every request on a network without a valid device shares it, so dropping
   the cookie never earns fresh tries.
-- **New devices are capped per network per day**: 50 per IPv4 address or IPv6 /64, 200 per IPv4 /24 or IPv6 /56, 500 per
-  IPv6 /48. Beyond the cap a request stays in the no-device bucket. None are issued while the breaker is tripped.
+- **A device is issued only to a request that isn't locked (R1).** A request without a device is judged as its
+  network's no-device bucket and its networks; only if none of them is locked is a new device issued (and counted),
+  and its wrong code counts on it. A locked answer never carries a device cookie.
+- **New devices are capped per network per day**: 500 per IPv4 address and 5,000 per IPv4 /24 (R1: raised, as a
+  carrier's shared address can see hundreds of new parents a day in card hand-out week), 50 per IPv6 /64, 200 per IPv6
+  /56, 500 per IPv6 /48. Beyond the cap a request stays in the no-device bucket. An unknown device never gets past the
+  networks' ceilings, so the cap only bounds how many devices can become known, which R3 also bounds per child
+  (below). Devices are issued while the breaker is tripped too (R2): issuing adds no guesses beyond the ceilings.
 - **Networks at three widths**, every 15 minutes: 30 wrong codes from an IPv4 address or IPv6 /64, 100 from an IPv4 /24
   or IPv6 /56, 300 from an IPv6 /48 lock it for 15 minutes.
-- **A region-wide circuit breaker**: 600 wrong codes in a minute across the region trip it for 15 minutes. While it is
-  tripped the network limits are 10, 30 and 100, no device is issued and known devices get no allowance of their own
-  (below). The wrong code that trips it makes the API log one code-free line, `shop_lockout_breaker_tripped <region>`,
-  for an alert on Vercel's logs.
+- **A region-wide circuit breaker**: 600 wrong codes in a minute across the region trip it for 15 minutes. The count
+  is kept in 16 rows (each wrong code in its network's row) and summed, so wrong codes don't queue on one row (R9).
+  While it is tripped, **only a network that keeps coming back is tightened** (R2): one whose last wrong code before
+  its current 15-minute count was within the hour gets 10, 30 and 100 instead of 30, 100 and 300; a network with no
+  earlier wrong code (a parent's first typo) keeps its ceilings. Known devices keep their allowance and devices are
+  still issued. The wrong code that trips it makes the API log one code-free line, `shop_lockout_breaker_tripped
+  <region>`, once per trip.
+- **The breaker's alert is not wired to anyone yet (R2.5; Seenu to set up).** The line is a `console.warn` in Vercel's
+  function logs only; nobody is paged until a Vercel log drain or alert rule matches it (`docs/shop-lockout-alert.md`).
 - **Known devices keep their own allowance on a locked network (M3).** A device that has opened a gallery with a right
   code is "known" (kept 30 days). On a network that is locked (a school's Wi-Fi after someone's typos, a carrier's shared
-  address), a known device still gets its own 5 tries, unless it was itself locked in the last 24 hours or the breaker is
-  tripped. Its wrong codes still count on the network. This doesn't reopen H1: known devices need a right code and an
-  issued device (capped per network), and each one loses the allowance after its first lock.
+  address), a known device still gets its own 5 tries, unless it was itself locked in the last 24 hours; breaker or not
+  (R2). Its wrong codes still count on the network. Opening, adding or re-entering a child makes a device known (never a
+  refused code: the 5-child or 3-gallery limit), and **one child's code makes at most 3 new devices known in 24 hours**
+  (R3), so a card can't vouch for a crowd of harvested devices. This doesn't reopen H1: known devices need a right code,
+  at most 3 a day per code, and each one loses the allowance after its first lock (about 5 network-free guesses a day
+  each). "Forget this device" (every gallery) makes it unknown again (R7).
 - The device's 5 wrong codes (in 24 hours) and the network's ceilings still lock for 15 minutes (answer 2). **A right
   code never resets a count.** A running lock is never extended or cleared by more wrong codes.
 
 **Effective limits** (H1.6), per 15 minutes unless said: a device (or a network's no-device bucket) 5 then locked 15
 minutes (so about 5 per 15 minutes, 480 a day at most); a network 30; an IPv4 /24 or IPv6 /56 100; an IPv6 /48 300 (about
-28,800 a day, against 1.9×10⁸ before, plus at most about 5 a day from each known device, of which a /48 can be issued
-500 a day); a whole region about 600 a minute before the breaker cuts every network to a
-third. With 10⁵ live Canadian codes in a space of 15×31⁷ ≈ 4.1×10¹¹, 28,800 guesses a day from a /48 find a code about
-once in 140 days; a botnet spread wide enough to reach the breaker's rate still meets it.
+28,800 a day, against 1.9×10⁸ before, plus at most about 5 a day from each known device, of which each code makes at
+most 3 a day); a network that keeps coming back while the breaker is tripped, a third of that. With 10⁵ live Canadian
+codes in a space of 15×31⁷ ≈ 4.1×10¹¹, 28,800 guesses a day from a /48 find a code about once in 140 days.
+
+**What the breaker does not do (R2; corrected).** It never refuses; it only lowers the ceilings of networks that keep
+coming back. A wide, distributed attack is still capped only per network: 10,000 IPv4 /24s at 100 per /24 per 15
+minutes is about 9.6×10⁷ guesses a day (about 2.9×10⁷ if each /24 keeps coming back while tripped), which finds about
+7 to 23 children a day with 10⁵ live codes, and about 70 to 230 with 10⁶. A second stage that does refuse is Seenu's
+decision (below, "Flagged for Seenu"); it is not built.
 
 How:
 
-- The address (L4): on Vercel only `x-vercel-forwarded-for`, which Vercel sets itself (`@vercel/functions` isn't a
-  dependency, so its `ipAddress()` isn't used); a request on Vercel without it, and any address that can't be read,
-  share **one strict bucket** (`untrusted`). Off Vercel (development, CI, end-to-end; Daybell isn't self-hosted) the
-  local server's `x-forwarded-for`. Device ids and networks are HMACs before they leave the route: no address or device
-  id is ever stored or logged.
+- The address (L4, R6): on Vercel only `x-vercel-forwarded-for`, which Vercel sets itself (`@vercel/functions` isn't
+  a dependency, so its `ipAddress()` isn't used); a request on Vercel without it, and any address that can't be read,
+  share **one strict bucket** (`untrusted`). Off Vercel, the local server's `x-forwarded-for` **only with
+  `SHOP_TRUST_XFF=1`** and no `VERCEL_ENV` (development, CI and end-to-end runs set it); without it every request is in
+  the strict bucket, so a non-Vercel deployment a client can send that header to can't be spoofed into fresh counts.
+  **A CDN or proxy put in front of Vercel would make `x-vercel-forwarded-for` the CDN's address**, putting every parent
+  in one network: such a change needs its own reading of the client address first. Device ids and networks are HMACs
+  before they leave the route: no address or device id is ever stored or logged.
 - `public.shop_enter_code` takes every key's **advisory lock** in one sorted order (parallel guesses take turns and two
-  tabs can't deadlock, code review N1), then any session row; checks the locks **before any lookup** (a locked caller
-  gets `locked` even with a right code and learns nothing); then looks up the HMAC. A miss counts on the device's bucket,
-  every network width and the breaker.
-- Rows are written only on a wrong code, a device issued (per network, not per request) or a known device's right code;
-  **a locked or refused request writes nothing** (M2). The counts live in `app.shop_code_attempts` (not reachable through
-  the Data API; no studio_id: a wrong guess belongs to no studio); `prune_shop` removes them after 24 hours untouched (a
-  known device's after 30 days).
+  tabs can't deadlock, code review N1), including the networks' new-device counts when a device may be issued (R1:
+  the caps can't be passed by parallel requests); checks the locks **before any lookup or write** (a locked caller gets
+  `locked` even with a right code and learns nothing); then issues a device if the request had none; then looks up the
+  HMAC. A miss counts on the device's bucket, every network width and the breaker. A right code then takes the
+  child's lock before any session row (trimming forgets other sessions of the child, so two devices entering one
+  child's code take turns rather than deadlock).
+- Rows are written only on a wrong code, a device issued (per network, not per request) or a right code that shows a
+  child; **a locked or refused request writes nothing** (M2, R1: a request without a device on a locked network gets
+  no device and counts none). The counts live in `app.shop_code_attempts` (not reachable through the Data API; no
+  studio_id: a wrong guess belongs to no studio; the per-child counts of R3 are keyed by a SHA-256 of a label and the
+  child's id, never a name or code); `prune_shop` removes them after 24 hours untouched (a known device's after 30
+  days).
 - 429 `rate_limited` with `fields.form = shop.locked` and `Retry-After`.
-- Every shop route also counts requests per network: **120 a minute** (architect's call, accepted), in
-  `app.shop_rate` through `take_shop_request`, the `stripe_call_budget` pattern. 429 with `Retry-After: 60`.
+- Every shop route also counts requests per network: **120 a minute** (architect's call, accepted), and **1,200 a
+  minute per IPv4 /24 or IPv6 /48** (R4), in `app.shop_rate` through `take_shop_request`, the `stripe_call_budget`
+  pattern. The wider network is counted first; once it is used up nothing is written for its networks, so rotating
+  /64s inside a /48 neither escapes the budget nor fills the table. 429 with `Retry-After: 60`.
 
 ## 3. Sessions (answer 3; calls 1, 11; code review S5, S6; security review L1, M2)
 
@@ -112,11 +142,18 @@ How:
   is the same 401 (`shop_session_required`).
 - Siblings (call 1): **same studio only, from any of its jobs, up to 5 children** per session, enforced in the function
   and by a trigger under a lock on the session row, whoever writes.
-- **At most 10 sessions show one child** (M2): opening or adding a child in an 11th forgets the oldest other sessions
-  that show them (with their bags), so one valid code can't fill the database.
+- **At most 10 sessions show one child** (M2, R3): opening or adding a child in an 11th forgets the oldest other
+  sessions that show them **with an empty bag**; a session with anything in its bag is never forgotten for this, so
+  someone else holding the card can't empty a parent's bag. **At most 10 new sessions show one child in 24 hours**
+  (R3): beyond that a right code is answered `locked` until the day is over (Retry-After up to 24 hours), writing
+  nothing; forgetting a session doesn't give the allowance back, and a device already showing the child still gets in.
+  Together they bound the database and the trimming.
 - "Forget this device" (⋯ menu, with a confirmation): with one gallery, it forgets it; with more, the parent chooses
   this gallery or all of them. Each forgotten session goes with its children and bag; the cookie keeps the rest or is
-  cleared.
+  cleared. **Forgetting every gallery also forgets the device** (R7): it is no longer known (its counts and any lock
+  stay, so forgetting earns no tries) and its cookie is cleared. A `?gallery=` not on the device is 404 and forgets
+  nothing. A failed forget (a busy shared address's 429, a lost connection) says so in the dialog
+  (`shop.menu.forgetFailed`), so a parent on a shared phone never believes it is gone.
 - Parents have no account and no JWT: every read and write runs as the service role from the `/api/v1/shop` routes,
   through SECURITY DEFINER functions that take the session token's hash and work only within that session's own studio
   and children. The tables have row-level security on and no policies (the `stripe_events` pattern); browsers,
@@ -221,7 +258,9 @@ Accessibility (WCAG 2.2 AA): every input labelled (the code field, the pose and 
 swiping (2.5.7); the docked button leaves room and adds scroll padding so a focused control is never hidden under it
 (2.4.11), and the sticky header adds scroll padding at the top too (S1); the selected child is `aria-current` and
 filled, a selected tab `aria-pressed` and underlined (no colour-only meaning); refusals are announced (`role="alert"`);
-the bag's totals are a polite, atomic live region (S2); every page names itself in the document's title (2.4.2, S3);
+the bag's totals are a polite, atomic live region (S2); every page names itself in the document's title (2.4.2, S3),
+**never with a child's name** (R8: titles reach browser history and tab sync and outlive "Forget this device"; the
+gallery is "Your child's photos");
 the photo grid and the docked bar are named ("Photos of Ava P.", "Next step"); option radios are named by their title
 alone with the price as their description, and delivery radios by their words alone (S4); at either end of the viewer
 focus moves to the other arrow, or to Close (N5). Words are in `messages/en-US.json` and `en-CA.json` (`shop.*`); colours
@@ -241,7 +280,7 @@ package (call 8).
 
 New group "Shop" and access kind `parent` (the session cookie) in `packages/api` routes and OpenAPI:
 `POST /shop/access` (opens or adds; `{childId, galleryId}`), `GET /shop/session` (`{galleries: [...]}`),
-`DELETE /shop/session[?gallery=]`, `GET /shop/children/{childId}/gallery`, `GET /shop/children/{childId}/price-list`,
+`DELETE /shop/session[?gallery=]` (404 for a gallery not on the device; without it, the device too, R7), `GET /shop/children/{childId}/gallery`, `GET /shop/children/{childId}/price-list`,
 `GET /shop/cart`, `POST /shop/cart/lines`, `PATCH`/`DELETE /shop/cart/lines/{id}`, `PUT /shop/cart/shipping`; all but
 the first two take `?gallery=` (`shopGalleryQuery`; without it, the device's first). `POST /shop/children` is gone:
 `/shop/access` places a code in the right gallery (S6). `ShopChild` is a union on `state`: an open child's name, school
@@ -257,9 +296,10 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
   price_list_id, id, kind)` lets a line carry its item's kind.
 - Functions, all SECURITY DEFINER with an empty `search_path`, executable by `service_role` only, named errors with no
   values: `shop_enter_code`, `shop_session`, `shop_gallery`, `shop_price_list`, `shop_cart`, `shop_cart_add`,
-  `shop_cart_set_quantity`, `shop_cart_remove`, `shop_set_shipping`, `shop_forget`, `take_shop_request`,
-  `prune_shop`; helpers in `app` that nobody can call directly (`shop_code_failed`, `shop_breaker_failed`,
-  `shop_issue_device`, `shop_trim_child_sessions`, `shop_line_available`, `shop_line_physical`, …). Every query names
+  `shop_cart_set_quantity`, `shop_cart_remove`, `shop_set_shipping`, `shop_forget`, `shop_forget_device`,
+  `take_shop_request`, `prune_shop`; helpers in `app` that nobody can call directly (`shop_code_failed`,
+  `shop_breaker_failed`, `shop_issue_device`, `shop_mark_known`, `shop_trim_child_sessions`, `shop_line_available`,
+  `shop_line_physical`, …). Every query names
   its studio, bag lines and package lines included (security review L5).
 - `prune_shop` runs in the jobs cron (hourly on staging, daily in production) after `prune_notifications`, **a page of
   1,000 at a time until a page comes back short or the region's share of the time is up** (M2): expired sessions with
@@ -267,7 +307,8 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
 - Events: **none for parents' actions** (call 10): sessions, attempts and the bag are the parent's own state, like the
   notifications exception of ADR 0021. Studios don't see gallery opens in Phase 1.
 - Region (D113): every shop route and page is pinned to `yul1` and refuses to run elsewhere for Canadian data
-  (`assertFunctionRegion`; photos also `assertStorageRegion`). A US function region will need its own shop routing,
+  (`assertFunctionRegion`, **inside `callShopFunction`, so every database call is checked against its own region**,
+  whichever session or code named it, R5; photos also `assertStorageRegion`). A US function region will need its own shop routing,
   as ADRs 0015 and 0021 already note.
 
 ## 10. Configuration
@@ -280,6 +321,9 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
 - **Seenu must add `SHOP_THROTTLE_KEY` in Vercel (Production, and Preview for staging) before the shop is used there:
   generate it with `openssl rand -base64 32` and paste it straight into Vercel's environment variables. Never in chat,
   a commit, an issue or a log.**
+- `SHOP_TRUST_XFF` (new, declared in `packages/config` `shopTrustForwardedFor()`, R6): `1` lets the shop read
+  `x-forwarded-for` off Vercel (development, CI, end-to-end; set in `ci.yml` and `.env.example`); ignored whenever
+  `VERCEL` or `VERCEL_ENV` is set. **Never set it in Vercel.**
 - `SHOP_URL` unset now falls back to `${siteUrl}/shop`.
 - `turbo.json` is unchanged: like the access code keys, the key is a runtime secret the build never reads.
 
@@ -293,7 +337,11 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
 - Config: `SHOP_THROTTLE_KEY` and the `/shop` fallback.
 - API (`shop.test.ts`): the schemas and `shopGalleryQuery`; `SHOP_CONFLICTS` and every limit kept equal to the
   migration's; nothing granted to browsers; the routes' access, gallery parameter and errors (`region_unavailable`).
-- pgTAP `021_parent_shop` (168 assertions): grants; lookup by HMAC among children only; the lockout (5th miss locks a
+- pgTAP `021_parent_shop` (198 assertions; re-review additions: a request without a device on a locked network
+  writing nothing and issued no device, no device with a lock, IPv4 caps of 500 and 5,000 and IPv6's 50, the breaker
+  summed over its rows, only a returning network tightened while tripped, devices issued and known devices let in
+  while tripped, 3 new known devices per child a day, trimming sparing a bag, 10 new sessions per child a day not
+  given back by forgetting, `shop_forget_device`, the wider request budget writing no row past it): grants; lookup by HMAC among children only; the lockout (5th miss locks a
   device wherever it goes, a locked caller with a right code, expiry and restart, a right code doesn't reset, the
   network's 30, the shared no-device bucket, devices issued and capped at 50, the /56's 100 and the /48's 300, a known
   device's own allowance on a locked network and its loss after a lock, the breaker's alert, tightened limits, no
@@ -308,7 +356,9 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
   example) and refused with nothing to deliver; cross-studio leaks (studio B, and the same device's studio B gallery,
   can't read or change A's child, prices or lines); forgetting one gallery leaves the others; the tidy-up a page at a
   time, keeping known devices 30 days; no events, no names or codes stored.
-- Route tests (`shop-routes.test.ts`): cookie flags, `__Host-` and Secure over HTTPS, a planted plain cookie ignored;
+- Route tests (`shop-routes.test.ts`; re-review: no device cookie with a lock, the /24 and /48 request budget,
+  `x-forwarded-for` only with `SHOP_TRUST_XFF=1` off Vercel, forget-all clearing the device cookie and calling
+  `shop_forget_device`, 404 for a gallery not on the device, `callShopFunction`'s region check on every call): cookie flags, `__Host-` and Secure over HTTPS, a planted plain cookie ignored;
   the token's hash only reaching the database; opening, adding to the same studio's gallery, a second studio's gallery,
   the 4th refused, dead sessions dropped; a device counted only by its signed cookie and the same on any network, a
   forged one no device, a device cookie set only when issued; identical answers for a wrong code, another region's code
@@ -320,12 +370,13 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
 - CSP (`csp.test.ts`): the policy, the bucket from the environment, a fresh nonce per page on the request and the
   response, studio pages untouched.
 - Cron (`going-live-routes.test.ts`): the shop pruned a page at a time until short, and stopped when time is up.
-- Screens (`shop-pages.test.tsx`, jsdom): **the bag read once when it opens, whatever the header's count does** (the
+- Screens (`shop-pages.test.tsx`, jsdom; re-review: the gallery's title without the child's name, a failed forget
+  announced with the dialog kept open): **the bag read once when it opens, whatever the header's count does** (the
   scratch reproduction of code review M1 made a regression test; it fails, timing out, if the loop comes back); no
   re-read after a change; the totals' live region; delivery radios' exact names; one `setBagCount` and no re-render for
   the same count; "Your galleries" with only open children's names; one gallery goes straight through; "Try again"
   instead of the form; the viewer's focus at the ends; the page title kept when the head is rewritten.
-- e2e `shop-gallery.spec.ts` (the `phone` project, Pixel 7), locators scoped to a landmark and exact (S4): code, cover
+- e2e `shop-gallery.spec.ts` (the `phone` project only, Pixel 7; the `desktop` project ignores `shop-*.spec.ts`), locators scoped to a landmark and exact (S4): code, cover
   (no slide with reduced motion), grid by its name, blur on visibility change, viewer Previous/Next, "Use this photo", a
   package radio and its pose, a sibling and switching, a print and a single download, delivery radios by exact name and
   totals, the page title, forgetting the device, a draft job's closed message without the child's name, and five wrong
@@ -363,6 +414,15 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
 | Code N10 | "Try again" on the add page (and every shop page) when the session can't be read |
 | Code N11 | §8 |
 | Code N12 | `callShopFunction`; `networkKey`, `wideKey`, `widerKey`, `deviceKey`; `PoseData`; `lib/shop/shop.ts` split into `http.ts`, `codes.ts`, `gallery.ts` (with `session.ts`, `throttle.ts`, `csp.ts`) |
+| Re-review R1 | §2: locks first, a device only for a request that isn't locked, never with `locked`; issue counts under the advisory locks; IPv4 caps 500 and 5,000 |
+| Re-review R2 | §2: devices still issued and known devices let in while tripped; only returning networks tightened; the breaker's limits stated; alert wiring for Seenu (follow-up); a second stage for Seenu to decide (flagged) |
+| Re-review R3 | §2, §3: 3 new known devices per child a day; only shown children make a device known; trimming spares bags; 10 new sessions per child a day |
+| Re-review R4 | §2: 1,200 requests a minute per IPv4 /24 or IPv6 /48, counted first |
+| Re-review R5 | §9: `assertFunctionRegion` inside `callShopFunction` |
+| Re-review R6 | §2, §10: `SHOP_TRUST_XFF`; the CDN note |
+| Re-review R7 | §3, §8: forget-all forgets the device and clears its cookie; 404 for an unknown gallery; failures shown |
+| Re-review R8 | §7: "Your child's photos"; no names in titles |
+| Re-review R9 | §2: the breaker's count in 16 rows, summed |
 
 ## Claude's calls, Seenu to review
 
@@ -400,23 +460,31 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
 25. (Orchestrator, code review S6) a device holds a session for each of up to 3 studios; a 4th is refused
     (`shop.galleryLimit`) rather than replacing one; "Your galleries" lists them; "Forget this device" offers this
     gallery or all.
-26. (Orchestrator, H1) the numbers: 30/100/300 wrong codes per network, /24 or /56, and /48 in 15 minutes; 50/200/500
-    new devices a day at those widths; a breaker at 600 wrong codes a minute per region, for 15 minutes, cutting the
-    network limits to 10/30/100 and issuing no devices.
-27. (Orchestrator, M3) a known device is one that has opened a gallery; it keeps its own 5 tries on a locked network
-    unless it was locked in the last 24 hours or the breaker is tripped; it stays known 30 days.
-28. The first wrong code of a request without a device counts on the device it is issued; only when none can be issued
-    does it count in the network's shared bucket (so a parent's first, mistyped try on school Wi-Fi isn't spent in a
-    bucket strangers share).
-29. The breaker's alert is one log line, `shop_lockout_breaker_tripped <region>`, with no code, address or name; an
-    alert rule on Vercel's logs is for Seenu to set up.
-30. At most 10 sessions show one child; the oldest others go (with their bags) when an 11th is used.
+26. (Orchestrator, H1; amended by R1 and R2) the numbers: 30/100/300 wrong codes per network, /24 or /56, and /48 in
+    15 minutes; new devices a day 500 per IPv4 address and 5,000 per /24, 50/200/500 per IPv6 /64, /56 and /48; a
+    breaker at 600 wrong codes a minute per region, for 15 minutes, cutting a returning network's limits to 10/30/100.
+27. (Orchestrator, M3; amended by R2 and R3) a known device is one that has opened, added or re-entered a child; it
+    keeps its own 5 tries on a locked network unless it was locked in the last 24 hours, breaker or not; one child's
+    code makes at most 3 new devices known a day; it stays known 30 days, or until "Forget this device" (all).
+28. The first wrong code of a request without a device counts on the device it is issued (when the request isn't
+    locked, R1); only when none can be issued does it count in the network's shared bucket (so a parent's first,
+    mistyped try on school Wi-Fi isn't spent in a bucket strangers share).
+29. The breaker's alert is one log line, `shop_lockout_breaker_tripped <region>`, once per trip, with no code, address
+    or name; a log drain or alert rule that pages someone is for Seenu to set up (`docs/shop-lockout-alert.md`).
+30. (Amended by R3) at most 10 sessions show one child; the oldest others with an empty bag go when an 11th is used;
+    at most 10 new sessions per child a day, the rest answered `locked` until the day is over.
 31. A gallery's id is a one-way hash of its token, named in `?gallery=`; the token never leaves the httpOnly cookie.
 32. The shop's CSP allows inline styles (React's style attributes and Next's own), never inline scripts; it carries no
     `upgrade-insecure-requests` (local http runs). `payment=()` in Permissions-Policy until step 10 decides what Apple
     and Google Pay need.
 33. "Order by" shows the last day to order in the parent's own time zone, the way ADR 0021 shows it to studios; there
     is no studio time zone yet.
+34. (R2) "A network that keeps coming back" is one whose last wrong code before its current 15-minute count was within
+    the hour; a wrong code inside the current count doesn't tighten it (else every network would be tightened by its
+    own count, as the limit only matters at the 10th).
+35. (R4) The wider request budget is 1,200 a minute (ten networks' worth).
+36. (R7) A failed forget shows "We couldn't forget this yet. Check your connection and try again." and keeps the
+    dialog open.
 
 ## Rejected
 
@@ -450,7 +518,9 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
   publish, which every read checks.
 - **Security L6:** the parent privacy notice (not written yet) must say the shop keeps a device cookie for 30 days, for
   the lockout only.
-- An alert rule on `shop_lockout_breaker_tripped` in Vercel's logs (call 29).
+- **Security re-review R2.5, for Seenu:** set up a Vercel log drain or alert rule that pages someone on
+  `shop_lockout_breaker_tripped` (`docs/shop-lockout-alert.md`). Today it is a `console.warn` only, so nobody may ever
+  see it.
 
 ## Flagged for Seenu
 
@@ -460,6 +530,11 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
   hides that class's set until the studio confirms it. Seenu to decide.
 - **D60 "low resolution":** `proof.webp` is 1600 px on its longest side (from step 4), about 5.3 inches at 300 dpi,
   watermarked. Kept as is; Seenu to confirm it is low enough.
+- **A second stage for a sustained trip (re-review R2.4; not built, Seenu to decide).** The breaker only lowers
+  ceilings (§2, "What the breaker does not do"). One option: after, say, 3 trips in an hour, requests without a known
+  device must pass an in-house proof-of-work (no third-party CAPTCHA, D113), or get a hard refusal. The trade-off:
+  proof-of-work costs every new parent's phone time and battery during an attack; a hard refusal stops new parents
+  everywhere in the region until it ends. Neither is decided.
 - The lockout numbers (call 26) on mobile carriers: thousands of phones can share one IPv4 address; known devices
   (call 27) soften it, but a busy carrier address can still lock new devices for 15 minutes. Worth a look before
   launch.

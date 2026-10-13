@@ -15,8 +15,15 @@ import type { PriceItemKind } from "./price-lists";
 export const SHOP_SIBLING_LIMIT = 5;
 /** A device holds a session (a gallery and a bag) for each of up to 3 studios (code review S6). */
 export const SHOP_GALLERY_LIMIT = 3;
-/** At most this many sessions show one child; opening another forgets the oldest (security review M2). */
+/**
+ * At most this many sessions show one child; opening another forgets the oldest with an empty bag (security review M2,
+ * R3). A session with something in its bag is never forgotten for this.
+ */
 export const SHOP_SESSIONS_PER_CHILD = 10;
+/** New sessions showing one child in 24 hours; beyond that a right code is refused as locked (security review R3). */
+export const SHOP_CHILD_SESSIONS_PER_DAY = 10;
+/** Devices newly made "known" by one child's code in 24 hours (security review R3). */
+export const SHOP_KNOWN_DEVICES_PER_CHILD_PER_DAY = 3;
 /** Fixed from the first code; adding a sibling doesn't extend it (answer 3, call 11). */
 export const SHOP_SESSION_DAYS = 30;
 /** Wrong codes from one device (or a network's requests without one) before it is locked (answer 2, call 4). */
@@ -33,16 +40,30 @@ export const SHOP_WIDE_LOCK_TRIES = 100;
 export const SHOP_WIDER_LOCK_TRIES = 300;
 /** Wrong codes in a minute across a region that trip its circuit breaker for SHOP_LOCK_MINUTES (H1). */
 export const SHOP_BREAKER_PER_MINUTE = 600;
-/** While the breaker is tripped, the networks' ceilings are about a third, and no device is issued. */
+/** The breaker's count is spread over this many rows, summed, so wrong codes don't queue on one row (R9). */
+export const SHOP_BREAKER_SHARDS = 16;
+/**
+ * While the breaker is tripped, the ceilings of a network that already had a wrong code in the hour before its current
+ * count began are about a third (security review R2); other networks keep theirs.
+ */
 export const SHOP_TRIPPED_TRIES = { net: 10, wide: 30, wider: 100 } as const;
-/** New devices issued a day per network, per IPv4 /24 or IPv6 /56, and per IPv6 /48 (H1). */
-export const SHOP_NEW_DEVICES_PER_DAY = { net: 50, wide: 200, wider: 500 } as const;
+export const SHOP_TRIPPED_LOOKBACK_HOURS = 1;
+/**
+ * New devices issued a day: per IPv4 address and /24 (R1: raised, as shared carrier addresses see many parents), and per
+ * IPv6 /64, /56 and /48 (H1).
+ */
+export const SHOP_NEW_DEVICES_PER_DAY = {
+  ipv4: { net: 500, wide: 5000 },
+  ipv6: { net: 50, wide: 200, wider: 500 },
+} as const;
 /** The device cookie, and a known device's record, last this long (security review L6). */
 export const SHOP_DEVICE_DAYS = 30;
 /** A known device keeps its own allowance on a locked network unless it was itself locked this recently (M3). */
 export const SHOP_KNOWN_DEVICE_COOLDOWN_HOURS = 24;
 /** Shop requests per network per minute (Claude's call, for Seenu to review). */
 export const SHOP_REQUESTS_PER_MINUTE = 120;
+/** And per IPv4 /24 or IPv6 /48 (security review R4). */
+export const SHOP_WIDE_REQUESTS_PER_MINUTE = 1200;
 /** Signed preview URLs last 10 minutes (Claude's call, for Seenu to review). */
 export const SHOP_PREVIEW_SECONDS = 600;
 /** Lines in one bag, and a line's quantity. */
@@ -65,6 +86,10 @@ export interface LockoutState {
   windowStart: number;
   /** Locked until this moment (ms), or null. */
   lockedUntil: number | null;
+  /** The last wrong code (ms). */
+  lastAt: number;
+  /** The last wrong code before the current count began (ms), or null (security review R2). */
+  earlierAt: number | null;
 }
 
 const NETWORK_WINDOW_MS = SHOP_NETWORK_WINDOW_MINUTES * MINUTE;
@@ -76,14 +101,14 @@ const NETWORK_TRIES = {
   wider: SHOP_WIDER_LOCK_TRIES,
 } as const;
 
-/** A key's limit: wrong codes in a window. The networks' limits are lower while the region's breaker is tripped. */
+/** A key's limit: wrong codes in a window. A tightened network's limit is a third (see lockoutStep). */
 export function lockoutLimit(
   kind: LockoutKind,
-  tripped = false,
+  tightened = false,
 ): { tries: number; windowMs: number } {
   if (kind === "device" || kind === "nodevice") return DEVICE_LIMIT;
   return {
-    tries: tripped ? SHOP_TRIPPED_TRIES[kind] : NETWORK_TRIES[kind],
+    tries: tightened ? SHOP_TRIPPED_TRIES[kind] : NETWORK_TRIES[kind],
     windowMs: NETWORK_WINDOW_MS,
   };
 }
@@ -99,10 +124,12 @@ export function retryAfterSeconds(state: LockoutState | null, now: number): numb
 }
 
 /**
- * One wrong code for a key. A served lock, or (unlocked) a window that has passed, starts the count again; the count
- * that reaches the limit locks the key for 15 minutes. A running lock is never extended or cleared (a known device's
- * wrong codes still count on its locked network). A right code never calls this: it never resets the count, so one
- * real code can't clear it between guesses.
+ * One wrong code for a key. A served lock, or (unlocked) a window that has passed, starts the count again, remembering
+ * the last wrong code before it; the count that reaches the limit locks the key for 15 minutes. While the region's
+ * breaker is tripped, a network whose last wrong code before this count was within the hour is tightened to a third
+ * (security review R2): a network that keeps coming back, not every network. A running lock is never extended or
+ * cleared (a known device's wrong codes still count on its locked network). A right code never calls this: it never
+ * resets the count, so one real code can't clear it between guesses.
  */
 export function lockoutStep(
   kind: LockoutKind,
@@ -110,13 +137,31 @@ export function lockoutStep(
   now: number,
   tripped = false,
 ): LockoutState {
-  const { tries, windowMs } = lockoutLimit(kind, tripped);
-  let next: LockoutState = state ?? { failures: 0, windowStart: now, lockedUntil: null };
+  const windowMs = lockoutLimit(kind).windowMs;
+  let next: LockoutState = state ?? {
+    failures: 0,
+    windowStart: now,
+    lockedUntil: null,
+    lastAt: now,
+    earlierAt: null,
+  };
   if (
-    (next.lockedUntil !== null && next.lockedUntil <= now) ||
-    (next.lockedUntil === null && next.windowStart + windowMs <= now)
+    state !== null &&
+    ((next.lockedUntil !== null && next.lockedUntil <= now) ||
+      (next.lockedUntil === null && next.windowStart + windowMs <= now))
   )
-    next = { failures: 0, windowStart: now, lockedUntil: null };
+    next = {
+      failures: 0,
+      windowStart: now,
+      lockedUntil: null,
+      lastAt: now,
+      earlierAt: next.lastAt,
+    };
+  const tightened =
+    tripped &&
+    next.earlierAt !== null &&
+    next.earlierAt > now - SHOP_TRIPPED_LOOKBACK_HOURS * 60 * MINUTE;
+  const { tries } = lockoutLimit(kind, tightened);
   const failures = Math.min(next.failures + 1, 1_000_000);
   return {
     failures,
@@ -125,19 +170,21 @@ export function lockoutStep(
       next.lockedUntil === null && failures >= tries
         ? now + SHOP_LOCK_MINUTES * MINUTE
         : next.lockedUntil,
+    lastAt: now,
+    earlierAt: next.earlierAt,
   };
 }
 
 /**
  * Whether a device keeps its own allowance while its network is locked (security review M3): it has opened a gallery
- * before, hasn't itself been locked in the last 24 hours, and the region's breaker isn't tripped.
+ * before and hasn't itself been locked in the last 24 hours. It keeps it while the breaker is tripped too (R2), as
+ * one child's code makes at most SHOP_KNOWN_DEVICES_PER_CHILD_PER_DAY devices known (R3).
  */
 export function keepsOwnAllowance(
   device: { known: boolean; lockedAt: number | null } | null,
   now: number,
-  tripped: boolean,
 ): boolean {
-  if (!device?.known || tripped) return false;
+  if (!device?.known) return false;
   return (
     device.lockedAt === null ||
     device.lockedAt <= now - SHOP_KNOWN_DEVICE_COOLDOWN_HOURS * 60 * MINUTE

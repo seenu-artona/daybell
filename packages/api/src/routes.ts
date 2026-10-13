@@ -1201,11 +1201,11 @@ export const ROUTES: RouteSpec[] = [
     group: "Shop",
     summary: "Forget this device",
     description:
-      "With ?gallery=, forgets that gallery: its session, children and bag. Without it, every gallery on this device. Clears the cookie when none is left.",
+      "With ?gallery=, forgets that gallery: its session, children and bag (not_found for a gallery not on this device). Without it, every gallery on this device, and the device: it is no longer known and its cookie is cleared. Clears the session cookie when none is left.",
     access: "parent",
     query: shopGalleryQuery,
     success: { status: 204, description: "Forgotten." },
-    errors: ["forbidden", "rate_limited", "region_unavailable"],
+    errors: ["forbidden", "not_found", "rate_limited", "region_unavailable"],
   },
   {
     method: "GET",

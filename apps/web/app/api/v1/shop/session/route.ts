@@ -5,12 +5,14 @@ import {
   admitShopRequest,
   callShopFunction,
   chosenSession,
+  fallbackRegion,
   sessionRequired,
   setShopCookies,
   shopErrorResponse,
   shopHandle,
 } from "@/lib/shop/http";
 import { type ShopCookieSession, shopCookieSessions } from "@/lib/shop/session";
+import { requestDeviceKey } from "@/lib/shop/throttle";
 
 export const runtime = "nodejs";
 export const preferredRegion = "yul1";
@@ -47,20 +49,31 @@ export const GET = shopHandle(async (request: Request) => {
 });
 
 /**
- * DELETE /api/v1/shop/session — "Forget this device" (answer 3, call 11; S6): with ?gallery=, that gallery (its
- * session, children and bag); without, every gallery on this device. The cookie keeps the rest, or is cleared.
+ * DELETE /api/v1/shop/session — "Forget this device" (answer 3, call 11; S6; security review R7): with ?gallery=, that
+ * gallery (its session, children and bag), or 404 for a gallery not on this device; without, every gallery on this
+ * device, and the device itself: it is no longer known (its counts and any lock stay) and its cookie is cleared. The
+ * session cookie keeps the rest, or is cleared.
  */
 export const DELETE = shopHandle(async (request: Request) => {
   const sessions = shopCookieSessions(request);
   await admitShopRequest(request, sessions);
   const named = new URL(request.url).searchParams.has("gallery");
   const chosen = chosenSession(request, sessions);
-  const forgotten = named ? (chosen ? [chosen] : []) : sessions;
+  if (named && !chosen) throw new ApiError("not_found", "We couldn't find that gallery.");
+  const forgotten = named && chosen ? [chosen] : sessions;
   for (const session of forgotten)
     await callShopFunction<boolean>(session.region, "shop_forget", {
       p_session_hash: session.hash,
     });
+  const device = named ? null : requestDeviceKey(request);
+  if (device) {
+    // The regions this device was used in that this request can name: its galleries' and the first region's.
+    const regions = new Set([...sessions.map((s) => s.region), fallbackRegion()]);
+    for (const region of regions)
+      await callShopFunction<null>(region, "shop_forget_device", { p_device_key: device });
+  }
   return setShopCookies(request, new NextResponse(null, { status: 204 }), {
     sessions: sessions.filter((s) => !forgotten.includes(s)),
+    clearDevice: !named,
   });
 });

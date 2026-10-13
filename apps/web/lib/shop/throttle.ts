@@ -1,7 +1,7 @@
 import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { ApiError } from "@daybell/api";
-import { shopThrottleKey } from "@daybell/config/server";
+import { shopThrottleKey, shopTrustForwardedFor } from "@daybell/config/server";
 import { SHOP_DEVICE_DAYS } from "@daybell/core";
 import { requestCookie, shopCookieName, shopCookieOptions } from "./session";
 
@@ -64,13 +64,15 @@ export function verifiedDevice(value: string | undefined, nowSeconds: number): s
 // ── Networks ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The address a request came from, or null when it can't be trusted (security review L4). On Vercel only
- * `x-vercel-forwarded-for`, which Vercel sets itself; a request without it shares one strict bucket. Off Vercel
- * (development, CI and end-to-end runs; Daybell isn't self-hosted) the local server's `x-forwarded-for`.
+ * The address a request came from, or null when it can't be trusted (security review L4, R6). On Vercel only
+ * `x-vercel-forwarded-for`, which Vercel sets itself (a CDN in front of Vercel would make it the CDN's address; ADR
+ * 0022 §2); a request without it shares one strict bucket. Off Vercel, the local server's `x-forwarded-for` only with
+ * SHOP_TRUST_XFF=1 (development, CI and end-to-end runs); otherwise every request shares the strict bucket.
  */
 export function clientAddress(request: Request): string | null {
   const first = (name: string) => request.headers.get(name)?.split(",")[0]?.trim() || null;
   if (process.env.VERCEL) return first("x-vercel-forwarded-for");
+  if (!shopTrustForwardedFor()) return null;
   return first("x-forwarded-for") ?? first("x-real-ip");
 }
 
@@ -120,9 +122,16 @@ export function networksOf(address: string | null): Networks {
 
 // ── Keys ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The request's network HMAC (for the 120-a-minute request budget). */
-export function networkKey(request: Request): string {
-  return macHex(`net:${networksOf(clientAddress(request)).net}`);
+/**
+ * The request budget's HMACs (120 a minute per network; R4: 1,200 per IPv4 /24 or IPv6 /48, so rotating addresses
+ * inside one doesn't escape it).
+ */
+export function budgetKeys(request: Request): { networkKey: string; wideKey: string } {
+  const networks = networksOf(clientAddress(request));
+  return {
+    networkKey: macHex(`net:${networks.net}`),
+    wideKey: macHex(`budget-wide:${networks.wider ?? networks.wide}`),
+  };
 }
 
 export interface CodeKeys {
@@ -158,6 +167,15 @@ export function codeKeys(request: Request, now = Date.now()): CodeKeys {
     deviceKey: device ? macHex(`device:${device}`) : null,
     offer,
   };
+}
+
+/** The device this server issued, if the request carries its signed cookie, as its HMAC; null otherwise. */
+export function requestDeviceKey(request: Request, now = Date.now()): string | null {
+  const device = verifiedDevice(
+    requestCookie(request, shopCookieName(request, DEVICE_COOKIE)),
+    Math.floor(now / 1000),
+  );
+  return device ? macHex(`device:${device}`) : null;
 }
 
 /** The device cookie's options: like the session's, for 30 days (L6). */

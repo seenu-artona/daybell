@@ -190,6 +190,7 @@ export type ShopRpc =
   | "shop_cart_remove"
   | "shop_set_shipping"
   | "shop_forget"
+  | "shop_forget_device"
   | "take_shop_request";
 
 export function shopRpc(region: DataRegion, fn: ShopRpc, args: Record<string, unknown>) {

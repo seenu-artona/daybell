@@ -88,13 +88,16 @@ async function studioSellingTwoChildren(browser: Browser, baseURL: string, tag: 
   const mia = await page.request.post(`/api/v1/jobs/${draftId}/children`, {
     data: { firstName: "Mia", lastName: "Chen" },
   });
+  expect(mia.status()).toBe(201);
+  // Read every answer before the context closes: closing it disposes its responses (CI, f15e892).
+  const miaCode = (await mia.json()).child.accessCode as string;
   const [avaCode, noahCode] = Object.values(codes);
   await context.close();
   return {
     studio: `Maple Lane ${tag}`,
     ava: avaCode as string,
     noah: noahCode as string,
-    mia: (await mia.json()).child.accessCode as string,
+    mia: miaCode,
   };
 }
 

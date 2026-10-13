@@ -1518,6 +1518,7 @@
       "forgetConfirm": "Forget",
       "forgetOne": "Forget this gallery",
       "forgetAll": "Forget all",
+      "forgetFailed": "We couldn’t forget this yet. Check your connection and try again.",
       "cancel": "Cancel"
     },
     "cover": {
@@ -1601,7 +1602,7 @@
     "titles": {
       "entry": "See your child’s photos",
       "galleries": "Your galleries",
-      "gallery": "{name}’s photos",
+      "gallery": "Your child’s photos",
       "packages": "Choose a package",
       "singles": "Single prints and downloads",
       "bag": "Bag",

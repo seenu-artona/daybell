@@ -85,7 +85,9 @@ export async function enterCode(
   // A code-free, name-free alert: the region's breaker has just tripped (security review H1).
   if ("alert" in result && result.alert)
     console.warn("shop_lockout_breaker_tripped", lookup.region);
-  const device = result.device_issued && keys.offer ? keys.offer.cookie : null;
+  // Never a device cookie with a lock (security review R1): the database doesn't issue one then either.
+  const device =
+    result.device_issued && result.outcome !== "locked" && keys.offer ? keys.offer.cookie : null;
   const live = "live" in result ? new Set(result.live) : null;
   const kept = live
     ? sessions.filter((s) => s.region !== lookup.region || live.has(s.hash))

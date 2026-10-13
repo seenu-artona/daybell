@@ -10,7 +10,7 @@ import messages from "@/messages/en-US.json";
 // (code review M1, from the scratch reproduction that counted 1154 GET /cart calls in a second), its totals are a
 // live region (S2), "Your galleries" lists each studio and only open children's names (S6, M1), a failed session read
 // offers "Try again" and never the code form (S5), the viewer keeps focus on a visible button (N5), and each page
-// names itself (S3).
+// names itself (S3), never with a child's name (R8); a forget that fails says so (R7).
 const nav = vi.hoisted(() => ({
   router: { replace: vi.fn(), push: vi.fn(), back: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() },
   params: {} as Record<string, string>,
@@ -44,6 +44,8 @@ const { default: BagPage } = await import("./bag/page");
 const { default: ShopEntryPage } = await import("./page");
 const { PhotoViewer } = await import("./_components/photo-viewer");
 const { ShopTitle } = await import("./_components/shop-title");
+const { ShopMenu } = await import("./_components/shop-menu");
+const { default: GalleryPage } = await import("./c/[childId]/page");
 
 const G = "0123456789abcdef0123456789abcdef";
 const G2 = "fedcba9876543210fedcba9876543210";
@@ -302,5 +304,54 @@ describe("page titles (code review S3)", () => {
       await new Promise((r) => setTimeout(r, 10));
     });
     expect(document.title).toBe("Bag");
+  });
+});
+
+describe("the gallery's title (security review R8)", () => {
+  it("never names the child: titles reach history and tab sync", async () => {
+    nav.params = { childId: AVA };
+    nav.search = new URLSearchParams({ gallery: G });
+    api.gallery.mockReturnValue(new Promise(() => {}));
+    await render(<GalleryPage />);
+    expect(document.title).toBe("Your child’s photos");
+    expect(document.title).not.toContain("Ava");
+  });
+});
+
+describe("Forget this device (security review R7)", () => {
+  beforeEach(() => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+      this.open = false;
+    };
+  });
+  const byText = (text: string) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === text);
+
+  it("says so when forgetting fails, and keeps the dialog open; then forgets", async () => {
+    await render(<ShopMenu gallery={G} />);
+    await act(async () => byText("Forget this device")?.click());
+    api.forget.mockResolvedValue({
+      ok: false,
+      status: 429,
+      code: "rate_limited",
+      form: null,
+      retryAfter: 60,
+    });
+    await act(async () => byText("Forget")?.click());
+    await wait(20);
+    expect(api.forget).toHaveBeenCalledWith(null);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "We couldn’t forget this yet. Check your connection and try again.",
+    );
+    expect(container.querySelector("dialog")?.open).toBe(true);
+    expect(nav.router.replace).not.toHaveBeenCalled();
+    api.forget.mockResolvedValue(ok(undefined));
+    await act(async () => byText("Forget")?.click());
+    await wait(20);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(nav.router.replace).toHaveBeenCalledWith("/shop");
   });
 });

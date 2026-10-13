@@ -45,7 +45,13 @@ describe("lockout (answer 2, call 4)", () => {
     const four = fail("device", SHOP_LOCK_TRIES - 1);
     expect(isLocked(four, T0)).toBe(false);
     const five = lockoutStep("device", four, T0);
-    expect(five).toEqual({ failures: 5, windowStart: T0, lockedUntil: T0 + 15 * MIN });
+    expect(five).toEqual({
+      failures: 5,
+      windowStart: T0,
+      lockedUntil: T0 + 15 * MIN,
+      lastAt: T0,
+      earlierAt: null,
+    });
     expect(isLocked(five, T0 + 15 * MIN - 1)).toBe(true);
     expect(retryAfterSeconds(five, T0)).toBe(900);
     expect(retryAfterSeconds(five, T0 + 15 * MIN - 1)).toBe(1);
@@ -59,6 +65,8 @@ describe("lockout (answer 2, call 4)", () => {
       failures: 1,
       windowStart: T0 + 15 * MIN,
       lockedUntil: null,
+      lastAt: T0 + 15 * MIN,
+      earlierAt: T0,
     });
   });
 
@@ -78,7 +86,7 @@ describe("lockout (answer 2, call 4)", () => {
     expect(lockoutStep("net", spread, T0 + 15 * MIN).failures).toBe(1);
   });
 
-  it("counts a network's /24 or /56 to 100 and its /48 to 300, a third of that while the breaker is tripped", () => {
+  it("counts a network's /24 or /56 to 100 and its /48 to 300, a third of that when tightened", () => {
     expect(lockoutLimit("wide")).toEqual({ tries: 100, windowMs: 15 * MIN });
     expect(lockoutLimit("wider").tries).toBe(300);
     expect([
@@ -91,8 +99,26 @@ describe("lockout (answer 2, call 4)", () => {
       { tries: 100, windowMs: 15 * MIN },
     ]);
     expect(lockoutLimit("nodevice", true)).toEqual(lockoutLimit("device"));
-    expect(isLocked(fail("net", 9, null, T0, true), T0)).toBe(false);
-    expect(isLocked(fail("net", 10, null, T0, true), T0)).toBe(true);
+  });
+
+  it("while the breaker is tripped, tightens only a network that had a wrong code in the hour before its count (R2)", () => {
+    // A network with no earlier wrong code keeps its 30, breaker or not.
+    expect(isLocked(fail("net", 29, null, T0, true), T0)).toBe(false);
+    expect(isLocked(fail("net", 30, null, T0, true), T0)).toBe(true);
+    // One that guessed in an earlier window, 20 minutes ago: its new count locks at 10.
+    const earlier = fail("net", 3, null, T0 - 20 * MIN);
+    const back = fail("net", 9, earlier, T0, true);
+    expect(back.earlierAt).toBe(T0 - 20 * MIN);
+    expect(isLocked(back, T0)).toBe(false);
+    expect(isLocked(lockoutStep("net", back, T0, true), T0)).toBe(true);
+    // Not when the breaker isn't tripped, nor when the earlier wrong code is over an hour old.
+    expect(isLocked(fail("net", 10, earlier, T0), T0)).toBe(false);
+    const old = fail("net", 3, null, T0 - 61 * MIN);
+    expect(isLocked(fail("net", 10, old, T0, true), T0)).toBe(false);
+    // Devices are never tightened.
+    expect(
+      isLocked(fail("device", 4, fail("device", 1, null, T0 - 25 * 60 * MIN), T0, true), T0),
+    ).toBe(false);
   });
 
   it("never extends or clears a running lock, even after its window", () => {
@@ -105,13 +131,12 @@ describe("lockout (answer 2, call 4)", () => {
     expect(lockoutStep("net", lockedLate, T0 + 16 * MIN).lockedUntil).toBe(T0 + 29 * MIN);
   });
 
-  it("lets a known device keep its own allowance on a locked network, unless it was locked lately or the breaker is tripped (M3)", () => {
-    expect(keepsOwnAllowance({ known: true, lockedAt: null }, T0, false)).toBe(true);
-    expect(keepsOwnAllowance({ known: true, lockedAt: T0 - 24 * 60 * MIN }, T0, false)).toBe(true);
-    expect(keepsOwnAllowance({ known: true, lockedAt: T0 - 60 * MIN }, T0, false)).toBe(false);
-    expect(keepsOwnAllowance({ known: true, lockedAt: null }, T0, true)).toBe(false);
-    expect(keepsOwnAllowance({ known: false, lockedAt: null }, T0, false)).toBe(false);
-    expect(keepsOwnAllowance(null, T0, false)).toBe(false);
+  it("lets a known device keep its own allowance on a locked network, unless it was locked lately (M3, R2)", () => {
+    expect(keepsOwnAllowance({ known: true, lockedAt: null }, T0)).toBe(true);
+    expect(keepsOwnAllowance({ known: true, lockedAt: T0 - 24 * 60 * MIN }, T0)).toBe(true);
+    expect(keepsOwnAllowance({ known: true, lockedAt: T0 - 60 * MIN }, T0)).toBe(false);
+    expect(keepsOwnAllowance({ known: false, lockedAt: null }, T0)).toBe(false);
+    expect(keepsOwnAllowance(null, T0)).toBe(false);
   });
 
   it("is not locked with no wrong codes", () => {

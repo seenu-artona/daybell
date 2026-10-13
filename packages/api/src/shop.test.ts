@@ -3,10 +3,13 @@ import { join } from "node:path";
 import {
   SHOP_BAG_LINES,
   SHOP_BREAKER_PER_MINUTE,
+  SHOP_BREAKER_SHARDS,
+  SHOP_CHILD_SESSIONS_PER_DAY,
   SHOP_DEVICE_DAYS,
   SHOP_DEVICE_WINDOW_HOURS,
   SHOP_GALLERY_LIMIT,
   SHOP_KNOWN_DEVICE_COOLDOWN_HOURS,
+  SHOP_KNOWN_DEVICES_PER_CHILD_PER_DAY,
   SHOP_LOCK_MINUTES,
   SHOP_LOCK_TRIES,
   SHOP_MAX_QUANTITY,
@@ -17,6 +20,7 @@ import {
   SHOP_SESSIONS_PER_CHILD,
   SHOP_SHIPPING_METHODS,
   SHOP_SIBLING_LIMIT,
+  SHOP_TRIPPED_LOOKBACK_HOURS,
   SHOP_TRIPPED_TRIES,
   SHOP_WIDE_LOCK_TRIES,
   SHOP_WIDER_LOCK_TRIES,
@@ -79,7 +83,7 @@ describe("the parent shop matches the database (ADR 0022)", () => {
       `app.shop_code_failed(v_own_kind, v_own_key, ${SHOP_LOCK_TRIES}, interval '${SHOP_DEVICE_WINDOW_HOURS} hours')`,
     );
     const network = (kind: string, key: string, tripped: number, normal: number) =>
-      `app.shop_code_failed('${kind}', ${key}, case when v_tripped then ${tripped} else ${normal} end, interval '${SHOP_NETWORK_WINDOW_MINUTES} minutes')`;
+      `app.shop_code_failed('${kind}', ${key}, ${normal}, interval '${SHOP_NETWORK_WINDOW_MINUTES} minutes', case when v_tripped then ${tripped} end)`;
     expect(sql).toContain(
       network("net", "p_net_key", SHOP_TRIPPED_TRIES.net, SHOP_NETWORK_LOCK_TRIES),
     );
@@ -89,9 +93,23 @@ describe("the parent shop matches the database (ADR 0022)", () => {
     expect(sql).toContain(
       network("wider", "p_wider_key", SHOP_TRIPPED_TRIES.wider, SHOP_WIDER_LOCK_TRIES),
     );
-    expect(sql).toContain(`if v_hits = ${SHOP_BREAKER_PER_MINUTE} then`);
+    expect(sql).toContain(`if v_total < ${SHOP_BREAKER_PER_MINUTE} then`);
+    expect(sql).toContain(`lpad(to_hex(p_shard & ${SHOP_BREAKER_SHARDS - 1}), 64, '0')`);
+    expect(sql).toContain(`(hashtextextended(p_net_key, 1) & ${SHOP_BREAKER_SHARDS - 1})::integer`);
+    expect(sql).toContain(`v.earlier_at > now() - interval '${SHOP_TRIPPED_LOOKBACK_HOURS} hour'`);
+    const { ipv4, ipv6 } = SHOP_NEW_DEVICES_PER_DAY;
     expect(sql).toContain(
-      `case a.kind when 'issue_net' then ${SHOP_NEW_DEVICES_PER_DAY.net} when 'issue_wide' then ${SHOP_NEW_DEVICES_PER_DAY.wide} else ${SHOP_NEW_DEVICES_PER_DAY.wider} end`,
+      `case a.kind when 'issue_net' then case when v_ipv4 then ${ipv4.net} else ${ipv6.net} end`,
+    );
+    expect(sql).toContain(
+      `when 'issue_wide' then case when v_ipv4 then ${ipv4.wide} else ${ipv6.wide} end`,
+    );
+    expect(sql).toContain(`else ${ipv6.wider} end) then`);
+    expect(sql).toContain(
+      `a.window_start > now() - interval '24 hours' and a.hits >= ${SHOP_KNOWN_DEVICES_PER_CHILD_PER_DAY}) then`,
+    );
+    expect(sql).toContain(
+      `a.window_start > now() - interval '24 hours' and a.hits >= ${SHOP_CHILD_SESSIONS_PER_DAY};`,
     );
     expect(sql).toContain(
       `a.locked_at <= now() - interval '${SHOP_KNOWN_DEVICE_COOLDOWN_HOURS} hours'`,
@@ -99,7 +117,9 @@ describe("the parent shop matches the database (ADR 0022)", () => {
     expect(sql).toContain(`x.updated_at < now() - interval '${SHOP_DEVICE_DAYS} days'`);
     expect(sql).toContain(`cardinality(v_live) >= ${SHOP_GALLERY_LIMIT} then`);
     expect(sql).toContain(`cardinality(v_hashes) > ${SHOP_GALLERY_LIMIT}`);
-    expect(sql).toContain(`offset ${SHOP_SESSIONS_PER_CHILD - 1}`);
+    expect(sql).toContain(
+      `limit greatest((select count(*) from others) - (${SHOP_SESSIONS_PER_CHILD} - 1), 0)`,
+    );
     expect(sql).toContain(`now() + interval '${SHOP_LOCK_MINUTES} minutes'`);
     expect(sql).toContain(`>= ${SHOP_BAG_LINES}`);
     expect(sql).toContain(`quantity between 1 and ${SHOP_MAX_QUANTITY}`);

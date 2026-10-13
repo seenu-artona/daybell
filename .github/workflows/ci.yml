@@ -106,6 +106,8 @@ jobs:
           throttle_key="$(openssl rand -base64 32)"
           echo "::add-mask::$throttle_key"
           echo "SHOP_THROTTLE_KEY=$throttle_key" >> "$GITHUB_ENV"
+          # The local server's x-forwarded-for may be trusted here (security review R6; never on Vercel).
+          echo "SHOP_TRUST_XFF=1" >> "$GITHUB_ENV"
           # Payouts (ADR 0020): the fake Stripe only (Claude's call Q12), no Stripe key in CI. A fresh random webhook
           # signing secret per run, which the fake signs its pretend events with; masked, never committed.
           echo "STRIPE_DRIVER=fake" >> "$GITHUB_ENV"
