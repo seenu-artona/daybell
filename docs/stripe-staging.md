@@ -1,4 +1,4 @@
-# Staging payouts on Stripe (Phase 1 steps 7 and 7b)
+# Staging payouts on Stripe (Phase 1 steps 7, 7b and 7c)
 
 What Seenu sets up once in the Stripe Dashboard, in **test mode** (a sandbox), so staging can connect studios' payout
 accounts with Stripe Connect (ADR 0020; D56, D98, D106, D113). Nothing here goes in the repository. Keys and signing
@@ -9,6 +9,12 @@ Daybell's code pins **stripe-node 22.6.2** and the API version **`2026-08-26.dah
 Since step 7b, studio accounts are created with **Accounts v2** (`POST /v2/core/accounts`; ADR 0020, section 16),
 because Stripe refuses Accounts v1 creation for new Connect platforms. **Don't** switch on "Accounts v1 support" in the
 Dashboard: Daybell doesn't need it.
+
+Since step 7c, the create also sends the **owner's sign-in email** as the account's `contact_email`: Stripe refused the
+create without one ("If configuration.recipient is supplied, the Account must have a contact email"; Seenu, Oct 12).
+It comes from the signed-in owner's verified account, never from the request, and is never logged or put in metadata.
+An owner whose sign-in has no email sees "Stripe needs an email address for your payout account, and your sign-in has
+none. Please contact Daybell support." and nothing is sent to Stripe.
 
 ## 1. Test mode and Connect
 
@@ -133,7 +139,8 @@ Notes:
 
 Stripe account and payout ids, flags (details submitted, card payments, payouts), counts of what's due, Stripe's reason
 codes, the schedule, and each payout's amount, currency, status and dates. Never bank details, names, emails or
-addresses, and never webhook payloads.
+addresses, and never webhook payloads. (The owner's sign-in email is sent to Stripe as the account's contact email
+when it is created; Daybell doesn't copy it anywhere.)
 
 ## If setting up payouts fails
 
@@ -157,8 +164,15 @@ docs and the codes' names; the message in Stripe's log is the authority):
 The owner sees "Daybell’s platform setup with Stripe isn’t finished yet, so payouts can’t be set up. Please contact
 Daybell support." for these: only Daybell can fix them.
 
+**`invalid_fields` (step 7c).** When Stripe v2 refuses fields (code `invalid_fields`), a second line
+`stripe_invalid_fields <stage> <field names>` lists the refused fields' names, comma-separated (e.g.
+`configuration.recipient`), at most 20; a name that isn't a plain Stripe field path is shown as `other`, and `none`
+means Stripe sent no list. Never the messages: read them in **Developers › Logs**. Tell the developers which fields.
+
 **Retrying after fixing the setup works at once.** Daybell's key is fixed per studio
-(`daybell-payout-account-v2-{studio}`). Accounts v2 handles idempotency keys differently from v1
+(`daybell-payout-account-v2b-{studio}` since step 7c; it was `daybell-payout-account-v2-{studio}`, but the request body
+changed when `contact_email` was added, and Stripe may refuse a reused key whose earlier request had different
+parameters with an `idempotency_error`). Accounts v2 handles idempotency keys differently from v1
 (https://docs.stripe.com/api-v2-overview): v1 keeps a key's first answer, even an error, for 24 hours and replays it
 (that is what happened with the v1 refusal); v2 replays a *successful* request for 30 days but re-executes a request
 that failed. So once the platform setup is fixed, the same studio's next click creates the account.

@@ -13,6 +13,7 @@ describe("fakeDriver (ADR 0020)", () => {
       studioId: "s1",
       region: "ca" as const,
       country: "CA" as const,
+      contactEmail: "maya.owner@example.test",
       idempotencyKey: "k1",
     };
     const created = await fake.createAccount(input);
@@ -26,6 +27,8 @@ describe("fakeDriver (ADR 0020)", () => {
     // Stripe's own schedule, not marked as set by Daybell, until Daybell sets its default (D56; Q6).
     expect(accountForDatabase(a).schedule).toMatchObject({ payout_interval: "daily" });
     expect(a.metadata).toEqual({ daybell_studio_id: "s1", daybell_region: "ca" });
+    // The contact email is accepted and never kept (step 7c).
+    expect(JSON.stringify(a)).not.toContain("maya");
     const scheduled = await fake.updatePayoutSchedule(a.id, {
       interval: "weekly",
       weeklyAnchor: "friday",

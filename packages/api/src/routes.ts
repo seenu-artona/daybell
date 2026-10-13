@@ -903,7 +903,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Payouts",
     summary: "Start or continue setting up payouts on Stripe",
     description:
-      "The owner only. Creates the studio's Stripe account the first time (country only, no name or email sent), then a single-use Stripe-hosted onboarding link that comes back to Settings > Payouts. Open it straight away. At most 10 calls to Stripe a minute per studio (refresh, links and schedule together); more get rate_limited.",
+      "The owner only. Creates the studio's Stripe account the first time (country, plus the owner's sign-in email as Stripe's contact email; 409 with payouts.noContactEmail if the sign-in has none), then a single-use Stripe-hosted onboarding link that comes back to Settings > Payouts. Open it straight away. At most 10 calls to Stripe a minute per studio (refresh, links and schedule together); more get rate_limited.",
     access: "owner",
     success: { status: 200, schema: payoutLinkResponse, description: "Where to go on Stripe." },
     errors: [

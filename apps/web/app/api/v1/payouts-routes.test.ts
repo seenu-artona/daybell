@@ -116,9 +116,22 @@ function fakeDatabase(rows: Record<string, unknown>) {
   return { supabase: { from }, calls };
 }
 
-function signIn(role: string, rows: Record<string, unknown> = {}, region = "ca") {
+/** The owner's sign-in email, from the verified auth user (step 7c): sent to Stripe as contact_email, never logged. */
+const EMAIL = "maya.owner@example.test";
+
+function signIn(
+  role: string,
+  rows: Record<string, unknown> = {},
+  region = "ca",
+  email: string | null = EMAIL,
+) {
   const db = fakeDatabase(rows);
-  scope.mockResolvedValue({ supabase: db.supabase, studio: as(role, region), userId: "user-1" });
+  scope.mockResolvedValue({
+    supabase: db.supabase,
+    studio: as(role, region),
+    userId: "user-1",
+    email,
+  });
   return db;
 }
 
@@ -259,7 +272,7 @@ describe("POST /studio/payouts/onboarding-link", () => {
     expect(stripeCalls()).toBe(0);
   });
 
-  it("creates the account once (the v2 idempotency key, country only), records it for the owner, then sets the default schedule and links to Stripe", async () => {
+  it("creates the account once (the v2b idempotency key, country and the owner's sign-in email), records it for the owner, then sets the default schedule and links to Stripe", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     signIn("owner", {});
     provider.createAccount.mockResolvedValue({ id: ACCOUNT });
@@ -291,8 +304,10 @@ describe("POST /studio/payouts/onboarding-link", () => {
       studioId: STUDIO,
       region: "ca",
       country: "CA",
-      // A new key: the v1 one replayed Stripe's refusal of v1 account creation (ADR 0020 amendment).
-      idempotencyKey: `daybell-payout-account-v2-${STUDIO}`,
+      // From the verified auth user, never the request (step 7c).
+      contactEmail: EMAIL,
+      // A new key for the new body (step 7c; ADR 0020 section 16): the studio id only, never the email.
+      idempotencyKey: `daybell-payout-account-v2b-${STUDIO}`,
     });
     // Read back through v1 and recorded as Stripe has it, before anything else is asked of Stripe.
     expect(provider.retrieveAccount).toHaveBeenCalledWith(ACCOUNT);
@@ -334,6 +349,57 @@ describe("POST /studio/payouts/onboarding-link", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain("connect.stripe.com");
     expect(log).not.toHaveBeenCalledWith("stripe_account_unrecorded", expect.anything());
     log.mockRestore();
+  });
+
+  it("never takes the email from the request, and never logs it (step 7c)", async () => {
+    const spies = (["error", "warn", "log", "info", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    signIn("owner", {});
+    provider.createAccount.mockResolvedValue({ id: ACCOUNT });
+    provider.retrieveAccount.mockResolvedValue(newStripeAccount());
+    // Every later step fails, so every log line on the way is written.
+    writeRpc.mockRejectedValue(new Error("db down"));
+    const res = await call(
+      import("./studio/payouts/onboarding-link/route"),
+      "POST",
+      request(
+        "POST",
+        JSON.stringify({ email: "forged@example.test", contactEmail: "forged@example.test" }),
+      ),
+    );
+    expect(res.status).toBe(500);
+    expect(provider.createAccount).toHaveBeenCalledWith(
+      // The key holds the studio id only, never the email.
+      expect.objectContaining({
+        contactEmail: EMAIL,
+        idempotencyKey: `daybell-payout-account-v2b-${STUDIO}`,
+      }),
+    );
+    expect(spies[0]).toHaveBeenCalledWith("stripe_account_unrecorded", STUDIO);
+    // An unknown create outcome logs too: still never the email.
+    provider.createAccount.mockRejectedValueOnce(new Error(`failed for ${EMAIL}`));
+    expect((await routes.onboarding()).status).toBe(500);
+    expect(spies[0]).toHaveBeenCalledWith("stripe_account_create_unknown", STUDIO);
+    const logged = JSON.stringify(spies.map((s) => s.mock.calls));
+    expect(logged).not.toContain("maya");
+    expect(logged).not.toContain("forged");
+    expect(await res.text()).not.toContain("maya");
+    for (const s of spies) s.mockRestore();
+  });
+
+  it("refuses with 409 payouts.noContactEmail, before Stripe, when the sign-in has no email (step 7c)", async () => {
+    for (const email of [null, ""]) {
+      signIn("owner", {}, "ca", email);
+      const res = await routes.onboarding();
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toMatchObject({
+        code: "conflict",
+        fields: { form: "payouts.noContactEmail" },
+      });
+    }
+    expect(stripeCalls()).toBe(0);
+    expect(writeRpc).not.toHaveBeenCalled();
   });
 
   it("records the account even when the schedule fails, and the next POST never creates again (security review 1)", async () => {
