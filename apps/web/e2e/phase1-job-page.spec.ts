@@ -224,8 +224,8 @@ test("job page layout, menu search and studio separation", async ({
   ).toHaveAttribute("href", `/app/jobs/${job.id}/people?print=qr`);
   await page.goto(`/app/jobs/${job.id}`);
 
-  // 6. Photos is real since step 4 (ADR 0016) and Shop since step 6 (ADR 0019); the other tabs show coming soon
-  // inside the job's frame; an unknown tab is a 404.
+  // 6. Photos is real since step 4 (ADR 0016), Shop since step 6 (ADR 0019) and Orders since step 11 (ADR 0024); the
+  // other tabs show coming soon inside the job's frame; an unknown tab is a 404.
   await main
     .getByRole("navigation", { name: "Job sections" })
     .getByRole("link", { name: "Photos", exact: true })
@@ -241,7 +241,12 @@ test("job page layout, menu search and studio separation", async ({
       .getByRole("region", { name: "Price list", exact: true })
       .getByLabel("Price list for this job", { exact: true }),
   ).toHaveValue(job.priceListId);
-  for (const name of ["Messages", "Orders", "Settings"]) {
+  await main
+    .getByRole("navigation", { name: "Job sections" })
+    .getByRole("link", { name: "Orders", exact: true })
+    .click();
+  await expect(main.getByText("No orders yet.", { exact: true })).toBeVisible();
+  for (const name of ["Messages", "Settings"]) {
     await main
       .getByRole("navigation", { name: "Job sections" })
       .getByRole("link", { name, exact: true })
