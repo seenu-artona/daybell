@@ -8,8 +8,10 @@ alter type public.ledger_kind add value 'order_refunded';
 alter type public.ledger_kind add value 'refund_failed';
 alter type public.ledger_kind add value 'refund_shortfall';
 
--- The bell's new kinds (ADR 0024 §bell): a new order (owners, admins and staff), a refund Stripe couldn't make and a
--- dispute opened (owners and admins). The same list as packages/core NOTIFICATION_KINDS.
+-- The bell's new kinds (ADR 0024 §bell): a new order (owners, admins and staff), a refund Stripe couldn't make, a
+-- dispute opened and a refund made outside Daybell (owners and admins). The same list as packages/core
+-- NOTIFICATION_KINDS.
 alter type public.notification_kind add value 'order_paid';
 alter type public.notification_kind add value 'refund_failed';
 alter type public.notification_kind add value 'dispute_opened';
+alter type public.notification_kind add value 'refund_external';

@@ -3,12 +3,15 @@
 -- (never photographers); a digital-only order is Complete; refunds by line, custom amount or a parent's cancel give back
 -- tax and Daybell's fee pro rata, the last one taking the exact remainders, never more than was paid, and each one
 -- Stripe accepts writes one balanced ledger transaction; a failed refund is mirrored; refunded lines lose their
--- downloads; shortfalls are recovered from a later sale or absorbed after 180 days; the bell rings for the right
--- people; staff read orders but never refunds, the ledger or Home's money; another studio and another session see
--- nothing; addresses go 90 days after shipping (with a hard cap); events hold no amounts, names or tracking numbers.
+-- downloads, and what the studio gave back for a refund that then failed is sent back; shortfalls are recovered from a
+-- later sale or absorbed after 180 days without one; the bell rings for the right people, a refund made outside
+-- Daybell too (and stops fulfilment until checked); staff read orders but never refunds, the ledger or Home's money;
+-- another studio and another session see nothing (the tracking is the paying session's only); addresses and tracking
+-- numbers go 90 days after shipping (365 at most); zips are limited per session and per order; events hold no
+-- amounts, names or tracking numbers.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(190);
+select plan(230);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -209,7 +212,10 @@ select ok((select bool_and(prosecdef and proconfig @> array['search_path=""']) f
     'record_payment_stripe_event', 'refund_by_stripe', 'order_disputed', 'shop_order_download_all',
     'shop_download_all_request', 'order_print_files', 'order_print_files_to_make', 'purge_shipping_addresses',
     'act_for_roles', 'refund_split', 'write_refund', 'write_refund_ledger', 'studio_order_refund_state',
-    'take_order_action', 'emit_as')),
+    'take_order_action', 'emit_as', 'refund_share_returned', 'order_external_refund', 'check_external_refund',
+    'shop_zip_take', 'order_zip_take', 'order_line_physical', 'order_physical', 'on_order_paid', 'notify_order',
+    'order_refunded', 'order_line_refunded_quantity', 'order_refund_badge', 'order_fully_refunded', 'shop_can_cancel',
+    'guard_order_refund_insert')),
   'every new SECURITY DEFINER function has an empty search_path');
 create temp table system_fns on commit drop as select unnest(array[
   'public.mark_order_status(uuid, uuid, uuid, public.order_fulfilment, public.shipping_carrier, text, text)',
@@ -227,12 +233,14 @@ create temp table system_fns on commit drop as select unnest(array[
   'public.refund_by_stripe(uuid, uuid, text)', 'public.order_disputed(uuid)',
   'public.shop_order_download_all(text, uuid)', 'public.shop_download_all_request(text, uuid, uuid[])',
   'public.order_print_files(uuid, uuid, uuid)', 'public.order_print_files_to_make(uuid, uuid, uuid, uuid[])',
-  'public.purge_shipping_addresses(integer)']) as f;
+  'public.purge_shipping_addresses(integer)', 'public.refund_share_returned(uuid, text, bigint)',
+  'public.order_external_refund(uuid)', 'public.check_external_refund(uuid, uuid, uuid)',
+  'public.shop_zip_take(text, uuid)', 'public.order_zip_take(uuid, uuid, uuid)']) as f;
 select is((select count(*) from system_fns, unnest(array['anon', 'authenticated']) r
   where has_function_privilege(r, f, 'execute')), 0::bigint, 'browsers and logged-out visitors run none of them');
 select ok((select bool_and(has_function_privilege('service_role', f, 'execute')) from system_fns),
   'the service role (the API) runs them all');
-select ok(has_function_privilege('authenticated', 'public.studio_orders(uuid, uuid, public.order_fulfilment, text, integer, uuid)', 'execute')
+select ok(has_function_privilege('authenticated', 'public.studio_orders(uuid, uuid, public.order_fulfilment, text, integer, uuid, public.shop_shipping_method)', 'execute')
   and not (select prosecdef from pg_proc where proname = 'studio_orders')
   and not (select prosecdef from pg_proc where proname = 'studio_sales')
   and not (select prosecdef from pg_proc where proname = 'studio_order_todo'),
@@ -308,6 +316,12 @@ select ok((select printed_at > now() - interval '1 minute' from public.orders wh
 select lives_ok(format($$ select public.mark_order_status('11111111-1111-4111-8111-111111111111',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, 'shipped', 'ups', '1Z999AA10123456784') $$, pg_temp.v('oP')),
   'shipped again');
+select is(public.shop_order(pg_temp.h('s3'), pg_temp.v('oP')) -> 'tracking',
+  '{"url": null, "number": "1Z999AA10123456784", "carrier": "ups"}'::jsonb, 'the session that paid sees the tracking');
+select is(public.shop_order(pg_temp.h('s1'), pg_temp.v('oP')) ->> 'view', 'full',
+  'another session holding the same child sees the order in full');
+select is(public.shop_order(pg_temp.h('s1'), pg_temp.v('oP')) -> 'tracking', 'null'::jsonb,
+  'but never its tracking (security review B1: it leads to the paying household)');
 select is(pg_temp.try(format($$ select public.undo_order_status('11111111-1111-4111-8111-111111111111',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, 'other') $$, pg_temp.v('oD'))), 'P0001 status_invalid',
   'a complete order has no step to undo');
@@ -336,6 +350,28 @@ select is(pg_temp.try(format($$ select public.mark_order_status('44444444-4444-4
 select public.undo_order_status('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   pg_temp.v('oU'), 'marked_by_mistake');
 
+-- A refund made outside Daybell (security review S5): flagged once, the bell rings, fulfilment stops until checked.
+select is(public.order_external_refund(pg_temp.v('oU')), true, 'a refund made outside Daybell flags the order');
+select is(public.order_external_refund(pg_temp.v('oU')), false, 'once');
+select is(pg_temp.try(format($$ select public.mark_order_status('44444444-4444-4444-8444-444444444444',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, 'printed') $$, pg_temp.v('oU'))), 'P0001 external_refund',
+  'and it can''t be printed until checked');
+select is((select array_agg(m.role::text order by m.role) from public.notifications n
+  join public.studio_members m on m.user_id = n.user_id and m.studio_id = n.studio_id
+  where n.kind = 'refund_external' and n.order_id = pg_temp.v('oU')), array['owner', 'admin'],
+  'it rings owners'' and admins'' bell');
+select is(pg_temp.try(format($$ select public.check_external_refund('44444444-4444-4444-8444-444444444444',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L) $$, pg_temp.v('oU'))), '42501 Not allowed for your role',
+  'staff can''t mark it checked');
+select lives_ok(format($$ select public.check_external_refund('55555555-5555-4555-8555-555555555555',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L) $$, pg_temp.v('oU')), 'an admin marks it checked');
+select is(pg_temp.try(format($$ select public.check_external_refund('11111111-1111-4111-8111-111111111111',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L) $$, pg_temp.v('oU'))), 'P0001 status_invalid', 'once');
+select is(pg_temp.try(format($$ select public.mark_order_status('44444444-4444-4444-8444-444444444444',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, 'printed') $$, pg_temp.v('oU'))), 'ok', 'then it can be printed');
+select public.undo_order_status('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  pg_temp.v('oU'), 'marked_by_mistake');
+
 -- ── Refunds: who, and when (answers 1, 3) ─────────────────────────────────────────────────────────────────────────
 select is(pg_temp.try(format($$ select public.begin_refund('44444444-4444-4444-8444-444444444444',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, gen_random_uuid(), 'custom', null, 100, false, null) $$,
@@ -352,6 +388,10 @@ select is(pg_temp.try(format($$ select public.begin_refund('11111111-1111-4111-8
 select is(pg_temp.try(format($$ select public.begin_refund('22222222-2222-4222-8222-222222222222',
   'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', %L, gen_random_uuid(), 'custom', null, 100, false, null) $$,
   pg_temp.v('oH'))), 'P0002 Order not found', 'another studio''s owner finds the order not found');
+select is(pg_temp.try(format($$ select public.begin_refund('11111111-1111-4111-8111-111111111111',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, %L, 'custom', null, 100, false, null) $$,
+  pg_temp.v('oH'), pg_temp.v('oD'))), '22023 A request id, and lines or a custom amount',
+  'a request id that is an order''s id is refused (security review note 4)');
 
 -- r1: one of Noah's two 4×6 prints. Tax 2,027 × 1,300 / 15,595 = 168.97 → 169; Daybell's 3% of 1,300 = 39.
 insert into t (name, id) select 'req1', gen_random_uuid();
@@ -381,6 +421,9 @@ select is(pg_temp.try(format($$ select public.begin_refund('11111111-1111-4111-8
 select is(pg_temp.try(format($$ select public.begin_refund('11111111-1111-4111-8111-111111111111',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, gen_random_uuid(), 'custom', null, 0, false, null) $$,
   pg_temp.v('oH'))), 'P0001 nothing_to_refund', 'a refund of nothing is refused');
+select is(pg_temp.try(format($$ select public.begin_refund('11111111-1111-4111-8111-111111111111',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, gen_random_uuid(), 'lines', '[]', null, false, null) $$,
+  pg_temp.v('oH'))), '22023 Choose 1 to 100 lines', 'no lines and no shipping is nothing');
 select is(pg_temp.try(format($$ select public.mark_order_status('44444444-4444-4444-8444-444444444444',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, 'printed') $$, pg_temp.v('oH'))), 'P0001 refund_in_flight',
   'a refund Stripe hasn''t accepted yet stops printing');
@@ -466,7 +509,13 @@ select results_eq($$ select kind::text, reason::text, actor_id, products_cents, 
 select is((select sum(quantity) from public.order_refund_lines where refund_id = pg_temp.v('r5')), 2::bigint,
   'every item left: the package and Noah''s other print');
 select is(public.shop_order_cancel_begin(pg_temp.h('s1'), pg_temp.v('oH')),
-  jsonb_build_object('refund_id', pg_temp.v('r5'), 'created', false), 'a second tap is the same cancel');
+  jsonb_build_object('refund_id', pg_temp.v('r5'), 'created', false, 'status', 'requested', 'stale', false),
+  'a second tap is the same cancel, not yet worth asking Stripe again');
+select isnt((select request_id from public.order_refunds where id = pg_temp.v('r5')), pg_temp.v('oH'),
+  'a cancel has its own request id, never the order''s (code review S1)');
+select is((select count(*) from public.order_action_attempts
+  where subject_id = 'd1000000-0000-4000-8000-000000000001' and action = 'cancel'), 2::bigint,
+  'and both taps count against the limit (security review S3)');
 select is(public.refund_accepted(pg_temp.v('r5'), 're_r5', 'pending'), 'pending', 'Stripe accepts it');
 select results_eq($$ select fulfilment_status::text, canceled_at is not null from public.orders
     where id = pg_temp.v('oH') $$, $$ values ('canceled', true) $$, 'the order is Canceled');
@@ -516,9 +565,32 @@ insert into t (name, id) select 'r9', (public.begin_refund('11111111-1111-4111-8
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oD'), gen_random_uuid(), 'custom', null, 100, false, null)
   ->> 'refund_id')::uuid;
 select public.refund_accepted(pg_temp.v('r9'), 're_r9', 'succeeded');
+select public.refund_recovered(pg_temp.v('r9'), 'trr_r9', 50);
 select is(pg_temp.try(format($$ select public.refund_failed(%L, 'lost_or_stolen_card') $$, pg_temp.v('r9'))), 'ok',
   'a succeeded refund can still fail at Stripe');
 select is((select status::text from public.order_refunds where id = pg_temp.v('r9')), 'failed', 'and does');
+select is((public.refund_for_stripe(pg_temp.v('r9')) ->> 'return_needed_cents')::bigint, 50::bigint,
+  'what the studio gave back for it is to be sent back (Q7)');
+select is(public.refunds_to_retry(10), jsonb_build_array(jsonb_build_object('refund_id', pg_temp.v('r9'))),
+  'the cron sends it back if the API didn''t');
+select lives_ok(format($$ select public.refund_share_returned(%L, 'tr_ret9', 50) $$, pg_temp.v('r9')),
+  'sent back by a transfer');
+select lives_ok(format($$ select public.refund_share_returned(%L, 'tr_other', 50) $$, pg_temp.v('r9')), 'once');
+select results_eq($$ select returned_cents, stripe_return_transfer_id,
+    (public.refund_for_stripe(id) ->> 'return_needed_cents')::bigint from public.order_refunds
+    where id = pg_temp.v('r9') $$, $$ values (50::bigint, 'tr_ret9', 0::bigint) $$, 'recorded, nothing more to send');
+select is(public.refunds_to_retry(10), '[]'::jsonb, 'nor retried');
+-- A shipping-only refund in By item mode (code review S5): no lines, the shipping left; abandoned here.
+insert into t (name, id) select 'rShip', (public.begin_refund('11111111-1111-4111-8111-111111111111',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oP'), gen_random_uuid(), 'lines', '[]', null, true, null)
+  ->> 'refund_id')::uuid;
+select results_eq($$ select products_cents, shipping_cents, (select count(*) from public.order_refund_lines rl
+    where rl.refund_id = r.id) from public.order_refunds r where r.id = pg_temp.v('rShip') $$,
+  $$ values (0::bigint, 1195::bigint, 0::bigint) $$, 'a shipping-only refund gives back the shipping and no items');
+select public.refund_abandoned(pg_temp.v('rShip'), 'stripe_refused');
+-- A refund that fails after the studio's share was taken back sends that share back (Q7).
+select is(pg_temp.try(format($$ select public.refund_share_returned(%L, 'tr_ret9', 50) $$, pg_temp.v('r1'))),
+  'P0001 not_failed', 'only a failed refund''s share is sent back');
 -- A refund Stripe refused outright never happened.
 insert into t (name, id) select 'r6', (public.begin_refund('11111111-1111-4111-8111-111111111111',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oD'), gen_random_uuid(), 'custom', null, 500, false, null)
@@ -561,9 +633,23 @@ select public.refund_accepted(pg_temp.v('r7'), 're_r7', 'succeeded');
 select public.refund_recovered(pg_temp.v('r7'), 'trr_r7', 50);
 select is(public.absorb_refund_shortfalls(10), 0, 'a recent shortfall waits for a sale');
 alter table public.order_refunds disable trigger order_refunds_guard;
-update public.order_refunds set accepted_at = now() - interval '181 days' where id = pg_temp.v('r7');
+update public.order_refunds set accepted_at = now() - interval '400 days' where id = pg_temp.v('r7');
 alter table public.order_refunds enable trigger order_refunds_guard;
-select is(public.absorb_refund_shortfalls(10), 1, 'after 180 days it is absorbed');
+select is(public.absorb_refund_shortfalls(10), 0,
+  'a studio that sold within 180 days still owes it, however old the refund (Q2; code review S2)');
+-- The studio's other sales, 100 then 200 days ago (put back after).
+create temp table paid_was on commit drop as select id, paid_at from public.orders
+  where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and id <> pg_temp.v('oP');
+alter table public.orders disable trigger orders_guard;
+update public.orders set paid_at = now() - interval '100 days' where id in (select id from paid_was);
+select is(public.absorb_refund_shortfalls(10), 0, 'a sale 100 days ago starts the 180 days again');
+update public.order_refunds set problem = 'refund_mismatch', problem_at = now() where id = pg_temp.v('r7');
+update public.orders set paid_at = now() - interval '200 days' where id in (select id from paid_was);
+select is(public.absorb_refund_shortfalls(10), 0, 'never one with a problem (support looks first)');
+update public.order_refunds set problem = null, problem_at = null where id = pg_temp.v('r7');
+select is(public.absorb_refund_shortfalls(10), 1, 'after 180 days without a settled sale it is absorbed');
+update public.orders o set paid_at = w.paid_at from paid_was w where o.id = w.id;
+alter table public.orders enable trigger orders_guard;
 select is(pg_temp.ledger(pg_temp.v('r7'), 'refund_shortfall'), 'studio_payable -' ||
   (select absorbed_cents from public.order_refunds where id = pg_temp.v('r7')) || ', daybell_fees ' ||
   (select absorbed_cents from public.order_refunds where id = pg_temp.v('r7')),
@@ -646,7 +732,7 @@ select is(public.studio_order_todo('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
   'To do: oU to print (oH is cancelled, oP shipped, oS delivered)');
 select is(jsonb_array_length(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')), 5, 'the list');
 select pg_temp.as_user('11111111-1111-4111-8111-111111111111');
-select is((select count(*) from public.order_refunds), 9::bigint, 'the owner reads every refund');
+select is((select count(*) from public.order_refunds), 10::bigint, 'the owner reads every refund');
 select is(jsonb_array_length(public.studio_order('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oH')) -> 'refunds'),
   4, 'and the order''s refunds on its page');
 select ok(jsonb_array_length(public.studio_order('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oH')) -> 'ledger')
@@ -664,7 +750,9 @@ select is((public.studio_sales('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'America/
     where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and account in ('parent_payments', 'refunds')),
   'Home''s sales: what parents paid less refunds, from the ledger');
 select is((public.studio_sales('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'America/Toronto') -> 'ranges' -> 'week'
-  ->> 'orders')::int, 4, 'orders paid and settled this week');
+  ->> 'orders')::int, 5, 'orders paid this week, counted when paid (oU''s fee isn''t settled yet; code review N5)');
+select is(jsonb_array_length(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, null, null, 50, null,
+  'school')), 2, 'filtered by delivery: the two school orders');
 select is((public.studio_sales('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'America/Toronto') ->> 'currency'), 'CAD',
   'in the region''s currency');
 select is(pg_temp.try($$ select public.studio_sales('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Mars/Olympus') $$),
@@ -700,12 +788,27 @@ select is(public.shop_order_download_all(pg_temp.h('s1'), pg_temp.v('oH')) -> 'f
 select is(public.shop_download_all_request(pg_temp.h('s2'), pg_temp.v('oD'), array[pg_temp.pid(1), pg_temp.pid(6)]),
   jsonb_build_object('queued', jsonb_build_array(pg_temp.pid(1)), 'unavailable', 0),
   'a missing file is queued (another studio''s photo is ignored)');
+select is((select count(*) from public.order_action_attempts where action like 'zip%'), 0::bigint,
+  'listing the files counts nothing: a 409 while they are made never uses up the limit (code review N1)');
 insert into public.order_action_attempts (studio_id, subject_id, action)
-select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'd1000000-0000-4000-8000-000000000002', 'zip' from generate_series(1, 8);
-select is(pg_temp.try(format($$ select public.shop_order_download_all(pg_temp.h('s2'), %L) $$, pg_temp.v('oD'))),
+select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'd1000000-0000-4000-8000-000000000002', 'zip' from generate_series(1, 9);
+select is(pg_temp.try(format($$ select public.shop_zip_take(pg_temp.h('s2'), %L) $$, pg_temp.v('oD'))),
   'ok', 'the tenth zip in an hour is fine');
-select is(pg_temp.try(format($$ select public.shop_order_download_all(pg_temp.h('s2'), %L) $$, pg_temp.v('oD'))),
+select is(pg_temp.try(format($$ select public.shop_zip_take(pg_temp.h('s2'), %L) $$, pg_temp.v('oD'))),
   'P0001 zip_limit', 'the eleventh is refused');
+select is(pg_temp.try(format($$ select public.shop_zip_take(pg_temp.h('sb'), %L) $$, pg_temp.v('oD'))),
+  'P0002 Order not found', 'never another studio''s order');
+insert into public.order_action_attempts (studio_id, subject_id, action)
+select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oP'), 'zip_order' from generate_series(1, 20);
+select is(pg_temp.try(format($$ select public.shop_zip_take(pg_temp.h('s3'), %L) $$, pg_temp.v('oP'))),
+  'P0001 zip_limit', 'an order gives at most 20 zips an hour, whatever the session (security review S4)');
+select is(pg_temp.try(format($$ select public.order_zip_take('44444444-4444-4444-8444-444444444444',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L) $$, pg_temp.v('oP'))), 'P0001 zip_limit', 'or person');
+select is(pg_temp.try(format($$ select public.order_zip_take('44444444-4444-4444-8444-444444444444',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L) $$, pg_temp.v('oS'))), 'ok', 'another order is fine');
+select is(pg_temp.try(format($$ select public.order_zip_take('33333333-3333-4333-8333-333333333333',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L) $$, pg_temp.v('oS'))), '42501 Not allowed for your role',
+  'never photographers');
 select is((public.order_print_files('44444444-4444-4444-8444-444444444444', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   pg_temp.v('oP')) -> 'files' -> 0 ->> 'quantity')::int, 1, 'staff get the print files of an order');
 select is(public.order_print_files('44444444-4444-4444-8444-444444444444', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -733,6 +836,13 @@ select is(public.purge_shipping_addresses(10), 1, 'but 91 days after');
 select results_eq($$ select ship_to_purged_at is not null, (select count(*) from public.order_shipping_addresses a
     where a.order_id = o.id) from public.orders o where o.id = pg_temp.v('oP') $$, $$ values (true, 0::bigint) $$,
   'the address is gone and the order says when');
+select results_eq($$ select carrier::text, tracking_number, tracking_url from public.orders where id = pg_temp.v('oP') $$,
+  $$ values ('ups', null::text, null::text) $$, 'the tracking number goes with it; the carrier stays (code review B2)');
+select is(public.shop_order(pg_temp.h('s3'), pg_temp.v('oP')) -> 'tracking', 'null'::jsonb,
+  'the parent no longer sees tracking');
+select is(pg_temp.try(format($$ select public.set_order_tracking('11111111-1111-4111-8111-111111111111',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', %L, 'ups', '1Z999AA10123456784') $$, pg_temp.v('oP'))),
+  'P0001 status_invalid', 'and it can''t be put back');
 select is((select count(*) from public.events where type = 'order.address_purged' and subject_id = pg_temp.v('oP')
   and actor_id is null and data = '{}'::jsonb), 1::bigint, 'one order.address_purged, with nothing in it');
 -- oH, cancelled (never shipped): 91 days after payment.
@@ -740,22 +850,35 @@ alter table public.orders disable trigger orders_guard;
 update public.orders set paid_at = now() - interval '91 days' where id = pg_temp.v('oH');
 alter table public.orders enable trigger orders_guard;
 select is(public.purge_shipping_addresses(10), 1, 'a cancelled order''s address goes 90 days after payment');
--- The hard cap: 180 days after payment, whatever happened (Q13).
+-- oC (S1, home): a 4×6 of Noah.
 select pg_temp.add('s1', 'c0000000-0000-4000-8000-000000000002', 'print', '4×6 print', 4, 1);
 select public.shop_set_shipping(pg_temp.h('s1'), 'home');
 insert into t (name, id) select 'oC', pg_temp.buy('s1', 169, 68);
--- The cancel limit: 5 a session an hour (S1 cancelled oH once already).
+-- A cancel whose refund then failed can be tried again, as its own refund (code review S1).
+insert into t (name, id) select 'rC1', (public.shop_order_cancel_begin(pg_temp.h('s1'), pg_temp.v('oC')) ->> 'refund_id')::uuid;
+select public.refund_accepted(pg_temp.v('rC1'), 're_rC1', 'pending');
+select public.refund_failed(pg_temp.v('rC1'), 'expired_or_canceled_card');
+select is((select fulfilment_status::text from public.orders where id = pg_temp.v('oC')), 'paid',
+  'a cancel whose refund failed puts the order back to Paid');
+select is((public.shop_order(pg_temp.h('s1'), pg_temp.v('oC')) ->> 'can_cancel')::boolean, true,
+  'and the parent may cancel again');
+insert into t (name, id) select 'rC2', (public.shop_order_cancel_begin(pg_temp.h('s1'), pg_temp.v('oC')) ->> 'refund_id')::uuid;
+select ok(pg_temp.v('rC2') is not null and pg_temp.v('rC2') <> pg_temp.v('rC1'), 'a new try is a new refund');
+select public.refund_abandoned(pg_temp.v('rC2'), 'stripe_refused');
+-- The cancel limit: 5 a session an hour (S1 tried four times already: oH twice, oC twice).
 insert into public.order_action_attempts (studio_id, subject_id, action)
-select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'd1000000-0000-4000-8000-000000000001', 'cancel'
-from generate_series(1, 4);
+values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'd1000000-0000-4000-8000-000000000001', 'cancel');
 select is(pg_temp.try(format($$ select public.shop_order_cancel_begin(pg_temp.h('s1'), %L) $$, pg_temp.v('oC'))),
   'P0001 cancel_limit', 'a sixth cancel in an hour is refused');
+select is(pg_temp.try(format($$ select public.shop_order_cancel_begin(pg_temp.h('s1'), %L) $$, pg_temp.v('oH'))),
+  'P0001 cancel_limit', 'even a repeat of a cancel already made (security review S3)');
+-- The hard cap: 365 days after payment, whatever happened (Seenu).
 alter table public.orders disable trigger orders_guard;
-update public.orders set paid_at = now() - interval '179 days' where id = pg_temp.v('oC');
+update public.orders set paid_at = now() - interval '364 days' where id = pg_temp.v('oC');
 alter table public.orders enable trigger orders_guard;
-select is(public.purge_shipping_addresses(10), 0, 'a paid order never shipped keeps its address up to 180 days');
+select is(public.purge_shipping_addresses(10), 0, 'a paid order never shipped keeps its address up to 365 days');
 alter table public.orders disable trigger orders_guard;
-update public.orders set paid_at = now() - interval '181 days' where id = pg_temp.v('oC');
+update public.orders set paid_at = now() - interval '366 days' where id = pg_temp.v('oC');
 alter table public.orders enable trigger orders_guard;
 select is(public.purge_shipping_addresses(10), 1, 'and not after');
 

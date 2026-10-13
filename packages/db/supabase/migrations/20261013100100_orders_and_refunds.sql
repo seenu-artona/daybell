@@ -8,9 +8,12 @@
 -- cancel; Daybell sets every amount (Q1): the parent is refunded with no Stripe flags, then one transfer reversal of
 -- what the studio gives back (the refund less Daybell's fee on it, pro rata at the order's rate). A shortfall (the
 -- card fee already reversed leaves too little in the transfer) is a studio receivable, recovered from the studio's next
--- settled sale, absorbed by Daybell after 180 days (Q2). Each refund Stripe accepts writes one balanced ledger
--- transaction. Staff see orders, totals and fees; never Home's money, the ledger or refunds (Q4). Home delivery
--- addresses are purged 90 days after shipping (a launch blocker from step 10).
+-- settled sale, absorbed by Daybell after 180 days without a settled sale (Q2). Each refund Stripe accepts writes one
+-- balanced ledger transaction; a refund that fails after the studio's share was taken back sends that share back (Q7).
+-- Staff see orders, totals and fees; never Home's money, the ledger or refunds (Q4). Home delivery addresses and
+-- tracking numbers are purged 90 days after shipping, at the latest 365 days after payment (a launch blocker from step
+-- 10). A refund made outside Daybell (the Stripe Dashboard) flags the order, rings the bell and stops fulfilment until
+-- an owner or admin marks it checked.
 
 -- ── Types ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 create type public.order_fulfilment as enum ('paid', 'printed', 'shipped', 'delivered', 'complete', 'canceled');
@@ -37,7 +40,11 @@ alter table public.orders
   add column tracking_number text check (tracking_number ~ '^[A-Za-z0-9 -]{4,40}$'),
   -- Only with "other": the carrier's own tracking page, https only.
   add column tracking_url text check (char_length(tracking_url) <= 500 and tracking_url ~ '^https://[^[:space:]]+$'),
-  add column ship_to_purged_at timestamptz;
+  add column ship_to_purged_at timestamptz,
+  -- A refund made outside Daybell (security review S5): stamped once; fulfilment stops until an owner or admin marks it
+  -- checked.
+  add column external_refund_at timestamptz,
+  add column external_refund_checked_at timestamptz;
 
 -- A line that needs printing: a print, or a package holding a print.
 create function app.order_line_physical(p_line public.order_lines) returns boolean
@@ -68,7 +75,10 @@ alter table public.orders
   add constraint orders_delivered check ((fulfilment_status = 'delivered') = (delivered_at is not null)),
   add constraint orders_canceled check ((fulfilment_status = 'canceled') = (canceled_at is not null)),
   -- Shipped means a carrier and a tracking number (Claude's call); both only for home delivery.
-  add constraint orders_tracking check (fulfilment_status <> 'shipped' or (carrier is not null and tracking_number is not null)),
+  -- (The purge clears the tracking number with the address: code review B2.)
+  add constraint orders_tracking check (fulfilment_status <> 'shipped'
+    or (carrier is not null and (tracking_number is not null or ship_to_purged_at is not null))),
+  add constraint orders_external_refund check (external_refund_checked_at is null or external_refund_at is not null),
   add constraint orders_tracking_home check ((carrier is null and tracking_number is null) or shipping_method = 'home'),
   add constraint orders_tracking_url check (tracking_url is null or carrier = 'other');
 
@@ -144,7 +154,8 @@ create table public.order_refunds (
   -- Restrict: money records are kept 7 years (D125).
   studio_id uuid not null references public.studios (id) on delete restrict,
   order_id uuid not null,
-  -- The caller's idempotency key (the order's own id for a parent's cancel): the same request is the same refund.
+  -- The caller's idempotency key (the studio's dialog makes one; each parent's cancel attempt gets its own): the same
+  -- request is the same refund. Never an order's id (begin_refund refuses it).
   request_id uuid not null,
   kind public.refund_kind not null,
   reason public.refund_reason,
@@ -159,7 +170,7 @@ create table public.order_refunds (
   status public.refund_status not null default 'requested',
   stripe_refund_id text unique check (char_length(stripe_refund_id) <= 255 and stripe_refund_id ~ '^(re|pyr)_[A-Za-z0-9_]+$'),
   -- What was taken back from the studio's transfer (null until done), and what of the studio's share is still owed
-  -- (Q2: recovered from its next settled sale, else absorbed after 180 days).
+  -- (Q2: recovered from its next settled sale, else absorbed after 180 days without one).
   reversal_cents bigint check (reversal_cents >= 0),
   stripe_reversal_id text check (char_length(stripe_reversal_id) <= 255 and stripe_reversal_id ~ '^trr_[A-Za-z0-9_]+$'),
   unrecovered_cents bigint not null default 0 check (unrecovered_cents >= 0),
@@ -174,6 +185,12 @@ create table public.order_refunds (
   backstop_next_at timestamptz,
   problem text check (problem ~ '^[a-z_]{1,100}$'),
   problem_at timestamptz,
+  -- Stripe failed the refund after the studio's share was taken back: the share sent back to the studio's account by a
+  -- transfer (Q7), once.
+  returned_cents bigint check (returned_cents > 0),
+  stripe_return_transfer_id text check (char_length(stripe_return_transfer_id) <= 255
+    and stripe_return_transfer_id ~ '^tr_[A-Za-z0-9_]+$'),
+  returned_at timestamptz,
   created_at timestamptz not null default now(),
   accepted_at timestamptz,
   settled_at timestamptz,
@@ -193,7 +210,9 @@ create table public.order_refunds (
     <= amount_cents - daybell_fee_cents),
   constraint order_refunds_cancel_reason check (kind <> 'cancel' or (reason = 'parent_asked' and actor_id is null)),
   constraint order_refunds_problem check ((problem is null) = (problem_at is null)),
-  constraint order_refunds_absorbed check ((absorbed_cents > 0) = (absorbed_at is not null))
+  constraint order_refunds_absorbed check ((absorbed_cents > 0) = (absorbed_at is not null)),
+  constraint order_refunds_returned check ((returned_at is null) = (stripe_return_transfer_id is null)
+    and (returned_at is null) = (returned_cents is null) and (returned_at is null or status = 'failed'))
 );
 create index order_refunds_order_idx on public.order_refunds (order_id, created_at);
 create index order_refunds_studio_idx on public.order_refunds (studio_id, created_at desc);
@@ -201,6 +220,7 @@ create index order_refunds_due_idx on public.order_refunds (coalesce(backstop_ne
   where problem is null and (status = 'requested' or (status in ('pending', 'succeeded') and reversal_cents is null)
     or status = 'pending');
 create index order_refunds_shortfall_idx on public.order_refunds (studio_id, accepted_at) where unrecovered_cents > 0;
+create index order_refunds_return_idx on public.order_refunds (failed_at) where status = 'failed' and returned_at is null;
 comment on table public.order_refunds is
   'A refund of an order (ADR 0024): its amounts in whole cents, Daybell''s fee given back, Stripe''s ids, the studio''s '
   'transfer reversal and any shortfall. Never deleted (D125); no personal data.';
@@ -243,14 +263,16 @@ create index order_refund_recoveries_order_idx on public.order_refund_recoveries
 comment on table public.order_refund_recoveries is
   'A refund''s shortfall taken back from the studio''s next settled sale (ADR 0024; Q2). Append-only.';
 
--- Counted actions (Claude's calls): a parent's cancels (5 a session an hour) and "Download all" and print-file zips (10 a
--- session or person an hour). Ids and times only; nobody signed in reads it.
+-- Counted actions (Claude's calls): a parent's cancels (5 a session an hour), "Download all" and print-file zips (10 a
+-- session or person an hour, and 20 an order an hour across everyone: security review S4). Ids and times only; nobody
+-- signed in reads it.
 create table public.order_action_attempts (
   id bigint generated always as identity primary key,
   studio_id uuid not null references public.studios (id) on delete cascade,
-  -- The shop session or the signed-in person. No foreign key: a pruned session or an erased person leaves nothing.
+  -- The shop session, the signed-in person or (zip_order) the order. No foreign key: a pruned session or an erased
+  -- person leaves nothing.
   subject_id uuid not null,
-  action text not null check (action in ('cancel', 'zip')),
+  action text not null check (action in ('cancel', 'zip', 'zip_order')),
   created_at timestamptz not null default now()
 );
 create index order_action_attempts_subject_idx on public.order_action_attempts (subject_id, action, created_at);
@@ -282,7 +304,9 @@ begin
      or (old.settled_at is not null and new.settled_at is distinct from old.settled_at)
      or (old.failed_at is not null and new.failed_at is distinct from old.failed_at)
      or (old.absorbed_at is not null and (new.absorbed_at, new.absorbed_cents) is distinct from (old.absorbed_at, old.absorbed_cents))
-     or (old.reversal_cents is not null and new.unrecovered_cents > old.unrecovered_cents) then
+     or (old.reversal_cents is not null and new.unrecovered_cents > old.unrecovered_cents)
+     or (old.returned_at is not null and (new.returned_at, new.returned_cents, new.stripe_return_transfer_id)
+         is distinct from (old.returned_at, old.returned_cents, old.stripe_return_transfer_id)) then
     raise exception 'refund_fixed' using errcode = 'check_violation';
   end if;
   if new.status is distinct from old.status and not (
@@ -308,7 +332,8 @@ begin
     raise exception 'refund_currency' using errcode = 'check_violation';
   end if;
   if new.status <> 'requested' or new.stripe_refund_id is not null or new.reversal_cents is not null
-     or new.accepted_at is not null or new.unrecovered_cents <> 0 or new.absorbed_cents <> 0 then
+     or new.accepted_at is not null or new.unrecovered_cents <> 0 or new.absorbed_cents <> 0
+     or new.returned_at is not null then
     raise exception 'refund_fixed' using errcode = 'check_violation';
   end if;
   return new;
@@ -425,7 +450,8 @@ end;
 $$;
 
 -- Who hears about each kind (the same as packages/core NOTIFICATION_AUDIENCE): a new order goes to the people who
--- fulfil it (owners, admins and staff); a failed refund and a dispute to owners and admins (who refund, answer 3).
+-- fulfil it (owners, admins and staff); a failed refund, a dispute and a refund made outside Daybell to owners and
+-- admins (who refund, answer 3).
 create or replace function app.notification_audience(p_kind public.notification_kind) returns public.studio_role[]
 language sql immutable
 set search_path = ''
@@ -438,6 +464,7 @@ as $$
     when 'order_paid' then '{owner,admin,staff}'::public.studio_role[]
     when 'refund_failed' then '{owner,admin}'::public.studio_role[]
     when 'dispute_opened' then '{owner,admin}'::public.studio_role[]
+    when 'refund_external' then '{owner,admin}'::public.studio_role[]
     else '{owner,admin,photographer}'::public.studio_role[]
   end;
 $$;
@@ -501,6 +528,8 @@ begin
     perform app.notify_order(new.id, new.studio_id, 'refund_failed', new.subject_id);
   elsif new.type = 'order.dispute_opened' and new.subject_id is not null then
     perform app.notify_order(new.id, new.studio_id, 'dispute_opened', new.subject_id);
+  elsif new.type = 'order.external_refund' and new.subject_id is not null then
+    perform app.notify_order(new.id, new.studio_id, 'refund_external', new.subject_id);
   end if;
   return null;
 end;
@@ -508,7 +537,7 @@ $$;
 drop trigger events_notify on public.events;
 create trigger events_notify after insert on public.events
 for each row when (new.type in ('job.selling', 'job.closed', 'payout_account.status_changed', 'photos.tagged',
-  'order.paid', 'order.refund_failed', 'order.dispute_opened'))
+  'order.paid', 'order.refund_failed', 'order.dispute_opened', 'order.external_refund'))
 execute function app.notify_from_event();
 
 -- ── Row-level security (Seenu, Q4) ────────────────────────────────────────────────────────────────────────────────
@@ -544,7 +573,8 @@ revoke all on public.order_refunds, public.order_refund_lines, public.order_refu
   public.order_action_attempts from anon, authenticated;
 grant select on public.order_refunds, public.order_refund_lines, public.order_refund_recoveries to authenticated;
 grant select (fulfilment_status, printed_at, shipped_at, delivered_at, canceled_at, disputed_at, carrier,
-  tracking_number, tracking_url, ship_to_purged_at) on public.orders to authenticated;
+  tracking_number, tracking_url, ship_to_purged_at, external_refund_at, external_refund_checked_at)
+  on public.orders to authenticated;
 
 -- ── The webhook inbox (amends ADR 0020, 0023) ─────────────────────────────────────────────────────────────────────
 alter table public.stripe_events drop constraint stripe_events_type_check;
@@ -698,7 +728,8 @@ $$;
 -- ── Fulfilment (answer 4: owners, admins and staff) ───────────────────────────────────────────────────────────────
 -- Marks one paid order Printed, Shipped (home delivery, with a carrier and tracking number; a link only for "other")
 -- or Delivered to school. Named refusals without values: order_not_paid, order_canceled, order_refunded (nothing left
--- to deliver), refund_in_flight (a refund not yet accepted by Stripe: a parent's cancel may be on its way),
+-- to deliver), external_refund (a refund made outside Daybell not yet checked by an owner or admin), refund_in_flight
+-- (a refund not yet accepted by Stripe: a parent's cancel may be on its way),
 -- wrong_delivery (shipping a school order or delivering a home one), tracking_required, status_invalid (not the next
 -- step). Another studio's order is not found. Events: order.printed, order.shipped {carrier}, order.delivered: never the
 -- tracking number.
@@ -724,6 +755,9 @@ begin
   end if;
   if app.order_fully_refunded(v_order) then
     raise exception 'order_refunded' using errcode = 'P0001';
+  end if;
+  if v_order.external_refund_at is not null and v_order.external_refund_checked_at is null then
+    raise exception 'external_refund' using errcode = 'P0001';
   end if;
   if (select x.in_flight from app.order_refunded(v_order.id) x) > 0 then
     raise exception 'refund_in_flight' using errcode = 'P0001';
@@ -804,7 +838,8 @@ begin
 end;
 $$;
 
--- Corrects a shipped order's carrier, tracking number or link. Event order.tracking_changed {carrier}.
+-- Corrects a shipped order's carrier, tracking number or link (not once the purge has cleared them). Event
+-- order.tracking_changed {carrier}.
 create function public.set_order_tracking(p_actor uuid, p_studio_id uuid, p_order_id uuid,
   p_carrier public.shipping_carrier, p_tracking_number text, p_tracking_url text default null) returns void
 language plpgsql security definer
@@ -818,7 +853,7 @@ begin
   if v_order.id is null then
     raise exception 'Order not found' using errcode = 'P0002';
   end if;
-  if v_order.fulfilment_status is distinct from 'shipped' then
+  if v_order.fulfilment_status is distinct from 'shipped' or v_order.ship_to_purged_at is not null then
     raise exception 'status_invalid' using errcode = 'P0001';
   end if;
   if p_carrier is null or coalesce(p_tracking_number, '') = '' then
@@ -903,7 +938,9 @@ begin
     cross join lateral (select app.order_line_refunded_quantity(ol.id) as done) q
     where ol.order_id = p_order.id and ol.studio_id = p_order.studio_id and ol.quantity > q.done;
   elsif p_kind = 'lines' then
-    if jsonb_typeof(p_lines) is distinct from 'array' or jsonb_array_length(p_lines) not between 1 and 100 then
+    -- No lines with the shipping left is a shipping-only refund (code review S5).
+    if jsonb_typeof(p_lines) is distinct from 'array' or jsonb_array_length(p_lines) > 100
+       or (jsonb_array_length(p_lines) = 0 and not coalesce(p_shipping, false)) then
       raise exception 'Choose 1 to 100 lines' using errcode = '22023';
     end if;
     if exists (
@@ -917,9 +954,9 @@ begin
           <> jsonb_array_length(p_lines) then
       raise exception 'over_refund' using errcode = 'P0001';
     end if;
-    select jsonb_agg(jsonb_build_object('line_id', ol.id, 'quantity', (e.value ->> 'quantity')::int,
-             'products_cents', ol.unit_price_cents * (e.value ->> 'quantity')::int) order by ol.position),
-      sum(ol.unit_price_cents * (e.value ->> 'quantity')::int)
+    select coalesce(jsonb_agg(jsonb_build_object('line_id', ol.id, 'quantity', (e.value ->> 'quantity')::int,
+             'products_cents', ol.unit_price_cents * (e.value ->> 'quantity')::int) order by ol.position), '[]'::jsonb),
+      coalesce(sum(ol.unit_price_cents * (e.value ->> 'quantity')::int), 0)
     into v_lines, v_p
     from jsonb_array_elements(p_lines) e
     join public.order_lines ol on ol.id = (e.value ->> 'line_id')::uuid and ol.studio_id = p_order.studio_id;
@@ -981,7 +1018,9 @@ $$;
 
 -- A studio's refund (owners and admins, answer 3): by line (with or without the shipping left) or a custom amount of
 -- products before tax (Q3). The same request id again answers the same refund (created: false). Refusals:
--- order_not_paid, fees_pending, over_refund, nothing_to_refund. Another studio's order is not found.
+-- order_not_paid, fees_pending, over_refund, nothing_to_refund. Another studio's order is not found. A request id
+-- that is an order's id is refused (22023): it could collide with nothing else today, but request ids are the caller's
+-- own (security review note 4).
 create function public.begin_refund(p_actor uuid, p_studio_id uuid, p_order_id uuid, p_request_id uuid,
   p_kind public.refund_kind, p_lines jsonb, p_custom_cents bigint, p_shipping boolean,
   p_reason public.refund_reason) returns jsonb
@@ -994,7 +1033,8 @@ declare
   v_existing uuid;
   v_id uuid;
 begin
-  if p_request_id is null or p_kind is null or p_kind = 'cancel' then
+  if p_request_id is null or p_kind is null or p_kind = 'cancel'
+     or exists (select 1 from public.orders o where o.id = p_request_id) then
     raise exception 'A request id, and lines or a custom amount' using errcode = '22023';
   end if;
   select * into v_order from public.orders o where o.id = p_order_id and o.studio_id = p_studio_id for update;
@@ -1020,8 +1060,11 @@ end;
 $$;
 
 -- A parent's cancel (answer 2; Q5, Q6): only the session that paid, while the order is Paid (not yet Printed; never a
--- digital-only order, which is Complete) and something is left to refund. Everything left, shipping included. At most
--- 5 a session an hour (cancel_limit). The same order again answers its cancel. Refusals: cannot_cancel, cancel_limit,
+-- digital-only order, which is Complete) and something is left to refund. Everything left, shipping included. Every
+-- try counts against 5 a session an hour (cancel_limit; security review S3), a repeat included. While a cancel is live
+-- (asked, pending or made) the same cancel is answered (created: false, with its status and whether it has waited 30
+-- seconds or more, so the API asks Stripe again only then); after one failed or Stripe refused it, the parent may try
+-- again: each try is its own refund with its own request id (code review S1). Refusals: cannot_cancel, cancel_limit,
 -- fees_pending. An order this session can't see is not found.
 create function public.shop_order_cancel_begin(p_session_hash text, p_order_id uuid) returns jsonb
 language plpgsql security definer
@@ -1030,32 +1073,39 @@ as $$
 declare
   v public.shop_sessions := app.shop_session_row(p_session_hash, true);
   v_order public.orders;
-  v_existing uuid;
+  v_live public.order_refunds;
   v_id uuid;
 begin
   select * into v_order from public.orders o where o.id = p_order_id and o.studio_id = v.studio_id for update;
   if v_order.id is null or app.shop_order_view(v, v_order) is null then
     raise exception 'Order not found' using errcode = 'P0002';
   end if;
-  select r.id into v_existing from public.order_refunds r
-  where r.studio_id = v_order.studio_id and r.request_id = v_order.id and r.kind = 'cancel';
-  if v_existing is not null and v_order.shop_session_id = v.id then
-    return jsonb_build_object('refund_id', v_existing, 'created', false);
-  end if;
-  if v_order.shop_session_id is distinct from v.id or v_order.status <> 'paid'
-     or v_order.fulfilment_status <> 'paid' or app.order_fully_refunded(v_order)
-     or (select x.in_flight from app.order_refunded(v_order.id) x) > 0 then
+  if v_order.shop_session_id is distinct from v.id then
     raise exception 'cannot_cancel' using errcode = 'P0001';
   end if;
   if not app.take_order_action(v.studio_id, v.id, 'cancel', 5) then
     raise exception 'cancel_limit' using errcode = 'P0001';
   end if;
-  v_id := app.write_refund(v_order, v_order.id, 'cancel', 'parent_asked', null, null, null, true);
-  return jsonb_build_object('refund_id', v_id, 'created', true);
+  select * into v_live from public.order_refunds r
+  where r.studio_id = v_order.studio_id and r.order_id = v_order.id and r.kind = 'cancel'
+    and r.status in ('requested', 'pending', 'succeeded')
+  order by r.created_at desc limit 1;
+  if v_live.id is not null then
+    return jsonb_build_object('refund_id', v_live.id, 'created', false, 'status', v_live.status,
+      'stale', v_live.created_at < now() - interval '30 seconds');
+  end if;
+  if v_order.status <> 'paid' or v_order.fulfilment_status <> 'paid' or app.order_fully_refunded(v_order)
+     or (select x.in_flight from app.order_refunded(v_order.id) x) > 0 then
+    raise exception 'cannot_cancel' using errcode = 'P0001';
+  end if;
+  v_id := app.write_refund(v_order, gen_random_uuid(), 'cancel', 'parent_asked', null, null, null, true);
+  return jsonb_build_object('refund_id', v_id, 'created', true, 'status', 'requested', 'stale', false);
 end;
 $$;
 
--- What the API needs to ask Stripe about a refund: amounts, ids and state (never a name).
+-- What the API needs to ask Stripe about a refund: amounts, ids and state (never a name). return_needed_cents: what
+-- the studio gave back for a refund Stripe then failed (its reversal and any shortfall recovered from later sales),
+-- not yet sent back (Q7).
 create function public.refund_for_stripe(p_refund_id uuid) returns jsonb
 language sql stable security definer
 set search_path = ''
@@ -1064,7 +1114,10 @@ as $$
     'reason', r.reason, 'status', r.status, 'amount_cents', r.amount_cents, 'daybell_fee_cents', r.daybell_fee_cents,
     'currency', r.currency, 'stripe_refund_id', r.stripe_refund_id, 'reversal_cents', r.reversal_cents,
     'reversal_needed_cents', r.amount_cents - r.daybell_fee_cents, 'payment_intent_id', o.payment_intent_id,
-    'transfer_id', o.transfer_id)
+    'transfer_id', o.transfer_id, 'stripe_account_id', o.stripe_account_id, 'returned_at', r.returned_at,
+    'return_needed_cents', case when r.status = 'failed' and r.returned_at is null
+      then coalesce(r.reversal_cents, 0) + (select coalesce(sum(x.amount_cents), 0) from public.order_refund_recoveries x
+                                            where x.refund_id = r.id) else 0 end)
   from public.order_refunds r join public.orders o on o.id = r.order_id and o.studio_id = r.studio_id
   where r.id = p_refund_id;
 $$;
@@ -1202,9 +1255,9 @@ begin
 end;
 $$;
 
--- Stripe couldn't refund (after accepting it): the mirror of its ledger transaction, a cancelled order back to Paid,
--- nothing more to recover, and order.refund_failed {kind}, which rings the bell (owners and admins). The money the
--- studio gave back stays with Daybell until support returns it (ADR 0024 follow-ups).
+-- Stripe couldn't refund (after accepting it): the mirror of its ledger transaction (so the studio's share is its
+-- own again), a cancelled order back to Paid, nothing more to recover, and order.refund_failed {kind}, which rings the
+-- bell (owners and admins). What the studio already gave back is sent back by the API (refund_share_returned; Q7).
 create function public.refund_failed(p_refund_id uuid, p_code text) returns text
 language plpgsql security definer
 set search_path = ''
@@ -1256,6 +1309,36 @@ begin
 end;
 $$;
 
+-- What the studio gave back for a refund Stripe then failed was sent back to its account (Q7): the transfer's id and
+-- amount, once. The ledger already gave the share back (refund_failed's mirror); like the sale's transfer and the
+-- reversals, the transfer settles it. Event order.refund_share_returned (no amounts).
+create function public.refund_share_returned(p_refund_id uuid, p_transfer_id text, p_cents bigint) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v public.order_refunds;
+begin
+  if coalesce(p_transfer_id, '') !~ '^tr_[A-Za-z0-9_]{1,250}$' or p_cents is null or p_cents < 1 then
+    raise exception 'A transfer and its amount' using errcode = '22023';
+  end if;
+  select * into v from public.order_refunds r where r.id = p_refund_id for update;
+  if v.id is null then
+    raise exception 'Refund not found' using errcode = 'P0002';
+  end if;
+  if v.returned_at is not null then
+    return;
+  end if;
+  if v.status <> 'failed' then
+    raise exception 'not_failed' using errcode = 'P0001';
+  end if;
+  update public.order_refunds r
+  set returned_cents = p_cents, stripe_return_transfer_id = p_transfer_id, returned_at = now()
+  where r.id = v.id;
+  perform app.emit_as(null, v.studio_id, 'order.refund_share_returned', v.order_id, '{}'::jsonb);
+end;
+$$;
+
 -- A backstop's try failed, or a problem no retry can fix: as note_checkout_failure, on the refund.
 create function public.note_refund_failure(p_refund_id uuid, p_code text, p_permanent boolean) returns void
 language plpgsql security definer
@@ -1275,7 +1358,8 @@ end;
 $$;
 
 -- The jobs cron's refund backstop (ids only), oldest due first, never one with a problem or backing off: refunds Stripe
--- hasn't accepted after a minute, accepted ones whose reversal isn't done, and pending ones to ask Stripe about.
+-- hasn't accepted after a minute, accepted ones whose reversal isn't done, pending ones to ask Stripe about, and failed
+-- ones whose share the studio gave back hasn't been sent back yet (Q7).
 create function public.refunds_to_retry(p_limit integer) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -1290,7 +1374,10 @@ begin
                            and ((r.status = 'requested' and r.created_at < now() - interval '1 minute')
                              or (r.status in ('pending', 'succeeded') and r.reversal_cents is null
                                  and r.accepted_at < now() - interval '1 minute')
-                             or (r.status = 'pending' and r.accepted_at < now() - interval '1 hour'))
+                             or (r.status = 'pending' and r.accepted_at < now() - interval '1 hour')
+                             or (r.status = 'failed' and r.returned_at is null
+                                 and (coalesce(r.reversal_cents, 0) > 0 or exists (
+                                   select 1 from public.order_refund_recoveries x where x.refund_id = r.id))))
                          order by coalesce(r.backstop_next_at, r.created_at), r.id limit p_limit) x), '[]'::jsonb);
 end;
 $$;
@@ -1369,9 +1456,11 @@ begin
 end;
 $$;
 
--- Shortfalls still owed 180 days after their refund are absorbed by Daybell (Q2): a refund_shortfall transaction,
--- studio_payable −owed (the studio no longer owes it) and daybell_fees +owed (Daybell's loss), and
--- order.shortfall_absorbed (no amounts). Up to p_limit at a time; returns how many.
+-- Shortfalls still owed after 180 days without a settled sale to recover them from are absorbed by Daybell (Q2: the
+-- clock starts at the refund and again at each of the studio's later settled sales; code review S2): a
+-- refund_shortfall transaction, studio_payable −owed (the studio no longer owes it) and daybell_fees +owed (Daybell's
+-- loss), and order.shortfall_absorbed (no amounts). Never a refund with a problem (support looks first). Up to p_limit
+-- at a time; returns how many.
 create function public.absorb_refund_shortfalls(p_limit integer) returns integer
 language plpgsql security definer
 set search_path = ''
@@ -1386,8 +1475,12 @@ begin
   end if;
   for v in
     select * from public.order_refunds r
-    where r.unrecovered_cents > 0 and r.absorbed_at is null and r.accepted_at < now() - interval '180 days'
+    where r.unrecovered_cents > 0 and r.absorbed_at is null and r.problem is null
       and r.status in ('pending', 'succeeded')
+      and greatest(r.accepted_at, (select max(o.paid_at) from public.orders o
+                                   where o.studio_id = r.studio_id and o.status = 'paid'
+                                     and o.fees_settled_at is not null and o.id <> r.order_id))
+          < now() - interval '180 days'
     order by r.accepted_at, r.id limit p_limit
     for update skip locked
   loop
@@ -1492,6 +1585,49 @@ begin
 end;
 $$;
 
+-- A refund made outside Daybell (the Stripe Dashboard; security review S5): the order is flagged once, fulfilment stops
+-- and order.external_refund rings owners' and admins' bell. True the first time.
+create function public.order_external_refund(p_order_id uuid) returns boolean
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_studio uuid;
+begin
+  update public.orders o set external_refund_at = now()
+  where o.id = p_order_id and o.status = 'paid' and o.external_refund_at is null
+  returning o.studio_id into v_studio;
+  if v_studio is null then
+    return false;
+  end if;
+  perform app.emit_as(null, v_studio, 'order.external_refund', p_order_id, '{}'::jsonb);
+  return true;
+end;
+$$;
+
+-- An owner or admin checked a refund made outside Daybell (in Stripe and with the parent): fulfilment may go on. Event
+-- order.external_refund_checked. Refused (status_invalid) when nothing is flagged or it was already checked.
+create function public.check_external_refund(p_actor uuid, p_studio_id uuid, p_order_id uuid) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_previous text := app.act_for_roles(p_actor, p_studio_id, '{owner,admin}');
+  v_order public.orders;
+begin
+  select * into v_order from public.orders o where o.id = p_order_id and o.studio_id = p_studio_id for update;
+  if v_order.id is null then
+    raise exception 'Order not found' using errcode = 'P0002';
+  end if;
+  if v_order.external_refund_at is null or v_order.external_refund_checked_at is not null then
+    raise exception 'status_invalid' using errcode = 'P0001';
+  end if;
+  update public.orders o set external_refund_checked_at = now() where o.id = v_order.id;
+  perform app.emit(p_studio_id, 'order.external_refund_checked', v_order.id, '{}'::jsonb);
+  perform app.end_act_for(v_previous);
+end;
+$$;
+
 -- ── Downloads: refunded lines lose theirs (Claude's call) ─────────────────────────────────────────────────────────
 -- As in 20261013000000, but a line every item of which was given back unlocks nothing. Custom refunds give back no
 -- items, so they leave downloads alone (Q3).
@@ -1559,8 +1695,9 @@ begin
 end;
 $$;
 
--- As in 20261013000000, with the fulfilment status, the refund badge, whether this session may cancel, and for the
--- full view the tracking once shipped and each line's refunded quantity.
+-- As in 20261013000000, with the fulfilment status, the refund badge, whether this session may cancel, each line's
+-- refunded quantity, and the tracking once shipped for the session that paid only (security review B1: another
+-- household holding the same code must never follow the parcel).
 create or replace function public.shop_order(p_session_hash text, p_order_id uuid) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -1582,7 +1719,8 @@ begin
     'fulfilment', v_order.fulfilment_status,
     'refund', case when v_order.status = 'paid' then app.order_refund_badge(v_order) end,
     'can_cancel', v_order.status = 'paid' and app.shop_can_cancel(v, v_order),
-    'tracking', case when v_full and v_order.fulfilment_status = 'shipped' then jsonb_build_object(
+    'tracking', case when v_order.shop_session_id = v.id and v_order.fulfilment_status = 'shipped'
+                       and v_order.tracking_number is not null then jsonb_build_object(
       'carrier', v_order.carrier, 'number', v_order.tracking_number, 'url', v_order.tracking_url) end,
     'paid_at', v_order.paid_at, 'created_at', v_order.created_at, 'currency', v_order.currency,
     'studio_name', (select s.name from public.studios s where s.id = v_order.studio_id),
@@ -1620,8 +1758,8 @@ end;
 $$;
 
 -- "Download all" (Claude's call): every download this session may have from a paid order, numbered as the single
--- downloads are (so the zip's files have the same names). At most 10 a session an hour (zip_limit). Not found
--- otherwise.
+-- downloads are (so the zip's files have the same names). Not counted: shop_zip_take counts a zip only when it is
+-- streamed (code review N1). Not found otherwise.
 create function public.shop_order_download_all(p_session_hash text, p_order_id uuid) returns jsonb
 language plpgsql security definer
 set search_path = ''
@@ -1637,9 +1775,6 @@ begin
   if v_view is null then
     raise exception 'Order not found' using errcode = 'P0002';
   end if;
-  if not app.take_order_action(v.studio_id, v.id, 'zip', 10) then
-    raise exception 'zip_limit' using errcode = 'P0001';
-  end if;
   return jsonb_build_object('studio_id', v_order.studio_id, 'reference', v_order.reference,
     'files', coalesce((select jsonb_agg(jsonb_build_object('job_id', d.job_id, 'photo_id', d.photo_id, 'n', d.number)
                                         order by d.number)
@@ -1647,6 +1782,28 @@ begin
                              from (select ol.position, dl.photo_id, dl.job_id, dl.n
                                    from app.shop_order_lines(v, v_order, v_view) ol
                                    cross join lateral app.order_line_downloads(ol) dl) x) d), '[]'::jsonb));
+end;
+$$;
+
+-- A zip about to be streamed, counted: at most 10 a session an hour and 20 an order an hour across every session and
+-- person (security review S4). Refusal: zip_limit. Not found for an order this session can't see.
+create function public.shop_zip_take(p_session_hash text, p_order_id uuid) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v public.shop_sessions := app.shop_session_row(p_session_hash);
+  v_order public.orders;
+begin
+  select * into v_order from public.orders o
+  where o.id = p_order_id and o.studio_id = v.studio_id and o.status = 'paid';
+  if v_order.id is null or app.shop_order_view(v, v_order) is null then
+    raise exception 'Order not found' using errcode = 'P0002';
+  end if;
+  if not app.take_order_action(v.studio_id, v.id, 'zip', 10)
+     or not app.take_order_action(v.studio_id, v_order.id, 'zip_order', 20) then
+    raise exception 'zip_limit' using errcode = 'P0001';
+  end if;
 end;
 $$;
 
@@ -1693,7 +1850,7 @@ $$;
 
 -- ── Print files (owners, admins and staff; Claude's call) ─────────────────────────────────────────────────────────
 -- The paid order's lines to print, with what is left of each after refunds, for the studio's own printing: the pose,
--- the item, its size or a package's prints. At most 10 zips a person an hour (zip_limit). Never a name.
+-- the item, its size or a package's prints. Not counted: order_zip_take counts a zip when it is streamed. Never a name.
 create function public.order_print_files(p_actor uuid, p_studio_id uuid, p_order_id uuid) returns jsonb
 language plpgsql security definer
 set search_path = ''
@@ -1707,9 +1864,6 @@ begin
   where o.id = p_order_id and o.studio_id = p_studio_id and o.status = 'paid';
   if v_order.id is null then
     raise exception 'Order not found' using errcode = 'P0002';
-  end if;
-  if not app.take_order_action(p_studio_id, p_actor, 'zip', 10) then
-    raise exception 'zip_limit' using errcode = 'P0001';
   end if;
   select jsonb_build_object('reference', v_order.reference,
     'files', coalesce(jsonb_agg(jsonb_build_object('position', ol.position, 'job_id', ol.job_id,
@@ -1726,6 +1880,26 @@ begin
     and ol.quantity > app.order_line_refunded_quantity(ol.id);
   perform app.end_act_for(v_previous);
   return v_out;
+end;
+$$;
+
+-- Print files about to be streamed, counted: at most 10 a person an hour and 20 an order an hour (zip_limit).
+create function public.order_zip_take(p_actor uuid, p_studio_id uuid, p_order_id uuid) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_previous text := app.act_for_roles(p_actor, p_studio_id, '{owner,admin,staff}');
+begin
+  if not exists (select 1 from public.orders o
+                 where o.id = p_order_id and o.studio_id = p_studio_id and o.status = 'paid') then
+    raise exception 'Order not found' using errcode = 'P0002';
+  end if;
+  if not app.take_order_action(p_studio_id, p_actor, 'zip', 10)
+     or not app.take_order_action(p_studio_id, p_order_id, 'zip_order', 20) then
+    raise exception 'zip_limit' using errcode = 'P0001';
+  end if;
+  perform app.end_act_for(v_previous);
 end;
 $$;
 
@@ -1765,11 +1939,12 @@ $$;
 
 -- ── What studios see (SECURITY INVOKER: row-level security decides; Q4) ───────────────────────────────────────────
 -- The studio's paid orders, newest first, a page at a time (after the order p_cursor), optionally one job's, one
--- fulfilment status's or references starting with p_reference: reference, date, children (first name and last
--- initial), items, total, fulfilment, delivery and the refund badge.
+-- fulfilment status's, one delivery's or references starting with p_reference: reference, date, children (first name
+-- and last initial), items, total, fulfilment, delivery and the refund badge. Filtered by Paid or Printed (what is
+-- waiting), fully refunded orders are left out, so Home's To do links list what they count (code review N3).
 create function public.studio_orders(p_studio_id uuid, p_job_id uuid default null,
   p_status public.order_fulfilment default null, p_reference text default null, p_limit integer default 50,
-  p_cursor uuid default null) returns jsonb
+  p_cursor uuid default null, p_delivery public.shop_shipping_method default null) returns jsonb
 language sql stable
 set search_path = ''
 as $$
@@ -1792,6 +1967,9 @@ as $$
         from public.orders o
         where o.studio_id = p_studio_id and o.status = 'paid'
           and (p_status is null or o.fulfilment_status = p_status)
+          and (p_status is null or p_status not in ('paid', 'printed')
+               or not coalesce((app.studio_order_refund_state(o.id) ->> 'fully_refunded')::boolean, false))
+          and (p_delivery is null or o.shipping_method = p_delivery)
           and (p_reference is null or o.reference like upper(p_reference) || '%')
           and (p_job_id is null or exists (select 1 from public.order_lines ol
                 where ol.order_id = o.id and ol.studio_id = o.studio_id and ol.job_id = p_job_id))
@@ -1817,8 +1995,9 @@ as $$
     'fulfilment', o.fulfilment_status, 'printed_at', o.printed_at, 'shipped_at', o.shipped_at,
     'delivered_at', o.delivered_at, 'canceled_at', o.canceled_at, 'disputed_at', o.disputed_at,
     'ship_to_purged_at', o.ship_to_purged_at,
-    'tracking', case when o.carrier is not null then jsonb_build_object('carrier', o.carrier,
-      'number', o.tracking_number, 'url', o.tracking_url) end,
+    'external_refund_at', o.external_refund_at, 'external_refund_checked_at', o.external_refund_checked_at,
+    'tracking', case when o.carrier is not null and o.tracking_number is not null then jsonb_build_object(
+      'carrier', o.carrier, 'number', o.tracking_number, 'url', o.tracking_url) end,
     'refund_state', app.studio_order_refund_state(o.id),
     'lines', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', ol.id, 'kind', ol.kind, 'name', ol.name, 'print_size', ol.print_size, 'quantity', ol.quantity,
@@ -1864,8 +2043,9 @@ as $$
 $$;
 
 -- Home's numbers (D127; owners and admins: the ledger's row-level security): today, this week (from Monday) and this
--- season (from August 1), in the person's time zone: sales after refunds (what parents paid less what was refunded),
--- orders paid, and Daybell's fee net of refunds; in the region's currency. From the ledger only.
+-- season (from August 1), in the person's time zone: sales after refunds (what parents paid less what was refunded)
+-- and Daybell's fee net of refunds, from the ledger; and orders counted when they were paid, so a sale whose Stripe
+-- fee comes late is counted at once (code review N5); in the region's currency.
 create function public.studio_sales(p_studio_id uuid, p_tz text) returns jsonb
 language plpgsql stable
 set search_path = ''
@@ -1891,9 +2071,9 @@ begin
         'sales_cents', (select coalesce(sum(e.amount_cents), 0) from public.ledger_entries e
                         where e.studio_id = p_studio_id and e.account in ('parent_payments', 'refunds')
                           and e.occurred_at >= (r.value #>> '{}')::timestamptz),
-        'orders', (select count(*) from public.ledger_transactions t
-                   where t.studio_id = p_studio_id and t.kind = 'order_paid'
-                     and t.created_at >= (r.value #>> '{}')::timestamptz),
+        'orders', (select count(*) from public.orders o
+                   where o.studio_id = p_studio_id and o.status = 'paid'
+                     and o.paid_at >= (r.value #>> '{}')::timestamptz),
         'daybell_fee_cents', (select -coalesce(sum(e.amount_cents), 0) from public.ledger_entries e
                               join public.ledger_transactions t on t.id = e.transaction_id and t.studio_id = e.studio_id
                               where e.studio_id = p_studio_id and e.account = 'daybell_fees'
@@ -1920,7 +2100,8 @@ $$;
 
 -- ── The address purge (step 10's launch blocker; Claude's calls) ──────────────────────────────────────────────────
 -- Home delivery recipients go 90 days after the order shipped; or, never shipped, 90 days after payment once the order
--- is cancelled or fully refunded; and, whatever happened, 180 days after payment (the hard cap). The order keeps when
+-- is cancelled or fully refunded; and, whatever happened, 365 days after payment (the hard cap, Seenu). The tracking
+-- number and link go with the address (they lead to it; code review B2); the carrier stays. The order keeps when
 -- (ship_to_purged_at); one order.address_purged event each, with no actor. Up to p_limit a run (the jobs cron), the
 -- rest next time. Also drops counted actions older than a day. Returns how many addresses went.
 create function public.purge_shipping_addresses(p_limit integer) returns integer
@@ -1940,13 +2121,13 @@ begin
     where o.shipped_at < now() - interval '90 days'
        or (o.paid_at < now() - interval '90 days'
            and (o.fulfilment_status = 'canceled' or app.order_fully_refunded(o)))
-       or o.paid_at < now() - interval '180 days'
+       or o.paid_at < now() - interval '365 days'
     order by o.paid_at, o.id
     limit p_limit
     for update of o skip locked
   loop
     delete from public.order_shipping_addresses a where a.order_id = v.id and a.studio_id = v.studio_id;
-    update public.orders o set ship_to_purged_at = now() where o.id = v.id;
+    update public.orders o set ship_to_purged_at = now(), tracking_number = null, tracking_url = null where o.id = v.id;
     perform app.emit_as(null, v.studio_id, 'order.address_purged', v.id, '{}'::jsonb);
     v_count := v_count + 1;
   end loop;
@@ -1984,6 +2165,7 @@ revoke all on function
   public.refund_settled(uuid),
   public.refund_failed(uuid, text),
   public.refund_abandoned(uuid, text),
+  public.refund_share_returned(uuid, text, bigint),
   public.note_refund_failure(uuid, text, boolean),
   public.refunds_to_retry(integer),
   public.refund_shortfalls_for_sale(uuid),
@@ -1993,12 +2175,16 @@ revoke all on function
   public.record_payment_stripe_event(text, text, uuid, text, boolean, timestamptz),
   public.refund_by_stripe(uuid, uuid, text),
   public.order_disputed(uuid),
+  public.order_external_refund(uuid),
+  public.check_external_refund(uuid, uuid, uuid),
   public.shop_order_download_all(text, uuid),
+  public.shop_zip_take(text, uuid),
   public.shop_download_all_request(text, uuid, uuid[]),
   public.order_print_files(uuid, uuid, uuid),
+  public.order_zip_take(uuid, uuid, uuid),
   public.order_print_files_to_make(uuid, uuid, uuid, uuid[]),
   public.purge_shipping_addresses(integer),
-  public.studio_orders(uuid, uuid, public.order_fulfilment, text, integer, uuid),
+  public.studio_orders(uuid, uuid, public.order_fulfilment, text, integer, uuid, public.shop_shipping_method),
   public.studio_sales(uuid, text),
   public.studio_order_todo(uuid)
   from public, anon, authenticated;
@@ -2017,6 +2203,7 @@ grant execute on function
   public.refund_settled(uuid),
   public.refund_failed(uuid, text),
   public.refund_abandoned(uuid, text),
+  public.refund_share_returned(uuid, text, bigint),
   public.note_refund_failure(uuid, text, boolean),
   public.refunds_to_retry(integer),
   public.refund_shortfalls_for_sale(uuid),
@@ -2026,14 +2213,19 @@ grant execute on function
   public.record_payment_stripe_event(text, text, uuid, text, boolean, timestamptz),
   public.refund_by_stripe(uuid, uuid, text),
   public.order_disputed(uuid),
+  public.order_external_refund(uuid),
+  public.check_external_refund(uuid, uuid, uuid),
   public.shop_order_download_all(text, uuid),
+  public.shop_zip_take(text, uuid),
   public.shop_download_all_request(text, uuid, uuid[]),
   public.order_print_files(uuid, uuid, uuid),
+  public.order_zip_take(uuid, uuid, uuid),
   public.order_print_files_to_make(uuid, uuid, uuid, uuid[]),
   public.purge_shipping_addresses(integer)
   to service_role;
 -- The studio's reads under row-level security.
-grant execute on function public.studio_orders(uuid, uuid, public.order_fulfilment, text, integer, uuid),
+grant execute on function public.studio_orders(uuid, uuid, public.order_fulfilment, text, integer, uuid,
+  public.shop_shipping_method),
   public.studio_sales(uuid, text), public.studio_order_todo(uuid)
   to authenticated;
 
