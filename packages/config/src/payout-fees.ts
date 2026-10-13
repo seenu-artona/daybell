@@ -34,6 +34,10 @@ export interface PayoutFeeTable {
   confirmed: boolean;
 }
 
+/**
+ * The launch rate (D59), which each regional database's platform setting starts at. Not authoritative since step 10:
+ * orders use, and Settings › Payouts shows, the database's setting (Seenu, answer 1; ADR 0023, docs/platform-fee.md).
+ */
 export const DAYBELL_FEE_BASIS_POINTS = 300;
 
 export const PAYOUT_FEES: Record<FeeCurrency, PayoutFeeTable> = {

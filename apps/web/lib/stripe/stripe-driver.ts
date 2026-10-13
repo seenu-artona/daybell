@@ -1,8 +1,11 @@
 import "server-only";
 import { ApiError, PAYOUT_CREATE_CONFLICT, PAYOUT_PLATFORM_SETUP } from "@daybell/api";
+import { CARD_PREFIX } from "@daybell/core";
 import Stripe from "stripe";
 import { StripeCallError, type StripeOutcome, type StripeStage } from "./errors";
 import {
+  type CheckoutSessionFacts,
+  type CheckoutStatus,
   type NewAccount,
   type PaymentsProvider,
   SCHEDULE_SET_KEY,
@@ -131,6 +134,67 @@ const epochSeconds = (iso: string) => {
   return Math.floor(ms / 1000);
 };
 
+const idOf = (value: string | { id: string } | null | undefined): string | null =>
+  value == null ? null : typeof value === "string" ? value : value.id;
+
+const checkoutStatus = (status: string | null): CheckoutStatus | "other" =>
+  status === "open" || status === "complete" || status === "expired" ? status : "other";
+
+/** What the checkout's expansion (payment_intent.latest_charge.balance_transaction) adds, read defensively. */
+const expanded = <T extends object>(value: unknown): T | null =>
+  value !== null && typeof value === "object" ? (value as T) : null;
+
+/**
+ * Stripe's checkout session as Daybell's facts (ADR 0023 §5.2). Never anything else from Stripe's object: the email
+ * and the recipient are read for their one use each and never stored here or logged (calls 2, 18).
+ */
+export function checkoutFacts(session: Stripe.Checkout.Session): CheckoutSessionFacts {
+  const intent = expanded<Stripe.PaymentIntent>(session.payment_intent);
+  const charge = expanded<Stripe.Charge>(intent?.latest_charge);
+  const balance = expanded<Stripe.BalanceTransaction>(charge?.balance_transaction);
+  const ship = session.collected_information?.shipping_details ?? null;
+  return {
+    id: session.id,
+    status: checkoutStatus(session.status),
+    paymentStatus: session.payment_status,
+    livemode: session.livemode,
+    url: session.url,
+    expiresAt: session.expires_at,
+    currency: session.currency,
+    amountSubtotal: session.amount_subtotal,
+    amountShipping: session.shipping_cost?.amount_subtotal ?? 0,
+    amountTax: session.total_details?.amount_tax ?? null,
+    amountTotal: session.amount_total,
+    orderId: session.metadata?.daybell_order_id ?? null,
+    studioId: session.metadata?.daybell_studio_id ?? null,
+    region: session.metadata?.daybell_region ?? null,
+    paymentIntentId: idOf(session.payment_intent),
+    chargeId: charge?.id ?? idOf(intent?.latest_charge),
+    transferId: idOf(charge?.transfer),
+    destination: idOf(intent?.transfer_data?.destination),
+    onBehalfOf: idOf(intent?.on_behalf_of),
+    applicationFeeAmount: intent?.application_fee_amount ?? null,
+    balanceTransaction: balance
+      ? { id: balance.id, feeCents: balance.fee, currency: balance.currency }
+      : null,
+    receiptEmail: session.customer_details?.email ?? null,
+    shipping: ship
+      ? {
+          name: ship.name,
+          line1: ship.address.line1 ?? "",
+          line2: ship.address.line2 ?? null,
+          city: ship.address.city ?? "",
+          state: ship.address.state ?? null,
+          postalCode: ship.address.postal_code ?? "",
+          country: ship.address.country ?? "",
+        }
+      : null,
+  };
+}
+
+/** Marks Daybell's own reversals of a studio's transfer, so a retry finds the one already made (call 1). */
+export const FEE_RECOVERY_PURPOSE = "card_fee";
+
 export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProvider {
   const stripe = new Stripe(secretKey, {
     apiVersion: STRIPE_API_VERSION,
@@ -227,6 +291,130 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
       // v1 only: Accounts v2 has no login links in stripe-node 22.6.2. Express dashboard accounts only.
       const link = await call(stripe.accounts.createLoginLink(accountId));
       return { url: link.url };
+    },
+
+    // ── Checkout (ADR 0023) ──────────────────────────────────────────────────────────────────────────────────────
+    async createCheckoutSession(params, idempotencyKey) {
+      const session = await call(stripe.checkout.sessions.create(params, { idempotencyKey }));
+      // A hosted checkout always has its address; anything else can't be sent to a parent.
+      if (!session.url)
+        throw new StripeCallError(
+          "We couldn't reach Stripe. Please try again.",
+          "other",
+          "unknown",
+        );
+      return { id: session.id, url: session.url, expiresAt: session.expires_at };
+    },
+    async retrieveCheckoutSession(sessionId) {
+      // The payment, its charge and the charge's balance transaction (Stripe's fee) in one read.
+      const session = await call(
+        stripe.checkout.sessions.retrieve(sessionId, {
+          expand: ["payment_intent.latest_charge.balance_transaction"],
+        }),
+      );
+      return checkoutFacts(session);
+    },
+    async expireCheckoutSession(sessionId) {
+      try {
+        const session = await stripe.checkout.sessions.expire(sessionId);
+        return { status: checkoutStatus(session.status) };
+      } catch (err) {
+        // Only an open checkout can be expired: Stripe refuses one already complete or expired, so its state is read.
+        if (err instanceof Stripe.errors.StripeError && err.type === "StripeInvalidRequestError") {
+          const session = await call(stripe.checkout.sessions.retrieve(sessionId));
+          if (session.status !== "open") return { status: checkoutStatus(session.status) };
+        }
+        return failed("other", err);
+      }
+    },
+    async setReceiptEmail(paymentIntentId, email) {
+      await call(
+        stripe.paymentIntents.update(
+          paymentIntentId,
+          { receipt_email: email },
+          { idempotencyKey: `daybell-receipt-${paymentIntentId}` },
+        ),
+      );
+    },
+    async recoverCardFee({ transferId, amountCents, orderId }) {
+      // Once per order: a reversal made by an earlier try (even more than a day ago, when Stripe's idempotency key has
+      // expired) is found by its metadata first.
+      const earlier = await call(stripe.transfers.listReversals(transferId, { limit: 100 }));
+      const found = earlier.data.find(
+        (r) =>
+          r.metadata?.daybell_order_id === orderId &&
+          r.metadata?.daybell_purpose === FEE_RECOVERY_PURPOSE,
+      );
+      if (found) return { reversalId: found.id };
+      const reversal = await call(
+        stripe.transfers.createReversal(
+          transferId,
+          {
+            amount: amountCents,
+            metadata: { daybell_order_id: orderId, daybell_purpose: FEE_RECOVERY_PURPOSE },
+          },
+          { idempotencyKey: `daybell-fee-recovery-${orderId}` },
+        ),
+      );
+      return { reversalId: reversal.id };
+    },
+    async setCardPrefix(accountId) {
+      await call(
+        stripe.accounts.update(accountId, {
+          settings: { card_payments: { statement_descriptor_prefix: CARD_PREFIX } },
+        }),
+      );
+    },
+
+    // ── Taxes (answer 2; calls 3, 6), in the studio's own account ─────────────────────────────────────────────────
+    async setTaxHeadOffice(accountId, address) {
+      await call(
+        stripe.tax.settings.update(
+          {
+            head_office: {
+              address: {
+                line1: address.line1,
+                ...(address.line2 ? { line2: address.line2 } : {}),
+                city: address.city,
+                state: address.province,
+                postal_code: address.postalCode,
+                country: "CA",
+              },
+            },
+          },
+          { stripeContext: accountId },
+        ),
+      );
+    },
+    async createTaxRegistration(accountId, registration, idempotencyKey) {
+      const created = await call(
+        stripe.tax.registrations.create(
+          {
+            country: "CA",
+            active_from: "now",
+            country_options: {
+              ca:
+                registration.kind === "gst_hst"
+                  ? { type: "standard" }
+                  : {
+                      type: "province_standard",
+                      province_standard: { province: registration.province },
+                    },
+            },
+          },
+          { stripeContext: accountId, idempotencyKey },
+        ),
+      );
+      return { id: created.id };
+    },
+    async expireTaxRegistration(accountId, registrationId) {
+      await call(
+        stripe.tax.registrations.update(
+          registrationId,
+          { expires_at: "now" },
+          { stripeContext: accountId },
+        ),
+      );
     },
   };
 }

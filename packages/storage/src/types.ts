@@ -47,11 +47,25 @@ export interface PhotoStorage {
   put(key: string, body: Uint8Array, options: PutOptions): Promise<void>;
   /**
    * A short-lived URL to read an object (previews for the studio's screens), valid for `expiresIn` seconds at most and
-   * never longer than the credentials that sign it. `signedAt` is for tests.
+   * never longer than the credentials that sign it. `signedAt` is for tests. With `download`, the browser saves the
+   * object as that file name (Content-Disposition: attachment) as a JPEG (a parent's paid download, ADR 0023); the name
+   * is signed into the URL and holds only letters, digits, dots, dashes and underscores.
    */
-  presignGet(key: string, options: { expiresIn: number; signedAt?: Date }): Promise<string>;
+  presignGet(
+    key: string,
+    options: { expiresIn: number; signedAt?: Date; download?: { filename: string } },
+  ): Promise<string>;
   /** Deletes every object and every version under a prefix (`{studio}/{job}/{photo}/`). Returns how many. */
   deleteAllVersions(prefix: string): Promise<number>;
+}
+
+/** A download's file name: plain characters only, so it can never break the header it is put in. */
+export const DOWNLOAD_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/** The Content-Disposition a download is served with. */
+export function attachmentDisposition(filename: string): string {
+  if (!DOWNLOAD_FILENAME.test(filename)) throw new StorageError("invalid_key");
+  return `attachment; filename="${filename}"`;
 }
 
 /** The driver refused: a bad key, or storage that isn't there. Never carries a key's or file's content. */

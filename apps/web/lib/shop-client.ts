@@ -1,9 +1,13 @@
 import type {
   ApiErrorBody,
+  CheckoutStartResponse,
+  DownloadLinkResponse,
   ShopCartLineInput,
   ShopCartResponse,
   ShopGalleryResponse,
   ShopOpenedResponse,
+  ShopOrderResponse,
+  ShopOrdersResponse,
   ShopPriceListResponse,
   ShopSessionResponse,
 } from "@daybell/api";
@@ -22,6 +26,8 @@ export type ShopResult<T> =
       form: string | null;
       /** Retry-After, in seconds, when the server sent one. */
       retryAfter: number | null;
+      /** The refusal's other fields (e.g. shop.alreadyPaid's orderId). */
+      fields: Record<string, string>;
     };
 
 async function call<T>(path: string, method = "GET", body?: unknown): Promise<ShopResult<T>> {
@@ -35,7 +41,7 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<Sh
       cache: "no-store",
     });
   } catch {
-    return { ok: false, status: 0, code: "network", form: null, retryAfter: null };
+    return { ok: false, status: 0, code: "network", form: null, retryAfter: null, fields: {} };
   }
   if (res.ok) return { ok: true, data: (res.status === 204 ? undefined : await res.json()) as T };
   const error = ((await res.json().catch(() => null)) as ApiErrorBody | null)?.error;
@@ -46,6 +52,7 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<Sh
     code: error?.code ?? "internal",
     form: error?.fields?.form ?? null,
     retryAfter: Number.isFinite(retry) && retry > 0 ? retry : null,
+    fields: error?.fields ?? {},
   };
 }
 
@@ -82,6 +89,18 @@ export const shopApi = {
     call<ShopCartResponse>(`/cart/lines/${path(lineId)}${inGallery(gallery)}`, "DELETE"),
   setShipping: (gallery: string, method: ShopShippingMethod) =>
     call<ShopCartResponse>(`/cart/shipping${inGallery(gallery)}`, "PUT", { method }),
+  // Checkout (ADR 0023): no body; the server prices the bag.
+  checkout: (gallery: string) =>
+    call<CheckoutStartResponse>(`/checkout${inGallery(gallery)}`, "POST"),
+  cancelCheckout: (gallery: string) =>
+    call<undefined>(`/checkout/cancel${inGallery(gallery)}`, "POST"),
+  orders: (gallery: string) => call<ShopOrdersResponse>(`/orders${inGallery(gallery)}`),
+  order: (gallery: string, orderId: string) =>
+    call<ShopOrderResponse>(`/orders/${path(orderId)}${inGallery(gallery)}`),
+  download: (gallery: string, orderId: string, photoId: string) =>
+    call<DownloadLinkResponse>(
+      `/orders/${path(orderId)}/downloads/${path(photoId)}${inGallery(gallery)}`,
+    ),
 };
 
 /** Things in a bag (quantities added, unavailable lines too), as the header's count shows them. */

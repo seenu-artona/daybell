@@ -7,7 +7,7 @@ import type {
   PriceListSummary,
   PriceListsResponse,
 } from "@daybell/api";
-import { orderedItems, PRICE_ITEM_GROUPS, priceItemGroup } from "@daybell/core";
+import { canSeePayouts, orderedItems, PRICE_ITEM_GROUPS, priceItemGroup } from "@daybell/core";
 import { Banner, Button, Card } from "@daybell/ui";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -20,6 +20,7 @@ import { priceListHref, usePriceText } from "../../../products/price-text";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
 import { LiveNote } from "../live-note";
+import { OrdersCard } from "./orders-card";
 
 const LINK =
   "inline-flex min-h-11 items-center self-start font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary";
@@ -29,6 +30,8 @@ const LINK =
  * delivery: the list's flat home shipping fee, and free delivery to school, off unless turned on (Claude's call 6).
  * Owners and admins change both while the job is a draft or selling (new orders only; answer 5, call 4); a closed
  * job's don't change. Everyone else reads.
+ *
+ * Paid orders follow, with their fees, for owners and admins (ADR 0023; the Orders tab is step 11).
  *
  * Keyboard (D91, WCAG 2.4.3 and 3.2.2): the list is picked, then saved with its own button, so arrowing through the
  * select saves nothing on the way. Nothing is disabled while a save runs (that would drop focus to the page); input
@@ -40,7 +43,7 @@ export default function ShopPage() {
   const tp = useTranslations("app.products");
   const text = useApiText();
   const price = usePriceText();
-  const { changed } = useStudio();
+  const { changed, me } = useStudio();
   const { job, setJob, canManage } = useJob();
   const [lists, setLists] = useState<PriceListSummary[] | null>(null);
   const [list, setList] = useState<PriceList | null>(null);
@@ -215,6 +218,8 @@ export default function ShopPage() {
             />
           </section>
         </Card>
+
+        {canSeePayouts(me.studio.role) ? <OrdersCard jobId={job.id} /> : null}
       </div>
     </JobSection>
   );

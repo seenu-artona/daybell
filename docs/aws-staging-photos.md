@@ -139,7 +139,10 @@ IAM › Roles › Create role › AWS service › **Lambda** › Next:
       "Sid": "WritePreviews",
       "Effect": "Allow",
       "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::daybell-staging-ca-photos/*.webp"
+      "Resource": [
+        "arn:aws:s3:::daybell-staging-ca-photos/*.webp",
+        "arn:aws:s3:::daybell-staging-ca-photos/*/download.jpg"
+      ]
     },
     {
       "Sid": "SizesByListing",
@@ -163,8 +166,8 @@ IAM › Roles › Create role › AWS service › **Lambda** › Next:
 }
 ```
 
-The worker can read originals and write previews in this bucket only, and read its one secret; it can't delete
-anything or reach the database.
+The worker can read originals and write previews and paid downloads (`download.jpg`, since step 10) in this bucket
+only, and read its one secret; it can't delete anything or reach the database.
 
 ## 8. The Lambda function
 
@@ -331,6 +334,53 @@ Secrets and variables › Actions › **Repository secrets**:
 - `STAGING_VERCEL_PROTECTION_BYPASS`: Vercel's bypass secret, if deployment protection is on.
 
 Run it once by hand (Actions › Staging photo clean-up › Run workflow) to check it answers with counts.
+
+## 13. Paid downloads (step 10)
+
+Since step 10 the worker also makes a **sold** photo's **paid download**, `download.jpg`: the original at full
+resolution, upright, sRGB, with every other bit of metadata stripped (ADR 0023, Claude's call 10). It is made lazily,
+only once the photo is sold (security review N1): never while a photo is processed, so an unwatermarked
+full-resolution copy exists only for photos a parent paid for. Parents get a 5-minute link to it after paying; never to
+the original. Signing those links needs read access to full-resolution files, which the app's
+usual role (`daybell-staging-vercel`) must still never have, so a **second role** signs them and can read
+`*/download.jpg` and nothing else.
+
+1. **The worker writes `download.jpg`.** Update the worker role's inline policy `photos` as in step 7 (the
+   `WritePreviews` statement now lists `*/download.jpg` too). Then run the deploy workflow (step 11) once this step is
+   merged, so the worker has the new code.
+2. **The download role.** IAM › Roles › Create role › **Custom trust policy**: copy the trust policy of
+   `daybell-staging-vercel` exactly (the same Vercel OIDC provider, and the same `aud` and `sub` conditions naming this
+   team, project and staging environment; step 9). Next (no managed policies) › Name
+   **`daybell-staging-ca-photo-downloads`** › Create. Add an inline policy `downloads`:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "ReadPaidDownloadsOnly",
+         "Effect": "Allow",
+         "Action": "s3:GetObject",
+         "Resource": "arn:aws:s3:::daybell-staging-ca-photos/*/download.jpg"
+       }
+     ]
+   }
+   ```
+
+   Don't add `download.jpg` to `daybell-staging-vercel`'s policy.
+3. **Vercel.** Add `AWS_DOWNLOAD_ROLE_ARN` = the new role's ARN, for the staging environment (not a secret). It must
+   differ from `AWS_ROLE_ARN`; the app refuses to sign download links otherwise. The photo-events queue is unchanged:
+   the existing `RetryPhotos` permission (step 9) is what sends the backfill messages below. Redeploy.
+4. **How the file gets made.** Nothing to run by hand. When an order is paid, Daybell queues `{photoId, make:
+   "download"}` on the photo-events queue for each photo it sold (the photo's id only); the worker makes just that file.
+   If a parent opens a paid download before it exists, Daybell asks them to try again in about 20 seconds, and queues
+   the photo again only if it was last asked for over 5 minutes ago. After 3 requests without the file, the parent is
+   told the download isn't available and the app logs `download_unavailable` (look at the worker's logs for
+   `download_failed` or `download_skipped` with the photo's id).
+5. **Check.** Buy a download on staging (`docs/stripe-staging.md`, section 6) and open it: the file saves as
+   `daybell-<reference>-1.jpg`. In S3, the photo's folder has `download.jpg` with `Cache-Control: private, no-store`.
+
+The lifecycle rule and the daily clean-up already cover `download.jpg` with the rest of the photo's files.
 
 ## Rotating the worker's secret
 

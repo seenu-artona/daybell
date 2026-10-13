@@ -93,8 +93,10 @@ describe("stripeWebhookSecrets (ADR 0020)", () => {
   const TWO = ["whsec", "z".repeat(24)].join("_");
   const THREE = ["whsec", "m".repeat(24)].join("_");
   const FOUR = ["whsec", "q".repeat(24)].join("_");
+  const FIVE = ["whsec", "r".repeat(24)].join("_");
+  const SIX = ["whsec", "s".repeat(24)].join("_");
 
-  it("reads one to four signing secrets (snapshot and thin destinations, each mid-rotation)", () => {
+  it("reads one to six signing secrets (snapshot, thin and platform destinations, each mid-rotation)", () => {
     expect(stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: ONE })).toEqual([ONE]);
     expect(stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: ` ${ONE} , ${TWO} ` })).toEqual([
       ONE,
@@ -103,6 +105,10 @@ describe("stripeWebhookSecrets (ADR 0020)", () => {
     expect(
       stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: [ONE, TWO, THREE, FOUR].join(",") }),
     ).toEqual([ONE, TWO, THREE, FOUR]);
+    // ADR 0023: the platform's checkout events have a destination of their own.
+    expect(
+      stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: [ONE, TWO, THREE, FOUR, FIVE, SIX].join(",") }),
+    ).toHaveLength(6);
   });
 
   it("refuses the same secret twice, so a copy-paste mistake is visible (security review 8)", () => {
@@ -116,12 +122,12 @@ describe("stripeWebhookSecrets (ADR 0020)", () => {
     expect(() => stripeWebhookSecrets({})).toThrow(/^STRIPE_WEBHOOK_SECRET is not set$/);
     for (const value of [
       "secret",
-      [ONE, TWO, THREE, FOUR, ["whsec", "b".repeat(24)].join("_")].join(","),
+      [ONE, TWO, THREE, FOUR, FIVE, SIX, ["whsec", "b".repeat(24)].join("_")].join(","),
       `${ONE},secret`,
       ["whsec", "short"].join("_"),
     ])
       expect(() => stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: value })).toThrow(
-        /^STRIPE_WEBHOOK_SECRET must be one to four whsec_ signing secrets$/,
+        /^STRIPE_WEBHOOK_SECRET must be one to six whsec_ signing secrets$/,
       );
   });
 });

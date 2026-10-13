@@ -41,6 +41,15 @@ export function payments(): PaymentsProvider {
   return provider;
 }
 
+/** Whether Stripe is set up in this deployment at all (STRIPE_DRIVER set); never throws. */
+export function paymentsConfigured(): boolean {
+  try {
+    return stripeSettings() !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether STRIPE_DRIVER=fake (and so off Vercel): the fake onboarding page and simulator exist only then. */
 export function isFakeStripe(): boolean {
   try {
@@ -69,6 +78,21 @@ export function assertStripeLink(url: string, driver: PaymentsProvider["driver"]
   if (!url.startsWith(allowed)) {
     // The host only if it is one of Stripe's (so a link from a new Stripe host is diagnosable), never the address.
     console.error("stripe_link_unexpected", driver, stripeHost(url));
+    throw new ApiError("internal", "Something went wrong on our side. Please try again.");
+  }
+  return url;
+}
+
+/**
+ * Where a checkout may send a parent (ADR 0023): Stripe's hosted checkout for the real driver, this deployment's fake
+ * page for the fake one. Anything else is refused before it reaches the browser (logged by a fixed name and Stripe's
+ * host, never the address).
+ */
+export function assertCheckoutLink(url: string, driver: PaymentsProvider["driver"]): string {
+  const allowed =
+    driver === "stripe" ? "https://checkout.stripe.com/" : `${siteUrl()}/dev/stripe-checkout?`;
+  if (!url.startsWith(allowed)) {
+    console.error("stripe_checkout_link_unexpected", driver, stripeHost(url));
     throw new ApiError("internal", "Something went wrong on our side. Please try again.");
   }
   return url;

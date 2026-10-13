@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
-import { type PhotoStorage, StorageError, type UploadedPart } from "./types";
+import { attachmentDisposition, type PhotoStorage, StorageError, type UploadedPart } from "./types";
 
 /**
  * The local driver: a folder on disk, for development, CI and end-to-end tests (STORAGE_DRIVER=local; refused in
@@ -14,6 +14,8 @@ export interface LocalPhotoStorage extends PhotoStorage {
   receivePart(key: string, query: URLSearchParams, body: Uint8Array): Promise<string>;
   /** Reads an object for a signed GET URL. */
   readSigned(key: string, query: URLSearchParams): Promise<Uint8Array<ArrayBuffer>>;
+  /** The Content-Disposition a signed GET URL asked for (a download, ADR 0023), or null. Call after readSigned. */
+  signedDisposition(query: URLSearchParams): string | null;
 }
 
 const SAFE_KEY = /^[0-9a-z][0-9a-z./-]*$/;
@@ -179,14 +181,28 @@ export function localPhotoStorage({
       await writeFile(target, body);
     },
 
-    async presignGet(key, { expiresIn, signedAt }) {
+    async presignGet(key, { expiresIn, signedAt, download }) {
       pathOf(key);
-      return signedUrl(key, `GET\n${key}`, {}, expiresIn, signedAt);
+      if (!download) return signedUrl(key, `GET\n${key}`, {}, expiresIn, signedAt);
+      attachmentDisposition(download.filename);
+      return signedUrl(
+        key,
+        `GET\n${key}\n${download.filename}`,
+        { download: download.filename },
+        expiresIn,
+        signedAt,
+      );
     },
 
     async readSigned(key, query) {
-      checkSignature(`GET\n${key}`, query);
+      const download = query.get("download");
+      checkSignature(download === null ? `GET\n${key}` : `GET\n${key}\n${download}`, query);
       return this.get(key);
+    },
+
+    signedDisposition(query) {
+      const download = query.get("download");
+      return download === null ? null : attachmentDisposition(download);
     },
 
     async deleteAllVersions(prefix) {

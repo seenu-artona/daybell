@@ -114,6 +114,8 @@ describe("object keys", () => {
       photoId: P,
       variant: "proof.webp",
     });
+    // The paid download (ADR 0023): a key of its own, never the original's.
+    expect(parsePhotoKey(`${S}/${J}/${P}/download.jpg`)?.variant).toBe("download.jpg");
     expect(parsePhotoKey(`${S}/${J}/${P}/original/x`)).toBeNull();
     expect(parsePhotoKey(`${S}/${J}/${P}/secret.jpg`)).toBeNull();
     expect(parsePhotoKey(`${S}/${J}/IMG_0001.JPG/original`)).toBeNull();

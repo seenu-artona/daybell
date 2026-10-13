@@ -10,7 +10,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./theme.css": "./src/theme.css",
-    "./tokens.json": "./src/tokens.json"
+    "./tokens.json": "./src/tokens.json",
+    "./studio-colors": "./src/lib/studio-colors.ts"
   },
   "scripts": {
     "gen": "node scripts/build-theme.mjs",

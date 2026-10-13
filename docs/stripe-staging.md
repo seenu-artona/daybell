@@ -1,4 +1,4 @@
-# Staging payouts on Stripe (Phase 1 steps 7, 7b and 7c)
+# Staging payouts and checkout on Stripe (Phase 1 steps 7, 7b, 7c and 10)
 
 What Seenu sets up once in the Stripe Dashboard, in **test mode** (a sandbox), so staging can connect studios' payout
 accounts with Stripe Connect (ADR 0020; D56, D98, D106, D113). Nothing here goes in the repository. Keys and signing
@@ -104,8 +104,8 @@ there.
 Notes:
 - The app refuses a live key (`sk_live_`/`rk_live_`) anywhere but production, and refuses `STRIPE_DRIVER=fake` on
   Vercel, both at build time and at run time.
-- `STRIPE_WEBHOOK_SECRET` takes one to four secrets. To roll one, add the new one next to the old (e.g.
-  `A,B,B-new`), redeploy, roll it in Stripe, then remove the old one.
+- `STRIPE_WEBHOOK_SECRET` takes one to six secrets (three destinations since step 10). To roll one, add the new one
+  next to the old (e.g. `A,B,C,B-new`), redeploy, roll it in Stripe, then remove the old one.
 
 ## 5. Redeploy and smoke test
 
@@ -135,11 +135,69 @@ Notes:
    staging's database yet (Stripe retries). A 500 means processing failed (Stripe retries; the inbox row keeps the
    error's code).
 
+## 6. Checkout (step 10)
+
+Parents pay on Stripe's hosted Checkout page: a destination charge on behalf of the studio's connected account, with
+Daybell's fee taken as an application fee and Stripe's card fee taken back from the studio's transfer (ADR 0023; D59,
+D98, D104, D106). Steps 1 to 5 must be done first: a studio needs an active payout account to sell.
+
+1. **A third webhook destination (C).** Checkout's events are Daybell's own (the session is created on the platform),
+   so they don't come through destination A. **Developers › Webhooks › Add destination**:
+   - **Events from**: **Your account**.
+   - **Payload style**: **snapshot**.
+   - **Events** (exactly these 2): `checkout.session.completed`, `checkout.session.expired`.
+   - **Endpoint URL**: the same `https://<staging domain>/api/v1/webhooks/stripe` (with the bypass parameter if used).
+   - Reveal its signing secret and add it to `STRIPE_WEBHOOK_SECRET` in Vercel, after the other two
+     (`whsec_A,whsec_B,whsec_C`). Redeploy.
+   Daybell reads each session from Stripe again rather than trusting the payload, and a cron backstop (the jobs cron)
+   completes or expires any checkout whose event never arrived.
+2. **The API key.** If staging uses a restricted key, it now also needs write access to **Checkout Sessions**,
+   **PaymentIntents** (Daybell sets the receipt email after payment), **Transfers** (the card fee is taken back as a
+   transfer reversal), **Tax settings** and **Tax registrations** (on connected accounts), and read access to
+   **Charges** and **Balance transactions** (to learn Stripe's fee). The calls are `checkout.sessions.create`,
+   `.retrieve` and `.expire`, `paymentIntents.update`, `transfers.listReversals` and `transfers.createReversal`,
+   `accounts.update` (the card statement prefix), `tax.settings.update`, `tax.registrations.create` and `.update`.
+   If unsure, use the test secret key.
+3. **Stripe Tax.** **Settings › Tax** (or **More › Tax**): turn Stripe Tax on for the platform, in test mode. Studios'
+   head office and registrations are set by Daybell through the API from Settings › Taxes (the studio is the seller and
+   liable). Check that Stripe Tax is allowed for connected accounts on this platform (Connect settings). A studio with
+   no registration charges no tax (small supplier; Seenu's answer 2).
+4. **Apple Pay and Google Pay (Seenu's answer 3).** **Settings › Payments › Payment methods**, for the platform's
+   configuration used with connected accounts: turn on **Apple Pay** and **Google Pay** (they are wallets on cards;
+   Daybell asks for `card` only). Leave **Link** off: Daybell also hides it on its Checkout pages (Claude's call 19).
+   Klarna and others stay off for now.
+5. **Receipts.** **Settings › Business › Customer emails** (Stripe's name may differ): turn on emails for
+   **successful payments**. Stripe emails the receipt to the address the parent typed on Checkout; Daybell never keeps
+   that address (D24: no sign-up).
+6. **Branding.** **Settings › Branding**: Daybell's icon. Checkout shows the studio's name and Daybell's charcoal
+   button (logos later; Claude's call 8).
+7. **Card statement prefix.** Nothing to do: Daybell sets each connected account's card statement prefix to `DBL` the
+   first time it sells, and each charge adds the studio's short name (e.g. `DBL* RIVERSIDE PHOTO`; D104).
+8. **Smoke test** (after redeploying):
+   - As the owner of a Canadian studio with active payouts: **Settings › Taxes**, save the business address and add a
+     test GST/HST number (Stripe's test mode accepts any well-formed number; check Stripe's Tax testing page).
+   - Open a job's shop, enter a code as a parent, add a package, a print and a download, choose home delivery and
+     click **Pay securely**.
+   - On Stripe's page: any email you own, the test card `4242 4242 4242 4242`, any future date, any CVC, a Canadian
+     address. Pay.
+   - Daybell's order page should say **Thank you!** with the order's reference and the downloads; the downloads open
+     (AWS must be set up first: `docs/aws-staging-photos.md`, section 13).
+   - The job's **Shop** tab shows the order with its tax, Daybell's fee, Stripe's card fee and what the studio gets.
+   - In Stripe: the payment on the platform, the transfer to the connected account with Daybell's application fee,
+     and a transfer reversal for the card fee (its metadata has `daybell_purpose: card_fee`). The receipt email arrives.
+   - Start another checkout and click Stripe's back arrow: the bag is unchanged and says the payment was canceled.
+   - Destination C's deliveries show 200s.
+9. **What to check against Stripe's docs.** ADR 0023 section 2 lists the Stripe facts that couldn't be checked from
+   here (e.g. whether `statement_descriptor_suffix` works with `on_behalf_of`, Stripe Tax on connected accounts with
+   `Stripe-Context`, the tax codes). If staging disagrees with any, tell the developers.
+
 ## What Daybell keeps
 
 Stripe account and payout ids, flags (details submitted, card payments, payouts), counts of what's due, Stripe's reason
-codes, the schedule, and each payout's amount, currency, status and dates. Never bank details, names, emails or
-addresses, and never webhook payloads. (The owner's sign-in email is sent to Stripe as the account's contact email
+codes, the schedule, and each payout's amount, currency, status and dates. Since step 10, also each order's Checkout
+Session, PaymentIntent, transfer, fee reversal and balance transaction ids, its amounts, tax and fees, and, for home
+delivery only, the recipient's name and Canadian address (to ship the order). Never bank details or card details, never
+the parent's email (Stripe keeps it for the receipt), and never webhook payloads. (The owner's sign-in email is sent to Stripe as the account's contact email
 when it is created; Daybell doesn't copy it anywhere.)
 
 ## If setting up payouts fails

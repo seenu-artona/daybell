@@ -2,7 +2,9 @@ import type { CronJobsResponse } from "@daybell/api";
 import { DATA_REGIONS, regionDatabase } from "@daybell/config";
 import { NextResponse } from "next/server";
 import { check, handle } from "@/lib/api";
-import { assertFunctionRegion } from "@/lib/region-guard";
+import { runCheckoutBackstops } from "@/lib/checkout/cron";
+import { assertFunctionRegion, PAYOUT_REGIONS } from "@/lib/region-guard";
+import { payments, paymentsConfigured } from "@/lib/stripe";
 import { jobSystemRpc } from "@/lib/supabase/service";
 import { assertCron } from "@/lib/worker-auth";
 
@@ -23,7 +25,9 @@ const PRUNE = 1000;
  *   through the bell), a page at a time;
  * - removes read notifications over 90 days old and any over 180 (Claude's call);
  * - removes expired shop sessions with their bags, and day-old wrong-code and hour-old request counts (ADR 0022), a
- *   page at a time until none are left or the region's time is up.
+ *   page at a time until none are left or the region's time is up;
+ * - where payments are set up (a payout region with Stripe), settles paid orders whose Stripe fee came late and
+ *   expires checkouts that ran out, after asking Stripe (ADR 0023; lib/checkout/cron.ts).
  * Each region gets an equal share of the time budget, so one region's backlog never starves the next (code review
  * S2). A region this function can't serve (its data must be handled in another function region, D113) is skipped and
  * logged by name, while the others still run; if no region could run, the request is refused as before (security
@@ -33,7 +37,13 @@ const PRUNE = 1000;
 export const GET = handle(async (request: Request) => {
   assertCron(request);
   const started = Date.now();
-  const totals: CronJobsResponse = { closedJobs: 0, prunedNotifications: 0, prunedShop: 0 };
+  const totals: CronJobsResponse = {
+    closedJobs: 0,
+    prunedNotifications: 0,
+    prunedShop: 0,
+    settledOrders: 0,
+    expiredOrders: 0,
+  };
   const regions = DATA_REGIONS.filter((region) => regionDatabase(region));
   let ran = 0;
   let refusal: unknown = null;
@@ -68,6 +78,11 @@ export const GET = handle(async (request: Request) => {
         totals.prunedShop += pruned;
         if (pruned < PRUNE) break;
       }
+    }
+    if (Date.now() < until && PAYOUT_REGIONS.includes(region) && paymentsConfigured()) {
+      const done = await runCheckoutBackstops(region, payments(), until);
+      totals.settledOrders += done.settledOrders;
+      totals.expiredOrders += done.expiredOrders;
     }
   }
   if (ran === 0 && refusal) throw refusal;

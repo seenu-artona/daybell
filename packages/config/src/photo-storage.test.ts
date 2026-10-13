@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const { cronSecret, cronSecrets, githubCronSecret, photoStorageSettings, photoWorkerSecrets } =
-  await import("./server");
+const {
+  cronSecret,
+  cronSecrets,
+  githubCronSecret,
+  photoDownloadRoleArn,
+  photoStorageSettings,
+  photoWorkerSecrets,
+} = await import("./server");
 
 const S3 = {
   STORAGE_DRIVER: "s3",
@@ -11,6 +17,26 @@ const S3 = {
   PHOTO_BUCKET_CA: "daybell-staging-ca-photos",
   PHOTO_QUEUE_URL_CA: "https://sqs.ca-central-1.amazonaws.com/123456789012/q",
 };
+
+describe("photoDownloadRoleArn (ADR 0023, call 10)", () => {
+  const ROLE = "arn:aws:iam::123456789012:role/daybell-staging-downloads";
+  it("reads the downloads' own role for S3", () => {
+    expect(photoDownloadRoleArn("ca", { ...S3, AWS_DOWNLOAD_ROLE_ARN: ROLE })).toBe(ROLE);
+  });
+  it("is null with the local driver and where there is no storage", () => {
+    expect(photoDownloadRoleArn("ca", { STORAGE_DRIVER: "local" })).toBeNull();
+    expect(photoDownloadRoleArn("us", { ...S3, AWS_DOWNLOAD_ROLE_ARN: ROLE })).toBeNull();
+  });
+  it("refuses a missing, malformed or shared role, by name only", () => {
+    expect(() => photoDownloadRoleArn("ca", S3)).toThrow(/^AWS_DOWNLOAD_ROLE_ARN is not set$/);
+    expect(() => photoDownloadRoleArn("ca", { ...S3, AWS_DOWNLOAD_ROLE_ARN: "role" })).toThrow(
+      /^AWS_DOWNLOAD_ROLE_ARN must be an IAM role ARN$/,
+    );
+    expect(() =>
+      photoDownloadRoleArn("ca", { ...S3, AWS_DOWNLOAD_ROLE_ARN: S3.AWS_ROLE_ARN }),
+    ).toThrow(/different role/);
+  });
+});
 
 describe("photoStorageSettings (D53, D113)", () => {
   it("reads Canada's bucket, queue and role", () => {

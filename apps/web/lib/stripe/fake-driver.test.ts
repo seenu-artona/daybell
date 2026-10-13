@@ -73,3 +73,109 @@ describe("fakeDriver (ADR 0020)", () => {
     await expect(fake.retrievePayout("acct_other", po)).rejects.toThrow();
   });
 });
+
+describe("fakeDriver checkout (ADR 0023)", () => {
+  const params = {
+    mode: "payment" as const,
+    line_items: [
+      {
+        quantity: 2,
+        price_data: { currency: "cad", unit_amount: 1300, product_data: { name: "4×6 print" } },
+      },
+    ],
+    shipping_address_collection: { allowed_countries: ["CA" as const] },
+    shipping_options: [
+      {
+        shipping_rate_data: {
+          type: "fixed_amount" as const,
+          display_name: "Home delivery",
+          fixed_amount: { amount: 1195, currency: "cad" },
+        },
+      },
+    ],
+    automatic_tax: { enabled: true },
+    payment_intent_data: {
+      application_fee_amount: 78,
+      on_behalf_of: "acct_X",
+      transfer_data: { destination: "acct_X" },
+    },
+    metadata: { daybell_order_id: "o-1", daybell_studio_id: "s-1", daybell_region: "ca" },
+    success_url: "http://localhost/shop/orders/o-1",
+    cancel_url: "http://localhost/shop/bag?checkout=canceled",
+    expires_at: Math.floor(Date.now() / 1000) + 1860,
+  };
+
+  it("makes one checkout per key, and its page is this deployment's fake one", async () => {
+    const fake = fakeDriver();
+    const a = await fake.createCheckoutSession(params, "daybell-checkout-o-1");
+    const b = await fake.createCheckoutSession(params, "daybell-checkout-o-1");
+    expect(b.id).toBe(a.id);
+    expect(a.id).toMatch(/^cs_test_fake[A-Za-z0-9]+$/);
+    expect(a.url).toMatch(/\/dev\/stripe-checkout\?session=cs_test_fake/);
+    expect((await fake.retrieveCheckoutSession(a.id)).status).toBe("open");
+  });
+
+  it("pays like Stripe: 13% tax with Stripe Tax on, a 2.9% + 30¢ fee, a transfer to the destination", async () => {
+    const { fakePayCheckout, fakeReceipts, fakeReversal, fakeTax, fakeCardFee } = await import(
+      "./fake-driver"
+    );
+    const fake = fakeDriver();
+    const { id } = await fake.createCheckoutSession(params, "daybell-checkout-o-2");
+    expect(() => fakePayCheckout(id, { email: "p@example.test", shipping: null })).toThrow(
+      "fake_stripe_address_needed",
+    );
+    const shipping = {
+      name: "Test Parent",
+      line1: "1 Test Street",
+      line2: null,
+      city: "Toronto",
+      state: "ON",
+      postalCode: "M5V 2T6",
+      country: "CA",
+    };
+    expect(fakePayCheckout(id, { email: "p@example.test", shipping })).toBe(params.success_url);
+    const facts = await fake.retrieveCheckoutSession(id);
+    const tax = fakeTax(2600 + 1195, true);
+    expect(tax).toBe(493);
+    expect(facts).toMatchObject({
+      status: "complete",
+      paymentStatus: "paid",
+      amountSubtotal: 2600,
+      amountShipping: 1195,
+      amountTax: tax,
+      amountTotal: 2600 + 1195 + tax,
+      destination: "acct_X",
+      onBehalfOf: "acct_X",
+      applicationFeeAmount: 78,
+      orderId: "o-1",
+      shipping,
+    });
+    expect(facts.balanceTransaction?.feeCents).toBe(fakeCardFee(2600 + 1195 + tax));
+    // A paid checkout can't be expired, or paid again.
+    expect(await fake.expireCheckoutSession(id)).toEqual({ status: "complete" });
+    expect(() => fakePayCheckout(id, { email: "p@example.test", shipping })).toThrow();
+    // The receipt is counted, never kept by address; the fee is reversed once per order.
+    await fake.setReceiptEmail(facts.paymentIntentId as string, "p@example.test");
+    expect(fakeReceipts(facts.paymentIntentId as string)).toBe(1);
+    const first = await fake.recoverCardFee({
+      transferId: "tr_x",
+      amountCents: 140,
+      orderId: "o-2",
+    });
+    const again = await fake.recoverCardFee({
+      transferId: "tr_x",
+      amountCents: 140,
+      orderId: "o-2",
+    });
+    expect(again).toEqual(first);
+    expect(fakeReversal("o-2")?.amount).toBe(140);
+  });
+
+  it("expires an open checkout and sends a cancelled parent back to the bag", async () => {
+    const { fakeCancelCheckout } = await import("./fake-driver");
+    const fake = fakeDriver();
+    const { id } = await fake.createCheckoutSession(params, "daybell-checkout-o-3");
+    expect(fakeCancelCheckout(id)).toBe(params.cancel_url);
+    expect(await fake.expireCheckoutSession(id)).toEqual({ status: "expired" });
+  });
+});

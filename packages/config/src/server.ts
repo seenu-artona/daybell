@@ -82,6 +82,26 @@ export function photoStorageSettings(
 }
 
 /**
+ * AWS_DOWNLOAD_ROLE_ARN (ADR 0023, call 10): the role only the parent download route assumes (with Vercel's OIDC token,
+ * like AWS_ROLE_ARN) to sign links to paid downloads. It may read `*\/download.jpg` and nothing else, so the role
+ * that signs everything else still never reads a full-resolution file (ADR 0016). Null with the local driver (its own
+ * signed URLs) and for regions without photo storage. Named, never shown, when it is missing.
+ */
+export function photoDownloadRoleArn(
+  region: DataRegion,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const settings = photoStorageSettings(region, env);
+  if (settings?.driver !== "s3") return null;
+  const value = required(env, "AWS_DOWNLOAD_ROLE_ARN");
+  if (!/^arn:aws:iam::\d{12}:role\/[\w+=,.@/-]{1,128}$/.test(value))
+    throw new Error("AWS_DOWNLOAD_ROLE_ARN must be an IAM role ARN");
+  if (value === settings.roleArn)
+    throw new Error("AWS_DOWNLOAD_ROLE_ARN must be a different role from AWS_ROLE_ARN");
+  return value;
+}
+
+/**
  * PHOTO_WORKER_SECRETS: the secrets the image worker signs its requests with, comma-separated, each at least 32
  * characters (`openssl rand -base64 32`). Two while one is being rotated: the worker's new secret is added here first,
  * then the worker is changed, then the old one is removed.
@@ -167,9 +187,10 @@ export function stripeSettings(
 
 /**
  * STRIPE_WEBHOOK_SECRET: the signing secrets (whsec_…) of the event destinations that send to the webhook,
- * comma-separated: one for the snapshot (v1) destination, one for the thin (Accounts v2) destination, and a second for
- * either while it is being rolled; at most four, none twice (ADR 0020 amendment). The fake driver signs its simulated events with
- * the first one, so CI sets a random one per run.
+ * comma-separated: one for the snapshot (v1) destination of connected accounts' events, one for the thin (Accounts v2)
+ * destination, one for the platform's own checkout events (ADR 0023), and a second for each while it is being rolled;
+ * at most six, none twice (ADR 0020 amendment). The fake driver signs its simulated events with the first one, so CI
+ * sets a random one per run.
  */
 export function stripeWebhookSecrets(
   env: Record<string, string | undefined> = process.env,
@@ -180,10 +201,10 @@ export function stripeWebhookSecrets(
     .filter(Boolean);
   if (
     secrets.length === 0 ||
-    secrets.length > 4 ||
+    secrets.length > 6 ||
     secrets.some((s) => !/^whsec_[A-Za-z0-9+/=_-]{16,}$/.test(s))
   )
-    throw new Error("STRIPE_WEBHOOK_SECRET must be one to four whsec_ signing secrets");
+    throw new Error("STRIPE_WEBHOOK_SECRET must be one to six whsec_ signing secrets");
   // Security review 8: a repeated secret is almost always a missing one (the other destination's) pasted twice.
   if (new Set(secrets).size !== secrets.length)
     throw new Error("STRIPE_WEBHOOK_SECRET lists the same signing secret twice");

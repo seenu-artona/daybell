@@ -1,5 +1,6 @@
 import type { DataRegion } from "@daybell/config";
-import type { PayoutWeekdayChoice } from "@daybell/core";
+import type { PayoutWeekdayChoice, PstProvince } from "@daybell/core";
+import type Stripe from "stripe";
 
 /**
  * The parts of Stripe's objects Daybell reads (ADR 0020). Structural, so Stripe's own types fit and the fake driver
@@ -76,6 +77,77 @@ export interface NewAccount {
   idempotencyKey: string;
 }
 
+// ── Checkout (Phase 1 step 10, ADR 0023) ────────────────────────────────────────────────────────────────────────
+
+/**
+ * The parameters of a hosted checkout, exactly as Stripe takes them (stripe-node's own type, so the compiler checks
+ * every field against stripe-node 22.6.2). Built by lib/checkout/stripe-params.ts only.
+ */
+export type CheckoutSessionParams = Stripe.Checkout.SessionCreateParams;
+
+/** A checkout's state at Stripe. */
+export type CheckoutStatus = "open" | "complete" | "expired";
+
+/**
+ * What Daybell reads back from a checkout (ADR 0023 §5.2): ids, amounts, the destination and Daybell's fee, and Stripe's
+ * own fee once its balance transaction exists. Two personal fields are held in memory only, for one purpose each, and
+ * never stored by the API, logged, or put in an event: the email the parent typed (Stripe's receipt, call 18) and the
+ * home delivery recipient (handed to the database for the studio's fulfilment, call 2).
+ */
+export interface CheckoutSessionFacts {
+  id: string;
+  status: CheckoutStatus | "other";
+  /** Stripe's payment_status: "paid" once the money is taken. */
+  paymentStatus: string;
+  livemode: boolean;
+  url: string | null;
+  /** Seconds since the epoch. */
+  expiresAt: number;
+  currency: string | null;
+  amountSubtotal: number | null;
+  /** Shipping before tax (shipping_cost.amount_subtotal); 0 without shipping. */
+  amountShipping: number;
+  amountTax: number | null;
+  amountTotal: number | null;
+  /** Daybell's ids, from the session's metadata. */
+  orderId: string | null;
+  studioId: string | null;
+  region: string | null;
+  paymentIntentId: string | null;
+  chargeId: string | null;
+  transferId: string | null;
+  destination: string | null;
+  /** The merchant of record (payment_intent.on_behalf_of): the studio's own account (D106; security review N5). */
+  onBehalfOf: string | null;
+  applicationFeeAmount: number | null;
+  /** Stripe's fee for the charge, once its balance transaction exists (call 1). */
+  balanceTransaction: { id: string; feeCents: number; currency: string } | null;
+  /** In memory only (call 18). */
+  receiptEmail: string | null;
+  /** In memory only (call 2). */
+  shipping: {
+    name: string;
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string | null;
+    postalCode: string;
+    country: string;
+  } | null;
+}
+
+/** The studio's business address, sent to Stripe as its tax head office (call 3). */
+export interface TaxHeadOffice {
+  line1: string;
+  line2: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+}
+
+/** A Canadian registration as Stripe takes it: GST/HST is "standard", PST "province_standard" (answer 2). */
+export type TaxRegistrationRequest = { kind: "gst_hst" } | { kind: "pst"; province: PstProvince };
+
 /**
  * Every call Daybell makes to Stripe, behind one interface with two drivers (ADR 0020): `stripe` (stripe-node) and
  * `fake` (in memory, for development, CI and end-to-end tests; refused on Vercel).
@@ -100,4 +172,37 @@ export interface PaymentsProvider {
   updatePayoutSchedule(accountId: string, schedule: ScheduleRequest): Promise<StripeAccountData>;
   retrievePayout(accountId: string, payoutId: string): Promise<StripePayoutData>;
   createLoginLink(accountId: string): Promise<{ url: string }>;
+
+  // Checkout (ADR 0023).
+  /** Creates the hosted checkout; the key makes a retry return the same one. */
+  createCheckoutSession(
+    params: CheckoutSessionParams,
+    idempotencyKey: string,
+  ): Promise<{ id: string; url: string; expiresAt: number }>;
+  /** Reads a checkout with its payment, charge and Stripe's fee. */
+  retrieveCheckoutSession(sessionId: string): Promise<CheckoutSessionFacts>;
+  /** Expires an open checkout; one already complete or expired answers with its state. */
+  expireCheckoutSession(sessionId: string): Promise<{ status: CheckoutStatus | "other" }>;
+  /** Stripe emails its receipt there (call 18). The email is never logged. */
+  setReceiptEmail(paymentIntentId: string, email: string): Promise<void>;
+  /**
+   * Recovers Stripe's fee from the studio's transfer (call 1): a partial reversal, once per order whatever the retries
+   * (an earlier reversal for the order is found by its metadata and returned).
+   */
+  recoverCardFee(input: {
+    transferId: string;
+    amountCents: number;
+    orderId: string;
+  }): Promise<{ reversalId: string }>;
+  /** Sets the account's card statement prefix to "DBL" (call 7). */
+  setCardPrefix(accountId: string): Promise<void>;
+
+  // Taxes (answer 2; calls 3, 6). In the studio's account.
+  setTaxHeadOffice(accountId: string, address: TaxHeadOffice): Promise<void>;
+  createTaxRegistration(
+    accountId: string,
+    registration: TaxRegistrationRequest,
+    idempotencyKey: string,
+  ): Promise<{ id: string }>;
+  expireTaxRegistration(accountId: string, registrationId: string): Promise<void>;
 }

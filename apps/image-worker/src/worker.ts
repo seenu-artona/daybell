@@ -7,6 +7,7 @@ import {
 } from "@daybell/core";
 import {
   type PhotoJobDeps,
+  runDownloadJob,
   runPhotoJob,
   type WorkerPhoto,
   type WorkerResult,
@@ -96,10 +97,20 @@ export function secretsFromJson(text: string | undefined): {
 }
 
 /**
- * The photo ids a queue message is about. S3 events name the original's key (IDs only); a retry from the API names
- * the photo. S3's test event and anything else name none.
+ * What a queue message asks for: `process` a photo (its previews, reported back), or make only its paid `download`
+ * once it is sold (made lazily: ADR 0023, security review N1).
  */
-export function photoIdsFromMessage(body: string, bucket: string): string[] {
+export interface PhotoTask {
+  photoId: string;
+  make: "process" | "download";
+}
+
+/**
+ * The work a queue message asks for. S3 events name the original's key (IDs only): process it. The API names a photo:
+ * process it (a retry), or with `make: "download"` make only its paid download (a sold photo). S3's test event and
+ * anything else ask for nothing.
+ */
+export function photoTasksFromMessage(body: string, bucket: string): PhotoTask[] {
   let message: unknown;
   try {
     message = JSON.parse(body);
@@ -108,20 +119,32 @@ export function photoIdsFromMessage(body: string, bucket: string): string[] {
   }
   const m = message as {
     photoId?: unknown;
+    make?: unknown;
     Records?: {
       eventSource?: string;
       s3?: { bucket?: { name?: string }; object?: { key?: string } };
     }[];
   };
-  if (typeof m.photoId === "string") return isUuid(m.photoId) ? [m.photoId.toLowerCase()] : [];
+  if (typeof m.photoId === "string") {
+    if (!isUuid(m.photoId)) return [];
+    if (m.make !== undefined && m.make !== "download") return [];
+    return [
+      { photoId: m.photoId.toLowerCase(), make: m.make === "download" ? "download" : "process" },
+    ];
+  }
   if (!Array.isArray(m.Records)) return [];
-  return m.Records.flatMap((r) => {
+  return m.Records.flatMap((r): PhotoTask[] => {
     if (r.eventSource !== "aws:s3" || r.s3?.bucket?.name !== bucket) return [];
     // S3 encodes keys in events like a form (spaces as +); ours hold only ids, but decode properly anyway.
     const key = decodeURIComponent((r.s3?.object?.key ?? "").replace(/\+/g, " "));
     const parsed = parsePhotoKey(key);
-    return parsed?.variant === "original" ? [parsed.photoId] : [];
+    return parsed?.variant === "original" ? [{ photoId: parsed.photoId, make: "process" }] : [];
   });
+}
+
+/** The photo ids a queue message is about, whatever it asks for. */
+export function photoIdsFromMessage(body: string, bucket: string): string[] {
+  return photoTasksFromMessage(body, bucket).map((t) => t.photoId);
 }
 
 const API_PATH = "/api/v1/internal/photo-worker/photos";
@@ -199,14 +222,15 @@ export function createHandler(parts: {
   return async (event: SQSEvent): Promise<SQSBatchResponse> => {
     const batchItemFailures: SQSBatchResponse["batchItemFailures"] = [];
     for (const record of event.Records) {
-      const ids = photoIdsFromMessage(record.body, parts.config.bucket);
-      if (ids.length === 0) write("message_ignored", record.messageId);
-      for (const id of ids) {
+      const tasks = photoTasksFromMessage(record.body, parts.config.bucket);
+      if (tasks.length === 0) write("message_ignored", record.messageId);
+      for (const task of tasks) {
         try {
-          await runPhotoJob(id, deps, { qrWasmFile: parts.qrWasmFile });
+          if (task.make === "download") await runDownloadJob(task.photoId, deps);
+          else await runPhotoJob(task.photoId, deps, { qrWasmFile: parts.qrWasmFile });
         } catch (err) {
           // The error's name only: messages from libraries can quote URLs or bodies.
-          write("photo_error", id, err instanceof Error ? err.name : "unknown");
+          write("photo_error", task.photoId, err instanceof Error ? err.name : "unknown");
           batchItemFailures.push({ itemIdentifier: record.messageId });
           break;
         }

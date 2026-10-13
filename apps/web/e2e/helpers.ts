@@ -1,4 +1,7 @@
-import { type Browser, expect, type Page } from "@playwright/test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type Browser, type BrowserContext, expect, type Page } from "@playwright/test";
 import { createServerClient } from "@supabase/ssr";
 import QRCode from "qrcode";
 import sharp, { type OverlayOptions } from "sharp";
@@ -114,4 +117,67 @@ export async function cardCodes(page: Page, jobId: string) {
     .eq("job_id", jobId);
   if (error) throw new Error(error.message);
   return data as { id: string; child_id: string | null; card_code: string }[];
+}
+
+/**
+ * A studio selling one job with one child, Ava Patel, and three of her photos tagged by her card (ADR 0022, 0023): its
+ * owner signed in on a desktop-sized page (the studio app is desktop only, D136), payouts Active through the fake
+ * Stripe, delivery to school on. The caller closes the context.
+ */
+export async function studioSellingAva(
+  browser: Browser,
+  baseURL: string,
+  tag: string,
+): Promise<{ context: BrowserContext; page: Page; studio: string; jobId: string; code: string }> {
+  const context = await browser.newContext({ baseURL, viewport: { width: 1280, height: 900 } });
+  const studio = `Riverside Photo ${tag}`;
+  const page = await signUpOwner(await context.newPage(), {
+    studio,
+    slug: `pay-${tag}`.slice(0, 40).replace(/-+$/, ""),
+    email: `pay-owner-${tag}@example.test`,
+  });
+  const pastDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+  const created = await page.request.post("/api/v1/jobs", {
+    data: { name: `Fall Portraits ${tag}`, type: "school", pictureDay: pastDay },
+  });
+  expect(created.status()).toBe(201);
+  const jobId = (await created.json()).job.id as string;
+  const added = await page.request.post(`/api/v1/jobs/${jobId}/children`, {
+    data: { firstName: "Ava", lastName: "Patel" },
+  });
+  expect(added.status()).toBe(201);
+  const child = (await added.json()).child as { id: string; accessCode: string };
+  expect((await page.request.post(`/api/v1/jobs/${jobId}/qr-cards`, { data: {} })).status()).toBe(
+    200,
+  );
+  const card = (await cardCodes(page, jobId)).find((c) => c.child_id === child.id)?.card_code ?? "";
+  const day = join(mkdtempSync(join(tmpdir(), "daybell-pay-")), "Picture day");
+  mkdirSync(day);
+  writeFileSync(join(day, "IMG_0001.JPG"), await photo(21, { payload: `DBC1:${card}` }));
+  writeFileSync(join(day, "IMG_0002.JPG"), await photo(22));
+  writeFileSync(join(day, "IMG_0003.JPG"), await photo(23));
+  const main = page.getByRole("main");
+  await page.goto(`/app/jobs/${jobId}/photos`);
+  await main.getByRole("button", { name: "Upload photos", exact: true }).click();
+  const sheet = main.getByRole("region", { name: "Upload photos", exact: true });
+  await sheet.locator('input[type="file"][webkitdirectory]').setInputFiles(day);
+  await expect(sheet.getByText("Done: 3 photos added", { exact: true })).toBeVisible({
+    timeout: 120_000,
+  });
+  await page.goto(`/app/jobs/${jobId}/photos/review`);
+  await expect(
+    main.getByText("3 photos · 0 in Leftovers · 0 to check", { exact: true }),
+  ).toBeVisible({ timeout: 120_000 });
+  expect((await page.request.post(`/api/v1/jobs/${jobId}/tagging/review`)).status()).toBe(200);
+  expect(
+    (
+      await page.request.patch(`/api/v1/jobs/${jobId}`, { data: { deliverToSchool: true } })
+    ).status(),
+  ).toBe(200);
+  expect((await page.request.post("/api/v1/studio/payouts/onboarding-link")).status()).toBe(200);
+  expect(
+    (await page.request.post("/api/dev-stripe", { data: { action: "finish" } })).status(),
+  ).toBe(200);
+  expect((await page.request.post(`/api/v1/jobs/${jobId}/start-selling`)).status()).toBe(200);
+  return { context, page, studio, jobId, code: child.accessCode };
 }
