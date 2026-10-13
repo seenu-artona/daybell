@@ -630,8 +630,8 @@ select is((select count(*) from public.orders) + (select count(*) from public.or
 select is(public.job_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001'),
   '[]'::jsonb, 'nor through the job''s list');
 select pg_temp.as_user('44444444-4444-4444-8444-444444444444');
-select is((select count(*) from public.orders) + (select count(*) from public.studio_tax_registrations), 0::bigint,
-  'staff read nothing either');
+select is((select count(*) from public.ledger_entries) + (select count(*) from public.studio_tax_registrations),
+  0::bigint, 'staff read no ledger or taxes (since step 11 they read orders to fulfil them: ADR 0024, Q4)');
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222');
 select is((select count(*) from public.orders) + (select count(*) from public.order_lines)
   + (select count(*) from public.order_line_contents) + (select count(*) from public.order_line_photos)
