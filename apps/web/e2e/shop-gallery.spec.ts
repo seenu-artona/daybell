@@ -249,7 +249,8 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
     .getByRole("button", { name: "One more", exact: true })
     .click();
   await expect(main.getByText("Total $141.95", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /pay/i })).toHaveCount(0);
+  // Paying is step 10's (shop-checkout.spec.ts): the docked Pay button is there once delivery is chosen.
+  await expect(docked.getByRole("button", { name: "Pay securely", exact: true })).toBeVisible();
 
   // 9. Forget this device (answer 3): back to the code page; the bag is gone with it.
   await header.getByRole("button", { name: "More", exact: true }).click();

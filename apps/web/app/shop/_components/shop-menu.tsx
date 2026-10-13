@@ -1,6 +1,7 @@
 "use client";
 
 import { Ellipsis } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
@@ -10,8 +11,9 @@ import { ShopDialog } from "./shop-dialog";
 import { shopButton, shopIconButton, shopSecondaryButton } from "./styles";
 
 /**
- * The ⋯ menu: "Forget this device", after a confirmation (answer 3, call 11). With galleries of more than one studio on
- * the device (S6), the confirmation offers this gallery or all of them.
+ * The ⋯ menu: "Your orders" (ADR 0023: paid orders and their downloads), and "Forget this device", after a
+ * confirmation (answer 3, call 11). With galleries of more than one studio on the device (S6), the confirmation offers
+ * this gallery or all of them.
  */
 export function ShopMenu({ gallery }: { gallery: string | null }) {
   const t = useTranslations("shop");
@@ -81,6 +83,15 @@ export function ShopMenu({ gallery }: { gallery: string | null }) {
         hidden={!open}
         className="absolute top-12 right-0 z-30 min-w-56 rounded-md border border-line bg-surface p-1 shadow-lg"
       >
+        {current ? (
+          <Link
+            href={`/shop/orders?gallery=${encodeURIComponent(current.id)}`}
+            onClick={() => setOpen(false)}
+            className="flex min-h-11 w-full items-center rounded-sm px-3 text-left text-sm text-ink no-underline hover:bg-subtle focus-visible:outline-3 focus-visible:outline-studio-ring"
+          >
+            {t("menu.orders")}
+          </Link>
+        ) : null}
         <button
           type="button"
           onClick={() => {

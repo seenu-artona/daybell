@@ -13,6 +13,7 @@ import {
   configFromEnv,
   createHandler,
   photoIdsFromMessage,
+  photoTasksFromMessage,
   secretsFromJson,
   type WorkerConfig,
 } from "./worker";
@@ -58,6 +59,26 @@ describe("photoIdsFromMessage", () => {
     expect(photoIdsFromMessage(JSON.stringify({ photoId: "../x" }), BUCKET)).toEqual([]);
     expect(photoIdsFromMessage(JSON.stringify({ Event: "s3:TestEvent" }), BUCKET)).toEqual([]);
     expect(photoIdsFromMessage("not json", BUCKET)).toEqual([]);
+  });
+});
+
+describe("photoTasksFromMessage (ADR 0023)", () => {
+  it("processes S3's originals and the API's retries, and makes only the download when asked", () => {
+    expect(photoTasksFromMessage(s3Event(photoKey(ids, "original")), BUCKET)).toEqual([
+      { photoId: ids.photoId, make: "process" },
+    ]);
+    expect(photoTasksFromMessage(JSON.stringify({ photoId: ids.photoId }), BUCKET)).toEqual([
+      { photoId: ids.photoId, make: "process" },
+    ]);
+    expect(
+      photoTasksFromMessage(JSON.stringify({ photoId: ids.photoId, make: "download" }), BUCKET),
+    ).toEqual([{ photoId: ids.photoId, make: "download" }]);
+    // Anything else asks for nothing (never a guess at what was meant).
+    expect(
+      photoTasksFromMessage(JSON.stringify({ photoId: ids.photoId, make: "delete" }), BUCKET),
+    ).toEqual([]);
+    // A download.jpg landing in S3 is not an original.
+    expect(photoTasksFromMessage(s3Event(photoKey(ids, "download.jpg")), BUCKET)).toEqual([]);
   });
 });
 
@@ -185,13 +206,39 @@ describe("the Lambda handler (S3 and the API faked)", () => {
         attempt: 2,
       },
     ]);
-    for (const variant of ["thumb.webp", "view.webp", "proof-thumb.webp", "proof.webp"] as const)
+    for (const variant of [
+      "thumb.webp",
+      "view.webp",
+      "proof-thumb.webp",
+      "proof.webp",
+      "download.jpg",
+    ] as const)
       expect(await storage.head(photoKey(ids, variant))).not.toBeNull();
     expect(fetchFake.mock.calls.map(([url]) => String(url))).toEqual([
       `${config.callbackBaseUrl}/api/v1/internal/photo-worker/photos/${ids.photoId}`,
       `${config.callbackBaseUrl}/api/v1/internal/photo-worker/photos/${ids.photoId}/result`,
     ]);
     expect(logs).toEqual([["photo_ready", ids.photoId]]);
+  });
+
+  it("makes a ready photo's missing download when the API asks (the backfill, ADR 0023)", async () => {
+    status = "ready";
+    const logs: unknown[][] = [];
+    const handler = createHandler({
+      qrWasmFile,
+      config,
+      storage,
+      fetch: fetchFake as typeof fetch,
+      log: (...args) => void logs.push(args),
+    });
+    expect(await handler(sqs(JSON.stringify({ photoId: ids.photoId, make: "download" })))).toEqual({
+      batchItemFailures: [],
+    });
+    expect(await storage.head(photoKey(ids, "download.jpg"))).not.toBeNull();
+    // Only the download: no previews remade and nothing reported.
+    expect(await storage.head(photoKey(ids, "thumb.webp"))).toBeNull();
+    expect(reports).toEqual([]);
+    expect(logs).toEqual([["download_ready", ids.photoId]]);
   });
 
   it("acknowledges a repeated message without doing the work again", async () => {

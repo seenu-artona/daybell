@@ -457,7 +457,14 @@ describe("GET /internal/cron/jobs", () => {
     );
     const res = await cron(`Bearer ${SECRET}`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ closedJobs: 503, prunedNotifications: 7, prunedShop: 7 });
+    // No Stripe here (STRIPE_DRIVER unset): the checkout backstops (ADR 0023) don't run.
+    expect(await res.json()).toEqual({
+      closedJobs: 503,
+      prunedNotifications: 7,
+      prunedShop: 7,
+      settledOrders: 0,
+      expiredOrders: 0,
+    });
     expect(systemRpc.mock.calls.map((c) => [c[0], c[1], c[2]])).toEqual([
       ["ca", "close_due_jobs", { p_limit: 500 }],
       ["ca", "close_due_jobs", { p_limit: 500 }],

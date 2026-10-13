@@ -1,5 +1,6 @@
 import { DATA_REGIONS } from "@daybell/config";
 import {
+  HEAD_OFFICE_PROVINCES,
   ITEM_DESCRIPTION_MAX,
   ITEM_NAME_MAX,
   JOB_STATUSES,
@@ -17,11 +18,14 @@ import {
   MAX_PHOTOS_PER_MOVE,
   MAX_PRICE_LIST_ITEMS,
   MAX_SHIPPING_CENTS,
+  normalizePostalCode,
+  normalizeTaxNumber,
   PAYOUT_WEEKDAY_CHOICES,
   PHOTO_PAGE_SIZE,
   PRICE_ITEM_KINDS,
   PRICE_LIST_NAME_MAX,
   PRINT_SIZES,
+  PST_PROVINCES,
   planParts,
   REVIEW_CHILDREN_PAGE,
   SHOP_MAX_QUANTITY,
@@ -1049,3 +1053,94 @@ export const shopGalleryQuery = z.object({
     }),
 });
 export type ShopGalleryQuery = z.infer<typeof shopGalleryQuery>;
+
+// ── Checkout and taxes (Phase 1 step 10, ADR 0023) ────────────────────────────────────────────────────────────────
+
+/** A job's paid orders, a page at a time (owners and admins). */
+export const orderListQuery = listQuery.extend({
+  jobId: z
+    .uuid({ error: "validation.invalid" })
+    .meta({ description: "The job whose orders to list." }),
+});
+export type OrderListQuery = z.infer<typeof orderListQuery>;
+
+const addressLine = (error: string) =>
+  z
+    .string({ error })
+    .trim()
+    .min(1, { error })
+    .max(100, { error: "validation.tooLong" })
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control and bidi characters is the point.
+    .refine((v) => !/[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/.test(v), { error });
+
+/**
+ * The studio's business address, sent to Stripe as its tax head office (call 3). Daybell keeps only the province.
+ * Canada without Quebec at launch.
+ */
+export const taxHeadOfficeInput = z.strictObject(
+  {
+    line1: addressLine("validation.addressLine"),
+    line2: z
+      .string()
+      .trim()
+      .max(100, { error: "validation.tooLong" })
+      .nullable()
+      .default(null)
+      .transform((v) => v || null),
+    city: addressLine("validation.city"),
+    province: z
+      .enum(HEAD_OFFICE_PROVINCES, { error: "validation.province" })
+      .meta({ description: "Two letters, e.g. ON. Quebec isn't offered at launch." }),
+    postalCode: z
+      .string({ error: "validation.postalCode" })
+      .transform((v, ctx) => {
+        const code = normalizePostalCode(v);
+        if (!code) {
+          ctx.addIssue({ code: "custom", message: "validation.postalCode" });
+          return z.NEVER;
+        }
+        return code;
+      })
+      .meta({ description: "e.g. M5V 2T6." }),
+  },
+  { error: "validation.unknownField" },
+);
+export type TaxHeadOfficeInput = z.infer<typeof taxHeadOfficeInput>;
+
+const taxNumber = (kind: "gst_hst" | "pst", error: string) =>
+  z.string({ error }).transform((v, ctx) => {
+    const number = normalizeTaxNumber(kind, v);
+    if (!number) {
+      ctx.addIssue({ code: "custom", message: error });
+      return z.NEVER;
+    }
+    return number;
+  });
+
+/** A GST/HST registration, or a PST one in BC, MB or SK (answer 2). The owner only (call 6). */
+export const taxRegistrationInput = z.discriminatedUnion(
+  "kind",
+  [
+    z.strictObject(
+      {
+        kind: z.literal("gst_hst"),
+        number: taxNumber("gst_hst", "validation.gstHstNumber").meta({
+          description: "9 digits, RT and 4 digits, e.g. 123456789RT0001.",
+        }),
+      },
+      { error: "validation.unknownField" },
+    ),
+    z.strictObject(
+      {
+        kind: z.literal("pst"),
+        province: z.enum(PST_PROVINCES, { error: "validation.pstProvince" }),
+        number: taxNumber("pst", "validation.pstNumber").meta({
+          description: "As the province writes it: letters, digits, spaces and dashes.",
+        }),
+      },
+      { error: "validation.unknownField" },
+    ),
+  ],
+  { error: "validation.taxKind" },
+);
+export type TaxRegistrationInput = z.infer<typeof taxRegistrationInput>;

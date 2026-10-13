@@ -191,8 +191,54 @@ export type ShopRpc =
   | "shop_set_shipping"
   | "shop_forget"
   | "shop_forget_device"
-  | "take_shop_request";
+  | "take_shop_request"
+  // Checkout (ADR 0023): the session's own bag, orders and downloads.
+  | "shop_checkout_begin"
+  | "shop_checkout_attach"
+  | "shop_pending_checkouts"
+  | "shop_orders"
+  | "shop_order"
+  | "shop_order_verify"
+  | "shop_download_photo";
 
 export function shopRpc(region: DataRegion, fn: ShopRpc, args: Record<string, unknown>) {
   return serviceClient(region).rpc(fn, args);
+}
+
+/**
+ * Checkout work nobody signed in does (ADR 0023): what Stripe reports about a checkout (only after the webhook's
+ * signature is checked, or a parent's own session asked, or the CRON_SECRET-checked cron), and the card prefix set at
+ * a studio's first checkout. Each names one order or account, and checks Stripe's answer against Daybell's own copy.
+ */
+export type CheckoutSystemRpc =
+  | "record_order_stripe_event"
+  | "finish_stripe_event"
+  | "complete_order"
+  | "expire_order"
+  | "settle_order_fees"
+  | "stale_checkouts"
+  | "unsettled_orders"
+  | "mark_card_prefix_set";
+
+export function checkoutSystemRpc(
+  region: DataRegion,
+  fn: CheckoutSystemRpc,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, args);
+}
+
+/**
+ * Tax writes (ADR 0023; call 6): Stripe first, then these, only from route handlers after studioScope() and the owner
+ * check; each acts for the person and checks again that they are the owner.
+ */
+export type TaxWriteRpc = "set_tax_head_office" | "add_tax_registration" | "end_tax_registration";
+
+export function taxWriteRpc(
+  region: DataRegion,
+  fn: TaxWriteRpc,
+  actorId: string,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, { p_actor: actorId, ...args });
 }

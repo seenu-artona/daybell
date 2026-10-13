@@ -35,6 +35,17 @@ export class RetryLater extends ApiError {
   }
 }
 
+/** A 409 that will pass by itself, with Retry-After (a paid download still being made, ADR 0023). */
+export class ConflictLater extends ApiError {
+  constructor(
+    readonly seconds: number,
+    message: string,
+    fields?: Record<string, string>,
+  ) {
+    super("conflict", message, fields);
+  }
+}
+
 export const NO_STORE = { "cache-control": "no-store" };
 
 export function shopErrorResponse(err: ApiError): NextResponse {
@@ -42,7 +53,9 @@ export function shopErrorResponse(err: ApiError): NextResponse {
     status: err.status,
     headers: {
       ...NO_STORE,
-      ...(err instanceof RetryLater ? { "retry-after": String(err.seconds) } : {}),
+      ...(err instanceof RetryLater || err instanceof ConflictLater
+        ? { "retry-after": String(err.seconds) }
+        : {}),
     },
   });
 }
@@ -80,6 +93,16 @@ const NAMED: Record<string, () => ApiError> = {
       SHOP_CONFLICTS.schoolDeliveryOff,
     ),
   bag_full: () => conflict("The bag is full.", SHOP_CONFLICTS.bagFull),
+  // Checkout (ADR 0023).
+  bag_empty: () => conflict("The bag is empty.", SHOP_CONFLICTS.bagEmpty),
+  line_unavailable: () =>
+    conflict("Something in the bag can't be bought any more.", SHOP_CONFLICTS.lineUnavailable),
+  choose_delivery: () => conflict("Choose delivery first.", SHOP_CONFLICTS.chooseDelivery),
+  not_accepting: () =>
+    conflict("This studio can't take payments right now.", SHOP_CONFLICTS.notAccepting),
+  below_minimum: () => conflict("The bag is below the minimum order.", SHOP_CONFLICTS.belowMinimum),
+  checkout_limit: () =>
+    new RetryLater(600, "Too many checkouts. Wait a few minutes and try again."),
 };
 
 type DbError = { code?: string; message?: string } | null;

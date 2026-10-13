@@ -129,7 +129,9 @@ export function partsComplete(
 
 /**
  * What is stored for a photo. The original as uploaded; plain previews for the studio only; watermarked previews
- * (the studio's name tiled across) for parents later (D60). Previews are made once, at upload (D100).
+ * (the studio's name tiled across) for parents (D60); and the file a parent downloads once they have paid
+ * (`download.jpg`: full resolution, upright, sRGB, every bit of metadata stripped; ADR 0023, call 10). Previews and
+ * the download are made once, at upload (D100). Parents never get the original.
  */
 export const PHOTO_VARIANTS = [
   "original",
@@ -137,9 +139,13 @@ export const PHOTO_VARIANTS = [
   "view.webp",
   "proof-thumb.webp",
   "proof.webp",
+  "download.jpg",
 ] as const;
 export type PhotoVariant = (typeof PHOTO_VARIANTS)[number];
-export type DerivativeVariant = Exclude<PhotoVariant, "original">;
+/** The WebP previews (studio and parents). */
+export type DerivativeVariant = Exclude<PhotoVariant, "original" | "download.jpg">;
+/** The paid download's key's last part (ADR 0023). */
+export const DOWNLOAD_VARIANT = "download.jpg" satisfies PhotoVariant;
 
 /** Each preview's longest side in pixels and whether it carries the watermark. */
 export const DERIVATIVES: Record<DerivativeVariant, { longestSide: number; watermark: boolean }> = {

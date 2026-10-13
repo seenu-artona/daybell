@@ -7,6 +7,7 @@ import {
   NOTIFICATION_KINDS,
   NOTIFICATIONS_SHOWN,
   ONBOARDING_TASKS,
+  ORDER_STATUSES,
   PAYOUT_ACCOUNT_STATUSES,
   PAYOUT_INTERVALS,
   PAYOUT_METHODS,
@@ -16,8 +17,10 @@ import {
   PHOTO_PLACES,
   PRICE_ITEM_KINDS,
   PRINT_SIZES,
+  PST_PROVINCES,
   SHOP_SHIPPING_METHODS,
   TASK_KEYS,
+  TAX_REGISTRATION_KINDS,
   UP_NEXT_SHOWN,
 } from "@daybell/core";
 import { z } from "zod";
@@ -1172,6 +1175,13 @@ export const cronJobsResponse = z.object({
   prunedShop: z.number().int().meta({
     description: "Expired shop sessions and day-old wrong-code and request counts removed.",
   }),
+  settledOrders: z.number().int().meta({
+    description:
+      "Paid orders whose Stripe fee was settled late (ADR 0023): the webhook's backstop.",
+  }),
+  expiredOrders: z.number().int().meta({
+    description: "Checkouts that ran out two hours ago, checked with Stripe and expired (or paid).",
+  }),
 });
 export type CronJobsResponse = z.infer<typeof cronJobsResponse>;
 
@@ -1385,6 +1395,21 @@ export const SHOP_CONFLICTS = {
   schoolDeliveryOff: "shop.schoolDeliveryOff",
   /** At most 100 lines in a bag. */
   bagFull: "shop.bagFull",
+  // Checkout (Phase 1 step 10, ADR 0023).
+  /** Nothing in the bag to pay for. */
+  bagEmpty: "shop.bagEmpty",
+  /** Something in the bag can't be bought any more: remove it first. */
+  lineUnavailable: "shop.lineUnavailable",
+  /** Choose home or school delivery first. */
+  chooseDelivery: "shop.chooseDelivery",
+  /** The studio can't take payments right now (its payouts aren't Active). */
+  notAccepting: "shop.notAccepting",
+  /** The bag is below Stripe's minimum charge (call 13). */
+  belowMinimum: "shop.belowMinimum",
+  /** The bag's earlier checkout was paid meanwhile: see the order (`fields.orderId`). */
+  alreadyPaid: "shop.alreadyPaid",
+  /** The paid download is being prepared (the backfill): try again in a minute (Retry-After). */
+  downloadPreparing: "shop.downloadPreparing",
 } as const;
 export type ShopConflict = (typeof SHOP_CONFLICTS)[keyof typeof SHOP_CONFLICTS];
 
@@ -1392,3 +1417,255 @@ export type ShopConflict = (typeof SHOP_CONFLICTS)[keyof typeof SHOP_CONFLICTS];
 export const SHOP_CODE_NOT_FOUND = "shop.codeNotFound";
 /** In `fields.form` of the 429 after too many wrong codes; Retry-After gives the seconds. */
 export const SHOP_LOCKED = "shop.locked";
+
+/**
+ * In `fields.form` of the 422 region_unavailable when checkout isn't set up in this deployment at all (no Stripe, e.g.
+ * PR previews), as opposed to the studio's region not taking payments yet.
+ */
+export const SHOP_CHECKOUT_NOT_CONFIGURED = "shop.checkoutNotConfigured";
+
+// ── Checkout and orders (Phase 1 step 10, ADR 0023) ─────────────────────────────────────────────────────────────
+
+export const checkoutStartResponse = z
+  .object({
+    orderId: z.uuid(),
+    url: z.url().meta({
+      description:
+        "Stripe's hosted checkout (in development and tests, this deployment's fake one). Go there straight away; it lasts 30 minutes.",
+    }),
+  })
+  .meta({ id: "CheckoutStart" });
+export type CheckoutStartResponse = z.infer<typeof checkoutStartResponse>;
+
+const orderStatus = z.enum(ORDER_STATUSES).meta({
+  description:
+    "pending: Stripe's checkout is open; paid; expired: cancelled, replaced or run out; failed: not used yet.",
+});
+
+const shopOrderChild = z
+  .discriminatedUnion("state", [
+    z.object({
+      id: z.uuid(),
+      state: z.literal("open"),
+      displayName: z
+        .string()
+        .meta({ description: 'First name and last initial only, e.g. "Ava P."' }),
+    }),
+    z.object({ id: z.uuid(), state: z.enum(["closed", "unavailable"]) }),
+  ])
+  .meta({
+    id: "ShopOrderChild",
+    description:
+      "A child on an order, named only while their shop is open (a stale card reveals nothing).",
+  });
+export type ShopOrderChild = z.infer<typeof shopOrderChild>;
+
+const orderView = z.enum(["full", "child"]).meta({
+  description:
+    "full: the session that paid, or one holding every child on the order; child: only this session's children's lines, with no amounts (call 12).",
+});
+
+export const shopOrderLine = z
+  .object({
+    id: z.uuid(),
+    childId: z.uuid().nullable(),
+    kind: z.enum(PRICE_ITEM_KINDS),
+    name: z.string(),
+    printSize: z.enum(PRINT_SIZES).nullable(),
+    quantity: z.number().int(),
+    unitPrice: money.nullable().meta({ description: "Null in the child view." }),
+    lineTotal: money.nullable().meta({ description: "Null in the child view." }),
+    contents: z.array(packageLine).meta({ description: "A package's contents as sold." }),
+    downloads: z
+      .array(
+        z.object({
+          photoId: z.uuid(),
+          n: z.number().int().meta({ description: "1, 2, 3… in the order." }),
+        }),
+      )
+      .meta({ description: "The photos this line unlocked, once paid; empty for prints." }),
+  })
+  .meta({ id: "ShopOrderLine" });
+export type ShopOrderLine = z.infer<typeof shopOrderLine>;
+
+export const shopOrder = z
+  .object({
+    id: z.uuid(),
+    reference: z.string().meta({ description: "8 characters, e.g. 7KQ2M9XA." }),
+    status: orderStatus,
+    view: orderView,
+    paidAt: z.iso.datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    studio: z.object({ name: z.string() }),
+    shippingMethod: z.enum(SHOP_SHIPPING_METHODS).nullable(),
+    totals: z
+      .object({
+        products: money,
+        shipping: money,
+        tax: money.nullable().meta({ description: "Null until paid." }),
+        total: money.nullable().meta({ description: "Null until paid." }),
+      })
+      .nullable()
+      .meta({ description: "Full view only." }),
+    registrations: z
+      .array(
+        z.object({
+          kind: z.enum(TAX_REGISTRATION_KINDS),
+          province: z.enum(PST_PROVINCES).nullable(),
+          number: z.string(),
+        }),
+      )
+      .meta({ description: "The studio's tax numbers when it was paid (call 5); full view only." }),
+    children: z.array(shopOrderChild),
+    lines: z.array(shopOrderLine),
+  })
+  .meta({
+    id: "ShopOrder",
+    description:
+      "An order as a parent sees it: never an email, an address or a last name; downloads once paid (ADR 0023).",
+  });
+export type ShopOrder = z.infer<typeof shopOrder>;
+export const shopOrderResponse = z.object({ order: shopOrder });
+export type ShopOrderResponse = z.infer<typeof shopOrderResponse>;
+
+export const shopOrderSummary = z
+  .object({
+    id: z.uuid(),
+    reference: z.string(),
+    status: orderStatus,
+    view: orderView,
+    paidAt: z.iso.datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    children: z.array(shopOrderChild),
+    downloads: z.number().int().meta({ description: "Photos to download from it." }),
+  })
+  .meta({ id: "ShopOrderSummary" });
+export type ShopOrderSummary = z.infer<typeof shopOrderSummary>;
+export const shopOrdersResponse = z
+  .object({
+    orders: z.array(shopOrderSummary).meta({
+      description:
+        "Paid orders this gallery may see, and its own checkouts of the last 2 hours; newest first, at most 50.",
+    }),
+  })
+  .meta({ id: "ShopOrders" });
+export type ShopOrdersResponse = z.infer<typeof shopOrdersResponse>;
+
+export const downloadLinkResponse = z
+  .object({
+    url: z.url().meta({
+      description:
+        "The full-resolution JPEG, metadata stripped (never the original), saved as a file named by the order. Signed for 5 minutes: open it straight away.",
+    }),
+    expiresAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({ id: "DownloadLink" });
+export type DownloadLinkResponse = z.infer<typeof downloadLinkResponse>;
+
+const personName = z.object({ id: z.uuid(), firstName: z.string(), lastName: z.string() });
+
+export const studioOrder = z
+  .object({
+    id: z.uuid(),
+    reference: z.string(),
+    paidAt: z.iso.datetime({ offset: true }),
+    products: money,
+    shipping: money,
+    tax: money,
+    total: money,
+    daybellFee: z
+      .object({ basisPoints: z.number().int(), amount: money })
+      .meta({ description: "Daybell's fee on products, at the rate this order used (D59)." }),
+    cardFee: money
+      .nullable()
+      .meta({ description: "Stripe's fee for the payment (D98); null until Stripe says." }),
+    paidToStudio: money.nullable().meta({
+      description:
+        "Total less Daybell's fee and the card fee (tax included: the studio remits it).",
+    }),
+    shippingMethod: z.enum(SHOP_SHIPPING_METHODS).nullable(),
+    items: z.number().int(),
+    children: z.array(personName).meta({ description: "The children the order is for." }),
+  })
+  .meta({ id: "Order", description: "A paid order, as the studio sees it (owners and admins)." });
+export type StudioOrder = z.infer<typeof studioOrder>;
+export const ordersResponse = z.object({
+  orders: z.array(studioOrder).meta({ description: "Newest first." }),
+  nextCursor: z.uuid().nullable(),
+});
+export type OrdersResponse = z.infer<typeof ordersResponse>;
+
+export const studioOrderDetail = studioOrder
+  .omit({ children: true, items: true })
+  .extend({
+    lines: z.array(
+      z.object({
+        id: z.uuid(),
+        kind: z.enum(PRICE_ITEM_KINDS),
+        name: z.string(),
+        printSize: z.enum(PRINT_SIZES).nullable(),
+        quantity: z.number().int(),
+        unitPrice: money,
+        lineTotal: money,
+        child: personName.nullable(),
+        photoId: z.uuid().nullable().meta({ description: "The pose; null for all digitals." }),
+        contents: z.array(packageLine),
+      }),
+    ),
+    shipTo: z
+      .object({
+        name: z.string(),
+        line1: z.string(),
+        line2: z.string().nullable(),
+        city: z.string(),
+        province: z.string().nullable(),
+        postalCode: z.string(),
+        country: z.literal("CA"),
+      })
+      .nullable()
+      .meta({ description: "Home delivery only (call 2)." }),
+  })
+  .meta({ id: "OrderDetail" });
+export type StudioOrderDetail = z.infer<typeof studioOrderDetail>;
+export const orderResponse = z.object({ order: studioOrderDetail });
+export type OrderResponse = z.infer<typeof orderResponse>;
+
+export const taxRegistration = z
+  .object({
+    id: z.uuid(),
+    kind: z.enum(TAX_REGISTRATION_KINDS),
+    province: z.enum(PST_PROVINCES).nullable(),
+    number: z.string(),
+    createdAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({ id: "TaxRegistration" });
+export type TaxRegistration = z.infer<typeof taxRegistration>;
+
+export const studioTaxesResponse = z
+  .object({
+    headOffice: z
+      .object({ province: z.string(), setAt: z.iso.datetime({ offset: true }) })
+      .nullable()
+      .meta({
+        description: "Whether the business address is at Stripe; Daybell keeps only its province.",
+      }),
+    registrations: z.array(taxRegistration).meta({ description: "Active registrations." }),
+    collectsTax: z.boolean().meta({
+      description:
+        "A head office and a registration: checkout charges tax. Otherwise none (small supplier).",
+    }),
+    canManage: z.boolean().meta({ description: "Only the owner changes taxes (call 6)." }),
+  })
+  .meta({ id: "StudioTaxes" });
+export type StudioTaxesResponse = z.infer<typeof studioTaxesResponse>;
+
+/** Why a taxes request was refused with 409, in the error's `fields.form`. */
+export const TAX_CONFLICTS = {
+  /** Taxes need the studio's Stripe account first (Settings › Payouts). */
+  notConnected: "taxes.notConnected",
+  /** Registrations need the business address first. */
+  headOfficeRequired: "taxes.headOfficeRequired",
+  /** One active registration of each kind (and province). */
+  alreadyRegistered: "taxes.alreadyRegistered",
+} as const;
+export type TaxConflict = (typeof TAX_CONFLICTS)[keyof typeof TAX_CONFLICTS];

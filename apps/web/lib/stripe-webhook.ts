@@ -1,16 +1,24 @@
 import "server-only";
 import { ApiError } from "@daybell/api";
-import { regionDatabase } from "@daybell/config";
+import { isDataRegion, regionDatabase } from "@daybell/config";
 import { NextResponse } from "next/server";
+import type Stripe from "stripe";
+import { CheckoutProblem, completeCheckout, expireOrder } from "./checkout/complete";
 import {
   payoutForDatabase,
   regionOfAccount,
   syncAccountCopy,
   withDefaultSchedule,
 } from "./payouts";
-import { assertFunctionRegion, assertPayoutFunctionRegion } from "./region-guard";
-import { payments, type VerifiedStripeEvent, verifyStripeWebhook, webhookSecrets } from "./stripe";
-import { payoutSystemRpc } from "./supabase/service";
+import { assertFunctionRegion, assertPayoutFunctionRegion, PAYOUT_REGIONS } from "./region-guard";
+import {
+  type PaymentsProvider,
+  payments,
+  type VerifiedStripeEvent,
+  verifyStripeWebhook,
+  webhookSecrets,
+} from "./stripe";
+import { checkoutSystemRpc, payoutSystemRpc } from "./supabase/service";
 import { readCapped } from "./worker-auth";
 
 /**
@@ -64,6 +72,19 @@ export const HANDLED_THIN_EVENTS = new Set([
   "v2.core.account[configuration.recipient].updated",
   "v2.core.account[configuration.recipient].capability_status_updated",
 ]);
+
+/**
+ * The platform's own events (no connected account): parents' checkouts, which live on Daybell's account with
+ * destination charges (ADR 0023). They need their own event destination ("Your account", snapshot payload;
+ * docs/stripe-staging.md).
+ */
+export const HANDLED_PLATFORM_EVENTS = new Set([
+  "checkout.session.completed",
+  "checkout.session.expired",
+]);
+
+const CHECKOUT_SESSION_ID = /^cs_(test_|live_)?[A-Za-z0-9_]{1,250}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{1,250}$/;
 const PAYOUT_ID = /^po_[A-Za-z0-9]{1,250}$/;
@@ -176,6 +197,12 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
   const event = normalizeStripeEvent(verified);
   const provider = payments();
   if (event.livemode !== provider.livemode) throw refused("stripe_webhook_wrong_mode");
+  if (
+    verified.payload === "snapshot" &&
+    !event.accountId &&
+    HANDLED_PLATFORM_EVENTS.has(verified.event.type)
+  )
+    return handleCheckoutEvent(verified.event, provider);
   if (!event.handled || !event.accountId) {
     console.warn("stripe_webhook_ignored", typeof event.type === "string" ? event.type : "unknown");
     return received();
@@ -280,5 +307,112 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
     // Can never succeed, so it isn't retried: a fixed name to alert on, with the event type and the code.
     console.error("stripe_webhook_permanent_failure", event.type, failure.code);
   }
+  return received();
+}
+
+/**
+ * A parent's checkout completed or expired (ADR 0023 §5.3), in order:
+ * 1. the event's ids and time are checked (signature and mode already were);
+ * 2. nothing is asked of Stripe outside the payout regions' function regions (D113);
+ * 3. the checkout is read from Stripe again (never the payload), and routed by the region Daybell wrote in its
+ *    metadata (else Canada, the Q11 precedent); a checkout that isn't Daybell's is acknowledged and left alone;
+ * 4. the event is recorded once in that region's inbox for the order Stripe names (404 for an order this database
+ *    doesn't hold, so Stripe tries again; 409 while another delivery holds it; 200 when already done);
+ * 5. the studio in Stripe's metadata must be the order's (a backstop);
+ * 6. completed: the order is completed (lib/checkout/complete.ts). Stripe's fee not yet known is retried (500, Stripe's
+ *    retries are the queue, with the jobs cron as the backstop); a mismatch with the order is recorded as permanent,
+ *    logged for an alert and answered with 200. Expired: the order expires (a no-op once paid).
+ * Logs hold fixed names, the event type and codes only: never the email, the address or any id.
+ */
+async function handleCheckoutEvent(
+  event: Stripe.Event,
+  provider: PaymentsProvider,
+): Promise<Response> {
+  const sessionId = (event.data?.object as { id?: unknown } | undefined)?.id;
+  if (
+    typeof event.id !== "string" ||
+    !EVENT_ID.test(event.id) ||
+    typeof sessionId !== "string" ||
+    !CHECKOUT_SESSION_ID.test(sessionId)
+  )
+    throw refused("stripe_webhook_bad_ids");
+  const createdMs = event.created * 1000;
+  if (!Number.isFinite(createdMs) || Math.abs(createdMs - Date.now()) > MAX_EVENT_AGE_MS)
+    throw refused("stripe_webhook_bad_time");
+
+  assertPayoutFunctionRegion();
+  const facts = await provider.retrieveCheckoutSession(sessionId);
+  if (!facts.orderId || !UUID.test(facts.orderId) || facts.id !== sessionId) {
+    console.warn("stripe_webhook_not_daybells", event.type);
+    return received();
+  }
+  const region =
+    isDataRegion(facts.region) && PAYOUT_REGIONS.includes(facts.region) ? facts.region : "ca";
+  if (!regionDatabase(region)) throw new ApiError("not_found", "Unknown order.");
+  assertFunctionRegion(region);
+
+  const recorded = await checkoutSystemRpc(region, "record_order_stripe_event", {
+    p_event_id: event.id,
+    p_type: event.type,
+    p_order_id: facts.orderId,
+    p_checkout_session_id: sessionId,
+    p_livemode: provider.livemode,
+    p_created: new Date(createdMs).toISOString(),
+  });
+  if (recorded.error) {
+    console.error("stripe_webhook_inbox_failed", event.type);
+    throw new ApiError("internal", "Something went wrong on our side.");
+  }
+  const claim = recorded.data as Claim;
+  if (!claim) {
+    console.warn("stripe_webhook_unknown_order", event.type);
+    throw new ApiError("not_found", "Unknown order.");
+  }
+  if (claim.processed) return received();
+  if (!claim.claimed || !claim.lease)
+    throw new ApiError("conflict", "This event is being processed.");
+
+  let failure: Failure = null;
+  if (facts.studioId !== claim.studio_id) {
+    console.error("stripe_webhook_studio_mismatch", event.type);
+    failure = { code: "studio_mismatch", permanent: true };
+  } else {
+    try {
+      if (event.type === "checkout.session.completed") {
+        const { outcome } = await completeCheckout(region, provider, sessionId, {
+          expectedOrderId: facts.orderId,
+          known: facts,
+        });
+        if (outcome === "fee_pending") failure = { code: "fee_pending", permanent: false };
+        // Cards and wallets are paid when the checkout completes; an unpaid one (later payment methods) is noted.
+        if (outcome === "unpaid") failure = { code: "not_paid", permanent: true };
+      } else {
+        await expireOrder(region, facts.orderId);
+      }
+    } catch (err) {
+      failure =
+        err instanceof CheckoutProblem
+          ? { code: err.code, permanent: true }
+          : {
+              code: err instanceof ApiError ? "stripe_unavailable" : "unexpected_object",
+              permanent: !(err instanceof ApiError),
+            };
+    }
+  }
+  const finished = await checkoutSystemRpc(region, "finish_stripe_event", {
+    p_inbox_id: claim.inbox_id,
+    p_lease: claim.lease,
+    p_error_code: failure?.code ?? null,
+    p_permanent: failure?.permanent ?? false,
+  });
+  if (finished.error || (failure && !failure.permanent)) {
+    console.error("stripe_webhook_failed", event.type, failure?.code ?? "finish_failed");
+    throw new ApiError("internal", "Something went wrong on our side.");
+  }
+  if (finished.data !== true) {
+    console.warn("stripe_webhook_lease_lost", event.type);
+    throw new ApiError("conflict", "This event is being processed.");
+  }
+  if (failure) console.error("stripe_webhook_permanent_failure", event.type, failure.code);
   return received();
 }

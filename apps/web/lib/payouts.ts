@@ -318,13 +318,19 @@ export function toPayout(row: PayoutRow): Payout {
   };
 }
 
-/** The fees Settings › Payouts explains, in the studio's currency (D98, D59; Claude's call Q8). */
-export function feesFor(region: DataRegion): StudioPayoutsResponse["fees"] {
+/**
+ * The fees Settings › Payouts explains, in the studio's currency (D98, D59; Claude's call Q8). Daybell's rate is the
+ * database's platform setting (Seenu's answer 1; ADR 0023), which each new order copies.
+ */
+export function feesFor(
+  region: DataRegion,
+  daybellBasisPoints: number,
+): StudioPayoutsResponse["fees"] {
   const currency = currencyForRegion(region);
   const table = PAYOUT_FEES[currency];
   const money = (cents: number) => ({ cents, currency });
   return {
-    daybellBasisPoints: table.daybellBasisPoints,
+    daybellBasisPoints,
     card: { basisPoints: table.card.basisPoints, fixed: money(table.card.fixedCents) },
     payout: { basisPoints: table.payout.basisPoints, fixed: money(table.payout.fixedCents) },
     activeAccount: money(table.activeAccountCents),
@@ -355,12 +361,16 @@ export async function loadStudioPayouts(
       ) ?? []) as PayoutRow[])
     : [];
   const account = row ? toPayoutAccount(row) : null;
+  const platform = check(await supabase.rpc("platform_fee_settings")) as {
+    daybell_fee_bps: number;
+  } | null;
+  if (!platform) throw new ApiError("internal", "Something went wrong on our side.");
   return {
     account,
     nextPayoutDate:
       account?.payoutsEnabled === true ? nextPayoutDay(account.schedule, today) : null,
     payouts: payouts.map(toPayout),
-    fees: feesFor(studio.region),
+    fees: feesFor(studio.region, platform.daybell_fee_bps),
     canManage: canManagePayouts(studio.role),
   };
 }

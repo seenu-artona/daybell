@@ -193,7 +193,15 @@
     "payoutWeekday": "Choose a weekday, Monday to Friday.",
     "payoutMonthDay": "Choose a day of the month from 1 to 31.",
     "closesAt": "Choose a day after today, no more than 400 days ahead.",
-    "accessCode": "Type the code from the photo card."
+    "accessCode": "Type the code from the photo card.",
+    "addressLine": "Enter the street address.",
+    "city": "Enter the city.",
+    "province": "Choose a province or territory.",
+    "postalCode": "Enter a postal code like M5V 2T6.",
+    "gstHstNumber": "Enter a GST/HST number like 123456789RT0001.",
+    "pstNumber": "Enter the PST number as the province gave it.",
+    "pstProvince": "PST is registered in British Columbia, Manitoba or Saskatchewan.",
+    "taxKind": "Choose GST/HST or PST."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -420,7 +428,8 @@
       "sections": {
         "label": "Settings sections",
         "team": "Team",
-        "payouts": "Payouts"
+        "payouts": "Payouts",
+        "taxes": "Taxes"
       }
     },
     "home": {
@@ -980,6 +989,40 @@
         "toSchoolHelp": "Parents choose free delivery to the school or paid home shipping.",
         "toSchoolOn": "Free delivery to school is on.",
         "toSchoolOff": "Free delivery to school is off."
+      },
+      "orders": {
+        "title": "Orders",
+        "loading": "Loading…",
+        "empty": "No paid orders yet.",
+        "caption": "Paid orders for this job, newest first",
+        "columns": {
+          "order": "Order",
+          "paid": "Paid",
+          "for": "For",
+          "items": "Items",
+          "total": "Total",
+          "tax": "Tax",
+          "daybellFee": "Daybell fee",
+          "cardFee": "Card fee",
+          "paidToYou": "Paid to you"
+        },
+        "fee": "{amount} ({percent}%)",
+        "pending": "Pending",
+        "open": "Open order {reference}",
+        "more": "Show more orders",
+        "note": "Daybell’s fee is a share of products only, never tax or shipping. The card fee is Stripe’s, passed on.",
+        "detailTitle": "Order {reference}",
+        "line": "{quantity, plural, one {{name}} other {# × {name}}}",
+        "forChild": "For {name}",
+        "childRemoved": "Child no longer on the roster",
+        "delivery": "Delivery",
+        "deliveries": {
+          "home": "Home delivery",
+          "school": "Delivery to school",
+          "none": "None (downloads only)"
+        },
+        "shipTo": "Ships to",
+        "cityLine": "{city} {province} {postalCode}"
       }
     },
     "people": {
@@ -1407,6 +1450,72 @@
         "paidOut": "A test payout was paid.",
         "back": "Back to Daybell"
       }
+    },
+    "taxes": {
+      "intro": "The sales tax your shop charges parents. Stripe calculates it at checkout from your registrations.",
+      "noRegistration": "No registration means no tax is charged (small supplier).",
+      "adviser": "Ask your tax adviser before you start selling.",
+      "loading": "Loading…",
+      "notForRole": "Only owners and admins can see taxes.",
+      "unavailable": "Taxes aren’t available in your region yet.",
+      "ownerOnly": "Only the studio owner can change taxes.",
+      "collects": {
+        "title": "Tax at checkout",
+        "yes": "Your shop charges tax at checkout.",
+        "no": "Your shop doesn’t charge tax yet."
+      },
+      "headOffice": {
+        "title": "Business address",
+        "hint": "Sent to Stripe as your tax head office. Daybell keeps only the province.",
+        "set": "Set, in {province}.",
+        "notSet": "Not set yet.",
+        "line1": "Street address",
+        "line2": "Unit or suite (optional)",
+        "city": "City",
+        "province": "Province or territory",
+        "postalCode": "Postal code",
+        "save": "Save business address",
+        "saved": "Business address saved."
+      },
+      "registrations": {
+        "title": "Registrations",
+        "none": "No registrations: no tax is charged.",
+        "gstHst": "GST/HST",
+        "pst": "PST ({province})",
+        "gstNumber": "GST/HST number",
+        "gstHelp": "9 digits, RT and 4 digits, e.g. 123456789RT0001.",
+        "addGst": "Add GST/HST number",
+        "pstProvince": "PST province",
+        "pstNumber": "PST number",
+        "addPst": "Add PST number",
+        "addressFirst": "Add your business address before your registrations.",
+        "added": "Registration added.",
+        "end": "End {kind} registration",
+        "endTitle": "End this registration?",
+        "endBody": "New checkouts stop charging this tax. Orders already paid keep it.",
+        "keep": "Keep it",
+        "confirmEnd": "End registration",
+        "ended": "Registration ended."
+      },
+      "conflicts": {
+        "notConnected": "Set up payouts before taxes.",
+        "headOfficeRequired": "Add your business address first.",
+        "alreadyRegistered": "That registration is already added."
+      },
+      "provinces": {
+        "AB": "Alberta",
+        "BC": "British Columbia",
+        "MB": "Manitoba",
+        "NB": "New Brunswick",
+        "NL": "Newfoundland and Labrador",
+        "NS": "Nova Scotia",
+        "NT": "Northwest Territories",
+        "NU": "Nunavut",
+        "ON": "Ontario",
+        "PE": "Prince Edward Island",
+        "SK": "Saskatchewan",
+        "YT": "Yukon"
+      }
     }
   },
   "invite": {
@@ -1445,7 +1554,9 @@
       "Search": "Search",
       "Notifications": "Notifications",
       "Internal": "Internal",
-      "Shop": "Parent shop"
+      "Shop": "Parent shop",
+      "Taxes": "Taxes",
+      "Orders": "Orders"
     },
     "access": {
       "public": "Anyone",
@@ -1501,7 +1612,15 @@
       "photoUnavailable": "That photo can’t be chosen. Choose another one.",
       "schoolDeliveryOff": "Delivery to school isn’t offered for everything in your bag.",
       "bagFull": "Your bag is full. Remove something first.",
-      "galleryLimit": "This device already has galleries from 3 photographers. Forget one, then try again."
+      "galleryLimit": "This device already has galleries from 3 photographers. Forget one, then try again.",
+      "bagEmpty": "Your bag is empty.",
+      "lineUnavailable": "Something in your bag isn’t available any more. Remove it, then pay.",
+      "chooseDelivery": "Choose delivery first.",
+      "notAccepting": "This photographer can’t take payments right now. Try again later.",
+      "belowMinimum": "Your order is below the minimum.",
+      "alreadyPaid": "This bag has just been paid for.",
+      "downloadPreparing": "Your download is being prepared. Try again in a minute.",
+      "checkoutNotConfigured": "Payments aren’t set up here."
     },
     "header": {
       "bag": "Bag, {count, plural, =0 {empty} one {# item} other {# items}}",
@@ -1520,7 +1639,8 @@
       "forgetOne": "Forget this gallery",
       "forgetAll": "Forget all",
       "forgetFailed": "We couldn’t forget this yet. Check your connection and try again.",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "orders": "Your orders"
     },
     "cover": {
       "seePhotos": "See photos",
@@ -1607,7 +1727,9 @@
       "packages": "Choose a package",
       "singles": "Single prints and downloads",
       "bag": "Bag",
-      "add": "Add a brother or sister"
+      "add": "Add a brother or sister",
+      "orders": "Your orders",
+      "order": "Your order"
     },
     "galleries": {
       "title": "Your galleries",
@@ -1616,6 +1738,70 @@
       "another": "Have a code from another photographer?",
       "submit": "View photos"
     },
-    "metaTitle": "Your photos"
+    "metaTitle": "Your photos",
+    "checkout": {
+      "stripe": {
+        "processedBy": "Payments processed by Daybell for {studio}",
+        "homeShipping": "Home delivery"
+      },
+      "pay": "Pay securely",
+      "paying": "Opening payment…",
+      "processedBy": "Payments processed by Daybell for {studio}.",
+      "canceled": "Payment canceled. Your bag is unchanged.",
+      "blocked": {
+        "unavailable": "Remove what’s no longer available to pay.",
+        "chooseDelivery": "Choose delivery to pay.",
+        "belowMinimum": "Minimum order is {amount}."
+      }
+    },
+    "orders": {
+      "title": "Your orders",
+      "empty": "No orders yet.",
+      "item": "Order {reference}",
+      "paidOn": "Paid {date}",
+      "confirming": "Confirming payment",
+      "downloads": "{count, plural, =0 {No downloads} one {# download} other {# downloads}}"
+    },
+    "order": {
+      "title": "Your order",
+      "loading": "Loading your order…",
+      "notFound": "We couldn’t find that order.",
+      "thanks": "Thank you!",
+      "paidTitle": "Paid",
+      "reference": "Order {reference}",
+      "receipt": "Stripe emails your receipt.",
+      "childView": "Showing what was ordered for your child.",
+      "confirming": "We’re confirming your payment…",
+      "slow": "This is taking longer than usual.",
+      "notPaid": "This checkout was canceled. Nothing was charged.",
+      "line": "{quantity, plural, one {{name}} other {# × {name}}}",
+      "tax": "Tax",
+      "total": "Total",
+      "gstHst": "GST/HST {number}",
+      "pst": "PST ({province}) {number}",
+      "download": "Download photo {n}",
+      "downloadStarted": "Photo {n} is downloading.",
+      "allOrders": "All your orders"
+    },
+    "devCheckout": {
+      "banner": "Test checkout: no real payment is made.",
+      "summary": "Your order",
+      "line": "{name} × {quantity}",
+      "taxOn": "Tax is added when you pay (test: 13%).",
+      "taxOff": "No tax is charged.",
+      "notOpen": "This checkout is closed.",
+      "email": "Email",
+      "card": "Card number",
+      "shipTo": "Ship to",
+      "name": "Full name",
+      "line1": "Address",
+      "line2": "Apartment or suite (optional)",
+      "city": "City",
+      "province": "Province",
+      "postalCode": "Postal code",
+      "pay": "Pay",
+      "cancel": "Back to the shop",
+      "failed": "The payment didn’t go through. Try again."
+    }
   }
 }

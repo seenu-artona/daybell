@@ -13,7 +13,7 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { type PhotoStorage, StorageError, type UploadedPart } from "./types";
+import { attachmentDisposition, type PhotoStorage, StorageError, type UploadedPart } from "./types";
 
 /** S3 keys this driver accepts: IDs, slashes, dots and dashes only (see photoKey). */
 const SAFE_KEY = /^[0-9a-z][0-9a-z./-]*$/;
@@ -167,8 +167,15 @@ export function s3PhotoStorage({
       );
     },
 
-    async presignGet(key, { expiresIn, signedAt }) {
+    async presignGet(key, { expiresIn, signedAt, download }) {
       checkKey(key);
+      // A paid download (ADR 0023): S3 answers with the name and type asked for in the signed URL.
+      const response = download
+        ? {
+            ResponseContentDisposition: attachmentDisposition(download.filename),
+            ResponseContentType: "image/jpeg",
+          }
+        : {};
       const signing = signedAt ?? new Date();
       const credentials = await client.config.credentials();
       let seconds = expiresIn;
@@ -178,7 +185,7 @@ export function s3PhotoStorage({
           SAFETY_SECONDS;
         seconds = Math.max(MIN_URL_SECONDS, Math.min(expiresIn, left));
       }
-      return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
+      return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key, ...response }), {
         expiresIn: seconds,
         signingDate: signing,
       });

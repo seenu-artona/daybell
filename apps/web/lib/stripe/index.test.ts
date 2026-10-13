@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // up here, with its own form code, not "not available in this region" (code review N12); Stripe links must be
 // Stripe's own Connect pages, or this deployment's fake pages with the fake driver (security review N5).
 vi.mock("server-only", () => ({}));
-const { assertStripeLink, payments, signStripeBody, verifyStripeWebhook } = await import("./index");
+const { assertCheckoutLink, assertStripeLink, payments, signStripeBody, verifyStripeWebhook } =
+  await import("./index");
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -22,6 +23,30 @@ describe("payments()", () => {
         message: "Payouts aren't set up in this environment.",
       });
     }
+  });
+});
+
+describe("assertCheckoutLink (ADR 0023)", () => {
+  it("sends a parent only to Stripe's hosted checkout, or this deployment's fake one", () => {
+    vi.stubEnv("SITE_URL", "https://dev.daybell.test");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const real = "https://checkout.stripe.com/c/pay/cs_test_a1";
+    expect(assertCheckoutLink(real, "stripe")).toBe(real);
+    const fake = "https://dev.daybell.test/dev/stripe-checkout?session=cs_test_fakeA";
+    expect(assertCheckoutLink(fake, "fake")).toBe(fake);
+    for (const [url, driver] of [
+      ["https://connect.stripe.com/setup", "stripe"],
+      ["https://checkout.stripe.com.evil.example/", "stripe"],
+      [fake, "stripe"],
+      [real, "fake"],
+      ["https://dev.daybell.test/shop", "fake"],
+    ] as const)
+      expect(() => assertCheckoutLink(url, driver)).toThrow(
+        expect.objectContaining({ code: "internal" }),
+      );
+    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/cs_test|evil|dev\.daybell/);
+    errors.mockRestore();
+    vi.unstubAllEnvs();
   });
 });
 

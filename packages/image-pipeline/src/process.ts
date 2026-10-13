@@ -31,10 +31,20 @@ export interface PhotoFacts {
 }
 
 export type ProcessResult =
-  | { ok: true; facts: PhotoFacts; derivatives: Record<DerivativeVariant, Buffer> }
+  | {
+      ok: true;
+      facts: PhotoFacts;
+      derivatives: Record<DerivativeVariant, Buffer>;
+      /** The paid download (`download.jpg`; ADR 0023, call 10). */
+      download: Buffer;
+    }
   | { ok: false; reason: FailureReason };
 
 export const DERIVATIVE_CONTENT_TYPE = "image/webp";
+/** The paid download is a JPEG, which every phone, computer and print lab opens. */
+export const DOWNLOAD_CONTENT_TYPE = "image/jpeg";
+/** High quality, with full colour detail (no chroma subsampling): a parent may print it. */
+export const DOWNLOAD_JPEG_QUALITY = 92;
 /** WebP quality: small enough for a grid of 200, sharp enough to judge focus at 1600 px. */
 const WEBP_QUALITY = 80;
 /** About 30% opacity (Seenu, answer 4). */
@@ -149,6 +159,67 @@ const decoder = (input: Buffer, limit: number) =>
   sharp(input, { failOn: "error", limitInputPixels: limit, sequentialRead: true });
 
 /**
+ * The file a parent downloads once they have paid (ADR 0023, call 10): the original at full resolution, upright (EXIF
+ * orientation applied), converted to sRGB with that profile attached, and every other bit of metadata stripped (no
+ * EXIF, XMP, IPTC, GPS or camera serial). The original itself never reaches a parent.
+ */
+function makeDownload(input: Buffer, limit: number): Promise<Buffer> {
+  return decoder(input, limit)
+    .autoOrient()
+    .withIccProfile("srgb")
+    .jpeg({ quality: DOWNLOAD_JPEG_QUALITY, chromaSubsampling: "4:4:4" })
+    .toBuffer();
+}
+
+type Inspected =
+  | { ok: true; input: Buffer; limit: number; facts: Omit<PhotoFacts, "qr"> }
+  | { ok: false; reason: FailureReason };
+
+/**
+ * The checks every original passes before any pixel is decoded: at most 50 MB, the file the browser hashed (SHA-256),
+ * JPEG, and at most the pixel limit (progressive JPEGs at half), read from the header.
+ */
+async function inspectOriginal(
+  bytes: Uint8Array<ArrayBuffer>,
+  options: { expectedSha256: string; maxPixels?: number; maxProgressivePixels?: number },
+): Promise<Inspected> {
+  if (bytes.length > MAX_PHOTO_BYTES) return { ok: false, reason: "too_large" };
+  if ((await sha256OfBytes(bytes)) !== options.expectedSha256.toLowerCase())
+    return { ok: false, reason: "hash_mismatch" };
+  if (!isJpeg(bytes)) return { ok: false, reason: "not_jpeg" };
+  const input = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  try {
+    // The header only: no pixels are decoded here, so the size is read without a limit and checked below.
+    const meta = await sharp(input, { failOn: "error", limitInputPixels: false }).metadata();
+    if (meta.format !== "jpeg") return { ok: false, reason: "not_jpeg" };
+    const limit = meta.isProgressive
+      ? (options.maxProgressivePixels ?? MAX_PROGRESSIVE_PIXELS)
+      : (options.maxPixels ?? MAX_INPUT_PIXELS);
+    if ((meta.width ?? 0) * (meta.height ?? 0) > limit) return { ok: false, reason: "too_large" };
+    return { ok: true, input, limit, facts: readFacts(meta) };
+  } catch {
+    return { ok: false, reason: "unreadable" };
+  }
+}
+
+/**
+ * Only the paid download, for a photo processed before downloads existed (the backfill; ADR 0023). The same checks as
+ * processOriginal, then download.jpg.
+ */
+export async function processDownload(
+  bytes: Uint8Array<ArrayBuffer>,
+  options: { expectedSha256: string; maxPixels?: number; maxProgressivePixels?: number },
+): Promise<{ ok: true; download: Buffer } | { ok: false; reason: FailureReason }> {
+  const inspected = await inspectOriginal(bytes, options);
+  if (!inspected.ok) return inspected;
+  try {
+    return { ok: true, download: await makeDownload(inspected.input, inspected.limit) };
+  } catch {
+    return { ok: false, reason: "unreadable" };
+  }
+}
+
+/**
  * The photo is decoded once to this size: big enough to read a QR card held at waist height (about 100 px across, 3 px
  * per module, ADR 0018), and the previews are made from it.
  */
@@ -189,7 +260,7 @@ async function tileFor(
 
 /**
  * Checks an uploaded original and makes its four previews: 400 px and 1600 px plain (the studio's screens) and the
- * same sizes watermarked with the studio's name (parents, later). The original must be the file the browser hashed
+ * same sizes watermarked with the studio's name (parents); and the paid download (ADR 0023). The original must be the file the browser hashed
  * (SHA-256), JPEG (Seenu, answer 1), at most 50 MB and at most MAX_INPUT_PIXELS. It is decoded once, to 2048 px,
  * where its QR card is read (ADR 0018; a second, larger decode only when a symbol is found but not read); the previews
  * are made from those pixels. Previews are upright (EXIF orientation applied), sRGB WebP, with every bit of metadata
@@ -209,26 +280,9 @@ export async function processOriginal(
     maxProgressivePixels?: number;
   },
 ): Promise<ProcessResult> {
-  if (bytes.length > MAX_PHOTO_BYTES) return { ok: false, reason: "too_large" };
-  if ((await sha256OfBytes(bytes)) !== options.expectedSha256.toLowerCase())
-    return { ok: false, reason: "hash_mismatch" };
-  if (!isJpeg(bytes)) return { ok: false, reason: "not_jpeg" };
-
-  const maxPixels = options.maxPixels ?? MAX_INPUT_PIXELS;
-  const maxProgressive = options.maxProgressivePixels ?? MAX_PROGRESSIVE_PIXELS;
-  const input = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let facts: Omit<PhotoFacts, "qr">;
-  let limit: number;
-  try {
-    // The header only: no pixels are decoded here, so the size is read without a limit and checked below.
-    const meta = await sharp(input, { failOn: "error", limitInputPixels: false }).metadata();
-    if (meta.format !== "jpeg") return { ok: false, reason: "not_jpeg" };
-    limit = meta.isProgressive ? maxProgressive : maxPixels;
-    if ((meta.width ?? 0) * (meta.height ?? 0) > limit) return { ok: false, reason: "too_large" };
-    facts = readFacts(meta);
-  } catch {
-    return { ok: false, reason: "unreadable" };
-  }
+  const inspected = await inspectOriginal(bytes, options);
+  if (!inspected.ok) return inspected;
+  const { input, limit, facts } = inspected;
 
   // Loaded before decoding: a reader that can't load is the worker's fault, not the photo's, so it throws (and the
   // message is tried again) instead of failing the photo.
@@ -306,7 +360,9 @@ export async function processOriginal(
       "proof.webp": proofBuf,
       "proof-thumb.webp": proofThumbBuf,
     };
-    return { ok: true, facts: { ...facts, qr }, derivatives };
+    // After the previews, so the full-resolution decode doesn't overlap theirs (the Lambda's memory).
+    const download = await makeDownload(input, limit);
+    return { ok: true, facts: { ...facts, qr }, derivatives, download };
   } catch {
     return { ok: false, reason: "unreadable" };
   }

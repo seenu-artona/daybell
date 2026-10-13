@@ -1,7 +1,12 @@
 "use client";
 
-import type { ShopCartLine, ShopCartResponse } from "@daybell/api";
-import { hasQuantity, type ShopShippingMethod } from "@daybell/core";
+import { SHOP_CONFLICTS, type ShopCartLine, type ShopCartResponse } from "@daybell/api";
+import {
+  checkoutBlocker,
+  hasQuantity,
+  MIN_CHARGE_CENTS,
+  type ShopShippingMethod,
+} from "@daybell/core";
 import { cn } from "@daybell/ui";
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -9,6 +14,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { bagCount, isGalleryId, type ShopResult, shopApi } from "@/lib/shop-client";
+import { DockedCta } from "../_components/docked-cta";
 import { money, useChildName, useRefusal } from "../_components/format";
 import { Loading, MessageScreen } from "../_components/message-screen";
 import { ProtectedImage } from "../_components/protected-image";
@@ -22,7 +28,10 @@ import { shopButton, shopIconButton } from "../_components/styles";
  * A gallery's bag (`?gallery=`, else the device's first): lines by child, priced now; lines that can't be bought any
  * more are marked and not counted; delivery to school or home (call 9); the total before tax, announced when it
  * changes (code review S2). A delivery choice shows at once and goes back if the bag refuses it, with the reason
- * announced (D91). Paying arrives with checkout (step 10).
+ * announced (D91). Pay (ADR 0023) is docked with the total once nothing stops it (otherwise the dock says why) and goes
+ * to Stripe's hosted checkout; "Payments processed by Daybell for {studio}" sits under the totals (D104). Coming back
+ * from Stripe without paying (`?checkout=canceled`) cancels that checkout, so a stale tab can't pay later, and says the
+ * bag is unchanged. A refusal is announced and the bag read again (a line may have become unavailable).
  *
  * The bag is read once when the page opens (and again only after a change the parent makes): code review M1 found the
  * first version refetching in a loop, using up the network's request budget.
@@ -33,12 +42,16 @@ function Bag() {
   const childName = useChildName();
   const router = useRouter();
   const shop = useShop();
-  const asked = useSearchParams().get("gallery");
+  const params = useSearchParams();
+  const asked = params.get("gallery");
+  const canceled = params.get("checkout") === "canceled";
   const gallery = shop.gallery(isGalleryId(asked) ? asked : null);
   const galleryId = gallery?.id ?? null;
   const [cart, setCart] = useState<ShopCartResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [paying, setPaying] = useState(false);
   // The delivery the parent just chose, shown checked at once while the bag saves it (e2e: a radio that waited for
   // the answer didn't change when clicked); cleared when the answer comes, so a refusal puts the saved one back.
   const [choosing, setChoosing] = useState<ShopShippingMethod | null>(null);
@@ -74,6 +87,44 @@ function Bag() {
       live = false;
     };
   }, [galleryId]);
+
+  // Back from Stripe without paying: that checkout can't be paid later (ADR 0023). Once per arrival.
+  useEffect(() => {
+    if (!galleryId || !canceled) return;
+    router.replace(`/shop/bag?gallery=${encodeURIComponent(galleryId)}`);
+    void shopApi.cancelCheckout(galleryId).then((result) => {
+      setNotice(result.ok ? t("checkout.canceled") : refusal(result));
+    });
+  }, [galleryId, canceled, router, t, refusal]);
+
+  // Pay (ADR 0023): the server prices the bag again and answers Stripe's address; the page goes straight there.
+  const pay = async () => {
+    if (!galleryId || paying) return;
+    setPaying(true);
+    setNotice(null);
+    const result = await shopApi.checkout(galleryId);
+    if (result.ok) {
+      window.location.assign(result.data.url);
+      return;
+    }
+    setPaying(false);
+    if (result.form === SHOP_CONFLICTS.alreadyPaid && result.fields.orderId) {
+      router.push(
+        `/shop/orders/${encodeURIComponent(result.fields.orderId)}?gallery=${encodeURIComponent(galleryId)}`,
+      );
+      return;
+    }
+    if (result.status === 401) {
+      router.replace("/shop");
+      return;
+    }
+    setError(refusal(result));
+    const fresh = await shopApi.cart(galleryId);
+    if (fresh.ok) {
+      setCart(fresh.data);
+      shop.setBagCount(galleryId, bagCount(fresh.data));
+    }
+  };
 
   const act = async (call: (gallery: string) => Promise<ShopResult<ShopCartResponse>>) => {
     if (!galleryId) return;
@@ -116,6 +167,23 @@ function Bag() {
     .map((c) => ({ child: c, lines: cart.lines.filter((l) => l.childId === c.id) }))
     .filter((g) => g.lines.length > 0);
 
+  const currency = cart.subtotal.currency;
+  const blocker = checkoutBlocker({
+    lines: cart.lines,
+    totalCents: cart.total?.cents ?? null,
+    currency,
+  });
+  const blockerText =
+    blocker === "unavailable"
+      ? t("checkout.blocked.unavailable")
+      : blocker === "chooseDelivery"
+        ? t("checkout.blocked.chooseDelivery")
+        : blocker === "belowMinimum"
+          ? t("checkout.blocked.belowMinimum", {
+              amount: money({ cents: MIN_CHARGE_CENTS[currency], currency }),
+            })
+          : null;
+
   const describe = (line: ShopCartLine, firstName: string) =>
     line.kind === "digital_all"
       ? t("buy.allDigitalsHint", { name: firstName })
@@ -127,9 +195,12 @@ function Bag() {
     <>
       {title}
       <ShopHeader title={t("bag.title")} back={back} gallery={galleryId} />
-      <main className="px-4 pt-2 pb-12">
+      <main className="px-4 pt-2 pb-32">
         <p role="alert" className="m-0 min-h-5 text-caption text-danger">
           {error}
+        </p>
+        <p role="status" className="m-0 text-body empty:hidden">
+          {notice}
         </p>
         {cart.lines.length === 0 ? (
           <MessageScreen>
@@ -274,9 +345,33 @@ function Bag() {
                 </p>
               ) : null}
             </div>
+            {gallery ? (
+              <p className="m-0 mt-4 text-caption text-muted">
+                {t("checkout.processedBy", { studio: gallery.studio.name })}
+              </p>
+            ) : null}
           </>
         )}
       </main>
+      {cart.lines.length > 0 ? (
+        blocker || !cart.total ? (
+          <DockedCta>
+            <p className="m-0 py-2 text-center text-sm text-muted">{blockerText}</p>
+          </DockedCta>
+        ) : (
+          <DockedCta price={money(cart.total)} label={t("bag.plusTax")}>
+            <button
+              type="button"
+              onClick={() => void pay()}
+              aria-busy={paying || undefined}
+              aria-disabled={paying || undefined}
+              className={shopButton}
+            >
+              {paying ? t("checkout.paying") : t("checkout.pay")}
+            </button>
+          </DockedCta>
+        )
+      ) : null}
     </>
   );
 }

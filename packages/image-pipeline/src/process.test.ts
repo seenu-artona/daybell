@@ -8,7 +8,9 @@ import {
   defaultFontFile,
   escapePango,
   type PhotoJobDeps,
+  processDownload,
   processOriginal,
+  runDownloadJob,
   runPhotoJob,
   type WorkerPhoto,
 } from "./index";
@@ -78,6 +80,60 @@ describe("processOriginal (D60, D100)", () => {
       "view.webp": [1600, 1067],
       "proof-thumb.webp": [400, 267],
       "proof.webp": [1600, 1067],
+    });
+  });
+
+  it("makes the paid download: full resolution, upright, sRGB JPEG, no EXIF or GPS (ADR 0023, call 10)", async () => {
+    const bytes = await jpeg(2400, 1600, { exif: true });
+    const result = await processOriginal(bytes, {
+      qrWasmFile: WASM,
+      studioName,
+      expectedSha256: sha(bytes),
+    });
+    if (!result.ok) throw new Error(result.reason);
+    const meta = await sharp(result.download).metadata();
+    expect(meta.format).toBe("jpeg");
+    expect([meta.width, meta.height]).toEqual([2400, 1600]);
+    expect(meta.space).toBe("srgb");
+    expect(meta.exif).toBeUndefined();
+    expect(meta.xmp).toBeUndefined();
+    expect(meta.iptc).toBeUndefined();
+    // Only the colour profile is kept, and it is sRGB.
+    expect(meta.icc).toBeDefined();
+    expect(meta.chromaSubsampling).toBe("4:4:4");
+    // The original's EXIF (camera, capture time, GPS) is nowhere in the file.
+    const text = result.download.toString("latin1");
+    for (const word of ["Exif", "Camera", "2026:10:01", "GPS"]) expect(text).not.toContain(word);
+  });
+
+  it("turns the download upright too", async () => {
+    const bytes = await jpeg(600, 300, { orientation: 6, exif: true });
+    const result = await processDownload(bytes, { expectedSha256: sha(bytes) });
+    if (!result.ok) throw new Error(result.reason);
+    const meta = await sharp(result.download).metadata();
+    expect([meta.width, meta.height]).toEqual([300, 600]);
+    expect(meta.orientation).toBeUndefined();
+    expect(meta.exif).toBeUndefined();
+  });
+
+  it("checks the original before making only the download (the backfill)", async () => {
+    const bytes = await jpeg(64, 48);
+    expect(await processDownload(bytes, { expectedSha256: "0".repeat(64) })).toEqual({
+      ok: false,
+      reason: "hash_mismatch",
+    });
+    const png = asBytes(
+      await sharp(await jpeg(8, 8))
+        .png()
+        .toBuffer(),
+    );
+    expect(await processDownload(png, { expectedSha256: sha(png) })).toEqual({
+      ok: false,
+      reason: "not_jpeg",
+    });
+    expect(await processDownload(bytes, { expectedSha256: sha(bytes), maxPixels: 100 })).toEqual({
+      ok: false,
+      reason: "too_large",
     });
   });
 
@@ -268,11 +324,11 @@ describe("runPhotoJob", () => {
     return { deps, stored };
   }
 
-  it("stores the four previews under ID-only keys and reports the facts", async () => {
+  it("stores the four previews and the download under ID-only keys and reports the facts", async () => {
     const { deps, stored } = await setup({});
     expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("ready");
     expect([...stored.keys()].sort()).toEqual(
-      ["original", "proof-thumb.webp", "proof.webp", "thumb.webp", "view.webp"].map(
+      ["download.jpg", "original", "proof-thumb.webp", "proof.webp", "thumb.webp", "view.webp"].map(
         (v) => `${ids.studioId}/${ids.jobId}/${ids.photoId}/${v}`,
       ),
     );
@@ -281,6 +337,12 @@ describe("runPhotoJob", () => {
       expect.anything(),
       "image/webp",
       "private, max-age=3600",
+    );
+    expect(deps.put).toHaveBeenCalledWith(
+      expect.stringMatching(/\/download\.jpg$/),
+      expect.anything(),
+      "image/jpeg",
+      "private, no-store",
     );
     expect(deps.report).toHaveBeenCalledWith(ids.photoId, {
       status: "ready",
@@ -337,5 +399,75 @@ describe("runPhotoJob", () => {
     deps.head.mockResolvedValueOnce({ size: MAX_PHOTO_BYTES + 1 });
     expect(await runPhotoJob(ids.photoId, deps, { qrWasmFile: WASM })).toBe("failed");
     expect(deps.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("runDownloadJob (the backfill, ADR 0023)", () => {
+  const ids = {
+    studioId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    jobId: "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e",
+    photoId: "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f",
+  };
+  async function setup(status: WorkerPhoto["status"] | null) {
+    const original = await jpeg(320, 240, { exif: true });
+    const stored = new Map<string, Uint8Array>([[photoKey(ids, "original"), original]]);
+    const deps = {
+      photo: vi.fn(async () =>
+        status === null
+          ? null
+          : {
+              id: ids.photoId,
+              studioId: ids.studioId,
+              jobId: ids.jobId,
+              status,
+              sha256: sha(original),
+              byteSize: original.length,
+              attempt: 1,
+              studioName,
+            },
+      ),
+      head: vi.fn(async (key: string) => {
+        const b = stored.get(key);
+        return b ? { size: b.length } : null;
+      }),
+      get: vi.fn(async (key: string) => stored.get(key) as Uint8Array<ArrayBuffer>),
+      put: vi.fn(async (key: string, body: Uint8Array) => void stored.set(key, body)),
+      log: vi.fn(),
+    };
+    return { deps, stored };
+  }
+
+  it("makes only download.jpg for a ready photo, and reports nothing", async () => {
+    const { deps, stored } = await setup("ready");
+    expect(await runDownloadJob(ids.photoId, deps)).toBe("ready");
+    expect([...stored.keys()].sort()).toEqual([
+      photoKey(ids, "download.jpg"),
+      photoKey(ids, "original"),
+    ]);
+    expect(deps.put).toHaveBeenCalledWith(
+      photoKey(ids, "download.jpg"),
+      expect.anything(),
+      "image/jpeg",
+      "private, no-store",
+    );
+    expect(deps.log).toHaveBeenCalledWith("download_ready", ids.photoId);
+    expect(JSON.stringify(deps.log.mock.calls)).not.toContain("North Peak");
+  });
+
+  it("skips a photo that isn't ready or is gone, without reading it", async () => {
+    for (const status of ["processing", "failed", null] as const) {
+      const { deps } = await setup(status);
+      expect(await runDownloadJob(ids.photoId, deps)).toBe("skipped");
+      expect(deps.get).not.toHaveBeenCalled();
+      expect(deps.put).not.toHaveBeenCalled();
+    }
+  });
+
+  it("leaves a photo alone when its original doesn't check out", async () => {
+    const { deps } = await setup("ready");
+    deps.head.mockResolvedValueOnce({ size: 3 });
+    expect(await runDownloadJob(ids.photoId, deps)).toBe("failed");
+    expect(deps.get).not.toHaveBeenCalled();
+    expect(deps.put).not.toHaveBeenCalled();
   });
 });

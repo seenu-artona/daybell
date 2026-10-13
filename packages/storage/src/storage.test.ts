@@ -49,6 +49,31 @@ describe("local driver", () => {
     expect([...(await storage.readSigned(original, query(get)))]).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it("signs a download's file name into its URL, and refuses it changed (ADR 0023)", async () => {
+    const storage = make();
+    const key = photoKey(ids, "download.jpg");
+    await storage.put(key, new Uint8Array([9, 9]), { contentType: "image/jpeg" });
+    const url = await storage.presignGet(key, {
+      expiresIn: 300,
+      download: { filename: "daybell-7KQ2M9XA-1.jpg" },
+    });
+    const q = query(url);
+    expect([...(await storage.readSigned(key, q))]).toEqual([9, 9]);
+    expect(storage.signedDisposition(q)).toBe('attachment; filename="daybell-7KQ2M9XA-1.jpg"');
+    const renamed = query(url);
+    renamed.set("download", "other.jpg");
+    await expect(storage.readSigned(key, renamed)).rejects.toThrow("invalid_signature");
+    const dropped = query(url);
+    dropped.delete("download");
+    await expect(storage.readSigned(key, dropped)).rejects.toThrow("invalid_signature");
+    expect(storage.signedDisposition(query(await storage.presignGet(key, { expiresIn: 60 })))).toBe(
+      null,
+    );
+    await expect(
+      storage.presignGet(key, { expiresIn: 60, download: { filename: 'a"; x=.jpg' } }),
+    ).rejects.toThrow("invalid_key");
+  });
+
   it("refuses a part of another length, a changed URL and an expired one", async () => {
     const storage = make();
     const uploadId = await storage.createMultipart(original, "image/jpeg");
@@ -113,6 +138,27 @@ describe("S3 driver", () => {
     expect([...url.searchParams.keys()].some((k) => k.toLowerCase().includes("checksum"))).toBe(
       false,
     );
+  });
+
+  it("signs a download as an attachment JPEG with a plain name (ADR 0023)", async () => {
+    const url = new URL(
+      await storage.presignGet(photoKey(ids, "download.jpg"), {
+        expiresIn: 300,
+        download: { filename: "daybell-7KQ2M9XA-2.jpg" },
+      }),
+    );
+    expect(url.pathname).toBe(`/${photoKey(ids, "download.jpg")}`);
+    expect(url.searchParams.get("response-content-disposition")).toBe(
+      'attachment; filename="daybell-7KQ2M9XA-2.jpg"',
+    );
+    expect(url.searchParams.get("response-content-type")).toBe("image/jpeg");
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("300");
+    await expect(
+      storage.presignGet(photoKey(ids, "download.jpg"), {
+        expiresIn: 300,
+        download: { filename: "Ava Patel.jpg" },
+      }),
+    ).rejects.toThrow("invalid_key");
   });
 
   it("signs reads at a given time, so a URL can stay the same for an hour", async () => {

@@ -71,6 +71,14 @@ describe("the parent shop matches the database (ADR 0022)", () => {
         "photoUnavailable",
         "schoolDeliveryOff",
         "siblingLimit",
+        // Checkout (ADR 0023; checkout.test.ts checks them against its migration).
+        "alreadyPaid",
+        "bagEmpty",
+        "belowMinimum",
+        "chooseDelivery",
+        "downloadPreparing",
+        "lineUnavailable",
+        "notAccepting",
       ].sort(),
     );
     expect([SHOP_CODE_NOT_FOUND, SHOP_LOCKED]).toEqual(["shop.codeNotFound", "shop.locked"]);
@@ -188,6 +196,11 @@ describe("shop routes", () => {
       "PATCH /shop/cart/lines/{id}",
       "DELETE /shop/cart/lines/{id}",
       "PUT /shop/cart/shipping",
+      "POST /shop/checkout",
+      "POST /shop/checkout/cancel",
+      "GET /shop/orders",
+      "GET /shop/orders/{orderId}",
+      "GET /shop/orders/{orderId}/downloads/{photoId}",
     ]);
     for (const r of shop)
       expect(r.access, r.path).toBe(r.path === "/shop/access" ? "public" : "parent");

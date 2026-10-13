@@ -115,7 +115,18 @@ function fakeDatabase(rows: Record<string, unknown>) {
     );
     return chain;
   };
-  return { supabase: { from }, calls };
+  // Daybell's fee rate, the database's platform setting (ADR 0023): 3.5% here, so the screen is seen to use it.
+  const rpc = async (fn: string) => {
+    calls.push({ table: `rpc:${fn}`, ops: [] });
+    return {
+      data:
+        fn === "platform_fee_settings"
+          ? { daybell_fee_bps: 350, card_fee_recovery: "per_sale" }
+          : null,
+      error: null,
+    };
+  };
+  return { supabase: { from, rpc }, calls };
 }
 
 /** The owner's sign-in email, from the verified auth user (step 7c): sent to Stripe as contact_email, never logged. */
@@ -238,11 +249,13 @@ describe("GET /studio/payouts", () => {
           failureCode: null,
         },
       ]);
+      // Daybell's rate is the database's setting, not a constant (Seenu's answer 1; ADR 0023).
       expect(body.fees).toMatchObject({
-        daybellBasisPoints: 300,
+        daybellBasisPoints: 350,
         activeAccount: { currency: "CAD" },
       });
-      for (const c of db.calls) expect(c.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
+      for (const c of db.calls.filter((c) => !c.table.startsWith("rpc:")))
+        expect(c.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
       expect(JSON.stringify(body)).not.toContain(ACCOUNT);
     }
     expect(stripeCalls()).toBe(0);

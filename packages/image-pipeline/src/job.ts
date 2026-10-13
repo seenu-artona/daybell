@@ -1,8 +1,10 @@
-import { type DerivativeVariant, MAX_PHOTO_BYTES, photoKey } from "@daybell/core";
+import { type DerivativeVariant, DOWNLOAD_VARIANT, MAX_PHOTO_BYTES, photoKey } from "@daybell/core";
 import {
   DERIVATIVE_CONTENT_TYPE,
+  DOWNLOAD_CONTENT_TYPE,
   type FailureReason,
   type PhotoFacts,
+  processDownload,
   processOriginal,
 } from "./process";
 
@@ -59,6 +61,8 @@ export class PhotoNotUploadedYet extends Error {
 
 /** Previews are private: only signed URLs read them, and browsers may keep them for an hour. */
 export const PREVIEW_CACHE_CONTROL = "private, max-age=3600";
+/** A paid download is saved, never cached on the way (ADR 0023). */
+export const DOWNLOAD_CACHE_CONTROL = "private, no-store";
 
 export type PhotoJobOutcome = "ready" | "failed" | "skipped";
 
@@ -108,12 +112,64 @@ export async function runPhotoJob(
     ...(options.qrWasmFile ? { qrWasmFile: options.qrWasmFile } : {}),
   });
   if (!result.ok) return fail(result.reason);
-  await Promise.all(
-    (Object.entries(result.derivatives) as [DerivativeVariant, Buffer][]).map(([variant, body]) =>
-      deps.put(photoKey(ids, variant), body, DERIVATIVE_CONTENT_TYPE, PREVIEW_CACHE_CONTROL),
+  await Promise.all([
+    ...(Object.entries(result.derivatives) as [DerivativeVariant, Buffer][]).map(
+      ([variant, body]) =>
+        deps.put(photoKey(ids, variant), body, DERIVATIVE_CONTENT_TYPE, PREVIEW_CACHE_CONTROL),
     ),
-  );
+    deps.put(
+      photoKey(ids, DOWNLOAD_VARIANT),
+      result.download,
+      DOWNLOAD_CONTENT_TYPE,
+      DOWNLOAD_CACHE_CONTROL,
+    ),
+  ]);
   await deps.report(photoId, { status: "ready", ...result.facts, attempt: photo.attempt });
   deps.log("photo_ready", photoId);
+  return "ready";
+}
+
+/**
+ * The backfill (ADR 0023): makes only `download.jpg` for a photo that is already ready (processed before downloads
+ * existed, or whose download went missing). Asked for by the API when a paid download isn't there yet, with a queue
+ * message `{photoId, make: "download"}`. Nothing is reported back: the API finds the file by looking. A photo that
+ * isn't ready, or is gone, is skipped; a failure is logged with its reason and the photo is left as it is.
+ */
+export async function runDownloadJob(
+  photoId: string,
+  deps: Pick<PhotoJobDeps, "photo" | "head" | "get" | "put" | "log">,
+): Promise<PhotoJobOutcome> {
+  const photo = await deps.photo(photoId);
+  if (photo?.status !== "ready") {
+    deps.log("download_skipped", photoId, photo ? photo.status : "missing");
+    return "skipped";
+  }
+  const ids = { studioId: photo.studioId, jobId: photo.jobId, photoId: photo.id };
+  const key = photoKey(ids, "original");
+  const head = await deps.head(key);
+  if (!head) {
+    deps.log("download_skipped", photoId, "original_missing");
+    return "skipped";
+  }
+  if (head.size > MAX_PHOTO_BYTES || head.size !== photo.byteSize) {
+    deps.log(
+      "download_failed",
+      photoId,
+      head.size > MAX_PHOTO_BYTES ? "too_large" : "hash_mismatch",
+    );
+    return "failed";
+  }
+  const result = await processDownload(await deps.get(key), { expectedSha256: photo.sha256 });
+  if (!result.ok) {
+    deps.log("download_failed", photoId, result.reason);
+    return "failed";
+  }
+  await deps.put(
+    photoKey(ids, DOWNLOAD_VARIANT),
+    result.download,
+    DOWNLOAD_CONTENT_TYPE,
+    DOWNLOAD_CACHE_CONTROL,
+  );
+  deps.log("download_ready", photoId);
   return "ready";
 }

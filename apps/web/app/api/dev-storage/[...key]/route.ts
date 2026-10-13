@@ -52,11 +52,19 @@ export async function GET(request: Request, ctx: Ctx): Promise<Response> {
   if (!storage) return notFound();
   const key = (await ctx.params).key.join("/");
   try {
-    const body = await storage.readSigned(key, new URL(request.url).searchParams);
+    const query = new URL(request.url).searchParams;
+    const body = await storage.readSigned(key, query);
+    // A paid download (ADR 0023) is saved under the name signed into its URL, never cached.
+    const disposition = storage.signedDisposition(query);
     return new Response(body, {
       headers: {
-        "content-type": key.endsWith(".webp") ? "image/webp" : "application/octet-stream",
-        "cache-control": "private, max-age=3600",
+        "content-type": key.endsWith(".webp")
+          ? "image/webp"
+          : key.endsWith(".jpg")
+            ? "image/jpeg"
+            : "application/octet-stream",
+        "cache-control": disposition ? "private, no-store" : "private, max-age=3600",
+        ...(disposition ? { "content-disposition": disposition } : {}),
       },
     });
   } catch (err) {

@@ -202,6 +202,31 @@ export const keyParts = (p: { studio_id: string; job_id: string; id: string }) =
  * steps as the Lambda, with the database and the local folder instead of signed calls and S3. The image pipeline (and
  * sharp) is loaded only here.
  */
+async function localWorkerPhoto(region: DataRegion, id: string) {
+  const row = photoResult<{
+    id: string;
+    studio_id: string;
+    job_id: string;
+    status: "uploading" | "processing" | "ready" | "failed";
+    sha256: string;
+    byte_size: number;
+    attempt: number;
+    studio_name: string;
+  } | null>(await photoSystemRpc(region, "photo_for_worker", { p_photo_id: id }));
+  return row
+    ? {
+        id: row.id,
+        studioId: row.studio_id,
+        jobId: row.job_id,
+        status: row.status,
+        sha256: row.sha256,
+        byteSize: Number(row.byte_size),
+        attempt: Number(row.attempt),
+        studioName: row.studio_name,
+      }
+    : null;
+}
+
 export async function processLocally(
   region: DataRegion,
   storage: PhotoStorage,
@@ -212,30 +237,7 @@ export async function processLocally(
     await runPhotoJob(
       photoId,
       {
-        async photo(id) {
-          const row = photoResult<{
-            id: string;
-            studio_id: string;
-            job_id: string;
-            status: "uploading" | "processing" | "ready" | "failed";
-            sha256: string;
-            byte_size: number;
-            attempt: number;
-            studio_name: string;
-          } | null>(await photoSystemRpc(region, "photo_for_worker", { p_photo_id: id }));
-          return row
-            ? {
-                id: row.id,
-                studioId: row.studio_id,
-                jobId: row.job_id,
-                status: row.status,
-                sha256: row.sha256,
-                byteSize: Number(row.byte_size),
-                attempt: Number(row.attempt),
-                studioName: row.studio_name,
-              }
-            : null;
-        },
+        photo: (id) => localWorkerPhoto(region, id),
         head: (key) => storage.head(key),
         get: (key) => storage.get(key),
         put: (key, body, contentType, cacheControl) =>
@@ -264,6 +266,32 @@ export async function processLocally(
     );
   } catch (err) {
     console.error("photo_local_error", photoId, err instanceof Error ? err.name : "unknown");
+  }
+}
+
+/**
+ * Makes a ready photo's paid download in this server process (the backfill with the local driver: development, CI and
+ * end-to-end tests; ADR 0023). The Lambda does the same for S3, from a queue message.
+ */
+export async function makeDownloadLocally(
+  region: DataRegion,
+  storage: PhotoStorage,
+  photoId: string,
+): Promise<void> {
+  const { runDownloadJob } = await import("@daybell/image-pipeline");
+  try {
+    await runDownloadJob(photoId, {
+      photo: (id) => localWorkerPhoto(region, id),
+      head: (key) => storage.head(key),
+      get: (key) => storage.get(key),
+      put: (key, body, contentType, cacheControl) =>
+        storage.put(key, body, { contentType, cacheControl }),
+      log: (event, id, reason) => {
+        if (event !== "download_ready") console.error(event, id, reason ?? "");
+      },
+    });
+  } catch (err) {
+    console.error("download_local_error", photoId, err instanceof Error ? err.name : "unknown");
   }
 }
 
