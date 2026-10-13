@@ -9,7 +9,7 @@ repository or chat.
 | Route | What it does | Production | Staging |
 |---|---|---|---|
 | `/api/v1/internal/cron/photos` | Photo clean-up: purges the bin after 30 days, drops unfinished uploads, finishes idle batches, tags batches (ADR 0016, 0018) | Vercel Cron, daily 07:17 UTC | `staging-photo-cleanup.yml`, daily 07:17 UTC |
-| `/api/v1/internal/cron/jobs` | Closes shops whose closing date has passed; prunes read notifications after 90 days and any after 180 (ADR 0021) | Vercel Cron, daily 08:07 UTC | `jobs-cron.yml`, hourly at :07 |
+| `/api/v1/internal/cron/jobs` | Closes shops whose closing date has passed; prunes read notifications after 90 days and any after 180 (ADR 0021), expired parent shop sessions, day-old wrong-code counts and hour-old request counts, a page at a time until done (ADR 0022) | Vercel Cron, daily 08:07 UTC | `jobs-cron.yml`, hourly at :07 |
 
 Vercel Cron only runs for production deployments, so staging is called from GitHub Actions.
 
@@ -37,7 +37,7 @@ can fail a production deploy, so:
      secret names starting with `GITHUB_`.)
    - Optional, for less to leak: move `STAGING_VERCEL_PROTECTION_BYPASS` here too. The workflow reads it either way;
      it only gets past Vercel's preview protection and opens no route by itself.
-4. GitHub › Actions › "Jobs cron (hourly)" › Run workflow, on `main`. It answers `{"closedJobs":…,"prunedNotifications":…}`.
+4. GitHub › Actions › "Jobs cron (hourly)" › Run workflow, on `main`. It answers `{"closedJobs":…,"prunedNotifications":…,"prunedShop":…}`.
    If the secret is missing it fails with "STAGING_ACTIONS_CRON_SECRET is missing from the staging environment".
 
 Until step 3 is done the hourly run fails loudly on `main` (the workflow is new; nothing relied on it before).

@@ -5,6 +5,7 @@
 export const API_ERROR_CODES = [
   "invalid_input",
   "not_signed_in",
+  "shop_session_required",
   "forbidden",
   "not_found",
   "conflict",
@@ -24,6 +25,7 @@ export const STATUS_FOR: Record<ApiErrorCode, number> = {
   invalid_input: 400,
   not_signed_in: 401,
   invalid_credentials: 401,
+  shop_session_required: 401,
   email_not_confirmed: 403,
   forbidden: 403,
   not_found: 404,

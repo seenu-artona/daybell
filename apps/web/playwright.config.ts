@@ -15,8 +15,9 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
-    // The studio app is desktop only (D136; ADR 0013); phone tests cover the parent shop, in shop-*.spec.ts files.
+    // The studio app is desktop only (D136; ADR 0013); the parent shop is phone first (ADR 0022), so its
+    // shop-*.spec.ts files run in the phone project only (they make their own desktop context for the studio's setup).
+    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: /shop-.*\.spec\.ts$/ },
     { name: "phone", use: { ...devices["Pixel 7"] }, testMatch: /shop-.*\.spec\.ts$/ },
   ],
   webServer: {

@@ -457,12 +457,38 @@ describe("GET /internal/cron/jobs", () => {
     );
     const res = await cron(`Bearer ${SECRET}`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ closedJobs: 503, prunedNotifications: 7 });
+    expect(await res.json()).toEqual({ closedJobs: 503, prunedNotifications: 7, prunedShop: 7 });
     expect(systemRpc.mock.calls.map((c) => [c[0], c[1], c[2]])).toEqual([
       ["ca", "close_due_jobs", { p_limit: 500 }],
       ["ca", "close_due_jobs", { p_limit: 500 }],
       ["ca", "prune_notifications", { p_limit: 1000 }],
+      ["ca", "prune_shop", { p_limit: 1000 }],
     ]);
+  });
+
+  it("prunes the parent shop a page at a time until a page comes back short (ADR 0022, security review M2)", async () => {
+    const pages = [1000, 1000, 3];
+    systemRpc.mockImplementation(async (_region: string, fn: string) => ({
+      data: fn === "prune_shop" ? pages.shift() : 0,
+      error: null,
+    }));
+    const res = await cron(`Bearer ${SECRET}`);
+    expect(await res.json()).toMatchObject({ prunedShop: 2003 });
+    expect(systemRpc.mock.calls.filter((c) => c[1] === "prune_shop")).toHaveLength(3);
+  });
+
+  it("stops pruning when the region's time is up", async () => {
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    systemRpc.mockImplementation(async (_region: string, fn: string) => {
+      if (fn !== "prune_shop") return { data: 0, error: null };
+      now += 20_000;
+      return { data: 1000, error: null };
+    });
+    const res = await cron(`Bearer ${SECRET}`);
+    clock.mockRestore();
+    expect(res.status).toBe(200);
+    expect(systemRpc.mock.calls.filter((c) => c[1] === "prune_shop")).toHaveLength(3);
   });
 
   it("accepts GitHub's own secret once it is set, and Vercel's still (security review M1)", async () => {

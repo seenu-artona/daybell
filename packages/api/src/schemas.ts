@@ -24,6 +24,8 @@ import {
   PRINT_SIZES,
   planParts,
   REVIEW_CHILDREN_PAGE,
+  SHOP_MAX_QUANTITY,
+  SHOP_SHIPPING_METHODS,
 } from "@daybell/core";
 import { z } from "zod";
 
@@ -971,3 +973,79 @@ export const markNotificationsReadInput = z.strictObject(
   { error: "validation.unknownField" },
 );
 export type MarkNotificationsReadInput = z.infer<typeof markNotificationsReadInput>;
+
+// ── The parent shop (Phase 1 step 9, ADR 0022) ────────────────────────────────────────────────────────────────────
+
+/**
+ * An access code as the parent typed it: in the body only, never in a URL. Anything that isn't a code gets exactly the
+ * answer a wrong code gets (and counts as one), so the format is not checked here, only that something was typed.
+ */
+export const shopCodeInput = z.strictObject(
+  {
+    code: z
+      .string({ error: "validation.accessCode" })
+      .trim()
+      .min(1, { error: "validation.accessCode" })
+      .max(40, { error: "validation.accessCode" })
+      .meta({
+        description:
+          "The 8-character code from the photo card (K7QM-4XPA; spaces and dashes are fine). Personal data: never in URLs or logs.",
+      }),
+  },
+  { error: "validation.unknownField" },
+);
+export type ShopCodeInput = z.infer<typeof shopCodeInput>;
+
+const shopQuantity = z
+  .number({ error: "validation.quantity" })
+  .int({ error: "validation.quantity" })
+  .min(1, { error: "validation.quantity" })
+  .max(SHOP_MAX_QUANTITY, { error: "validation.quantity" });
+
+/** Adds a package, print or download to the bag: a pose (photoId) for everything but all digitals. */
+export const shopCartLineInput = z.strictObject(
+  {
+    childId: z.uuid({ error: "validation.invalid" }),
+    itemId: z.uuid({ error: "validation.invalid" }),
+    photoId: z
+      .uuid({ error: "validation.invalid" })
+      .nullable()
+      .default(null)
+      .meta({ description: "The pose: one of the child's portraits. Null for all digitals." }),
+    quantity: shopQuantity
+      .default(1)
+      .meta({ description: "1 to 99; digital downloads are bought once." }),
+  },
+  { error: "validation.unknownField" },
+);
+export type ShopCartLineInput = z.infer<typeof shopCartLineInput>;
+
+export const shopQuantityInput = z.strictObject(
+  { quantity: shopQuantity },
+  { error: "validation.unknownField" },
+);
+export type ShopQuantityInput = z.infer<typeof shopQuantityInput>;
+
+export const shopShippingInput = z.strictObject(
+  {
+    method: z.enum(SHOP_SHIPPING_METHODS, { error: "validation.invalid" }).meta({
+      description:
+        "home (the bag's one home fee) or school (free, only if every job delivers to school).",
+    }),
+  },
+  { error: "validation.unknownField" },
+);
+export type ShopShippingInput = z.infer<typeof shopShippingInput>;
+
+/** Which of the device's galleries (one per studio, code review S6) a shop call is for. */
+export const shopGalleryQuery = z.object({
+  gallery: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/, { error: "validation.invalid" })
+    .optional()
+    .meta({
+      description:
+        "A gallery's id from GET /shop/session. Without it, the device's first gallery. A gallery not on this device is 401 shop_session_required.",
+    }),
+});
+export type ShopGalleryQuery = z.infer<typeof shopGalleryQuery>;

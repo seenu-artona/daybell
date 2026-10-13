@@ -125,3 +125,49 @@ describe("stripeWebhookSecrets (ADR 0020)", () => {
       );
   });
 });
+
+const { shopThrottleKey, shopTrustForwardedFor } = await import("./server");
+
+describe("shopTrustForwardedFor (ADR 0022; security review R6)", () => {
+  it("is true only for SHOP_TRUST_XFF=1 off Vercel", () => {
+    expect(shopTrustForwardedFor({ SHOP_TRUST_XFF: "1" })).toBe(true);
+    expect(shopTrustForwardedFor({ SHOP_TRUST_XFF: " 1 " })).toBe(true);
+    for (const env of [
+      {},
+      { SHOP_TRUST_XFF: "" },
+      { SHOP_TRUST_XFF: "true" },
+      { SHOP_TRUST_XFF: "0" },
+      { SHOP_TRUST_XFF: "1", VERCEL: "1" },
+      { SHOP_TRUST_XFF: "1", VERCEL_ENV: "preview" },
+      { SHOP_TRUST_XFF: "1", VERCEL_ENV: "production" },
+    ])
+      expect(shopTrustForwardedFor(env)).toBe(false);
+  });
+});
+
+describe("shopThrottleKey (ADR 0022)", () => {
+  // Made at run time, so no key-shaped value is ever committed.
+  const key = (fill: number) => btoa(String.fromCharCode(...new Uint8Array(32).fill(fill)));
+
+  it("reads 32 base64 bytes", () => {
+    expect(shopThrottleKey({ SHOP_THROTTLE_KEY: ` ${key(7)} ` })).toEqual(
+      new Uint8Array(32).fill(7),
+    );
+  });
+
+  it("refuses a missing, short or malformed key, naming the variable only", () => {
+    for (const SHOP_THROTTLE_KEY of [undefined, "", "not base64!", btoa("short")])
+      expect(() => shopThrottleKey({ SHOP_THROTTLE_KEY })).toThrow(
+        /^SHOP_THROTTLE_KEY must be 32 random bytes, base64-encoded/,
+      );
+  });
+
+  it("must differ from the access code keys", () => {
+    expect(() =>
+      shopThrottleKey({ SHOP_THROTTLE_KEY: key(1), ACCESS_CODE_HMAC_KEY: key(1) }),
+    ).toThrow(/^SHOP_THROTTLE_KEY must be different from ACCESS_CODE_HMAC_KEY$/);
+    expect(() =>
+      shopThrottleKey({ SHOP_THROTTLE_KEY: key(2), ACCESS_CODE_ENCRYPTION_KEY: key(2) }),
+    ).toThrow(/^SHOP_THROTTLE_KEY must be different from ACCESS_CODE_ENCRYPTION_KEY$/);
+  });
+});

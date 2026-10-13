@@ -15,3 +15,14 @@
     line-height: var(--text-body--line-height);
   }
 }
+
+/* The parent shop's docked button (ADR 0022): keep a focused control clear of it when scrolling it into view
+   (WCAG 2.4.11). */
+html:has([data-docked-cta]) {
+  scroll-padding-bottom: 7rem;
+}
+
+/* The parent shop's sticky header: keep a focused control clear of it too (WCAG 2.4.11; code review S1). */
+html:has([data-shop-header]) {
+  scroll-padding-top: 4.5rem;
+}

@@ -21,7 +21,9 @@ const PRUNE = 1000;
  * from Vercel Cron (CRON_SECRET). In every region that has a database, in that region's function region:
  * - closes every selling job whose closing date has passed (job.closed {scheduled: true}, no actor; the team hears
  *   through the bell), a page at a time;
- * - removes read notifications over 90 days old and any over 180 (Claude's call).
+ * - removes read notifications over 90 days old and any over 180 (Claude's call);
+ * - removes expired shop sessions with their bags, and day-old wrong-code and hour-old request counts (ADR 0022), a
+ *   page at a time until none are left or the region's time is up.
  * Each region gets an equal share of the time budget, so one region's backlog never starves the next (code review
  * S2). A region this function can't serve (its data must be handled in another function region, D113) is skipped and
  * logged by name, while the others still run; if no region could run, the request is refused as before (security
@@ -31,7 +33,7 @@ const PRUNE = 1000;
 export const GET = handle(async (request: Request) => {
   assertCron(request);
   const started = Date.now();
-  const totals: CronJobsResponse = { closedJobs: 0, prunedNotifications: 0 };
+  const totals: CronJobsResponse = { closedJobs: 0, prunedNotifications: 0, prunedShop: 0 };
   const regions = DATA_REGIONS.filter((region) => regionDatabase(region));
   let ran = 0;
   let refusal: unknown = null;
@@ -54,10 +56,19 @@ export const GET = handle(async (request: Request) => {
       totals.closedJobs += closed;
       if (closed < PAGE) break;
     }
-    if (Date.now() - started < BUDGET_MS)
+    if (Date.now() - started < BUDGET_MS) {
       totals.prunedNotifications += Number(
         check(await jobSystemRpc(region, "prune_notifications", { p_limit: PRUNE })) ?? 0,
       );
+      // A page at a time until a page comes back short, within the region's share of the time (security review M2).
+      while (Date.now() < until) {
+        const pruned = Number(
+          check(await jobSystemRpc(region, "prune_shop", { p_limit: PRUNE })) ?? 0,
+        );
+        totals.prunedShop += pruned;
+        if (pruned < PRUNE) break;
+      }
+    }
   }
   if (ran === 0 && refusal) throw refusal;
   return NextResponse.json(totals);

@@ -164,11 +164,35 @@ export function jobStatusRpc(
 }
 
 /**
- * Job work nobody signed in does: closing shops whose closing date has passed and pruning old notifications, only from
- * the CRON_SECRET-checked jobs cron route.
+ * Job work nobody signed in does: closing shops whose closing date has passed, pruning old notifications and expired
+ * parent shop sessions (ADR 0022), only from the CRON_SECRET-checked jobs cron route.
  */
-export type JobSystemRpc = "close_due_jobs" | "prune_notifications";
+export type JobSystemRpc = "close_due_jobs" | "prune_notifications" | "prune_shop";
 
 export function jobSystemRpc(region: DataRegion, fn: JobSystemRpc, args: Record<string, unknown>) {
+  return serviceClient(region).rpc(fn, args);
+}
+
+/**
+ * The parent shop (ADR 0022): parents have no account, so every shop read and write runs as the service role, only
+ * from the /api/v1/shop routes, and only with what those routes checked: the HMACs of the network and device (codes),
+ * the SHA-256 of the session cookie's token. Each function works only within that session's own studio and children,
+ * so a session can never reach another studio's data. Never with anything a browser chose beyond ids and quantities.
+ */
+export type ShopRpc =
+  | "shop_enter_code"
+  | "shop_session"
+  | "shop_gallery"
+  | "shop_price_list"
+  | "shop_cart"
+  | "shop_cart_add"
+  | "shop_cart_set_quantity"
+  | "shop_cart_remove"
+  | "shop_set_shipping"
+  | "shop_forget"
+  | "shop_forget_device"
+  | "take_shop_request";
+
+export function shopRpc(region: DataRegion, fn: ShopRpc, args: Record<string, unknown>) {
   return serviceClient(region).rpc(fn, args);
 }

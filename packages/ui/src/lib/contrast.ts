@@ -58,3 +58,44 @@ export function uiColorOn(brand: string, surface = "#ffffff", ink = "#14231c"): 
   }
   return colour;
 }
+
+/** The parent shop's colour until a studio picks its own (D116). */
+export const DEFAULT_SHOP_ACCENT = "#1c1c1e";
+const INK = "#14231c";
+
+export interface ShopAccent {
+  /** Buttons, the bag's count, selected tabs. */
+  accent: string;
+  /** Text and icons on the accent: white or ink, whichever reads better (4.5:1 or more). */
+  onAccent: string;
+  /** Focus rings, selected radios and pose rings: 3:1 or more against white (WCAG 1.4.11). */
+  ring: string;
+}
+
+/**
+ * The shop's colours from a studio's colour (D116, D117; Claude's call 7: everyone is charcoal in Phase 1, and this is
+ * kept for when studios pick one). A colour that is unreadable with both white and ink text, or not a colour at all,
+ * falls back to charcoal; a pale one keeps its buttons but rings and selected marks use ink instead.
+ */
+export function shopAccent(brand: string | null | undefined): ShopAccent {
+  const hex = normalizeHex(brand);
+  const readable =
+    hex !== null &&
+    Math.max(contrastRatio(hex, "#ffffff"), contrastRatio(hex, INK)) >= MIN_TEXT_CONTRAST;
+  const accent = readable ? hex : DEFAULT_SHOP_ACCENT;
+  return {
+    accent,
+    onAccent: readableTextOn(accent),
+    ring: contrastRatio(accent, "#ffffff") >= MIN_UI_CONTRAST ? accent : INK,
+  };
+}
+
+/** The CSS variables the shop's components read (the theme's studio slot), for a studio's colour. */
+export function shopAccentVariables(brand: string | null | undefined): Record<string, string> {
+  const { accent, onAccent, ring } = shopAccent(brand);
+  return {
+    "--color-studio": accent,
+    "--color-on-studio": onAccent,
+    "--color-studio-ring": ring,
+  };
+}

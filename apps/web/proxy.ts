@@ -2,12 +2,31 @@ import { regionDatabase } from "@daybell/config";
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { REGION_COOKIE, resolveRegion } from "./lib/region";
+import { newNonce, shopContentSecurityPolicy } from "./lib/shop/csp";
+
+/**
+ * The parent shop's pages: straight through, never touching studio sign-in (ADR 0022: parents have no account, and
+ * their requests shouldn't refresh or read a studio session that may share the browser), with a strict
+ * Content-Security-Policy and a fresh nonce, which Next puts on its own scripts (security review L2).
+ */
+export function shopPage(request: NextRequest): NextResponse {
+  const csp = shopContentSecurityPolicy(newNonce(), {
+    dev: process.env.NODE_ENV === "development",
+  });
+  const headers = new Headers(request.headers);
+  headers.set("content-security-policy", csp);
+  const response = NextResponse.next({ request: { headers } });
+  response.headers.set("content-security-policy", csp);
+  return response;
+}
 
 /**
  * Runs before pages: keeps the Supabase session fresh and sends signed-out visitors away from the studio app.
- * API routes check the session themselves.
+ * API routes check the session themselves. The parent shop's pages get their own policy (shopPage).
  */
 export async function proxy(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  if (path === "/shop" || path.startsWith("/shop/")) return shopPage(request);
   let response = NextResponse.next({ request });
   const region = resolveRegion(request.cookies.get(REGION_COOKIE)?.value);
   const db = region ? regionDatabase(region) : null;
