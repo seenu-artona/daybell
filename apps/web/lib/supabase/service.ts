@@ -9,7 +9,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  * preparing QR cards (blank cards carry pre-made codes, ADR 0015) go through these database functions, which only the
  * service role can run. Call this only from route handlers, after studioScope() and assertCanEditRoster(); the
  * function checks the acting person's role again and attributes the events to them. Nothing else may use the service
- * role (photo writes and the image worker's and cron's photo work below are the only other uses): it bypasses
+ * role (photo, payout and job status writes and the system work below are the only other uses): it bypasses
  * row-level security.
  */
 export type CodeWriteRpc =
@@ -144,5 +144,31 @@ export function payoutSystemRpc(
   fn: PayoutSystemRpc,
   args: Record<string, unknown>,
 ) {
+  return serviceClient(region).rpc(fn, args);
+}
+
+/**
+ * Job status changes (ADR 0021): browsers never write a job's status. Only from route handlers after studioScope(),
+ * assertCanManage() and a check that the job is the studio's; each function acts for the person, checks again that
+ * they are an owner or admin, and checks what selling needs in the same transaction.
+ */
+export type JobStatusRpc = "start_selling" | "reopen_job" | "close_job";
+
+export function jobStatusRpc(
+  region: DataRegion,
+  fn: JobStatusRpc,
+  actorId: string,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, { p_actor: actorId, ...args });
+}
+
+/**
+ * Job work nobody signed in does: closing shops whose closing date has passed and pruning old notifications, only from
+ * the CRON_SECRET-checked jobs cron route.
+ */
+export type JobSystemRpc = "close_due_jobs" | "prune_notifications";
+
+export function jobSystemRpc(region: DataRegion, fn: JobSystemRpc, args: Record<string, unknown>) {
   return serviceClient(region).rpc(fn, args);
 }

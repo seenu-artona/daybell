@@ -60,13 +60,14 @@ describe("checklistFacts and checklistSummary", () => {
     expect(checklistSummary(job, row, "2026-10-12")).toEqual({
       milestone: "setUp",
       done: 2,
-      total: 6,
+      total: 7,
       next: "printQrCards",
     });
+    // A closed job sold, so Start selling stays ticked (ADR 0021).
     expect(checklistSummary({ ...job, status: "closed" }, row, "2026-10-12")).toEqual({
       milestone: null,
-      done: 2,
-      total: 6,
+      done: 3,
+      total: 7,
       next: null,
     });
   });

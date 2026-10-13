@@ -2,7 +2,7 @@
 
 import type { ActivityItem } from "@daybell/api";
 import { Card, CardRow, IconChip } from "@daybell/ui";
-import { FilePlus2, Pencil, QrCode, Store, Upload, Users } from "lucide-react";
+import { FilePlus2, Lock, Pencil, QrCode, ShoppingBag, Store, Upload, Users } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { type ActivityIcon, activityChip, unnamedSubject } from "@/lib/activity";
@@ -15,6 +15,8 @@ const ICONS: Record<ActivityIcon, typeof Pencil> = {
   printed: QrCode,
   team: Users,
   studio: Store,
+  selling: ShoppingBag,
+  closed: Lock,
 };
 
 /**
@@ -53,6 +55,9 @@ export function ActivityCard({
       subject: item.subjectEmail ?? t("aTeammate"),
       role: item.role ? tr(item.role).toLowerCase() : "",
       name: item.subjectName ?? t(unnamedSubject(item.type)),
+      // A shop closed by its closing date has no actor (ADR 0021): the sentence says so instead of "Someone". Someone
+      // who has since left the team still did it (code review S3): "Someone closed the shop".
+      hasActor: item.hasActor ? "yes" : "no",
     });
   const when = (item: ActivityItem) => (
     <time className="shrink-0 text-caption text-muted" dateTime={item.occurredAt}>

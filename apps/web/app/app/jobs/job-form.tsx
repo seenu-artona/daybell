@@ -11,6 +11,7 @@ import { api } from "@/lib/client-api";
 import { Combobox } from "../combobox";
 import { ClientForm } from "../contacts/client-form";
 import { Dialog, SelectField } from "../dialog";
+import { ClosingDateField, closesAtFor, closingFieldValue } from "./closing-date";
 
 type ClientRef = NonNullable<Job["client"]>;
 
@@ -53,7 +54,8 @@ function ClientCombobox({
 
 /**
  * Create or edit a job in one form (D133 form rules): name; picture day | type; client; and under "More options" the
- * internal number (pre-filled with the next one) | subjects expected.
+ * internal number (pre-filled with the next one) | subjects expected, and for an existing draft or selling job its
+ * closing date (ADR 0021).
  */
 export function JobForm({
   job,
@@ -67,6 +69,7 @@ export function JobForm({
   const t = useTranslations("app.jobs");
   const ta = useTranslations("app");
   const tc = useTranslations("app.contacts");
+  const tClosing = useTranslations("app.job.closing");
   const text = useApiText();
   const [name, setName] = useState(job?.name ?? "");
   const [pictureDay, setPictureDay] = useState(job?.pictureDay ?? "");
@@ -74,6 +77,10 @@ export function JobForm({
   const [internalNumber, setInternalNumber] = useState(job?.internalNumber ?? "");
   const [type, setType] = useState<JobType>(job?.type ?? "school");
   const [subjects, setSubjects] = useState(job?.subjectsExpected?.toString() ?? "");
+  // The closing date (ADR 0021): only for existing draft and selling jobs; sent only when it changed.
+  const initialClosing = closingFieldValue(job?.closesAt ?? null);
+  const [closing, setClosing] = useState(initialClosing);
+  const showClosing = job !== null && job.status !== "closed";
   const [moreOpen, setMoreOpen] = useState(false);
   const [newClientName, setNewClientName] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -98,7 +105,7 @@ export function JobForm({
   function showErrors(fields: Record<string, string>) {
     setErrors(fields);
     // Errors inside "More options" must be seen.
-    if (fields.internalNumber || fields.subjectsExpected) setMoreOpen(true);
+    if (fields.internalNumber || fields.subjectsExpected || fields.closesAt) setMoreOpen(true);
   }
 
   async function save(e: FormEvent) {
@@ -119,6 +126,7 @@ export function JobForm({
       ...(usesSuggestion ? {} : { internalNumber }),
       type,
       subjectsExpected: count ? Number(count) : null,
+      ...(showClosing && closing !== initialClosing ? { closesAt: closesAtFor(closing) } : {}),
     };
     const res = await api<{ job: Job }>(isNew ? "/jobs" : `/jobs/${job.id}`, {
       method: isNew ? "POST" : "PATCH",
@@ -210,6 +218,16 @@ export function JobForm({
               onChange={(e) => setSubjects(e.target.value)}
               error={text.field(errors.subjectsExpected)}
             />
+            {showClosing ? (
+              <div className="sm:col-span-2">
+                <ClosingDateField
+                  label={ta("optionalLabel", { label: tClosing("label") })}
+                  value={closing}
+                  onChange={setClosing}
+                  error={text.field(errors.closesAt)}
+                />
+              </div>
+            ) : null}
           </div>
         </details>
         <div className="flex flex-col-reverse gap-3 pt-1 sm:flex-row sm:justify-end">

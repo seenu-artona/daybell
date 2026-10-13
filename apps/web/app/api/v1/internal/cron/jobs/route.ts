@@ -1,0 +1,64 @@
+import type { CronJobsResponse } from "@daybell/api";
+import { DATA_REGIONS, regionDatabase } from "@daybell/config";
+import { NextResponse } from "next/server";
+import { check, handle } from "@/lib/api";
+import { assertFunctionRegion } from "@/lib/region-guard";
+import { jobSystemRpc } from "@/lib/supabase/service";
+import { assertCron } from "@/lib/worker-auth";
+
+export const runtime = "nodejs";
+// Canadian studios' data is handled in Montréal (D113), like the photo clean-up.
+export const preferredRegion = "yul1";
+export const maxDuration = 60;
+
+/** Stops starting new work after this long; whatever is left closes on the next run. */
+const BUDGET_MS = 50_000;
+const PAGE = 500;
+const PRUNE = 1000;
+
+/**
+ * GET /api/v1/internal/cron/jobs — the jobs cron (ADR 0021): hourly from GitHub Actions (GITHUB_CRON_SECRET) and daily
+ * from Vercel Cron (CRON_SECRET). In every region that has a database, in that region's function region:
+ * - closes every selling job whose closing date has passed (job.closed {scheduled: true}, no actor; the team hears
+ *   through the bell), a page at a time;
+ * - removes read notifications over 90 days old and any over 180 (Claude's call).
+ * Each region gets an equal share of the time budget, so one region's backlog never starves the next (code review
+ * S2). A region this function can't serve (its data must be handled in another function region, D113) is skipped and
+ * logged by name, while the others still run; if no region could run, the request is refused as before (security
+ * review nice-to-have 3: per-region routes once the US has its own function region).
+ * Answers counts only and logs nothing about studios or people.
+ */
+export const GET = handle(async (request: Request) => {
+  assertCron(request);
+  const started = Date.now();
+  const totals: CronJobsResponse = { closedJobs: 0, prunedNotifications: 0 };
+  const regions = DATA_REGIONS.filter((region) => regionDatabase(region));
+  let ran = 0;
+  let refusal: unknown = null;
+
+  for (const [index, region] of regions.entries()) {
+    try {
+      assertFunctionRegion(region);
+    } catch (err) {
+      console.error("jobs_cron_region_skipped", region);
+      refusal = err;
+      continue;
+    }
+    ran += 1;
+    // This region's share ends here; whatever it leaves closes on the next run.
+    const until = started + (BUDGET_MS * (index + 1)) / regions.length;
+    while (Date.now() < until) {
+      const closed = Number(
+        check(await jobSystemRpc(region, "close_due_jobs", { p_limit: PAGE })) ?? 0,
+      );
+      totals.closedJobs += closed;
+      if (closed < PAGE) break;
+    }
+    if (Date.now() - started < BUDGET_MS)
+      totals.prunedNotifications += Number(
+        check(await jobSystemRpc(region, "prune_notifications", { p_limit: PRUNE })) ?? 0,
+      );
+  }
+  if (ran === 0 && refusal) throw refusal;
+  return NextResponse.json(totals);
+});

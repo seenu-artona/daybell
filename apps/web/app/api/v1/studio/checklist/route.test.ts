@@ -262,7 +262,8 @@ describe("GET /studio/checklist", () => {
   });
 
   it("skips jobs whose only open task is on the Overview itself (Picture day)", async () => {
-    const db = fakeDatabase({ jobs: [job("a", utcDay(30))] }, {}, [
+    // Selling already (a draft would have Start selling next, ADR 0021).
+    const db = fakeDatabase({ jobs: [job("a", utcDay(30), "selling")] }, {}, [
       fact("a", {
         children: 1,
         qr_eligible: 1,

@@ -1,11 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
-import { createServerClient } from "@supabase/ssr";
-import QRCode from "qrcode";
-import sharp, { type OverlayOptions } from "sharp";
-import { PASSWORD, signUpOwner, VERIFY_LINK } from "./helpers";
+import { expect, test } from "@playwright/test";
+import { cardCodes, PASSWORD, photo, signUpOwner, VERIFY_LINK } from "./helpers";
 import { linkFromEmail } from "./mail";
 
 // Phase 1 step 5 "QR tagging and review" (D32, F16, D142 #7, D143; Seenu's answers of Oct 12 2026; ADR 0018), with
@@ -17,56 +14,6 @@ import { linkFromEmail } from "./mail";
 // Leftovers; a class photo upload goes to its class; staff see the review read-only; another studio sees and changes
 // nothing. Desktop only (D136). JPEGs and QR codes are made in the test.
 const run = `${Date.now()}`;
-
-/**
- * A 24-megapixel photo with a plain background of its own (so no two files are the same), and maybe a card: a QR
- * holding `payload` (as printed cards do), optionally with its middle covered (finder patterns still visible).
- */
-async function photo(seed: number, card?: { payload: string; damaged?: boolean }) {
-  const background = { r: (seed * 37) % 256, g: (seed * 91) % 256, b: 120 };
-  const layers: OverlayOptions[] = [];
-  if (card) {
-    let png = await QRCode.toBuffer(card.payload, {
-      errorCorrectionLevel: "M",
-      margin: 4,
-      width: 300,
-    });
-    if (card.damaged)
-      png = await sharp(png)
-        .composite([
-          {
-            input: { create: { width: 210, height: 75, channels: 3, background: "#000" } },
-            left: 45,
-            top: 112,
-          },
-        ])
-        .png()
-        .toBuffer();
-    layers.push({ input: png, left: 2600, top: 2300 });
-  }
-  return sharp({ create: { width: 6000, height: 4000, channels: 3, background } })
-    .composite(layers)
-    .jpeg({ quality: 85 })
-    .toBuffer();
-}
-
-/** The job's card codes, read through the Data API as the signed-in owner (row-level security; ADR 0015). */
-async function cardCodes(page: Page, jobId: string) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL_CA;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY_CA;
-  if (!url || !key)
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL_CA and _PUBLISHABLE_KEY_CA are needed");
-  const jar = await page.context().cookies();
-  const supabase = createServerClient(url, key, {
-    cookies: { getAll: () => jar.map((c) => ({ name: c.name, value: c.value })), setAll: () => {} },
-  });
-  const { data, error } = await supabase
-    .from("qr_cards")
-    .select("id, child_id, card_code")
-    .eq("job_id", jobId);
-  if (error) throw new Error(error.message);
-  return data as { id: string; child_id: string | null; card_code: string }[];
-}
 
 const pastDay = () => new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
 

@@ -25,6 +25,8 @@ insert into public.jobs (id, studio_id, name, type, picture_day, internal_number
   ('a0000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Closed', 'seniors', '2026-10-01', 'JOB00003'),
   ('a0000000-0000-4000-8000-000000000004', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Retry', 'seniors', '2026-10-01', 'JOB00004'),
   ('b0000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Fall', 'seniors', '2026-10-01', 'JOB00001');
+-- A job closes after selling (step 8's status guard: never straight from draft).
+update public.jobs set status = 'selling' where id = 'a0000000-0000-4000-8000-000000000003';
 update public.jobs set status = 'closed' where id = 'a0000000-0000-4000-8000-000000000003';
 
 create function pg_temp.as_user(p_user uuid) returns boolean language sql as $$

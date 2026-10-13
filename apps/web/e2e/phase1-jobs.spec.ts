@@ -149,7 +149,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(first).toContainText("Draft");
   // Each row shows its checklist (D143): the milestone, progress and the next task, linked to where it's done.
   await expect(first.getByText("Set up", { exact: true })).toBeVisible();
-  await expect(first.getByText("1 of 6 done", { exact: true })).toBeVisible();
+  await expect(first.getByText("1 of 7 done", { exact: true })).toBeVisible();
   await expect(
     first.getByRole("link", { name: `Next: Add the roster, ${job} (edited)`, exact: true }),
   ).toHaveAttribute("href", /^\/app\/jobs\/[0-9a-f-]{36}\/people$/);
@@ -171,7 +171,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   expect(jobs.jobs[0].checklist).toEqual({
     milestone: "setUp",
     done: 1,
-    total: 6,
+    total: 7,
     next: "addRoster",
   });
   const status = await page.request.patch(`/api/v1/jobs/${id}`, { data: { status: "selling" } });

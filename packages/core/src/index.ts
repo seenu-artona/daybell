@@ -5,6 +5,7 @@ export * from "./ids";
 export * from "./job-page";
 export * from "./jobs";
 export * from "./money";
+export * from "./notifications";
 export * from "./payouts";
 export * from "./people";
 export * from "./photos";

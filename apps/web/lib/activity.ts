@@ -42,13 +42,24 @@ export function unnamedSubject(type: ActivityType): "aJob" | "aClient" {
 }
 
 /** The icon on an activity row's chip; the component maps each to a lucide icon. */
-export type ActivityIcon = "created" | "edited" | "imported" | "printed" | "team" | "studio";
+export type ActivityIcon =
+  | "created"
+  | "edited"
+  | "imported"
+  | "printed"
+  | "team"
+  | "studio"
+  | "selling"
+  | "closed";
 
 /**
  * The pastel chip at the start of an activity row (D140): new things green, edits amber, imports and QR card prints
- * blue, team changes lime, studio changes grey. Decorative only: the sentence says what happened.
+ * blue, team changes lime, studio changes grey; a shop opening green and closing grey (ADR 0021). Decorative only: the
+ * sentence says what happened.
  */
 export function activityChip(type: ActivityType): { tone: IconChipTone; icon: ActivityIcon } {
+  if (type === "job.selling") return { tone: "primary", icon: "selling" };
+  if (type === "job.closed") return { tone: "neutral", icon: "closed" };
   if (type === "roster.imported") return { tone: "info", icon: "imported" };
   if (type === "qr_cards.printed") return { tone: "info", icon: "printed" };
   if (type.startsWith("member.") || type.startsWith("invite."))

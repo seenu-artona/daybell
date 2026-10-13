@@ -24,6 +24,7 @@ import { Dialog } from "../../../dialog";
 import { ChildForm, GroupForm } from "../child-form";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
+import { LiveNote } from "../live-note";
 import { RemoveChildDialog } from "../remove-child-dialog";
 import { tabHref } from "../tabs";
 import { ChildPanel } from "./child-panel";
@@ -244,6 +245,7 @@ function PeoplePage() {
             <Banner tone="info" title={t("overCap", { max: ROSTER_VIEW_MAX })} />
           ) : null}
           {roster.failed ? <Banner tone="danger" title={tr("loadFailed")} /> : null}
+          <LiveNote />
         </>
       }
       panel={

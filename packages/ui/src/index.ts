@@ -2,6 +2,7 @@ export { Badge, type BadgeProps, badgeVariants } from "./components/badge";
 export { Button, type ButtonProps, buttonVariants } from "./components/button";
 export { Card, CardMeta, type CardProps, CardRow, CardTitle } from "./components/card";
 export { Celebration, type CelebrationProps } from "./components/celebration";
+export { CONFETTI_MS, ConfettiBurst, type ConfettiBurstProps } from "./components/confetti";
 export { Banner, type BannerProps, Toast } from "./components/feedback";
 export { Field, type FieldProps } from "./components/field";
 export { IconButton, type IconButtonProps, iconButtonVariants } from "./components/icon-button";

@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import axe from "axe-core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Badge,
   Banner,
@@ -10,7 +10,9 @@ import {
   CardRow,
   CardTitle,
   Celebration,
+  CONFETTI_MS,
   CodeInput,
+  ConfettiBurst,
   clampPercent,
   cn,
   contrastRatio,
@@ -348,5 +350,53 @@ describe("D140 job page pieces", () => {
     expect(screen.getByText("One").className).toMatch(/\bborder-b\b/);
     expect(screen.getByText("One").className).toMatch(/\bmin-h-14\b/);
     await expectNoA11yViolations(container);
+  });
+});
+
+describe("ConfettiBurst (D75, D91)", () => {
+  const motion = (reduce: boolean) =>
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({ matches: reduce && query.includes("reduce"), media: query })),
+    );
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("draws nothing at all when reduced motion is asked for, and is done at once", () => {
+    motion(true);
+    const onDone = vi.fn();
+    const { container } = render(<ConfettiBurst onDone={onDone} />);
+    expect(container.innerHTML).toBe("");
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("bursts for 1–2 seconds in token colours, hidden from assistive technology and clicks, then goes", async () => {
+    vi.useFakeTimers();
+    motion(false);
+    const onDone = vi.fn();
+    const { container } = render(
+      <main>
+        <ConfettiBurst onDone={onDone} />
+      </main>,
+    );
+    const burst = container.querySelector("[data-confetti]") as HTMLElement;
+    expect(burst.getAttribute("aria-hidden")).toBe("true");
+    expect(burst.className).toMatch(/\bpointer-events-none\b/);
+    expect(burst.className).toMatch(/\bmotion-reduce:hidden\b/);
+    const pieces = [...burst.querySelectorAll("span")];
+    expect(pieces.length).toBe(40);
+    for (const piece of pieces) {
+      expect(piece.className).toMatch(/\bbg-(primary|lime|info|warning)\b/);
+      expect(piece.getAttribute("style")).not.toMatch(/#[0-9a-f]{3,6}/i);
+    }
+    expect(CONFETTI_MS).toBeGreaterThanOrEqual(1000);
+    expect(CONFETTI_MS).toBeLessThanOrEqual(2000);
+    act(() => {
+      vi.advanceTimersByTime(CONFETTI_MS + 200);
+    });
+    expect(container.querySelector("[data-confetti]")).toBeNull();
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 });

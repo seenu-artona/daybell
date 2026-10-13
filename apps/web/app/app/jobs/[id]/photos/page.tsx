@@ -11,6 +11,7 @@ import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
+import { LiveNote } from "../live-note";
 import { tabHref } from "../tabs";
 import { PhotoGrid, tileId } from "./photo-grid";
 import { PhotoPanel } from "./photo-panel";
@@ -176,6 +177,7 @@ function PhotosPage() {
         <>
           {bin ? null : <PhotosViews jobId={job.id} current="all" />}
           {closed && !bin ? <Banner tone="info" title={t("closed")} /> : null}
+          {bin ? null : <LiveNote />}
           {bin ? <p className="m-0 text-sm text-muted">{t("binNote")}</p> : null}
           {(sheetOpen || uploading) && canUpload && !bin ? (
             <UploadSheet

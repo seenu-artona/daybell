@@ -1,20 +1,27 @@
 "use client";
 
 import { formatMoney, money } from "@daybell/core";
-import { ChevronDown, Megaphone } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { ActivityCard } from "./activity-card";
 import { HomeChecklist } from "./home-checklist";
+import { JobsSelling } from "./jobs-selling";
 import { useStudio } from "./me-context";
 import { PageFrame } from "./page-frame";
 
 const RANGES = ["week", "month", "season"] as const;
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
+  const id = useId();
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-      <h2 className="m-0 px-5 pt-4 pb-3 text-[15px] leading-5 font-bold">{title}</h2>
+    <section
+      aria-labelledby={id}
+      className="overflow-hidden rounded-2xl border border-line bg-surface"
+    >
+      <h2 id={id} className="m-0 px-5 pt-4 pb-3 text-[15px] leading-5 font-bold">
+        {title}
+      </h2>
       {children}
     </section>
   );
@@ -46,7 +53,7 @@ function Trend({ points }: { points: number[] }) {
 
 /**
  * Studio Home (D127, D143): numbers like Shopify, then the studio setup checklist or Up next (in place of "Needs you";
- * ADR 0017), jobs selling now, and recent activity.
+ * ADR 0017), the jobs selling now (ADR 0021), and recent activity.
  */
 export default function HomePage() {
   const th = useTranslations("app.home");
@@ -123,10 +130,7 @@ export default function HomePage() {
 
         <div className="flex flex-col gap-6">
           <Panel title={th("jobsSelling")}>
-            <p className="m-0 flex items-center gap-3 border-t border-line px-5 py-4 text-muted">
-              <Megaphone className="size-5 shrink-0" aria-hidden="true" />
-              {th("noJobs")}
-            </p>
+            <JobsSelling refreshKey={version} />
           </Panel>
           {canManage ? <ActivityCard refreshKey={version} /> : null}
         </div>

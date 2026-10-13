@@ -1,0 +1,44 @@
+name: Jobs cron (hourly)
+
+# Closes staging's shops whose closing date has passed and prunes old notifications (ADR 0021; docs/crons.md). Hourly
+# here because Vercel Cron's plan may allow only daily jobs. Production has no job in this workflow (security review
+# M1): it relies on its daily Vercel cron (vercel.json) until Seenu decides otherwise.
+# The token is GitHub's own (staging's GITHUB_CRON_SECRET in Vercel), read from the `staging` environment, which only
+# the main branch may use, never from repository-wide secrets. The response is counts, never personal data.
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: jobs-cron
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: staging
+    steps:
+      - name: Call staging's jobs cron
+        env:
+          # GitHub refuses secret names starting with GITHUB_, hence STAGING_ACTIONS_CRON_SECRET.
+          CRON_TOKEN: ${{ secrets.STAGING_ACTIONS_CRON_SECRET }}
+          BYPASS: ${{ secrets.STAGING_VERCEL_PROTECTION_BYPASS }}
+          SITE_URL: https://daybell-git-main-artona-tech-team.vercel.app
+        run: |
+          if [ -z "$CRON_TOKEN" ]; then
+            echo "::error::STAGING_ACTIONS_CRON_SECRET is missing from the staging environment (docs/crons.md)."
+            exit 1
+          fi
+          case "$SITE_URL" in
+            https://*) ;;
+            *) echo "::error::The staging address must start with https://"; exit 1 ;;
+          esac
+          bypass=()
+          if [ -n "$BYPASS" ]; then bypass=(-H "x-vercel-protection-bypass: $BYPASS"); fi
+          curl --proto '=https' --fail-with-body --silent --show-error --max-time 90 \
+            -H "Authorization: Bearer $CRON_TOKEN" "${bypass[@]}" \
+            "$SITE_URL/api/v1/internal/cron/jobs"

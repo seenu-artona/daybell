@@ -19,6 +19,7 @@ import { useStudio } from "../../../me-context";
 import { priceListHref, usePriceText } from "../../../products/price-text";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
+import { LiveNote } from "../live-note";
 
 const LINK =
   "inline-flex min-h-11 items-center self-start font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary";
@@ -115,7 +116,7 @@ export default function ShopPage() {
   return (
     <JobSection title={tt("shop")} subline={tp("beforeTax")}>
       <div className="flex flex-col gap-4" aria-busy={busy || undefined}>
-        {job.status === "selling" ? <Banner tone="info" title={t("live")} /> : null}
+        <LiveNote />
         {closed ? <Banner tone="info" title={t("closed")} /> : null}
         {!canManage ? <p className="m-0 text-muted">{t("readOnly")}</p> : null}
         <p role="status" aria-live="polite" className="m-0 empty:sr-only">

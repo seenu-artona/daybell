@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const { cronSecret, photoStorageSettings, photoWorkerSecrets } = await import("./server");
+const { cronSecret, cronSecrets, githubCronSecret, photoStorageSettings, photoWorkerSecrets } =
+  await import("./server");
 
 const S3 = {
   STORAGE_DRIVER: "s3",
@@ -79,5 +80,37 @@ describe("photoWorkerSecrets and cronSecret", () => {
     }
     expect(() => cronSecret({ CRON_SECRET: "short" })).toThrow(/at least 32/);
     expect(cronSecret({ CRON_SECRET: b })).toBe(b);
+  });
+});
+
+describe("githubCronSecret and cronSecrets (ADR 0021, security review M1)", () => {
+  const vercel = "v".repeat(40);
+  const github = "g".repeat(40);
+  it("is optional: without it only CRON_SECRET is accepted", () => {
+    expect(githubCronSecret({ CRON_SECRET: vercel })).toBeNull();
+    expect(githubCronSecret({ CRON_SECRET: vercel, GITHUB_CRON_SECRET: "  " })).toBeNull();
+    expect(cronSecrets({ CRON_SECRET: vercel })).toEqual([vercel]);
+  });
+  it("adds GitHub's own secret when set", () => {
+    expect(cronSecrets({ CRON_SECRET: vercel, GITHUB_CRON_SECRET: github })).toEqual([
+      vercel,
+      github,
+    ]);
+  });
+  it("refuses a short one, or one equal to CRON_SECRET, without echoing it", () => {
+    for (const env of [
+      { CRON_SECRET: vercel, GITHUB_CRON_SECRET: "short" },
+      { CRON_SECRET: vercel, GITHUB_CRON_SECRET: vercel },
+    ]) {
+      expect(() => githubCronSecret(env)).toThrow(/GITHUB_CRON_SECRET/);
+      try {
+        githubCronSecret(env);
+      } catch (e) {
+        expect(String(e)).not.toContain(vercel);
+      }
+    }
+  });
+  it("still needs CRON_SECRET", () => {
+    expect(() => cronSecrets({ GITHUB_CRON_SECRET: github })).toThrow(/CRON_SECRET is not set/);
   });
 });

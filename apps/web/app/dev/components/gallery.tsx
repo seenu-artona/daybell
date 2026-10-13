@@ -11,6 +11,7 @@ import {
   CardTitle,
   Celebration,
   CodeInput,
+  ConfettiBurst,
   Field,
   IconButton,
   IconChip,
@@ -73,6 +74,7 @@ function Portrait({ n, alt }: { n: number; alt: string }) {
 export function Gallery() {
   const t = useTranslations("gallery");
   const [burst, setBurst] = useState(0);
+  const [confetti, setConfetti] = useState(0);
   const [code, setCode] = useState("LINC2");
   const [pose, setPose] = useState(1);
   const [pkg, setPkg] = useState("family");
@@ -275,6 +277,13 @@ export function Gallery() {
             body={t("celebrate.body")}
             action={<Button onClick={() => setBurst((b) => b + 1)}>{t("celebrate.again")}</Button>}
           />
+        </div>
+        {/* The page-wide burst when a job goes live (ADR 0021); nothing with reduced motion. */}
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={() => setConfetti((c) => c + 1)}>
+            {t("celebrate.confetti")}
+          </Button>
+          {confetti > 0 ? <ConfettiBurst key={confetti} /> : null}
         </div>
       </Section>
 
