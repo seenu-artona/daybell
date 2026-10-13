@@ -120,11 +120,13 @@ describe("closingDateAllowed", () => {
 
 describe("endOfLocalDay and closingDay (ADR 0021, Q2)", () => {
   // Time zones are passed explicitly: switching process TZ at run time is not reliable across Node builds.
+  // America/Los_Angeles, not Vancouver: newer tz data may give British Columbia year-round UTC−7,
+  // so a Vancouver expectation would depend on the runner's ICU version.
   it("is the next local midnight, in the setter's own time zone", () => {
     expect(endOfLocalDay("2026-11-20", "America/Toronto").toISOString()).toBe(
       "2026-11-21T05:00:00.000Z",
     );
-    expect(endOfLocalDay("2026-11-20", "America/Vancouver").toISOString()).toBe(
+    expect(endOfLocalDay("2026-11-20", "America/Los_Angeles").toISOString()).toBe(
       "2026-11-21T08:00:00.000Z",
     );
   });
