@@ -46,6 +46,7 @@ const { PhotoViewer } = await import("./_components/photo-viewer");
 const { ShopTitle } = await import("./_components/shop-title");
 const { ShopMenu } = await import("./_components/shop-menu");
 const { default: GalleryPage } = await import("./c/[childId]/page");
+const { coverSeen, markCoverSeen } = await import("./_components/tab-state");
 
 const G = "0123456789abcdef0123456789abcdef";
 const G2 = "fedcba9876543210fedcba9876543210";
@@ -379,5 +380,53 @@ describe("Forget this device (security review R7)", () => {
     await wait(20);
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(nav.router.replace).toHaveBeenCalledWith("/shop");
+  });
+
+  // Forgetting leaves nothing about the gallery in the browser: the tab's "cover seen" flags go too, so the cover
+  // shows again when the code is entered again (regression: e2e shop-checkout step 8 never saw "See photos").
+  const BEN = "c0000000-0000-4000-8000-000000000002";
+  const ben = gallery().children.map((c) => ({
+    ...c,
+    id: BEN,
+    displayName: "Ben Q.",
+    firstName: "Ben",
+  }));
+  afterEach(() => window.sessionStorage.clear());
+
+  it("clears every shop key in the tab when it forgets the whole device", async () => {
+    markCoverSeen(AVA);
+    markCoverSeen(BEN);
+    window.sessionStorage.setItem("unrelated", "kept");
+    api.forget.mockResolvedValue(ok(undefined));
+    await render(<ShopMenu gallery={G} />);
+    await act(async () => byText("Forget this device")?.click());
+    expect(coverSeen(AVA)).toBe(true);
+    await act(async () => byText("Forget")?.click());
+    await wait(20);
+    expect(api.forget).toHaveBeenCalledWith(null);
+    expect(coverSeen(AVA)).toBe(false);
+    expect(coverSeen(BEN)).toBe(false);
+    expect(window.sessionStorage.getItem("unrelated")).toBe("kept");
+  });
+
+  it("clears only the forgotten gallery's children when it forgets one gallery", async () => {
+    api.session.mockResolvedValue(
+      ok({
+        galleries: [
+          gallery(),
+          gallery({ id: G2, studio: { name: "Birch Studio" }, children: ben }),
+        ],
+      }),
+    );
+    markCoverSeen(AVA);
+    markCoverSeen(BEN);
+    api.forget.mockResolvedValue(ok(undefined));
+    await render(<ShopMenu gallery={G} />);
+    await act(async () => byText("Forget this device")?.click());
+    await act(async () => byText("Forget this gallery")?.click());
+    await wait(20);
+    expect(api.forget).toHaveBeenCalledWith(G);
+    expect(coverSeen(AVA)).toBe(false);
+    expect(coverSeen(BEN)).toBe(true);
   });
 });

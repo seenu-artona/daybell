@@ -16,9 +16,9 @@ import { PhotoViewer } from "../../_components/photo-viewer";
 import { ShopHeader } from "../../_components/shop-header";
 import { ShopTitle } from "../../_components/shop-title";
 import { shopButton } from "../../_components/styles";
+import { coverSeen, markCoverSeen } from "../../_components/tab-state";
 import { useChildData } from "../../_components/use-child";
 
-const coverKey = (childId: string) => `daybell-shop-cover:${childId}`;
 const strong = (chunks: ReactNode) => <strong>{chunks}</strong>;
 
 /**
@@ -39,7 +39,7 @@ export default function GalleryPage() {
   const focusHeading = useRef(false);
 
   useEffect(() => {
-    setShowCover(window.sessionStorage.getItem(coverKey(childId)) === null);
+    setShowCover(!coverSeen(childId));
     setSet("portraits");
     setViewer(null);
   }, [childId]);
@@ -83,7 +83,7 @@ export default function GalleryPage() {
           total={data.portraits.length}
           onImageError={onImageError}
           onSeePhotos={() => {
-            window.sessionStorage.setItem(coverKey(childId), "1");
+            markCoverSeen(childId);
             focusHeading.current = true;
             setShowCover(false);
           }}

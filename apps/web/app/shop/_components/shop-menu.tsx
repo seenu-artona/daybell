@@ -9,6 +9,7 @@ import { shopApi } from "@/lib/shop-client";
 import { useShop } from "./shop-context";
 import { ShopDialog } from "./shop-dialog";
 import { shopButton, shopIconButton, shopSecondaryButton } from "./styles";
+import { forgetTabState } from "./tab-state";
 
 /**
  * The ⋯ menu: "Your orders" (ADR 0023: paid orders and their downloads), and "Forget this device", after a
@@ -50,6 +51,7 @@ export function ShopMenu({ gallery }: { gallery: string | null }) {
   /**
    * Forgets one gallery (by id) or, with null, every gallery on the device. A refusal (a busy shared address's 429, a
    * lost connection) says so and keeps the dialog open, so a parent on a shared phone never believes it is gone (R7).
+   * Once forgotten, this tab's memory of it (the cover seen) goes too, so nothing about it remains in the browser.
    */
   const forget = async (which: string | null) => {
     setBusy(true);
@@ -60,6 +62,11 @@ export function ShopMenu({ gallery }: { gallery: string | null }) {
       setFailed(true);
       return;
     }
+    forgetTabState(
+      which === null
+        ? null
+        : (galleries.find((g) => g.id === which)?.children.map((c) => c.id) ?? []),
+    );
     await shop.refresh();
     setBusy(false);
     setConfirming(false);
