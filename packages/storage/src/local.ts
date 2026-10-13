@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { attachmentDisposition, type PhotoStorage, StorageError, type UploadedPart } from "./types";
@@ -173,6 +174,16 @@ export function localPhotoStorage({
         if (err instanceof StorageError) throw err;
         throw new StorageError("not_found");
       }
+    },
+
+    async getStream(key) {
+      const path = pathOf(key);
+      try {
+        await stat(path);
+      } catch {
+        throw new StorageError("not_found");
+      }
+      return createReadStream(path);
     },
 
     async put(key, body) {

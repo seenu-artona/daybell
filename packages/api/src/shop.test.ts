@@ -80,6 +80,10 @@ describe("the parent shop matches the database (ADR 0022)", () => {
         "downloadUnavailable",
         "lineUnavailable",
         "notAccepting",
+        // Orders (ADR 0024; orders.test.ts checks them against its migration).
+        "cancelLimit",
+        "cannotCancel",
+        "zipTooBig",
       ].sort(),
     );
     expect([SHOP_CODE_NOT_FOUND, SHOP_LOCKED]).toEqual(["shop.codeNotFound", "shop.locked"]);
@@ -201,6 +205,8 @@ describe("shop routes", () => {
       "POST /shop/checkout/cancel",
       "GET /shop/orders",
       "GET /shop/orders/{orderId}",
+      "POST /shop/orders/{orderId}/cancel",
+      "GET /shop/orders/{orderId}/download-all",
       "GET /shop/orders/{orderId}/downloads/{photoId}",
     ]);
     for (const r of shop)

@@ -1,9 +1,11 @@
+import { Readable } from "node:stream";
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  type GetObjectCommandOutput,
   ListObjectsV2Command,
   ListObjectVersionsCommand,
   ListPartsCommand,
@@ -153,6 +155,25 @@ export function s3PhotoStorage({
       const out = await client.send(new GetObjectCommand({ Bucket: bucket, Key: checkKey(key) }));
       if (!out.Body) throw new StorageError("not_found");
       return new Uint8Array(await out.Body.transformToByteArray());
+    },
+
+    async getStream(key) {
+      let out: GetObjectCommandOutput;
+      try {
+        out = await client.send(new GetObjectCommand({ Bucket: bucket, Key: checkKey(key) }));
+      } catch (err) {
+        if (isNotFound(err)) throw new StorageError("not_found");
+        throw err;
+      }
+      const body = out.Body as
+        | (Readable & { transformToWebStream?: unknown })
+        | { transformToWebStream: () => ReadableStream }
+        | undefined;
+      if (!body) throw new StorageError("not_found");
+      if (body instanceof Readable) return body;
+      return Readable.fromWeb(
+        body.transformToWebStream() as Parameters<typeof Readable.fromWeb>[0],
+      );
     },
 
     async put(key, body, { contentType, cacheControl }) {

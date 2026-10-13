@@ -11,6 +11,10 @@ export const NOTIFICATION_KINDS = [
   "payouts_restricted",
   "photos_failed",
   "tagging_ready",
+  // Orders (Phase 1 step 11, ADR 0024).
+  "order_paid",
+  "refund_failed",
+  "dispute_opened",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -28,6 +32,10 @@ export const NOTIFICATION_AUDIENCE: Record<NotificationKind, readonly Role[]> = 
   payouts_restricted: ["owner", "admin"],
   photos_failed: ["owner", "admin", "photographer"],
   tagging_ready: ["owner", "admin", "photographer"],
+  // A new order goes to the people who fulfil it; a failed refund and a dispute to the people who refund (ADR 0024).
+  order_paid: ["owner", "admin", "staff"],
+  refund_failed: ["owner", "admin"],
+  dispute_opened: ["owner", "admin"],
 };
 
 export function hearsAbout(role: string, kind: NotificationKind): boolean {
@@ -35,10 +43,15 @@ export function hearsAbout(role: string, kind: NotificationKind): boolean {
 }
 
 /**
- * Where a notification leads: the job's Overview, its Photos showing the failed ones, Photos' Review, or Settings ›
- * Payouts. Screens turn these into links.
+ * Where a notification leads: the job's Overview, its Photos showing the failed ones, Photos' Review, Settings ›
+ * Payouts, or the order's page (ADR 0024). Screens turn these into links.
  */
-export type NotificationTarget = "jobOverview" | "jobFailedPhotos" | "jobReview" | "payouts";
+export type NotificationTarget =
+  | "jobOverview"
+  | "jobFailedPhotos"
+  | "jobReview"
+  | "payouts"
+  | "order";
 
 export function notificationTarget(kind: NotificationKind): NotificationTarget {
   switch (kind) {
@@ -52,6 +65,10 @@ export function notificationTarget(kind: NotificationKind): NotificationTarget {
     case "payouts_active":
     case "payouts_restricted":
       return "payouts";
+    case "order_paid":
+    case "refund_failed":
+    case "dispute_opened":
+      return "order";
   }
 }
 

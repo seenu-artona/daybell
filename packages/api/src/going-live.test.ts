@@ -18,6 +18,15 @@ const sql = readFileSync(
   join(__dirname, "../../db/supabase/migrations/20261012500000_going_live.sql"),
   "utf8",
 );
+// Step 11 adds the order kinds in their own migration and replaces app.notification_audience (ADR 0024).
+const enumsSql = readFileSync(
+  join(__dirname, "../../db/supabase/migrations/20261013100000_orders_enums.sql"),
+  "utf8",
+);
+const ordersSql = readFileSync(
+  join(__dirname, "../../db/supabase/migrations/20261013100100_orders_and_refunds.sql"),
+  "utf8",
+);
 const errors = (r: { success: boolean; error?: unknown }) =>
   r.success ? {} : fieldErrors(r.error as Parameters<typeof fieldErrors>[0]);
 
@@ -25,12 +34,14 @@ describe("going live matches the database (ADR 0021)", () => {
   it("has the same notification kinds", () => {
     const kinds = [
       ...(sql.match(/notification_kind as enum \(([^)]*)\)/)?.[1] ?? "").matchAll(/'(\w+)'/g),
+      ...enumsSql.matchAll(/alter type public\.notification_kind add value '(\w+)'/g),
     ].map((m) => m[1]);
     expect(kinds).toEqual([...NOTIFICATION_KINDS]);
   });
 
   it("has the same audience per kind as app.notification_audience", () => {
-    const body = sql.slice(sql.indexOf("function app.notification_audience"));
+    // The latest definition: step 11's.
+    const body = ordersSql.slice(ordersSql.indexOf("function app.notification_audience"));
     for (const kind of NOTIFICATION_KINDS) {
       const roles = NOTIFICATION_AUDIENCE[kind].join(",");
       const explicit = body.match(new RegExp(`when '${kind}' then '\\{([^}]*)\\}'`))?.[1];

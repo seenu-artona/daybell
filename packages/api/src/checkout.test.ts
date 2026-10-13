@@ -158,9 +158,10 @@ describe("tax inputs (answer 2; call 3)", () => {
     }
   });
 
-  it("lists a job's orders by its id", () => {
+  it("lists a job's orders by its id (optional since step 11's Orders page)", () => {
     expect(orderListQuery.safeParse({ jobId: "nope" }).success).toBe(false);
     expect(orderListQuery.parse({ jobId: "a0000000-0000-4000-8000-000000000001" }).limit).toBe(50);
+    expect(orderListQuery.parse({}).jobId).toBeUndefined();
   });
 });
 
@@ -170,15 +171,15 @@ describe("checkout, orders and taxes routes", () => {
   const op = (path: string, method: string) =>
     (doc.paths[path] as Record<string, Op> | undefined)?.[method];
 
-  it("are parents' for checkout, owners' and admins' for orders, the owner's for tax changes", () => {
+  it("are parents' for checkout, fulfilment's for orders (step 11), the owner's for tax changes", () => {
     for (const [path, method, access] of [
       ["/shop/checkout", "post", "parent"],
       ["/shop/checkout/cancel", "post", "parent"],
       ["/shop/orders", "get", "parent"],
       ["/shop/orders/{orderId}", "get", "parent"],
       ["/shop/orders/{orderId}/downloads/{photoId}", "get", "parent"],
-      ["/orders", "get", "owner-admin"],
-      ["/orders/{id}", "get", "owner-admin"],
+      ["/orders", "get", "fulfilment"],
+      ["/orders/{id}", "get", "fulfilment"],
       ["/studio/taxes", "get", "owner-admin"],
       ["/studio/taxes/head-office", "put", "owner"],
       ["/studio/taxes/registrations", "post", "owner"],

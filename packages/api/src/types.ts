@@ -1,5 +1,6 @@
 import { DATA_REGIONS } from "@daybell/config";
 import {
+  CARRIERS,
   CURRENCIES,
   JOB_STATUSES,
   JOB_TYPES,
@@ -7,6 +8,7 @@ import {
   NOTIFICATION_KINDS,
   NOTIFICATIONS_SHOWN,
   ONBOARDING_TASKS,
+  ORDER_FULFILMENTS,
   ORDER_STATUSES,
   PAYOUT_ACCOUNT_STATUSES,
   PAYOUT_INTERVALS,
@@ -18,6 +20,9 @@ import {
   PRICE_ITEM_KINDS,
   PRINT_SIZES,
   PST_PROVINCES,
+  REFUND_KINDS,
+  REFUND_REASONS,
+  REFUND_STATUSES,
   SHOP_SHIPPING_METHODS,
   TASK_KEYS,
   TAX_REGISTRATION_KINDS,
@@ -84,6 +89,13 @@ export const ACTIVITY_TYPES = [
   "job.closed",
   "roster.imported",
   "qr_cards.printed",
+  // Orders (ADR 0024): paid, each fulfilment step, refunds and a parent's cancel. Never amounts or names.
+  "order.paid",
+  "order.printed",
+  "order.shipped",
+  "order.delivered",
+  "order.refunded",
+  "order.canceled",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -103,7 +115,10 @@ export const activityItem = z
     role: studioRole.nullable(),
     subjectName: z.string().nullable().meta({
       description:
-        "The job's or client's current name, for job, client, roster and QR card events.",
+        "The job's or client's current name, for job, client, roster and QR card events; the order's reference for order events.",
+    }),
+    subjectId: z.uuid().nullable().meta({
+      description: "What it was about (an order's id for order events, to link to it).",
     }),
     occurredAt: z.iso.datetime({ offset: true }),
   })
@@ -1136,7 +1151,7 @@ export const notification = z
     id: z.uuid(),
     kind: z.enum(NOTIFICATION_KINDS).meta({
       description:
-        "job_selling, job_closed (everyone); payouts_active, payouts_restricted (owners and admins); photos_failed, tagging_ready (owners, admins and photographers).",
+        "job_selling, job_closed (everyone); payouts_active, payouts_restricted (owners and admins); photos_failed, tagging_ready (owners, admins and photographers); order_paid (owners, admins and staff); refund_failed, dispute_opened (owners and admins).",
     }),
     createdAt: z.iso.datetime({ offset: true }),
     readAt: z.iso.datetime({ offset: true }).nullable(),
@@ -1144,6 +1159,10 @@ export const notification = z
       .object({ id: z.uuid(), name: z.string() })
       .nullable()
       .meta({ description: "The job it is about, with its current name; null for payouts." }),
+    order: z
+      .object({ id: z.uuid(), reference: z.string() })
+      .nullable()
+      .meta({ description: "The order it is about (order_paid, refund_failed, dispute_opened)." }),
     data: notificationData,
   })
   .meta({
@@ -1181,6 +1200,17 @@ export const cronJobsResponse = z.object({
   }),
   expiredOrders: z.number().int().meta({
     description: "Checkouts that ran out two hours ago, checked with Stripe and expired (or paid).",
+  }),
+  retriedRefunds: z.number().int().meta({
+    description:
+      "Refunds Stripe hadn't accepted, whose reversal wasn't done or whose status was still pending, tried again (ADR 0024).",
+  }),
+  purgedAddresses: z.number().int().meta({
+    description:
+      "Home delivery addresses removed: 90 days after shipping, or after payment once cancelled or refunded; 180 at most.",
+  }),
+  absorbedShortfalls: z.number().int().meta({
+    description: "Refund shortfalls no sale paid back within 180 days, absorbed by Daybell (Q2).",
   }),
 });
 export type CronJobsResponse = z.infer<typeof cronJobsResponse>;
@@ -1412,6 +1442,13 @@ export const SHOP_CONFLICTS = {
   downloadPreparing: "shop.downloadPreparing",
   /** The paid download couldn't be made after several tries: support has been alerted. */
   downloadUnavailable: "shop.downloadUnavailable",
+  // Orders (Phase 1 step 11, ADR 0024).
+  /** The order can't be cancelled here: printed already, downloads only, or not this device's purchase. */
+  cannotCancel: "shop.cannotCancel",
+  /** Too many cancels from this gallery in an hour (429, Retry-After). */
+  cancelLimit: "shop.cancelLimit",
+  /** More files than one zip holds: download them one at a time. */
+  zipTooBig: "shop.zipTooBig",
 } as const;
 export type ShopConflict = (typeof SHOP_CONFLICTS)[keyof typeof SHOP_CONFLICTS];
 
@@ -1444,6 +1481,27 @@ const orderStatus = z.enum(ORDER_STATUSES).meta({
     "pending: Stripe's checkout is open; paid; expired: cancelled, replaced or run out; failed: not used yet.",
 });
 
+// Orders after payment (Phase 1 step 11, ADR 0024).
+const fulfilment = z.enum(ORDER_FULFILMENTS).meta({
+  description:
+    "paid → printed → shipped (home, with tracking) or delivered (to school); complete: downloads only, nothing to deliver; canceled: the parent cancelled.",
+});
+const refundBadge = z.enum(["refunded", "partly_refunded"]).nullable().meta({
+  description: "Apart from the status: all or some of it was refunded (Stripe accepted).",
+});
+const carrier = z.enum(CARRIERS);
+const tracking = z
+  .object({
+    carrier,
+    number: z.string(),
+    url: z.string().nullable().meta({ description: "The studio's own link, for other carriers." }),
+    link: z
+      .string()
+      .nullable()
+      .meta({ description: "Where to follow it: the carrier's page, or the studio's link." }),
+  })
+  .meta({ id: "Tracking" });
+
 const shopOrderChild = z
   .discriminatedUnion("state", [
     z.object({
@@ -1475,6 +1533,7 @@ export const shopOrderLine = z
     name: z.string(),
     printSize: z.enum(PRINT_SIZES).nullable(),
     quantity: z.number().int(),
+    refundedQuantity: z.number().int().meta({ description: "How many were refunded." }),
     unitPrice: money.nullable().meta({ description: "Null in the child view." }),
     lineTotal: money.nullable().meta({ description: "Null in the child view." }),
     contents: z.array(packageLine).meta({ description: "A package's contents as sold." }),
@@ -1495,6 +1554,15 @@ export const shopOrder = z
     id: z.uuid(),
     reference: z.string().meta({ description: "8 characters, e.g. 7KQ2M9XA." }),
     status: orderStatus,
+    fulfilment: fulfilment.nullable().meta({ description: "Once paid (ADR 0024)." }),
+    refund: refundBadge,
+    canCancel: z.boolean().meta({
+      description:
+        "This gallery paid and the order isn't printed yet: it may cancel for a full refund (answer 2).",
+    }),
+    tracking: tracking
+      .nullable()
+      .meta({ description: "Once shipped; full view only. Never in an email (none in Phase 1)." }),
     view: orderView,
     paidAt: z.iso.datetime({ offset: true }).nullable(),
     createdAt: z.iso.datetime({ offset: true }),
@@ -1506,6 +1574,7 @@ export const shopOrder = z
         shipping: money,
         tax: money.nullable().meta({ description: "Null until paid." }),
         total: money.nullable().meta({ description: "Null until paid." }),
+        refunded: money.meta({ description: "Refunded so far." }),
       })
       .nullable()
       .meta({ description: "Full view only." }),
@@ -1535,6 +1604,8 @@ export const shopOrderSummary = z
     id: z.uuid(),
     reference: z.string(),
     status: orderStatus,
+    fulfilment: fulfilment.nullable(),
+    refund: refundBadge,
     view: orderView,
     paidAt: z.iso.datetime({ offset: true }).nullable(),
     createdAt: z.iso.datetime({ offset: true }),
@@ -1566,7 +1637,79 @@ export type DownloadLinkResponse = z.infer<typeof downloadLinkResponse>;
 
 const personName = z.object({ id: z.uuid(), firstName: z.string(), lastName: z.string() });
 
+// ── Orders and refunds (Phase 1 step 11, ADR 0024) ──────────────────────────────────────────────────────────────
+
 export const studioOrder = z
+  .object({
+    id: z.uuid(),
+    reference: z.string(),
+    paidAt: z.iso.datetime({ offset: true }),
+    total: money,
+    shippingMethod: z.enum(SHOP_SHIPPING_METHODS).nullable(),
+    fulfilment,
+    refund: refundBadge,
+    disputed: z.boolean().meta({ description: "A dispute was opened on the payment." }),
+    items: z.number().int(),
+    children: z
+      .array(z.object({ id: z.uuid(), displayName: z.string() }))
+      .meta({ description: 'First name and last initial, e.g. "Ava P."' }),
+  })
+  .meta({
+    id: "Order",
+    description: "A paid order in the studio's list (owners, admins and staff; Q4).",
+  });
+export type StudioOrder = z.infer<typeof studioOrder>;
+export const ordersResponse = z.object({
+  orders: z.array(studioOrder).meta({ description: "Newest first." }),
+  nextCursor: z.uuid().nullable(),
+});
+export type OrdersResponse = z.infer<typeof ordersResponse>;
+
+export const refund = z
+  .object({
+    id: z.uuid(),
+    kind: z.enum(REFUND_KINDS),
+    reason: z.enum(REFUND_REASONS).nullable(),
+    status: z.enum(REFUND_STATUSES).meta({
+      description:
+        "requested: not yet accepted by Stripe; pending, succeeded: Stripe's; failed; canceled: Stripe refused it, nothing happened.",
+    }),
+    products: money,
+    shipping: money,
+    tax: money,
+    amount: money.meta({ description: "What the parent gets back." }),
+    daybellFee: money.meta({ description: "Daybell's fee given back to the studio (answer 1)." }),
+    unrecovered: money.meta({
+      description:
+        "What the studio's transfer couldn't give back yet: taken from its next sale (Q2).",
+    }),
+    createdAt: z.iso.datetime({ offset: true }),
+    lines: z.array(z.object({ lineId: z.uuid(), quantity: z.number().int() })),
+  })
+  .meta({ id: "Refund" });
+export type Refund = z.infer<typeof refund>;
+export const refundResponse = z.object({ refund });
+export type RefundResponse = z.infer<typeof refundResponse>;
+
+export const ledgerTransaction = z
+  .object({
+    id: z.uuid(),
+    kind: z.enum(["order_paid", "order_refunded", "refund_failed", "refund_shortfall"]),
+    createdAt: z.iso.datetime({ offset: true }),
+    entries: z.array(
+      z.object({
+        id: z.number().int(),
+        account: z.string(),
+        amount: money.meta({
+          description: "Positive is a debit (in hand or owed to Daybell), negative a credit.",
+        }),
+      }),
+    ),
+  })
+  .meta({ id: "LedgerTransaction", description: "Balanced: its entries add up to zero." });
+export type LedgerTransaction = z.infer<typeof ledgerTransaction>;
+
+export const studioOrderDetail = z
   .object({
     id: z.uuid(),
     reference: z.string(),
@@ -1585,21 +1728,22 @@ export const studioOrder = z
       description:
         "Total less Daybell's fee and the card fee (tax included: the studio remits it).",
     }),
+    feesSettled: z
+      .boolean()
+      .meta({ description: "Stripe's fee is known: refunds can be made (before, 409)." }),
     shippingMethod: z.enum(SHOP_SHIPPING_METHODS).nullable(),
-    items: z.number().int(),
-    children: z.array(personName).meta({ description: "The children the order is for." }),
-  })
-  .meta({ id: "Order", description: "A paid order, as the studio sees it (owners and admins)." });
-export type StudioOrder = z.infer<typeof studioOrder>;
-export const ordersResponse = z.object({
-  orders: z.array(studioOrder).meta({ description: "Newest first." }),
-  nextCursor: z.uuid().nullable(),
-});
-export type OrdersResponse = z.infer<typeof ordersResponse>;
-
-export const studioOrderDetail = studioOrder
-  .omit({ children: true, items: true })
-  .extend({
+    fulfilment,
+    printedAt: z.iso.datetime({ offset: true }).nullable(),
+    shippedAt: z.iso.datetime({ offset: true }).nullable(),
+    deliveredAt: z.iso.datetime({ offset: true }).nullable(),
+    canceledAt: z.iso.datetime({ offset: true }).nullable(),
+    disputedAt: z.iso.datetime({ offset: true }).nullable(),
+    shipToPurgedAt: z.iso.datetime({ offset: true }).nullable().meta({
+      description: "When the home delivery address was removed (90 days after shipping).",
+    }),
+    tracking: tracking.nullable(),
+    refund: refundBadge,
+    refundInFlight: z.boolean().meta({ description: "A refund Stripe hasn't accepted yet." }),
     lines: z.array(
       z.object({
         id: z.uuid(),
@@ -1607,8 +1751,12 @@ export const studioOrderDetail = studioOrder
         name: z.string(),
         printSize: z.enum(PRINT_SIZES).nullable(),
         quantity: z.number().int(),
+        refundedQuantity: z.number().int().meta({ description: "How many were given back." }),
         unitPrice: money,
         lineTotal: money,
+        physical: z
+          .boolean()
+          .meta({ description: "To be printed (a print, or a package with prints)." }),
         child: personName.nullable(),
         photoId: z.uuid().nullable().meta({ description: "The pose; null for all digitals." }),
         contents: z.array(packageLine),
@@ -1625,12 +1773,108 @@ export const studioOrderDetail = studioOrder
         country: z.literal("CA"),
       })
       .nullable()
-      .meta({ description: "Home delivery only (call 2)." }),
+      .meta({ description: "Home delivery only (call 2); removed 90 days after shipping." }),
+    refunds: z
+      .array(refund)
+      .nullable()
+      .meta({ description: "Owners and admins only (Q4); null for staff." }),
+    refundable: z
+      .object({
+        products: money,
+        shipping: money,
+        tax: money,
+        daybellFee: money,
+        refunded: money.meta({ description: "Refunded so far (accepted by Stripe)." }),
+      })
+      .nullable()
+      .meta({ description: "What is left to refund. Owners and admins only." }),
+    ledger: z
+      .array(ledgerTransaction)
+      .nullable()
+      .meta({ description: "The order's ledger transactions. Owners and admins only." }),
   })
   .meta({ id: "OrderDetail" });
 export type StudioOrderDetail = z.infer<typeof studioOrderDetail>;
 export const orderResponse = z.object({ order: studioOrderDetail });
 export type OrderResponse = z.infer<typeof orderResponse>;
+
+/** Why an order request was refused with 409, in the error's `fields.form`. */
+export const ORDER_CONFLICTS = {
+  notPaid: "orders.notPaid",
+  refunded: "orders.refunded",
+  canceled: "orders.canceled",
+  refundInFlight: "orders.refundInFlight",
+  /** Stripe's fee isn't known yet; Retry-After says when to try again. */
+  feesPending: "orders.feesPending",
+  wrongDelivery: "orders.wrongDelivery",
+  trackingRequired: "orders.trackingRequired",
+  statusInvalid: "orders.statusInvalid",
+  overRefund: "orders.overRefund",
+  nothingToRefund: "orders.nothingToRefund",
+  /** Stripe refused the refund outright: nothing happened. */
+  refundRefused: "orders.refundRefused",
+} as const;
+export type OrderConflict = (typeof ORDER_CONFLICTS)[keyof typeof ORDER_CONFLICTS];
+
+/** The database's refusal names (migration 20261013100100), as the API's conflicts. */
+export const ORDER_DB_REFUSALS: Record<string, keyof typeof ORDER_CONFLICTS> = {
+  order_not_paid: "notPaid",
+  order_refunded: "refunded",
+  order_canceled: "canceled",
+  refund_in_flight: "refundInFlight",
+  fees_pending: "feesPending",
+  wrong_delivery: "wrongDelivery",
+  tracking_required: "trackingRequired",
+  status_invalid: "statusInvalid",
+  over_refund: "overRefund",
+  nothing_to_refund: "nothingToRefund",
+};
+
+export const bulkOrderStatusResponse = z
+  .object({
+    results: z.array(
+      z.object({
+        orderId: z.uuid(),
+        outcome: z.string().meta({
+          description: 'ok, or why that order was refused (an orders.* conflict, or "not_found").',
+        }),
+      }),
+    ),
+  })
+  .meta({ id: "BulkOrderStatus", description: "One result per order, in the request's order." });
+export type BulkOrderStatusResponse = z.infer<typeof bulkOrderStatusResponse>;
+
+export const salesSummary = z
+  .object({
+    start: z.iso.datetime({ offset: true }).meta({ description: "Where the range begins." }),
+    sales: money.meta({
+      description: "What parents paid less what was refunded (from the ledger).",
+    }),
+    orders: z.number().int(),
+    daybellFee: money.meta({ description: "Daybell's fee, net of refunds." }),
+    averageOrder: money.nullable(),
+  })
+  .meta({ id: "SalesSummary" });
+export type SalesSummary = z.infer<typeof salesSummary>;
+
+export const salesResponse = z
+  .object({
+    sales: z
+      .object({ today: salesSummary, week: salesSummary, season: salesSummary })
+      .nullable()
+      .meta({ description: "Owners and admins only (Q4); null for staff." }),
+    todo: z.object({
+      toPrint: z.number().int(),
+      toShip: z.number().int(),
+      toDeliver: z.number().int().meta({ description: "Printed, waiting to go to school." }),
+    }),
+  })
+  .meta({
+    id: "StudioSales",
+    description:
+      "Home's numbers (D127): today, this week (from Monday) and this season (from August 1), in the time zone asked.",
+  });
+export type SalesResponse = z.infer<typeof salesResponse>;
 
 export const taxRegistration = z
   .object({
