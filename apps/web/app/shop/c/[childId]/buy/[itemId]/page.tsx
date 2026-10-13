@@ -14,10 +14,12 @@ import { ProtectedImage } from "../../../../_components/protected-image";
 import { Quantity } from "../../../../_components/quantity";
 import { useShop } from "../../../../_components/shop-context";
 import { ShopHeader } from "../../../../_components/shop-header";
+import { ShopTitle } from "../../../../_components/shop-title";
 import { shopButton } from "../../../../_components/styles";
 import { useChildData } from "../../../../_components/use-child";
 
-interface Both {
+/** What the pose page needs: the job's prices and the child's portraits. */
+interface PoseData {
   prices: ShopPriceListResponse;
   gallery: ShopGalleryResponse;
 }
@@ -34,16 +36,17 @@ function Pose() {
   const { setBagCount } = useShop();
   const { itemId } = useParams<{ itemId: string }>();
   const wanted = useSearchParams().get("photo");
-  const load = useCallback(async (childId: string) => {
+  const load = useCallback(async (galleryId: string, childId: string) => {
     const [prices, gallery] = await Promise.all([
-      shopApi.priceList(childId),
-      shopApi.gallery(childId),
+      shopApi.priceList(galleryId, childId),
+      shopApi.gallery(galleryId, childId),
     ]);
     if (!prices.ok) return prices;
     if (!gallery.ok) return gallery;
     return { ok: true as const, data: { prices: prices.data, gallery: gallery.data } };
   }, []);
-  const { childId, child, studio, data, onImageError } = useChildData<Both>(load);
+  const { childId, galleryId, child, studio, data, failed, reload, onImageError } =
+    useChildData<PoseData>(load);
   const item = data?.prices.priceList?.items.find((i) => i.id === itemId);
   const portraits = data?.gallery.portraits ?? [];
   const [pose, setPose] = useState<string | null>(null);
@@ -57,25 +60,49 @@ function Pose() {
   }, [pose, portraits, wanted]);
 
   const add = async () => {
-    if (!item || !pose) return;
+    if (!item || !pose || !galleryId) return;
     setBusy(true);
     setError(null);
-    const result = await shopApi.addLine({ childId, itemId: item.id, photoId: pose, quantity });
+    const result = await shopApi.addLine(galleryId, {
+      childId,
+      itemId: item.id,
+      photoId: pose,
+      quantity,
+    });
     setBusy(false);
     if (!result.ok) {
       setError(refusal(result));
       return;
     }
-    setBagCount(bagCount(result.data));
-    router.push("/shop/bag");
+    setBagCount(galleryId, bagCount(result.data));
+    router.push(`/shop/bag?gallery=${encodeURIComponent(galleryId)}`);
   };
 
-  if (!child || !data) return <Loading label={t("loading")} />;
+  const heading = item?.name ?? t("pose.title");
+  const title = <ShopTitle>{heading}</ShopTitle>;
+  if (!child || !data)
+    return (
+      <>
+        {title}
+        {failed ? (
+          <MessageScreen>
+            <button type="button" onClick={() => void reload()} className={shopButton}>
+              {t("retry")}
+            </button>
+          </MessageScreen>
+        ) : (
+          <Loading label={t("loading")} />
+        )}
+      </>
+    );
   const chosen = portraits.find((p) => p.id === pose);
   const closed = data.prices.state !== "open";
+  // Back to the packages with the pose the parent came with (code review N9).
+  const back = `/shop/c/${childId}/buy${wanted ? `?photo=${encodeURIComponent(wanted)}` : ""}`;
   return (
     <>
-      <ShopHeader title={item?.name ?? t("pose.title")} back={`/shop/c/${childId}/buy`} />
+      {title}
+      <ShopHeader title={heading} back={back} gallery={galleryId} />
       <main className="px-4 pt-4 pb-32">
         {closed ? (
           <MessageScreen>
@@ -151,7 +178,7 @@ function Pose() {
       {!closed && item && item.kind !== "digital_all" ? (
         <DockedCta
           price={money({ cents: item.price.cents * quantity, currency: item.price.currency })}
-          label={t("pose.summary", { name: item.name, count: 1 })}
+          label={t("pose.summary", { name: item.name, count: quantity })}
         >
           <button
             type="button"

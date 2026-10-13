@@ -7,6 +7,7 @@ import {
   type InputHTMLAttributes,
   type KeyboardEvent,
   type ReactNode,
+  useId,
   useRef,
 } from "react";
 import { cn } from "../lib/cn";
@@ -185,7 +186,10 @@ export interface OptionCardProps
   flag?: ReactNode;
 }
 
-/** A package or add-on as a large tap target. */
+/**
+ * A package or add-on as a large tap target. Its input is named by the title alone ("Package B"), with the
+ * description, price and flag as its description, so screen readers (and tests) can find it by a short, exact name.
+ */
 export function OptionCard({
   type = "radio",
   title,
@@ -195,6 +199,10 @@ export function OptionCard({
   className,
   ...props
 }: OptionCardProps) {
+  const id = useId();
+  const described = [description ? `${id}-d` : null, `${id}-p`, flag ? `${id}-f` : null]
+    .filter(Boolean)
+    .join(" ");
   return (
     <label
       className={cn(
@@ -203,9 +211,18 @@ export function OptionCard({
         className,
       )}
     >
-      <input type={type} className="peer absolute opacity-0" {...props} />
+      <input
+        type={type}
+        className="peer absolute opacity-0"
+        aria-labelledby={`${id}-t`}
+        aria-describedby={described}
+        {...props}
+      />
       {flag ? (
-        <span className="absolute -top-2.5 right-3.5 rounded-full bg-lime px-2 text-micro text-ink">
+        <span
+          id={`${id}-f`}
+          className="absolute -top-2.5 right-3.5 rounded-full bg-lime px-2 text-micro text-ink"
+        >
           {flag}
         </span>
       ) : null}
@@ -219,12 +236,18 @@ export function OptionCard({
         aria-hidden="true"
       />
       <span className="min-w-0 flex-1">
-        <span className="block text-title-sm">{title}</span>
+        <span id={`${id}-t`} className="block text-title-sm">
+          {title}
+        </span>
         {description ? (
-          <span className="mt-0.5 block text-body text-muted">{description}</span>
+          <span id={`${id}-d`} className="mt-0.5 block text-body text-muted">
+            {description}
+          </span>
         ) : null}
       </span>
-      <span className="text-base font-bold tabular-nums">{price}</span>
+      <span id={`${id}-p`} className="text-base font-bold tabular-nums">
+        {price}
+      </span>
     </label>
   );
 }

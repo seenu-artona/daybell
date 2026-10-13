@@ -7,13 +7,18 @@ import {
   cartTotals,
   effectiveShipping,
   formatShopCookie,
+  formatShopCookies,
   hasQuantity,
   isLocked,
+  keepsOwnAllowance,
+  type LockoutKind,
   type LockoutState,
+  lockoutLimit,
   lockoutStep,
   mergeQuantity,
   parentDisplayName,
   parseShopCookie,
+  parseShopCookies,
   pickCoverPhoto,
   retryAfterSeconds,
   SHOP_LOCK_TRIES,
@@ -23,17 +28,23 @@ import {
 const MIN = 60_000;
 const T0 = Date.UTC(2026, 9, 12, 12, 0, 0);
 
-function fail(kind: "pair" | "ip", times: number, start: LockoutState | null = null, at = T0) {
+function fail(
+  kind: LockoutKind,
+  times: number,
+  start: LockoutState | null = null,
+  at = T0,
+  tripped = false,
+) {
   let state = start;
-  for (let i = 0; i < times; i++) state = lockoutStep(kind, state, at);
+  for (let i = 0; i < times; i++) state = lockoutStep(kind, state, at, tripped);
   return state as LockoutState;
 }
 
 describe("lockout (answer 2, call 4)", () => {
   it("locks a network and device for 15 minutes on the 5th wrong code", () => {
-    const four = fail("pair", SHOP_LOCK_TRIES - 1);
+    const four = fail("device", SHOP_LOCK_TRIES - 1);
     expect(isLocked(four, T0)).toBe(false);
-    const five = lockoutStep("pair", four, T0);
+    const five = lockoutStep("device", four, T0);
     expect(five).toEqual({ failures: 5, windowStart: T0, lockedUntil: T0 + 15 * MIN });
     expect(isLocked(five, T0 + 15 * MIN - 1)).toBe(true);
     expect(retryAfterSeconds(five, T0)).toBe(900);
@@ -41,10 +52,10 @@ describe("lockout (answer 2, call 4)", () => {
   });
 
   it("is over exactly at the 15 minutes, and then the count starts again", () => {
-    const locked = fail("pair", 5);
+    const locked = fail("device", 5);
     expect(isLocked(locked, T0 + 15 * MIN)).toBe(false);
     expect(retryAfterSeconds(locked, T0 + 15 * MIN)).toBe(0);
-    expect(lockoutStep("pair", locked, T0 + 15 * MIN)).toEqual({
+    expect(lockoutStep("device", locked, T0 + 15 * MIN)).toEqual({
       failures: 1,
       windowStart: T0 + 15 * MIN,
       lockedUntil: null,
@@ -52,19 +63,55 @@ describe("lockout (answer 2, call 4)", () => {
   });
 
   it("counts a device's wrong codes for 24 hours", () => {
-    const four = fail("pair", 4);
-    expect(lockoutStep("pair", four, T0 + 24 * 60 * MIN - 1).lockedUntil).not.toBeNull();
-    expect(lockoutStep("pair", four, T0 + 24 * 60 * MIN)).toMatchObject({
+    const four = fail("device", 4);
+    expect(lockoutStep("device", four, T0 + 24 * 60 * MIN - 1).lockedUntil).not.toBeNull();
+    expect(lockoutStep("device", four, T0 + 24 * 60 * MIN)).toMatchObject({
       failures: 1,
       lockedUntil: null,
     });
   });
 
   it("locks a network on its 30th wrong code in 15 minutes, from any device", () => {
-    expect(isLocked(fail("ip", SHOP_NETWORK_LOCK_TRIES - 1), T0)).toBe(false);
-    expect(isLocked(fail("ip", SHOP_NETWORK_LOCK_TRIES), T0)).toBe(true);
-    const spread = fail("ip", 29);
-    expect(lockoutStep("ip", spread, T0 + 15 * MIN).failures).toBe(1);
+    expect(isLocked(fail("net", SHOP_NETWORK_LOCK_TRIES - 1), T0)).toBe(false);
+    expect(isLocked(fail("net", SHOP_NETWORK_LOCK_TRIES), T0)).toBe(true);
+    const spread = fail("net", 29);
+    expect(lockoutStep("net", spread, T0 + 15 * MIN).failures).toBe(1);
+  });
+
+  it("counts a network's /24 or /56 to 100 and its /48 to 300, a third of that while the breaker is tripped", () => {
+    expect(lockoutLimit("wide")).toEqual({ tries: 100, windowMs: 15 * MIN });
+    expect(lockoutLimit("wider").tries).toBe(300);
+    expect([
+      lockoutLimit("net", true),
+      lockoutLimit("wide", true),
+      lockoutLimit("wider", true),
+    ]).toEqual([
+      { tries: 10, windowMs: 15 * MIN },
+      { tries: 30, windowMs: 15 * MIN },
+      { tries: 100, windowMs: 15 * MIN },
+    ]);
+    expect(lockoutLimit("nodevice", true)).toEqual(lockoutLimit("device"));
+    expect(isLocked(fail("net", 9, null, T0, true), T0)).toBe(false);
+    expect(isLocked(fail("net", 10, null, T0, true), T0)).toBe(true);
+  });
+
+  it("never extends or clears a running lock, even after its window", () => {
+    const locked = fail("net", SHOP_NETWORK_LOCK_TRIES);
+    const later = lockoutStep("net", locked, T0 + 14 * MIN);
+    expect(later.lockedUntil).toBe(T0 + 15 * MIN);
+    // A lock set at minute 14 of the window outlives the window: a miss at minute 16 doesn't clear it.
+    const late = fail("net", SHOP_NETWORK_LOCK_TRIES - 1);
+    const lockedLate = lockoutStep("net", late, T0 + 14 * MIN);
+    expect(lockoutStep("net", lockedLate, T0 + 16 * MIN).lockedUntil).toBe(T0 + 29 * MIN);
+  });
+
+  it("lets a known device keep its own allowance on a locked network, unless it was locked lately or the breaker is tripped (M3)", () => {
+    expect(keepsOwnAllowance({ known: true, lockedAt: null }, T0, false)).toBe(true);
+    expect(keepsOwnAllowance({ known: true, lockedAt: T0 - 24 * 60 * MIN }, T0, false)).toBe(true);
+    expect(keepsOwnAllowance({ known: true, lockedAt: T0 - 60 * MIN }, T0, false)).toBe(false);
+    expect(keepsOwnAllowance({ known: true, lockedAt: null }, T0, true)).toBe(false);
+    expect(keepsOwnAllowance({ known: false, lockedAt: null }, T0, false)).toBe(false);
+    expect(keepsOwnAllowance(null, T0, false)).toBe(false);
   });
 
   it("is not locked with no wrong codes", () => {
@@ -156,6 +203,10 @@ describe("delivery (call 9)", () => {
     expect(effectiveShipping("school", options)).toBe("home");
   });
 
+  it("fails closed when a job with something to deliver is missing (N3)", () => {
+    expect(() => availableShipping([line("a", 1000)], [])).toThrow();
+  });
+
   it("is nothing for a bag of downloads, or of lines no longer available", () => {
     expect(
       availableShipping([line("a", 2500, 1, { physical: false })], [job("a", 895, true)]),
@@ -233,5 +284,27 @@ describe("the shop cookie", () => {
     ])
       expect(parseShopCookie(bad)).toBeNull();
     expect(() => formatShopCookie("ca", "short")).toThrow();
+  });
+
+  it("holds up to 3 sessions, one per studio (S6)", () => {
+    const t = (c: string) => c.repeat(43);
+    const value = formatShopCookies([
+      { region: "ca", token: t("A") },
+      { region: "ca", token: t("B") },
+    ]);
+    expect(value).toBe(`ca.${t("A")}~ca.${t("B")}`);
+    expect(parseShopCookies(value)).toEqual([
+      { region: "ca", token: t("A") },
+      { region: "ca", token: t("B") },
+    ]);
+    expect(
+      parseShopCookies(`ca.${t("A")}~junk~ca.${t("A")}~ca.${t("B")}~ca.${t("C")}~ca.${t("D")}`).map(
+        (e) => e.token,
+      ),
+    ).toEqual([t("A"), t("B"), t("C")]);
+    expect(parseShopCookies(undefined)).toEqual([]);
+    expect(() =>
+      formatShopCookies(["A", "B", "C", "D"].map((c) => ({ region: "ca" as const, token: t(c) }))),
+    ).toThrow();
   });
 });

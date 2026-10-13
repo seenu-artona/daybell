@@ -9,7 +9,7 @@ repository or chat.
 | Route | What it does | Production | Staging |
 |---|---|---|---|
 | `/api/v1/internal/cron/photos` | Photo clean-up: purges the bin after 30 days, drops unfinished uploads, finishes idle batches, tags batches (ADR 0016, 0018) | Vercel Cron, daily 07:17 UTC | `staging-photo-cleanup.yml`, daily 07:17 UTC |
-| `/api/v1/internal/cron/jobs` | Closes shops whose closing date has passed; prunes read notifications after 90 days and any after 180 (ADR 0021), expired parent shop sessions and day-old wrong-code counts (ADR 0022) | Vercel Cron, daily 08:07 UTC | `jobs-cron.yml`, hourly at :07 |
+| `/api/v1/internal/cron/jobs` | Closes shops whose closing date has passed; prunes read notifications after 90 days and any after 180 (ADR 0021), expired parent shop sessions, day-old wrong-code counts and hour-old request counts, a page at a time until done (ADR 0022) | Vercel Cron, daily 08:07 UTC | `jobs-cron.yml`, hourly at :07 |
 
 Vercel Cron only runs for production deployments, so staging is called from GitHub Actions.
 

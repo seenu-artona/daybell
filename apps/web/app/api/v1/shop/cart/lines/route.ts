@@ -1,7 +1,8 @@
 import { shopCartLineInput } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { parseBody } from "@/lib/api";
-import { readCart, requireShopSession, shop, shopHandle } from "@/lib/shop/shop";
+import { readCart } from "@/lib/shop/gallery";
+import { callShopFunction, requireShopSession, shopHandle } from "@/lib/shop/http";
 
 export const runtime = "nodejs";
 export const preferredRegion = "yul1";
@@ -13,7 +14,7 @@ export const preferredRegion = "yul1";
 export const POST = shopHandle(async (request: Request) => {
   const session = await requireShopSession(request);
   const input = await parseBody(request, shopCartLineInput);
-  await shop<string>(session.region, "shop_cart_add", {
+  await callShopFunction<string>(session.region, "shop_cart_add", {
     p_session_hash: session.hash,
     p_child_id: input.childId,
     p_item_id: input.itemId,

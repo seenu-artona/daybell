@@ -13,9 +13,13 @@ import type { PriceItemKind } from "./price-lists";
 
 /** A session shows the first code's child and up to 4 siblings, of the same studio (call 1). */
 export const SHOP_SIBLING_LIMIT = 5;
+/** A device holds a session (a gallery and a bag) for each of up to 3 studios (code review S6). */
+export const SHOP_GALLERY_LIMIT = 3;
+/** At most this many sessions show one child; opening another forgets the oldest (security review M2). */
+export const SHOP_SESSIONS_PER_CHILD = 10;
 /** Fixed from the first code; adding a sibling doesn't extend it (answer 3, call 11). */
 export const SHOP_SESSION_DAYS = 30;
-/** Wrong codes from one network and device before it is locked (answer 2, call 4). */
+/** Wrong codes from one device (or a network's requests without one) before it is locked (answer 2, call 4). */
 export const SHOP_LOCK_TRIES = 5;
 /** How long a lock lasts (answer 2). */
 export const SHOP_LOCK_MINUTES = 15;
@@ -24,6 +28,19 @@ export const SHOP_DEVICE_WINDOW_HOURS = 24;
 /** Wrong codes from one network, from any device, in SHOP_NETWORK_WINDOW_MINUTES before it is locked (call 4). */
 export const SHOP_NETWORK_LOCK_TRIES = 30;
 export const SHOP_NETWORK_WINDOW_MINUTES = 15;
+/** The wider networks' ceilings in the same 15 minutes (security review H1): an IPv4 /24 or IPv6 /56, an IPv6 /48. */
+export const SHOP_WIDE_LOCK_TRIES = 100;
+export const SHOP_WIDER_LOCK_TRIES = 300;
+/** Wrong codes in a minute across a region that trip its circuit breaker for SHOP_LOCK_MINUTES (H1). */
+export const SHOP_BREAKER_PER_MINUTE = 600;
+/** While the breaker is tripped, the networks' ceilings are about a third, and no device is issued. */
+export const SHOP_TRIPPED_TRIES = { net: 10, wide: 30, wider: 100 } as const;
+/** New devices issued a day per network, per IPv4 /24 or IPv6 /56, and per IPv6 /48 (H1). */
+export const SHOP_NEW_DEVICES_PER_DAY = { net: 50, wide: 200, wider: 500 } as const;
+/** The device cookie, and a known device's record, last this long (security review L6). */
+export const SHOP_DEVICE_DAYS = 30;
+/** A known device keeps its own allowance on a locked network unless it was itself locked this recently (M3). */
+export const SHOP_KNOWN_DEVICE_COOLDOWN_HOURS = 24;
 /** Shop requests per network per minute (Claude's call, for Seenu to review). */
 export const SHOP_REQUESTS_PER_MINUTE = 120;
 /** Signed preview URLs last 10 minutes (Claude's call, for Seenu to review). */
@@ -36,8 +53,11 @@ const MINUTE = 60_000;
 
 // ── Lockout ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** What is counted per key: a network and device together ("pair"), or a network ("ip"). */
-export type LockoutKind = "pair" | "ip";
+/**
+ * What is counted per key (security review H1): a device the server issued, wherever it is; the shared bucket of a
+ * network's requests without one; the network (IPv4 address, IPv6 /64); its /24 or /56; its IPv6 /48.
+ */
+export type LockoutKind = "device" | "nodevice" | "net" | "wide" | "wider";
 
 export interface LockoutState {
   failures: number;
@@ -47,10 +67,26 @@ export interface LockoutState {
   lockedUntil: number | null;
 }
 
-const LIMITS: Record<LockoutKind, { tries: number; windowMs: number }> = {
-  pair: { tries: SHOP_LOCK_TRIES, windowMs: SHOP_DEVICE_WINDOW_HOURS * 60 * MINUTE },
-  ip: { tries: SHOP_NETWORK_LOCK_TRIES, windowMs: SHOP_NETWORK_WINDOW_MINUTES * MINUTE },
-};
+const NETWORK_WINDOW_MS = SHOP_NETWORK_WINDOW_MINUTES * MINUTE;
+const DEVICE_LIMIT = { tries: SHOP_LOCK_TRIES, windowMs: SHOP_DEVICE_WINDOW_HOURS * 60 * MINUTE };
+
+const NETWORK_TRIES = {
+  net: SHOP_NETWORK_LOCK_TRIES,
+  wide: SHOP_WIDE_LOCK_TRIES,
+  wider: SHOP_WIDER_LOCK_TRIES,
+} as const;
+
+/** A key's limit: wrong codes in a window. The networks' limits are lower while the region's breaker is tripped. */
+export function lockoutLimit(
+  kind: LockoutKind,
+  tripped = false,
+): { tries: number; windowMs: number } {
+  if (kind === "device" || kind === "nodevice") return DEVICE_LIMIT;
+  return {
+    tries: tripped ? SHOP_TRIPPED_TRIES[kind] : NETWORK_TRIES[kind],
+    windowMs: NETWORK_WINDOW_MS,
+  };
+}
 
 export function isLocked(state: LockoutState | null, now: number): boolean {
   return state?.lockedUntil != null && state.lockedUntil > now;
@@ -63,25 +99,49 @@ export function retryAfterSeconds(state: LockoutState | null, now: number): numb
 }
 
 /**
- * One wrong code for a key. A served lock, or a window that has passed, starts the count again; the count that reaches
- * the limit locks the key for 15 minutes. A right code never calls this: it never resets the count, so one real code
- * can't clear it between guesses.
+ * One wrong code for a key. A served lock, or (unlocked) a window that has passed, starts the count again; the count
+ * that reaches the limit locks the key for 15 minutes. A running lock is never extended or cleared (a known device's
+ * wrong codes still count on its locked network). A right code never calls this: it never resets the count, so one
+ * real code can't clear it between guesses.
  */
 export function lockoutStep(
   kind: LockoutKind,
   state: LockoutState | null,
   now: number,
+  tripped = false,
 ): LockoutState {
-  const { tries, windowMs } = LIMITS[kind];
+  const { tries, windowMs } = lockoutLimit(kind, tripped);
   let next: LockoutState = state ?? { failures: 0, windowStart: now, lockedUntil: null };
-  if ((next.lockedUntil !== null && next.lockedUntil <= now) || next.windowStart + windowMs <= now)
+  if (
+    (next.lockedUntil !== null && next.lockedUntil <= now) ||
+    (next.lockedUntil === null && next.windowStart + windowMs <= now)
+  )
     next = { failures: 0, windowStart: now, lockedUntil: null };
-  const failures = next.failures + 1;
+  const failures = Math.min(next.failures + 1, 1_000_000);
   return {
     failures,
     windowStart: next.windowStart,
-    lockedUntil: failures >= tries ? now + SHOP_LOCK_MINUTES * MINUTE : next.lockedUntil,
+    lockedUntil:
+      next.lockedUntil === null && failures >= tries
+        ? now + SHOP_LOCK_MINUTES * MINUTE
+        : next.lockedUntil,
   };
+}
+
+/**
+ * Whether a device keeps its own allowance while its network is locked (security review M3): it has opened a gallery
+ * before, hasn't itself been locked in the last 24 hours, and the region's breaker isn't tripped.
+ */
+export function keepsOwnAllowance(
+  device: { known: boolean; lockedAt: number | null } | null,
+  now: number,
+  tripped: boolean,
+): boolean {
+  if (!device?.known || tripped) return false;
+  return (
+    device.lockedAt === null ||
+    device.lockedAt <= now - SHOP_KNOWN_DEVICE_COOLDOWN_HOURS * 60 * MINUTE
+  );
 }
 
 // ── Names ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -166,8 +226,10 @@ export function availableShipping(
 ): ShippingOptions {
   const ids = new Set(lines.filter((l) => l.available && l.physical).map((l) => l.jobId));
   const shipping = jobs.filter((j) => ids.has(j.jobId));
-  if (ids.size === 0 || shipping.length !== ids.size)
-    return { needed: ids.size > 0, homeCents: 0, school: false };
+  if (ids.size === 0) return { needed: false, homeCents: 0, school: false };
+  // Money fails closed (code review N3): a job missing here would make delivery free.
+  if (shipping.length !== ids.size)
+    throw new Error("Every job with something to deliver needs its delivery facts");
   return {
     needed: true,
     homeCents: Math.max(...shipping.map((j) => j.homeShippingCents)),
@@ -238,11 +300,39 @@ export function formatShopCookie(region: AccessCodeRegion, token: string): strin
   return `${region}.${token}`;
 }
 
-/** The region and token in a shop cookie, or null for anything else (then there is no session). */
+/** The region and token in a shop cookie entry, or null for anything else (then there is no session). */
 export function parseShopCookie(
   value: string | null | undefined,
 ): { region: AccessCodeRegion; token: string } | null {
   const match = /^(us|ca)\.([A-Za-z0-9_-]{43})$/.exec(value ?? "");
   if (!match) return null;
   return { region: match[1] as AccessCodeRegion, token: match[2] as string };
+}
+
+/** Separates a device's sessions in the one shop cookie (a cookie-safe character no entry contains). */
+const SESSIONS_SEPARATOR = "~";
+
+/**
+ * A device's sessions, one per studio (S6): "ca.<token>~ca.<token>", at most 3, oldest first. Malformed entries and
+ * repeats are dropped, and only the first 3 well-formed ones count.
+ */
+export function parseShopCookies(
+  value: string | null | undefined,
+): { region: AccessCodeRegion; token: string }[] {
+  const out: { region: AccessCodeRegion; token: string }[] = [];
+  for (const part of (value ?? "").split(SESSIONS_SEPARATOR)) {
+    const entry = parseShopCookie(part);
+    if (entry && !out.some((e) => e.token === entry.token)) out.push(entry);
+    if (out.length === SHOP_GALLERY_LIMIT) break;
+  }
+  return out;
+}
+
+/** The cookie's value for a device's sessions (at most 3). */
+export function formatShopCookies(
+  entries: readonly { region: AccessCodeRegion; token: string }[],
+): string {
+  if (entries.length > SHOP_GALLERY_LIMIT)
+    throw new Error("A device holds at most 3 shop sessions");
+  return entries.map((e) => formatShopCookie(e.region, e.token)).join(SESSIONS_SEPARATOR);
 }

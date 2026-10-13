@@ -1,7 +1,8 @@
 import { ApiError } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireShopSession, shop, shopHandle, toShopGallery } from "@/lib/shop/shop";
+import { toShopGallery } from "@/lib/shop/gallery";
+import { callShopFunction, requireShopSession, shopHandle } from "@/lib/shop/http";
 
 export const runtime = "nodejs";
 // Canadian photos are signed in Montréal (D113).
@@ -17,9 +18,13 @@ export const GET = shopHandle(async (request: Request, ctx: Ctx) => {
   const session = await requireShopSession(request);
   const { childId } = await ctx.params;
   if (!z.uuid().safeParse(childId).success) throw new ApiError("not_found", "Child not found.");
-  const row = await shop<Parameters<typeof toShopGallery>[1]>(session.region, "shop_gallery", {
-    p_session_hash: session.hash,
-    p_child_id: childId,
-  });
+  const row = await callShopFunction<Parameters<typeof toShopGallery>[1]>(
+    session.region,
+    "shop_gallery",
+    {
+      p_session_hash: session.hash,
+      p_child_id: childId,
+    },
+  );
   return NextResponse.json(await toShopGallery(session.region, row));
 });

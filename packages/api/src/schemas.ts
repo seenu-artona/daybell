@@ -1036,3 +1036,16 @@ export const shopShippingInput = z.strictObject(
   { error: "validation.unknownField" },
 );
 export type ShopShippingInput = z.infer<typeof shopShippingInput>;
+
+/** Which of the device's galleries (one per studio, code review S6) a shop call is for. */
+export const shopGalleryQuery = z.object({
+  gallery: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/, { error: "validation.invalid" })
+    .optional()
+    .meta({
+      description:
+        "A gallery's id from GET /shop/session. Without it, the device's first gallery. A gallery not on this device is 401 shop_session_required.",
+    }),
+});
+export type ShopGalleryQuery = z.infer<typeof shopGalleryQuery>;

@@ -466,6 +466,31 @@ describe("GET /internal/cron/jobs", () => {
     ]);
   });
 
+  it("prunes the parent shop a page at a time until a page comes back short (ADR 0022, security review M2)", async () => {
+    const pages = [1000, 1000, 3];
+    systemRpc.mockImplementation(async (_region: string, fn: string) => ({
+      data: fn === "prune_shop" ? pages.shift() : 0,
+      error: null,
+    }));
+    const res = await cron(`Bearer ${SECRET}`);
+    expect(await res.json()).toMatchObject({ prunedShop: 2003 });
+    expect(systemRpc.mock.calls.filter((c) => c[1] === "prune_shop")).toHaveLength(3);
+  });
+
+  it("stops pruning when the region's time is up", async () => {
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    systemRpc.mockImplementation(async (_region: string, fn: string) => {
+      if (fn !== "prune_shop") return { data: 0, error: null };
+      now += 20_000;
+      return { data: 1000, error: null };
+    });
+    const res = await cron(`Bearer ${SECRET}`);
+    clock.mockRestore();
+    expect(res.status).toBe(200);
+    expect(systemRpc.mock.calls.filter((c) => c[1] === "prune_shop")).toHaveLength(3);
+  });
+
   it("accepts GitHub's own secret once it is set, and Vercel's still (security review M1)", async () => {
     systemRpc.mockResolvedValue({ data: 0, error: null });
     expect((await cron(`Bearer ${GITHUB}`)).status).toBe(401);

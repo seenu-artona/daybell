@@ -49,21 +49,39 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<Sh
   };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GALLERY = /^[0-9a-f]{32}$/;
+
+/** Whether an id from the page's address is a well-formed id (security review L3): nothing else goes into a path. */
+export const isShopId = (id: string | undefined | null): id is string => UUID.test(id ?? "");
+export const isGalleryId = (id: string | undefined | null): id is string => GALLERY.test(id ?? "");
+
+const path = (id: string) => encodeURIComponent(id);
+const inGallery = (gallery: string) => `?gallery=${encodeURIComponent(gallery)}`;
+
+/** The shop's calls. Everything after opening a code names the gallery (the studio's) it is for (S6). */
 export const shopApi = {
   session: () => call<ShopSessionResponse>("/session"),
   open: (code: string) => call<ShopOpenedResponse>("/access", "POST", { code }),
-  addChild: (code: string) => call<ShopOpenedResponse>("/children", "POST", { code }),
-  forget: () => call<undefined>("/session", "DELETE"),
-  gallery: (childId: string) => call<ShopGalleryResponse>(`/children/${childId}/gallery`),
-  priceList: (childId: string) => call<ShopPriceListResponse>(`/children/${childId}/price-list`),
-  cart: () => call<ShopCartResponse>("/cart"),
-  addLine: (line: Partial<ShopCartLineInput> & Pick<ShopCartLineInput, "childId" | "itemId">) =>
-    call<ShopCartResponse>("/cart/lines", "POST", line),
-  setQuantity: (lineId: string, quantity: number) =>
-    call<ShopCartResponse>(`/cart/lines/${lineId}`, "PATCH", { quantity }),
-  removeLine: (lineId: string) => call<ShopCartResponse>(`/cart/lines/${lineId}`, "DELETE"),
-  setShipping: (method: ShopShippingMethod) =>
-    call<ShopCartResponse>("/cart/shipping", "PUT", { method }),
+  forget: (gallery: string | null) =>
+    call<undefined>(`/session${gallery ? inGallery(gallery) : ""}`, "DELETE"),
+  gallery: (gallery: string, childId: string) =>
+    call<ShopGalleryResponse>(`/children/${path(childId)}/gallery${inGallery(gallery)}`),
+  priceList: (gallery: string, childId: string) =>
+    call<ShopPriceListResponse>(`/children/${path(childId)}/price-list${inGallery(gallery)}`),
+  cart: (gallery: string) => call<ShopCartResponse>(`/cart${inGallery(gallery)}`),
+  addLine: (
+    gallery: string,
+    line: Partial<ShopCartLineInput> & Pick<ShopCartLineInput, "childId" | "itemId">,
+  ) => call<ShopCartResponse>(`/cart/lines${inGallery(gallery)}`, "POST", line),
+  setQuantity: (gallery: string, lineId: string, quantity: number) =>
+    call<ShopCartResponse>(`/cart/lines/${path(lineId)}${inGallery(gallery)}`, "PATCH", {
+      quantity,
+    }),
+  removeLine: (gallery: string, lineId: string) =>
+    call<ShopCartResponse>(`/cart/lines/${path(lineId)}${inGallery(gallery)}`, "DELETE"),
+  setShipping: (gallery: string, method: ShopShippingMethod) =>
+    call<ShopCartResponse>(`/cart/shipping${inGallery(gallery)}`, "PUT", { method }),
 };
 
 /** Things in a bag (quantities added, unavailable lines too), as the header's count shows them. */

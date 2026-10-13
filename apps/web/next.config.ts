@@ -30,18 +30,31 @@ const config: NextConfig = {
   outputFileTracingIncludes: { "/api/v1/jobs/[id]/qr-cards": ["./assets/fonts/*.ttf"] },
   poweredByHeader: false,
   reactStrictMode: true,
-  // The parent shop (ADR 0022): never indexed, never framed (screenshots in a frame dodge the deterrents), and no
-  // Referer, so the signed preview URLs never travel to another site in one.
+  // The parent shop (ADR 0022): never indexed, never framed (screenshots in a frame dodge the deterrents), no Referer
+  // (the signed preview URLs never travel to another site in one), HTTPS only on custom domains too, and no camera,
+  // microphone, location or payment APIs (security review L2). The pages' Content-Security-Policy carries a nonce per
+  // request (proxy.ts); the API's answers are JSON, which may load nothing at all.
   async headers() {
     const shopHeaders = [
       { key: "X-Robots-Tag", value: "noindex, nofollow" },
       { key: "Referrer-Policy", value: "no-referrer" },
       { key: "X-Frame-Options", value: "DENY" },
+      { key: "Strict-Transport-Security", value: "max-age=63072000" },
+      {
+        key: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()",
+      },
     ];
     return [
       { source: "/shop", headers: shopHeaders },
       { source: "/shop/:path*", headers: shopHeaders },
-      { source: "/api/v1/shop/:path*", headers: shopHeaders },
+      {
+        source: "/api/v1/shop/:path*",
+        headers: [
+          ...shopHeaders,
+          { key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" },
+        ],
+      },
     ];
   },
 };

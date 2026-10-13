@@ -2,15 +2,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   SHOP_BAG_LINES,
+  SHOP_BREAKER_PER_MINUTE,
+  SHOP_DEVICE_DAYS,
   SHOP_DEVICE_WINDOW_HOURS,
+  SHOP_GALLERY_LIMIT,
+  SHOP_KNOWN_DEVICE_COOLDOWN_HOURS,
   SHOP_LOCK_MINUTES,
   SHOP_LOCK_TRIES,
   SHOP_MAX_QUANTITY,
   SHOP_NETWORK_LOCK_TRIES,
   SHOP_NETWORK_WINDOW_MINUTES,
+  SHOP_NEW_DEVICES_PER_DAY,
   SHOP_SESSION_DAYS,
+  SHOP_SESSIONS_PER_CHILD,
   SHOP_SHIPPING_METHODS,
   SHOP_SIBLING_LIMIT,
+  SHOP_TRIPPED_TRIES,
+  SHOP_WIDE_LOCK_TRIES,
+  SHOP_WIDER_LOCK_TRIES,
 } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import { STATUS_FOR } from "./errors";
@@ -19,6 +28,7 @@ import {
   fieldErrors,
   shopCartLineInput,
   shopCodeInput,
+  shopGalleryQuery,
   shopQuantityInput,
   shopShippingInput,
 } from "./schemas";
@@ -52,8 +62,8 @@ describe("the parent shop matches the database (ADR 0022)", () => {
       [
         "bagFull",
         "closed",
+        "galleryLimit",
         "itemUnavailable",
-        "otherStudio",
         "photoUnavailable",
         "schoolDeliveryOff",
         "siblingLimit",
@@ -66,11 +76,30 @@ describe("the parent shop matches the database (ADR 0022)", () => {
     expect(sql).toContain(`>= ${SHOP_SIBLING_LIMIT} then`);
     expect(sql).toContain(`now() + interval '${SHOP_SESSION_DAYS} days'`);
     expect(sql).toContain(
-      `when 'pair' then ${SHOP_LOCK_TRIES} else ${SHOP_NETWORK_LOCK_TRIES} end`,
+      `app.shop_code_failed(v_own_kind, v_own_key, ${SHOP_LOCK_TRIES}, interval '${SHOP_DEVICE_WINDOW_HOURS} hours')`,
+    );
+    const network = (kind: string, key: string, tripped: number, normal: number) =>
+      `app.shop_code_failed('${kind}', ${key}, case when v_tripped then ${tripped} else ${normal} end, interval '${SHOP_NETWORK_WINDOW_MINUTES} minutes')`;
+    expect(sql).toContain(
+      network("net", "p_net_key", SHOP_TRIPPED_TRIES.net, SHOP_NETWORK_LOCK_TRIES),
     );
     expect(sql).toContain(
-      `when 'pair' then interval '${SHOP_DEVICE_WINDOW_HOURS} hours' else interval '${SHOP_NETWORK_WINDOW_MINUTES} minutes' end`,
+      network("wide", "p_wide_key", SHOP_TRIPPED_TRIES.wide, SHOP_WIDE_LOCK_TRIES),
     );
+    expect(sql).toContain(
+      network("wider", "p_wider_key", SHOP_TRIPPED_TRIES.wider, SHOP_WIDER_LOCK_TRIES),
+    );
+    expect(sql).toContain(`if v_hits = ${SHOP_BREAKER_PER_MINUTE} then`);
+    expect(sql).toContain(
+      `case a.kind when 'issue_net' then ${SHOP_NEW_DEVICES_PER_DAY.net} when 'issue_wide' then ${SHOP_NEW_DEVICES_PER_DAY.wide} else ${SHOP_NEW_DEVICES_PER_DAY.wider} end`,
+    );
+    expect(sql).toContain(
+      `a.locked_at <= now() - interval '${SHOP_KNOWN_DEVICE_COOLDOWN_HOURS} hours'`,
+    );
+    expect(sql).toContain(`x.updated_at < now() - interval '${SHOP_DEVICE_DAYS} days'`);
+    expect(sql).toContain(`cardinality(v_live) >= ${SHOP_GALLERY_LIMIT} then`);
+    expect(sql).toContain(`cardinality(v_hashes) > ${SHOP_GALLERY_LIMIT}`);
+    expect(sql).toContain(`offset ${SHOP_SESSIONS_PER_CHILD - 1}`);
     expect(sql).toContain(`now() + interval '${SHOP_LOCK_MINUTES} minutes'`);
     expect(sql).toContain(`>= ${SHOP_BAG_LINES}`);
     expect(sql).toContain(`quantity between 1 and ${SHOP_MAX_QUANTITY}`);
@@ -132,7 +161,6 @@ describe("shop routes", () => {
       "POST /shop/access",
       "GET /shop/session",
       "DELETE /shop/session",
-      "POST /shop/children",
       "GET /shop/children/{childId}/gallery",
       "GET /shop/children/{childId}/price-list",
       "GET /shop/cart",
@@ -145,8 +173,22 @@ describe("shop routes", () => {
       expect(r.access, r.path).toBe(r.path === "/shop/access" ? "public" : "parent");
   });
 
-  it("all say they are rate limited, and the session error is a 401", () => {
-    for (const r of shop) expect(r.errors, r.path).toContain("rate_limited");
+  it("all say they are rate limited and may find no region (N11), and the session error is a 401", () => {
+    for (const r of shop) {
+      expect(r.errors, r.path).toContain("rate_limited");
+      expect(r.errors, r.path).toContain("region_unavailable");
+    }
     expect(STATUS_FOR.shop_session_required).toBe(401);
+  });
+
+  it("name a gallery of the device for everything but opening and listing them (S6)", () => {
+    for (const r of shop.filter(
+      (r) => r.path !== "/shop/access" && !(r.method === "GET" && r.path === "/shop/session"),
+    ))
+      expect(r.query, `${r.method} ${r.path}`).toBe(shopGalleryQuery);
+    expect(shopGalleryQuery.parse({ gallery: "0123456789abcdef0123456789abcdef" })).toEqual({
+      gallery: "0123456789abcdef0123456789abcdef",
+    });
+    expect(shopGalleryQuery.safeParse({ gallery: "../cart" }).success).toBe(false);
   });
 });

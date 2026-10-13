@@ -14,6 +14,8 @@
 - Inputs: the Phase 1 spec step 9 ("Code entry with lockout; full-screen cover and photo grid in the default look with
   the studio's name and colour; up to 5 sibling codes in one cart; package, then pose"), Seenu's answers 1–4 of Oct 12,
   2026, Claude's calls 1–13 on the architect's questions, the architect's plan, and the ShopFlow v5 board.
+- Review fixes (Oct 12–13): the security review (H1, M1, M2, M3, L1–L7) and the code review (M1, M2, S1–S6, N1–N12),
+  with the orchestrator's calls on both, are in this ADR as amended below; §12 lists each finding and where it went.
 
 ## Context
 
@@ -31,42 +33,90 @@ studio); previews have been made at upload since step 4, including watermarked `
   that isn't a code, a blank card's code and a wrong code all get the same 404 (`shop.codeNotFound`), take the same
   path (the HMAC is always computed) and count as a wrong code (call 5: blank cards not yet named reveal nothing).
 - Lookup is by `children.access_code_hash` only: never `qr_cards` (blank cards) and never `card_code`.
+- Every shop request is counted against its network's budget **before its body is read** (security review L7), so
+  malformed bodies count too.
 
-## 2. Lockout (answer 2, call 4)
+## 2. Lockout (answer 2, call 4; security review H1, M2, M3, L4, L6)
 
-- **5 wrong codes from one network and device (in 24 hours) lock that pair for 15 minutes; 30 wrong codes from one
-  network in 15 minutes lock the network for 15 minutes.** Claude's call 4; the 24-hour window for a device is Claude's
-  call, Seenu to review.
-- The network is the client's address (the first `x-forwarded-for` entry, which Vercel sets and overwrites); IPv6 is
-  bucketed by its /64. The device is a random httpOnly cookie, `daybell_device` (400 days, used for nothing else). Both
-  are HMAC'd with a new key, `SHOP_THROTTLE_KEY`, before they leave the route: no address or device id is ever stored
-  or logged. Clearing cookies only moves a guesser onto the network count.
-- `public.shop_enter_code` locks both counters' rows first (network, then pair), checks the lock **before any lookup**
-  (a locked caller gets `locked` even with a right code and learns nothing), then looks up the HMAC. A miss counts on
-  both keys; the 5th miss answers `locked` straight away. **A right code never resets the count** (else one real code
-  could clear it between guesses). Parallel guesses take turns on the row locks, so a burst can't slip past the limit.
+The first version counted "5 per network and device" by a device id the caller chose, so a script without cookies was
+only ever limited per network: about 2,880 guesses a day per IPv4 address or IPv6 /64, and about 1.9×10⁸ a day from one
+IPv6 /48 (H1). It now counts:
+
+- **Devices the server issued.** A request without one may be given one: a random id in a cookie signed with HMAC
+  under `SHOP_THROTTLE_KEY` (`<id>.<issued at>.<signature>`, checked in constant time, valid 30 days, L6). Anything
+  else (no cookie, a forged or expired one) is "no device". A device is counted **wherever it is**: moving networks
+  doesn't reset it.
+- **One shared no-device bucket per network.** Every request on a network without a valid device shares it, so dropping
+  the cookie never earns fresh tries.
+- **New devices are capped per network per day**: 50 per IPv4 address or IPv6 /64, 200 per IPv4 /24 or IPv6 /56, 500 per
+  IPv6 /48. Beyond the cap a request stays in the no-device bucket. None are issued while the breaker is tripped.
+- **Networks at three widths**, every 15 minutes: 30 wrong codes from an IPv4 address or IPv6 /64, 100 from an IPv4 /24
+  or IPv6 /56, 300 from an IPv6 /48 lock it for 15 minutes.
+- **A region-wide circuit breaker**: 600 wrong codes in a minute across the region trip it for 15 minutes. While it is
+  tripped the network limits are 10, 30 and 100, no device is issued and known devices get no allowance of their own
+  (below). The wrong code that trips it makes the API log one code-free line, `shop_lockout_breaker_tripped <region>`,
+  for an alert on Vercel's logs.
+- **Known devices keep their own allowance on a locked network (M3).** A device that has opened a gallery with a right
+  code is "known" (kept 30 days). On a network that is locked (a school's Wi-Fi after someone's typos, a carrier's shared
+  address), a known device still gets its own 5 tries, unless it was itself locked in the last 24 hours or the breaker is
+  tripped. Its wrong codes still count on the network. This doesn't reopen H1: known devices need a right code and an
+  issued device (capped per network), and each one loses the allowance after its first lock.
+- The device's 5 wrong codes (in 24 hours) and the network's ceilings still lock for 15 minutes (answer 2). **A right
+  code never resets a count.** A running lock is never extended or cleared by more wrong codes.
+
+**Effective limits** (H1.6), per 15 minutes unless said: a device (or a network's no-device bucket) 5 then locked 15
+minutes (so about 5 per 15 minutes, 480 a day at most); a network 30; an IPv4 /24 or IPv6 /56 100; an IPv6 /48 300 (about
+28,800 a day, against 1.9×10⁸ before, plus at most about 5 a day from each known device, of which a /48 can be issued
+500 a day); a whole region about 600 a minute before the breaker cuts every network to a
+third. With 10⁵ live Canadian codes in a space of 15×31⁷ ≈ 4.1×10¹¹, 28,800 guesses a day from a /48 find a code about
+once in 140 days; a botnet spread wide enough to reach the breaker's rate still meets it.
+
+How:
+
+- The address (L4): on Vercel only `x-vercel-forwarded-for`, which Vercel sets itself (`@vercel/functions` isn't a
+  dependency, so its `ipAddress()` isn't used); a request on Vercel without it, and any address that can't be read,
+  share **one strict bucket** (`untrusted`). Off Vercel (development, CI, end-to-end; Daybell isn't self-hosted) the
+  local server's `x-forwarded-for`. Device ids and networks are HMACs before they leave the route: no address or device
+  id is ever stored or logged.
+- `public.shop_enter_code` takes every key's **advisory lock** in one sorted order (parallel guesses take turns and two
+  tabs can't deadlock, code review N1), then any session row; checks the locks **before any lookup** (a locked caller
+  gets `locked` even with a right code and learns nothing); then looks up the HMAC. A miss counts on the device's bucket,
+  every network width and the breaker.
+- Rows are written only on a wrong code, a device issued (per network, not per request) or a known device's right code;
+  **a locked or refused request writes nothing** (M2). The counts live in `app.shop_code_attempts` (not reachable through
+  the Data API; no studio_id: a wrong guess belongs to no studio); `prune_shop` removes them after 24 hours untouched (a
+  known device's after 30 days).
 - 429 `rate_limited` with `fields.form = shop.locked` and `Retry-After`.
-- The counts live in `app.shop_code_attempts` (the `app` schema is not reachable through the Data API; no studio_id: a
-  wrong guess belongs to no studio), HMACs only, removed after 24 hours.
 - Every shop route also counts requests per network: **120 a minute** (architect's call, accepted), in
   `app.shop_rate` through `take_shop_request`, the `stripe_call_budget` pattern. 429 with `Retry-After: 60`.
 
-## 3. Sessions (answer 3; calls 1, 11)
+## 3. Sessions (answer 3; calls 1, 11; code review S5, S6; security review L1, M2)
 
 - A right code opens a session: `public.shop_sessions`, one studio, **a fixed 30 days from the first code; adding a
-  sibling doesn't extend it** (call 11). Opening a code on a device that already has a session forgets the old one
-  (one session per device; Claude's call, Seenu to review).
-- The cookie `daybell_shop=<region>.<token>`: 32 random bytes, httpOnly, SameSite=Lax, Path=/, Max-Age 30 days,
-  Secure in production (as `daybell_region`, so local and CI runs over http work). The database keeps only the
-  token's SHA-256, so a leaked table can't be replayed. The region names the database for later requests (D113). A
-  missing, forged, expired or unknown cookie is the same 401 (`shop_session_required`, a new API error code); a dead
-  cookie is cleared.
-- Siblings (call 1): **same studio only, from any of its jobs, up to 5 children**. Another studio's code answers 409
-  `shop.otherStudio` ("This code is from a different photographer. Open it separately."); checkout stays per studio.
-  The 5 is enforced in the function and by a trigger under a lock on the session row, whoever writes. In the sibling
-  flow a code of another region can't be this studio's and is looked up as nothing (a wrong code; Claude's call).
-- "Forget this device" (⋯ menu, with a confirmation) deletes the session, its children and its bag, and clears the
-  cookie (call 11).
+  sibling doesn't extend it** (call 11).
+- **One session per studio on a device, up to 3 studios** (code review S6, orchestrator's call). A code of a studio the
+  device already has a session of **adds the child to that session** (call 16 narrowed; this also fixes S5: a code typed
+  again never empties a bag); another studio's code opens a session of its own, leaving the first's gallery and bag
+  alone. A 4th studio is refused: 409 `shop.galleryLimit` ("This device already has galleries from 3 photographers.
+  Forget one, then try again."). Checkout stays per studio.
+- The cookie holds the device's sessions: `<region>.<token>~<region>.<token>`, at most 3, oldest first; each token 32
+  random bytes, the database keeping only its SHA-256, so a leaked table can't be replayed. The region names the
+  database for later requests (D113). Sessions that no longer last are dropped from the cookie on the next code or
+  session read.
+- Cookies (L1): **`__Host-daybell_shop` and `__Host-daybell_device`, Secure, Path=/, no Domain**, httpOnly, SameSite=Lax,
+  30 days, on every HTTPS host, so a sibling subdomain can't plant one. Only on `http://localhost` (and 127.0.0.1) are
+  they plain and not Secure, because browsers refuse Secure cookies over plain HTTP there; over HTTPS a plain-named
+  cookie is never read.
+- A gallery's id (`galleryId`, 32 hex) is a one-way hash of its token: the screens name a gallery with it
+  (`?gallery=`) without holding the token. A missing, forged, expired or unknown cookie, or a gallery not on the device,
+  is the same 401 (`shop_session_required`).
+- Siblings (call 1): **same studio only, from any of its jobs, up to 5 children** per session, enforced in the function
+  and by a trigger under a lock on the session row, whoever writes.
+- **At most 10 sessions show one child** (M2): opening or adding a child in an 11th forgets the oldest other sessions
+  that show them (with their bags), so one valid code can't fill the database.
+- "Forget this device" (⋯ menu, with a confirmation): with one gallery, it forgets it; with more, the parent chooses
+  this gallery or all of them. Each forgotten session goes with its children and bag; the cookie keeps the rest or is
+  cleared.
 - Parents have no account and no JWT: every read and write runs as the service role from the `/api/v1/shop` routes,
   through SECURITY DEFINER functions that take the session token's hash and work only within that session's own studio
   and children. The tables have row-level security on and no policies (the `stripe_events` pattern); browsers,
@@ -82,8 +132,10 @@ studio); previews have been made at upload since step 4, including watermarked `
   - `unavailable`: the child is marked Do not publish or Do not photograph, or has no portrait parents may see. "Photos
     aren't available yet. Contact {studio}." No photos at all, class photos included (call 6).
   - `open`: the gallery.
-- A valid code for a closed or draft job does reveal that the code exists and the studio's name: Seenu chose that
-  message (answer 4).
+- A closed, draft or unavailable child is **only an id and a state** in the session (security review M1): no name,
+  school, picture day or dates leave the database, and the screens say "Your child". A stale, lost or discarded card,
+  or a Do not publish child's (often a custody or protection case), reveals only that the code exists and the studio's
+  name, as Seenu's message asks (answer 4).
 - Photos: `app.parent_visible_photos(job, child, group)` is the set-based twin of `photo_parent_visible` (same
   predicate: ready, not binned, never a card or another job's card photo, a maybe-card only once a person placed or
   confirmed it, placed with a child or a class set, not flagged, its batch's tags up to date). pgTAP proves the two agree
@@ -91,7 +143,7 @@ studio); previews have been made at upload since step 4, including watermarked `
   to other children of a Do not publish child, call 6), in tagging order.
 - The cover (D119) is **the first visible portrait in tagging order** until studios can star a pose (call 3), full
   screen, with the studio's name, the child's name, the school (the job's client, else the job's name), picture day
-  and a **"See photos" button**. The words slide up on load; with reduced motion they don't. It never moves on by itself.
+  and a **"See photos" button** (open children only). The words slide up on load; with reduced motion they don't. It never moves on by itself.
   It shows once per child per browser tab session (Claude's call).
 - Class photos are **view only** in Phase 1 (call 8): the viewer says so, and the database refuses them as a pose.
 - Colour: **charcoal #1C1C1E for every studio in Phase 1** (call 7; D116), from the theme's existing studio slot
@@ -113,8 +165,16 @@ studio); previews have been made at upload since step 4, including watermarked `
   one quiet line says "Photos are protected and shown at low resolution with a watermark", and an attempt shows it again.
   With reduced motion the blur has no transition.
 - `/shop` and `/api/v1/shop` send `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: no-referrer` (signed URLs never
-  travel in a Referer) and `X-Frame-Options: DENY`; pages also carry robots noindex and no-referrer metadata. Shop API
-  answers are `Cache-Control: no-store`. No third-party scripts or analytics; the font is self-hosted.
+  travel in a Referer), `X-Frame-Options: DENY`, `Strict-Transport-Security: max-age=63072000` (custom domains too) and
+  `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()`; pages also carry
+  robots noindex and no-referrer metadata. Shop API answers are `Cache-Control: no-store` and
+  `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`. The font is self-hosted.
+- **Content-Security-Policy on every shop page** (security review L2), with a fresh nonce per request from the proxy,
+  which Next puts on its own scripts (the shop's layout renders per request for it): `default-src 'self'`;
+  `script-src 'self' 'nonce-…' 'strict-dynamic'` (plus `'unsafe-eval'` in development only); `style-src 'self'
+  'unsafe-inline'`; `img-src 'self' blob: data: https://<PHOTO_BUCKET_CA>.s3.ca-central-1.amazonaws.com`;
+  `font-src 'self'`; `connect-src 'self'`; `object-src 'none'`; `frame-ancestors 'none'`; `base-uri 'none'`;
+  `form-action 'self'`. So the browser itself enforces "no third-party scripts" and Canada-only images (D113).
 
 ## 6. The bag (calls 8, 9)
 
@@ -125,10 +185,16 @@ studio); previews have been made at upload since step 4, including watermarked `
   item and pose again adds to its line; at most 100 lines. Refusals: 409 `shop.closed`, `shop.itemUnavailable`,
   `shop.photoUnavailable`, `shop.bagFull`.
 - A line reads back `available: false`, marked "No longer available" and left out of the totals, when its item left
-  the job's list (a list switch), its pose can't be shown any more, or the shop closed. Deleting an item or purging a
-  photo removes its lines (composite foreign keys with cascade).
+  the job's list (a list switch), its pose can't be shown any more, or the shop closed. **One rule in one place**
+  (code review M2): `app.shop_line_available` decides it for the bag's totals, for delivery and for quantities. Deleting
+  an item or purging a photo removes its lines (composite foreign keys with cascade).
+- A quantity can change only on a line that can still be bought (N2): 409 `shop.closed`, `shop.itemUnavailable` or
+  `shop.photoUnavailable` otherwise. Removing always works.
 - Delivery (call 9): **one home fee per bag, the highest among its jobs with something to deliver; school delivery
-  only if every such job allows it; a bag of downloads needs none.** When both are offered the parent chooses; the
+  only if every such job allows it; a bag of downloads needs none**, all counting only lines that can still be bought,
+  in core (`availableShipping`) and the database (`shop_set_shipping`) alike (M2): school delivery is never offered and
+  then refused, and is refused when nothing needs delivery. A job missing from the delivery facts throws rather than
+  making delivery free (N3). The bag's money is in the studio's currency from the database, never a guess (N4). When both are offered the parent chooses; the
   total waits for that choice ("Choose delivery"; Claude's call, Seenu to review). School delivery is free. Totals are
   whole cents, before tax.
 - The header's bag count is every thing in the bag (quantities added), unavailable lines included, until removed.
@@ -142,20 +208,29 @@ proxy passes `/shop` straight through, so parents' requests never touch studio s
 
 | Page | What |
 |---|---|
-| `/shop` | Code entry (neutral, the studio isn't known yet); with a session, straight to the first child's gallery |
-| `/shop/add` | A brother's or sister's code |
-| `/shop/c/[childId]` | The cover, then the grid; Portraits / Class photo; the children as links; "Order by" and school delivery; the viewer |
+| `/shop` | Code entry (neutral, the studio isn't known yet); with one gallery, straight to its first child; with more, "Your galleries" (each studio's name and its open children's names) and the form for another code; if the galleries can't be read, "Try again", never the form (S5) |
+| `/shop/add?gallery=` | A brother's or sister's code (another studio's opens its own gallery) |
+| `/shop/c/[childId]` | The cover, then the grid; Portraits / Class photo; the children as links; "Order by" (the last day to order, as ADR 0021 shows studios, N6) and school delivery; the viewer |
 | `/shop/c/[childId]/buy` | Packages as a radio list, the price docked beside Continue; "Single prints and downloads" |
 | `/shop/c/[childId]/buy/singles` | Prints, the single download and all digitals |
 | `/shop/c/[childId]/buy/[itemId]` | The pose (radios shown as thumbnails), how many, "Add to bag" |
-| `/shop/bag` | Lines by child, delivery, totals "+ tax" |
+| `/shop/bag?gallery=` | A gallery's bag: lines by child, delivery, totals "+ tax" |
 
 Accessibility (WCAG 2.2 AA): every input labelled (the code field, the pose and delivery radios, the quantity groups);
 44 px targets; visible focus in the studio colour; the viewer has Previous and Next buttons and arrow keys besides
 swiping (2.5.7); the docked button leaves room and adds scroll padding so a focused control is never hidden under it
-(2.4.11); the selected child is `aria-current` and filled, a selected tab `aria-pressed` and underlined (no colour-only
-meaning); refusals are announced (`role="alert"`). Words are in `messages/en-US.json` and `en-CA.json` (`shop.*`);
-colours are tokens only.
+(2.4.11), and the sticky header adds scroll padding at the top too (S1); the selected child is `aria-current` and
+filled, a selected tab `aria-pressed` and underlined (no colour-only meaning); refusals are announced (`role="alert"`);
+the bag's totals are a polite, atomic live region (S2); every page names itself in the document's title (2.4.2, S3);
+the photo grid and the docked bar are named ("Photos of Ava P.", "Next step"); option radios are named by their title
+alone with the price as their description, and delivery radios by their words alone (S4); at either end of the viewer
+focus moves to the other arrow, or to Close (N5). Words are in `messages/en-US.json` and `en-CA.json` (`shop.*`); colours
+are tokens only.
+
+The bag is read once when it opens and again only after the parent's own change, whose answer is the bag (code review
+M1: the first version refetched in a loop, 1154 reads a second in a reproduction, using up the network's request
+budget). The provider's `setBagCount` is one function for its life and leaves the state alone when the count is the
+same.
 
 Board deviations (decisions win): the board's cover has no button and moves on after 2 seconds; D119 asks for a "See
 photos" button and a timed move would fail WCAG 2.2.1. The board's accent is #2B2B2B; D116 says #1C1C1E. Left out as
@@ -165,11 +240,14 @@ package (call 8).
 ## 8. API (D92)
 
 New group "Shop" and access kind `parent` (the session cookie) in `packages/api` routes and OpenAPI:
-`POST /shop/access`, `GET`/`DELETE /shop/session`, `POST /shop/children`, `GET /shop/children/{childId}/gallery`,
-`GET /shop/children/{childId}/price-list`, `GET /shop/cart`, `POST /shop/cart/lines`,
-`PATCH`/`DELETE /shop/cart/lines/{id}`, `PUT /shop/cart/shipping`. 409 keys in `SHOP_CONFLICTS`; `shop.codeNotFound`
-and `shop.locked`; the new error code `shop_session_required` (401). Writes go through `handle()`'s same-origin and
-JSON-only checks.
+`POST /shop/access` (opens or adds; `{childId, galleryId}`), `GET /shop/session` (`{galleries: [...]}`),
+`DELETE /shop/session[?gallery=]`, `GET /shop/children/{childId}/gallery`, `GET /shop/children/{childId}/price-list`,
+`GET /shop/cart`, `POST /shop/cart/lines`, `PATCH`/`DELETE /shop/cart/lines/{id}`, `PUT /shop/cart/shipping`; all but
+the first two take `?gallery=` (`shopGalleryQuery`; without it, the device's first). `POST /shop/children` is gone:
+`/shop/access` places a code in the right gallery (S6). `ShopChild` is a union on `state`: an open child's name, school
+and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLimit` replaces `shop.otherStudio`);
+`shop.codeNotFound` and `shop.locked`; the error code `shop_session_required` (401); every shop route lists
+`region_unavailable` (N11). Writes go through `handle()`'s same-origin and JSON-only checks.
 
 ## 9. Database (forward migration `20261012700000_parent_shop.sql`)
 
@@ -180,9 +258,12 @@ JSON-only checks.
 - Functions, all SECURITY DEFINER with an empty `search_path`, executable by `service_role` only, named errors with no
   values: `shop_enter_code`, `shop_session`, `shop_gallery`, `shop_price_list`, `shop_cart`, `shop_cart_add`,
   `shop_cart_set_quantity`, `shop_cart_remove`, `shop_set_shipping`, `shop_forget`, `take_shop_request`,
-  `prune_shop`; helpers in `app` that nobody can call directly.
-- `prune_shop` runs in the jobs cron (hourly on staging, daily in production) after `prune_notifications`: expired
-  sessions with their bags, and wrong-code and request counts untouched for 24 hours.
+  `prune_shop`; helpers in `app` that nobody can call directly (`shop_code_failed`, `shop_breaker_failed`,
+  `shop_issue_device`, `shop_trim_child_sessions`, `shop_line_available`, `shop_line_physical`, …). Every query names
+  its studio, bag lines and package lines included (security review L5).
+- `prune_shop` runs in the jobs cron (hourly on staging, daily in production) after `prune_notifications`, **a page of
+  1,000 at a time until a page comes back short or the region's share of the time is up** (M2): expired sessions with
+  their bags, counts untouched for 24 hours (a known device's for 30 days), request counts over an hour old.
 - Events: **none for parents' actions** (call 10): sessions, attempts and the bag are the parent's own state, like the
   notifications exception of ADR 0021. Studios don't see gallery opens in Phase 1.
 - Region (D113): every shop route and page is pinned to `yul1` and refuses to run elsewhere for Canadian data
@@ -192,9 +273,10 @@ JSON-only checks.
 ## 10. Configuration
 
 - `SHOP_THROTTLE_KEY` (new, declared in `packages/config` `shopThrottleKey()`): 32 random bytes, base64, different
-  from both access code keys; server-only, read on first use; errors name the variable only. Without it every shop
-  route answers 500 and logs `shop_throttle_key_missing` (fails closed). CI makes a fresh one per run. Changing it only
-  restarts the counts.
+  from both access code keys; server-only, read on first use; errors name the variable only. It also signs device
+  cookies: changing it restarts the counts and makes every device new. Without it every shop
+  route answers 500 and logs `shop_throttle_key_missing` (fails closed). CI makes a fresh one per run.
+- The shop's image policy reads `STORAGE_DRIVER` and `PHOTO_BUCKET_CA` (already set for photos).
 - **Seenu must add `SHOP_THROTTLE_KEY` in Vercel (Production, and Preview for staging) before the shop is used there:
   generate it with `openssl rand -base64 32` and paste it straight into Vercel's environment variables. Never in chat,
   a commit, an issue or a log.**
@@ -203,40 +285,92 @@ JSON-only checks.
 
 ## 11. Tests
 
-- Core (`shop.test.ts`): lockout edges, line rules, merging, delivery and totals (school and downloads free,
-  unavailable lines left out, no total until delivery is chosen), cover pick, display name, the cookie format.
-- UI (`contrast.test.ts`): `shopAccent` fallbacks (none, pale yellow, mid grey) and contrast for any colour.
+- Core (`shop.test.ts`): lockout edges for every kind (device, no-device, network widths, tripped limits, a running
+  lock never cleared), the known-device rule, line rules, merging, delivery and totals (school and downloads free,
+  unavailable lines left out, no total until delivery is chosen, a missing job throws), cover pick, display name, the
+  cookie format with up to 3 sessions.
+- UI: `shopAccent` fallbacks; an option card named by its title alone and described by the rest.
 - Config: `SHOP_THROTTLE_KEY` and the `/shop` fallback.
-- API (`shop.test.ts`): the schemas; `SHOP_CONFLICTS` and limits kept equal to the migration's; nothing granted to
-  browsers; the routes' access and errors.
-- pgTAP `021_parent_shop` (113 assertions): grants (tables and functions closed to `anon` and `authenticated`), lookup
-  by HMAC among children only (blank-card and card codes refused), the lockout (5th miss locks, locked caller with a
-  right code, expiry and restart, a right code doesn't reset, the network ceiling), sessions (30 days, siblings,
-  other studio, the limit of 5 even for direct inserts, a session never holding another studio's child, expiry,
-  replacing a device's session), the gallery (every hidden kind excluded, another class's set and another child's
-  photos excluded, equivalence with `photo_parent_visible`, closed, draft, passed closing date, unavailable), prices,
-  the bag (kind rules, another child's or a class photo refused, another studio's item refused, merging, a list switch
-  and a hidden pose make lines unavailable, cascades), cross-studio leaks (studio B's session can't read or change A's
-  child, prices or lines, even with their ids), no events, no names or codes stored. Two sessions racing for the 5th
-  sibling can't be run in one pgTAP connection; the trigger's row lock is what serialises them.
-- Route tests (`shop-routes.test.ts`): cookie flags; the token's hash only reaching the database; identical answers
-  for a wrong code, another region's code and a non-code; 429 with Retry-After when locked or over 120 a minute; the
-  same pair and network keys for the same device; no code or address reaching the database; the Montréal guard;
-  failing closed without the key; 401 for a missing, forged or other-region cookie; signed keys ending in `proof*.webp`
-  for 600 seconds at most; nothing signed for closed shops; the bag priced and totalled; refusals as keys; `no-store`;
-  cross-site and non-JSON writes refused; the `next.config` headers; a console spy proving nothing is logged.
-- e2e `shop-gallery.spec.ts` (the `phone` project, Pixel 7): code, cover (no slide with reduced motion), grid, blur on
-  visibility change, viewer Previous/Next, "Use this photo", a package and its pose, a sibling and switching, a print
-  and a single download, delivery and totals, forgetting the device, a draft job's closed message, and five wrong codes
-  locking a phone out.
+- API (`shop.test.ts`): the schemas and `shopGalleryQuery`; `SHOP_CONFLICTS` and every limit kept equal to the
+  migration's; nothing granted to browsers; the routes' access, gallery parameter and errors (`region_unavailable`).
+- pgTAP `021_parent_shop` (168 assertions): grants; lookup by HMAC among children only; the lockout (5th miss locks a
+  device wherever it goes, a locked caller with a right code, expiry and restart, a right code doesn't reset, the
+  network's 30, the shared no-device bucket, devices issued and capped at 50, the /56's 100 and the /48's 300, a known
+  device's own allowance on a locked network and its loss after a lock, the breaker's alert, tightened limits, no
+  devices and no allowance while tripped, a locked request writing no row); sessions (30 days, siblings added to the
+  studio's session, another studio's opening its own with the first untouched, a 4th studio refused, dead sessions
+  left out, the limit of 5 even for direct inserts, a session never holding another studio's child, expiry, 10
+  sessions per child at most); a closed or draft child's name, school and day never in the session; the gallery (every
+  hidden kind excluded, another class's set and another child's photos excluded, equivalence with
+  `photo_parent_visible`, closed, draft, passed closing date, unavailable with nothing but the state); prices; the bag
+  (kind rules, refusals, merging, a list switch and a hidden pose make lines unavailable and their quantities fixed,
+  cascades, the studio's currency); school delivery judged by lines that can still be bought (the code review's
+  example) and refused with nothing to deliver; cross-studio leaks (studio B, and the same device's studio B gallery,
+  can't read or change A's child, prices or lines); forgetting one gallery leaves the others; the tidy-up a page at a
+  time, keeping known devices 30 days; no events, no names or codes stored.
+- Route tests (`shop-routes.test.ts`): cookie flags, `__Host-` and Secure over HTTPS, a planted plain cookie ignored;
+  the token's hash only reaching the database; opening, adding to the same studio's gallery, a second studio's gallery,
+  the 4th refused, dead sessions dropped; a device counted only by its signed cookie and the same on any network, a
+  forged one no device, a device cookie set only when issued; identical answers for a wrong code, another region's code
+  and a non-code; 429 with Retry-After; the breaker's one code-free log line; the budget counted before the body is read;
+  Vercel's address header only; the Montréal guard; failing closed without the key; the galleries list with closed
+  children as id and state only; forgetting one or all; a gallery not on the device refused; proofs only, 600 seconds
+  at most; the bag priced in the studio's currency; school delivery by available lines; refusals as keys; `no-store`;
+  cross-site and non-JSON writes refused; the `next.config` headers; a console spy proving nothing else is logged.
+- CSP (`csp.test.ts`): the policy, the bucket from the environment, a fresh nonce per page on the request and the
+  response, studio pages untouched.
+- Cron (`going-live-routes.test.ts`): the shop pruned a page at a time until short, and stopped when time is up.
+- Screens (`shop-pages.test.tsx`, jsdom): **the bag read once when it opens, whatever the header's count does** (the
+  scratch reproduction of code review M1 made a regression test; it fails, timing out, if the loop comes back); no
+  re-read after a change; the totals' live region; delivery radios' exact names; one `setBagCount` and no re-render for
+  the same count; "Your galleries" with only open children's names; one gallery goes straight through; "Try again"
+  instead of the form; the viewer's focus at the ends; the page title kept when the head is rewritten.
+- e2e `shop-gallery.spec.ts` (the `phone` project, Pixel 7), locators scoped to a landmark and exact (S4): code, cover
+  (no slide with reduced motion), grid by its name, blur on visibility change, viewer Previous/Next, "Use this photo", a
+  package radio and its pose, a sibling and switching, a print and a single download, delivery radios by exact name and
+  totals, the page title, forgetting the device, a draft job's closed message without the child's name, and five wrong
+  codes locking a phone out.
+
+## 12. Review findings and where they went (Oct 12–13)
+
+| Finding | Fix |
+|---|---|
+| Security H1 | §2: signed devices, shared no-device bucket, devices capped per network, /24, /56 and /48 ceilings, region breaker with an alert, effective limits stated |
+| Security M1 | §4: closed, draft and unavailable children are an id and a state only; "Your child" |
+| Security M2 | §2, §3, §9: no row before the lock check or on a refused request; counts only on failure; prune loops; 10 sessions per child |
+| Security M3 | §2: known devices keep their own allowance on a locked network |
+| Security M4 | Follow-up (needs Seenu's AWS work) |
+| Security L1 | §3: `__Host-` cookies, Secure except on `http://localhost` |
+| Security L2 | §5: CSP with a nonce; Canada-only `img-src`; Permissions-Policy; HSTS |
+| Security L3 | Ids from the address checked as UUIDs and encoded in every client path |
+| Security L4 | §2: `x-vercel-forwarded-for` on Vercel only; one strict bucket otherwise |
+| Security L5 | §9: every query names its studio |
+| Security L6 | §2: device cookie 30 days; privacy notice follow-up |
+| Security L7 | §1: counted before the body is read |
+| Security L8 | Follow-up |
+| Code M1 | §7: the bag reads once; stable `setBagCount`; regression test |
+| Code M2 | §6: one availability rule for totals, delivery and quantities |
+| Code S1–S4 | §7: top scroll padding; totals live region; page titles; scoped, exact e2e locators |
+| Code S5 | §3, §7: same-studio codes add; "Try again" instead of the form |
+| Code S6 | §3: a session per studio, up to 3; "Your galleries"; forget one or all |
+| Code N1 | §2: advisory locks first, in one order, then session rows |
+| Code N2–N4 | §6 |
+| Code N5 | §7 |
+| Code N6 | §7: the last day to order, as ADR 0021 shows it (there is no job or studio time zone yet) |
+| Code N7 | One locale pattern for "Order by … · Free delivery to school" |
+| Code N8 | Unused keys removed; the pose summary shows the quantity |
+| Code N9 | The pose page's Back keeps the pose |
+| Code N10 | "Try again" on the add page (and every shop page) when the session can't be read |
+| Code N11 | §8 |
+| Code N12 | `callShopFunction`; `networkKey`, `wideKey`, `widerKey`, `deviceKey`; `PoseData`; `lib/shop/shop.ts` split into `http.ts`, `codes.ts`, `gallery.ts` (with `session.ts`, `throttle.ts`, `csp.ts`) |
 
 ## Claude's calls, Seenu to review
 
-1. Siblings: same studio only (any of its jobs); another studio's code is refused with "This code is from a
-   different photographer. Open it separately."
+1. Siblings: same studio only (any of its jobs). (Amended by 25: another studio's code opens its own gallery.)
 2. Parents see first name and last initial only ("Ava P.").
 3. The cover is the child's first visible portrait in tagging order until studios can star one.
-4. Lockout: 5 wrong codes per network+device, plus 30 per network in 15 minutes; 15-minute locks.
+4. Lockout: 5 wrong codes per device (amended by 26–29: a signed device, wherever it is), plus 30 per network in 15
+   minutes; 15-minute locks.
 5. An unnamed blank card's code counts as a wrong code.
 6. Do not publish, Do not photograph, or no visible portraits: "Photos aren't available yet. Contact {studio}.", no
    photos; class sets still shown to other children.
@@ -252,15 +386,37 @@ JSON-only checks.
     no pay button until step 10; client-rendered shell pinned to `yul1`; no `next/image`.
 15. A device's wrong codes count over 24 hours (the network's over 15 minutes); a lock that has run out starts the
     count again.
-16. Opening a code on a device replaces that device's earlier session.
-17. In the sibling flow, a code of a region other than the session's counts as a wrong code.
+16. (Narrowed by the orchestrator, code review S5/S6) a code of a studio the device has a session of adds to it; it
+    never replaces a session.
+17. A code of a region with no database here counts as a wrong code (there is no separate sibling flow any more).
 18. When both deliveries are offered, the parent must choose before a total shows; there is no default.
 19. The cover shows once per child per browser tab session.
 20. The bag's count includes lines no longer available until they are removed.
 21. At most 100 lines in a bag; quantities 1 to 99.
-22. IPv6 networks are counted by their /64.
-23. Cookies are Secure in production only (local and CI run over http), Path=/; the device cookie lasts 400 days.
+22. IPv6 networks are counted by their /64, and also by their /56 and /48 (H1).
+23. (Amended, L1 and L6) cookies are `__Host-` and Secure everywhere but `http://localhost`; the device cookie lasts
+    30 days.
 24. A new API error code, `shop_session_required` (401), rather than reusing `not_signed_in` (from the plan).
+25. (Orchestrator, code review S6) a device holds a session for each of up to 3 studios; a 4th is refused
+    (`shop.galleryLimit`) rather than replacing one; "Your galleries" lists them; "Forget this device" offers this
+    gallery or all.
+26. (Orchestrator, H1) the numbers: 30/100/300 wrong codes per network, /24 or /56, and /48 in 15 minutes; 50/200/500
+    new devices a day at those widths; a breaker at 600 wrong codes a minute per region, for 15 minutes, cutting the
+    network limits to 10/30/100 and issuing no devices.
+27. (Orchestrator, M3) a known device is one that has opened a gallery; it keeps its own 5 tries on a locked network
+    unless it was locked in the last 24 hours or the breaker is tripped; it stays known 30 days.
+28. The first wrong code of a request without a device counts on the device it is issued; only when none can be issued
+    does it count in the network's shared bucket (so a parent's first, mistyped try on school Wi-Fi isn't spent in a
+    bucket strangers share).
+29. The breaker's alert is one log line, `shop_lockout_breaker_tripped <region>`, with no code, address or name; an
+    alert rule on Vercel's logs is for Seenu to set up.
+30. At most 10 sessions show one child; the oldest others go (with their bags) when an 11th is used.
+31. A gallery's id is a one-way hash of its token, named in `?gallery=`; the token never leaves the httpOnly cookie.
+32. The shop's CSP allows inline styles (React's style attributes and Next's own), never inline scripts; it carries no
+    `upgrade-insecure-requests` (local http runs). `payment=()` in Permissions-Policy until step 10 decides what Apple
+    and Google Pay need.
+33. "Order by" shows the last day to order in the parent's own time zone, the way ADR 0021 shows it to studios; there
+    is no studio time zone yet.
 
 ## Rejected
 
@@ -273,6 +429,10 @@ JSON-only checks.
 - Codes in URLs (query or path): they would reach logs, history and Referer headers.
 - New `shop-accent` tokens (the plan's): the theme already has the studio slot with charcoal as its default; a second
   pair would duplicate it.
+- Device ids chosen by the browser (the first version): free fresh tries for anyone who drops the cookie (H1).
+- A 4th studio's code replacing the device's oldest gallery: it would empty a bag without asking (S6).
+- A proof-of-work step instead of a network lock (M3): known devices soften shared networks without making every
+  parent's phone do work.
 
 ## Follow-ups
 
@@ -281,3 +441,25 @@ JSON-only checks.
 - Studios starring a best pose; studio colours and presets (D117, D118).
 - A US function region and its shop routing.
 - Class photo sales, if Seenu wants them (call 8).
+- **Security M4, for Seenu (AWS):** the shop signs previews with the same AWS role as the studio app; only the
+  `ParentPreview` type keeps it to `proof*.webp`. Give the shop's routes their own role whose policy allows only
+  `s3:GetObject` on `arn:aws:s3:::<bucket>/*/*/*/proof*.webp`, so a future bug can't sign an original for a parent.
+  Needs a new role and `AWS_SHOP_ROLE_ARN` in Vercel; then the shop's storage client uses it.
+- **Security L8:** sessions can't be revoked per child yet. When a code can be regenerated (a lost card, a custody
+  dispute), that must delete the child's `shop_session_children` rows. Today a studio's only immediate switch is Do not
+  publish, which every read checks.
+- **Security L6:** the parent privacy notice (not written yet) must say the shop keeps a device cookie for 30 days, for
+  the lockout only.
+- An alert rule on `shop_lockout_breaker_tripped` in Vercel's logs (call 29).
+
+## Flagged for Seenu
+
+- **Class sets with a Do not publish classmate (call 6).** Class photo sets stay visible to every parent in the class
+  even when a classmate is marked Do not publish (the orchestrator kept it: such children are normally not in the class
+  photo). Do not publish often marks a custody or protection case; one option is that a Do not publish child in a class
+  hides that class's set until the studio confirms it. Seenu to decide.
+- **D60 "low resolution":** `proof.webp` is 1600 px on its longest side (from step 4), about 5.3 inches at 300 dpi,
+  watermarked. Kept as is; Seenu to confirm it is low enough.
+- The lockout numbers (call 26) on mobile carriers: thousands of phones can share one IPv4 address; known devices
+  (call 27) soften it, but a busy carrier address can still lock new devices for 15 minutes. Worth a look before
+  launch.

@@ -5,8 +5,10 @@
 -- A parent types a child's access code and sees that child's photos straight away (D24): no account. The code opens a
 -- shop session, kept by this regional database (D113) and named by a random token in an httpOnly cookie; the database
 -- stores only the token's SHA-256. A session belongs to one studio and holds up to 5 of that studio's children (call 1)
--- for 30 days from the first code (answer 3, call 11), with a bag of what the parent picked. Codes are looked up by
--- their existing HMAC only (ADR 0011), after a lockout check (answer 2, call 4) so a locked caller learns nothing.
+-- for 30 days from the first code (answer 3, call 11), with a bag of what the parent picked. One device may hold a
+-- session for each of up to 3 studios (code review S6): a code from a studio the device already has adds to that
+-- session; another studio's opens a session of its own. Codes are looked up by their existing HMAC only (ADR 0011),
+-- after a lockout check (answer 2, call 4; security review H1 and M3) so a locked caller learns nothing.
 --
 -- Everything here is used only by the API, as the service role, through the SECURITY DEFINER functions below: browsers
 -- (signed in or not) can read or run none of it. Sessions, attempts and the bag are the parent's own state, not a
@@ -57,7 +59,7 @@ create table public.shop_session_children (
   constraint shop_session_children_line_key unique (session_id, child_id, studio_id, job_id)
 );
 create index shop_session_children_studio_idx on public.shop_session_children (studio_id);
-create index shop_session_children_child_idx on public.shop_session_children (child_id);
+create index shop_session_children_child_idx on public.shop_session_children (child_id, added_at);
 comment on table public.shop_session_children is 'The children a shop session shows (at most 5). Service role only.';
 
 -- At most 5 children per session (call 1), whoever writes: the session's row is locked first, so two siblings added at
@@ -67,8 +69,9 @@ language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  perform 1 from public.shop_sessions s where s.id = new.session_id for update;
-  if (select count(*) from public.shop_session_children c where c.session_id = new.session_id) >= 5 then
+  perform 1 from public.shop_sessions s where s.id = new.session_id and s.studio_id = new.studio_id for update;
+  if (select count(*) from public.shop_session_children c
+      where c.session_id = new.session_id and c.studio_id = new.studio_id) >= 5 then
     raise exception 'sibling_limit' using errcode = 'P0001';
   end if;
   return new;
@@ -119,21 +122,33 @@ alter table public.shop_session_children enable row level security;
 alter table public.shop_cart_lines enable row level security;
 revoke all on public.shop_sessions, public.shop_session_children, public.shop_cart_lines from anon, authenticated;
 
--- ── Wrong codes and request counts (answer 2, call 4) ─────────────────────────────────────────────────────────────
+-- ── Wrong codes, new devices and request counts (answer 2, call 4; security review H1, M2, M3) ─────────────────────
 -- In the app schema: never reachable through the Data API. A wrong guess belongs to no studio, so there is no
--- studio_id. key_hash is an HMAC made by the API (SHOP_THROTTLE_KEY) of the network and device (kind pair) or the
--- network alone (kind ip); never an address. Rows go after 24 hours (prune_shop).
+-- studio_id. key_hash is an HMAC made by the API (SHOP_THROTTLE_KEY), never an address or a device id. Kinds:
+-- - device: a device the server issued (its signed cookie checked by the API), wherever it is: 5 wrong codes in 24
+--   hours lock it for 15 minutes. known: it has opened a gallery (M3); locked_at: when it was last locked.
+-- - nodevice: the one shared bucket of a network's requests without such a device: 5, like a device.
+-- - net (an IPv4 address or an IPv6 /64), wide (IPv4 /24, IPv6 /56), wider (IPv6 /48): 30, 100 and 300 wrong codes in
+--   15 minutes lock the network for 15 minutes; a third of that while the breaker is tripped.
+-- - issue_net, issue_wide, issue_wider: hits counts new devices issued per network in 24 hours (50, 200, 500).
+-- - region: the circuit breaker, one row: 600 wrong codes in a minute across the region trip it for 15 minutes.
+-- Rows are written only on a wrong code, a new device or a known device's right code: never on a locked or refused
+-- request (M2). They go after 24 hours untouched (a known device's after 30 days; prune_shop).
 create table app.shop_code_attempts (
-  kind text not null check (kind in ('pair', 'ip')),
+  kind text not null check (kind in ('device', 'nodevice', 'net', 'wide', 'wider', 'issue_net', 'issue_wide',
+    'issue_wider', 'region')),
   key_hash text not null check (key_hash ~ '^[0-9a-f]{64}$'),
-  failures integer not null default 0 check (failures between 0 and 1000000),
+  -- Wrong codes in the window (issue_* rows: devices issued).
+  hits integer not null default 0 check (hits between 0 and 1000000),
   window_start timestamptz not null default now(),
   locked_until timestamptz,
+  locked_at timestamptz,
+  known boolean not null default false,
   updated_at timestamptz not null default now(),
   primary key (kind, key_hash)
 );
 comment on table app.shop_code_attempts is
-  'Wrong access codes per network+device and per network (HMACs only), for the lockout (ADR 0022).';
+  'Wrong access codes per device, network and region, and devices issued per network (HMACs only), for the lockout (ADR 0022).';
 create index shop_code_attempts_updated_idx on app.shop_code_attempts (updated_at);
 
 -- Shop requests per network per minute (Claude's call: 120), the stripe_call_budget pattern.
@@ -191,6 +206,32 @@ as $$
   where c.id = p_child_id;
 $$;
 
+-- Whether a bag line can still be bought (code review M2: one rule for the bag's totals, delivery and quantities):
+-- its item is on the job's current list, its child's shop is open, and its pose (if any) is still one of the child's
+-- visible portraits.
+create function app.shop_line_available(p_line public.shop_cart_lines) returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (select 1 from public.jobs j
+                 where j.id = p_line.job_id and j.studio_id = p_line.studio_id
+                   and j.price_list_id = p_line.price_list_id)
+    and app.shop_child_state(p_line.child_id) = 'open'
+    and (p_line.photo_id is null or exists (
+      select 1 from app.parent_visible_photos(p_line.job_id, p_line.child_id, null) p
+      where p.id = p_line.photo_id and p.place = 'child'));
+$$;
+
+-- Whether a bag line needs delivery: a print, or a package holding prints.
+create function app.shop_line_physical(p_line public.shop_cart_lines) returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select p_line.kind = 'print' or (p_line.kind = 'package' and exists (
+    select 1 from public.price_list_package_lines pk
+    where pk.package_item_id = p_line.item_id and pk.studio_id = p_line.studio_id and pk.line_kind = 'print'));
+$$;
+
 -- ── Sessions ──────────────────────────────────────────────────────────────────────────────────────────────────────
 -- The session a cookie's token names while it lasts, optionally locked; session_required (P0001) otherwise, so a
 -- missing, forged and expired cookie are the same.
@@ -235,81 +276,185 @@ begin
 end;
 $$;
 
--- A wrong code for one key (kind pair or ip, its row already locked by the caller): counts it, and locks the key for
--- 15 minutes on the 5th wrong code of a network+device (in 24 hours) or the 30th of a network in 15 minutes (call 4).
--- A lock that has run out, or a window that has passed, starts the count again. A right code never resets it, so one
--- real code can't clear the count between guesses. Returns when the key is locked until, or null. (packages/core's
--- lockoutStep is the same rule.)
-create function app.shop_code_failed(p_kind text, p_key text) returns timestamptz
+-- A wrong code for one key (the caller holds its advisory lock): counts it, and locks the key for 15 minutes when the
+-- count reaches p_limit in p_window. A lock that has run out, or (unlocked) a window that has passed, starts the count
+-- again; a running lock is never extended or cleared (a known device's misses still count on a locked network, M3). A right code never resets the count, so one real code can't clear it between
+-- guesses. Returns when the key is locked until, or null. (packages/core's lockoutStep is the same rule.)
+create function app.shop_code_failed(p_kind text, p_key text, p_limit integer, p_window interval)
+returns timestamptz
 language plpgsql security definer
 set search_path = ''
 as $$
 declare
-  v_limit integer := case p_kind when 'pair' then 5 else 30 end;
-  v_window interval := case p_kind when 'pair' then interval '24 hours' else interval '15 minutes' end;
   v app.shop_code_attempts;
+  v_locking boolean := false;
 begin
   select * into v from app.shop_code_attempts a where a.kind = p_kind and a.key_hash = p_key;
-  if v.locked_until <= now() or v.window_start + v_window <= now() then
-    v.failures := 0;
+  if v.kind is null or v.locked_until <= now()
+     or (v.locked_until is null and v.window_start + p_window <= now()) then
+    v.hits := 0;
     v.window_start := now();
     v.locked_until := null;
   end if;
-  v.failures := least(v.failures + 1, 1000000);
-  if v.failures >= v_limit then
+  v.hits := least(v.hits + 1, 1000000);
+  if v.locked_until is null and v.hits >= p_limit then
     v.locked_until := now() + interval '15 minutes';
+    v_locking := true;
   end if;
-  update app.shop_code_attempts a
-  set failures = v.failures, window_start = v.window_start, locked_until = v.locked_until, updated_at = now()
-  where a.kind = p_kind and a.key_hash = p_key;
+  insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start, locked_until, locked_at, updated_at)
+  values (p_kind, p_key, v.hits, v.window_start, v.locked_until, case when v_locking then now() end, now())
+  on conflict (kind, key_hash) do update
+  set hits = excluded.hits, window_start = excluded.window_start, locked_until = excluded.locked_until,
+    locked_at = coalesce(excluded.locked_at, a.locked_at), updated_at = now();
   return v.locked_until;
 end;
 $$;
 
--- A parent enters an access code (answers 1–3; calls 1, 4, 5). Two ways:
--- - opening (p_new_session_hash): a new session for the code's child; the device's old session (p_session_hash, if
---   any) is forgotten;
--- - adding a sibling (p_new_session_hash null): p_session_hash must name a live session (else session_required).
--- In order: the lock is checked before any lookup, so a locked caller learns nothing (locked, retry_after); the code's
--- HMAC is looked up among children only (never a blank card's code, call 5; never a card code); a miss (or a null hash:
--- a code of a region not set up here, or not a code at all) counts against the network+device and the network; a hit
--- never resets the count. A hit opens the session or adds the child: added, already (in the session), limit (5
--- children), other_studio (call 1). Every key's row is locked for the whole call, so parallel guesses take turns.
--- Errors and answers carry no codes or names.
-create function public.shop_enter_code(p_code_hash text, p_pair_key text, p_ip_key text, p_session_hash text,
-  p_new_session_hash text)
+-- The region's circuit breaker (H1): every wrong code counts here; the 600th in a minute trips it for 15 minutes.
+-- Returns true only on the wrong code that trips it, so the API logs one code-free alert.
+create function app.shop_breaker_failed() returns boolean
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_hits integer;
+begin
+  insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start)
+  values ('region', repeat('0', 64), 1, now())
+  on conflict (kind, key_hash) do update
+  set hits = case when a.window_start + interval '1 minute' <= now() then 1 else least(a.hits + 1, 1000000) end,
+    window_start = case when a.window_start + interval '1 minute' <= now() then now() else a.window_start end,
+    updated_at = now()
+  returning a.hits into v_hits;
+  if v_hits = 600 then
+    update app.shop_code_attempts a set locked_until = now() + interval '15 minutes', locked_at = now()
+    where a.kind = 'region' and a.key_hash = repeat('0', 64);
+    return true;
+  end if;
+  return false;
+end;
+$$;
+
+-- A new device for a request that had none (H1): yes while the network has had fewer than 50 new devices in 24 hours
+-- (its IPv4 /24 or IPv6 /56 fewer than 200, its IPv6 /48 fewer than 500), and counts it. Otherwise the request stays
+-- in its network's shared no-device bucket.
+create function app.shop_issue_device(p_net_key text, p_wide_key text, p_wider_key text) returns boolean
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if exists (select 1 from app.shop_code_attempts a
+             where (a.kind, a.key_hash) in (('issue_net', p_net_key), ('issue_wide', p_wide_key),
+                                            ('issue_wider', p_wider_key))
+               and a.window_start > now() - interval '24 hours'
+               and a.hits >= case a.kind when 'issue_net' then 50 when 'issue_wide' then 200 else 500 end) then
+    return false;
+  end if;
+  insert into app.shop_code_attempts as a (kind, key_hash, hits, window_start)
+  select k.kind, k.key_hash, 1, now()
+  from (values ('issue_net', p_net_key), ('issue_wide', p_wide_key), ('issue_wider', p_wider_key)) k (kind, key_hash)
+  where k.key_hash is not null
+  on conflict (kind, key_hash) do update
+  set hits = case when a.window_start <= now() - interval '24 hours' then 1 else least(a.hits + 1, 1000000) end,
+    window_start = case when a.window_start <= now() - interval '24 hours' then now() else a.window_start end,
+    updated_at = now();
+  return true;
+end;
+$$;
+
+-- At most 10 sessions show a child (M2): the session just used (p_keep) and the 9 newest others; older ones go, with
+-- their bags.
+create function app.shop_trim_child_sessions(p_studio_id uuid, p_child_id uuid, p_keep uuid) returns void
+language sql security definer
+set search_path = ''
+as $$
+  delete from public.shop_sessions s
+  where s.studio_id = p_studio_id and s.id in (
+    select sc.session_id from public.shop_session_children sc
+    where sc.child_id = p_child_id and sc.studio_id = p_studio_id and sc.session_id <> p_keep
+    order by sc.added_at desc, sc.session_id desc
+    offset 9);
+$$;
+
+-- A parent enters an access code (answers 1–3; calls 1, 4, 5; security review H1, M2, M3; code review S5, S6, N1).
+-- The API sends HMACs only: the device (p_device_key, a device it issued and signed; or p_new_device_key, one it offers
+-- when the request had none), the network (p_net_key: IPv4 address or IPv6 /64), the wider networks (p_wide_key: IPv4
+-- /24 or IPv6 /56; p_wider_key: IPv6 /48, null for IPv4), the device's session hashes in this region (at most 3, one
+-- per studio) and a new session's hash. In order:
+-- 1. A device for a request without one, within the day's caps for its networks (never while the breaker is tripped).
+-- 2. Every key's advisory lock, in one order, then any session row (N1): parallel guesses take turns, and the order is
+--    the same for every call, so two tabs can't deadlock.
+-- 3. The lock, before any lookup, so a locked caller learns nothing: the device's own bucket (or the network's shared
+--    no-device bucket) and the networks'. A known device (one that has opened a gallery and hasn't been locked in 24
+--    hours) keeps its own 5 tries while its network is locked (M3), unless the breaker is tripped.
+-- 4. The code's HMAC among children only (never a blank card's code, call 5; never a card code). A miss (or a null
+--    hash: a code of a region not set up here, or not a code at all) counts against the device's bucket, every network
+--    and the region's breaker. A hit never resets a count.
+-- 5. A hit: a session of the code's studio on this device gets the child (added, already, limit: 5 children); else a
+--    new session (opened), while the device has fewer than 3 (gallery_limit).
+-- Answers carry no codes or names: outcome, child_id, session_hash, live (the device's sessions here that still
+-- last), retry_after, device_issued, and alert (this miss tripped the breaker).
+create function public.shop_enter_code(p_code_hash text, p_device_key text, p_new_device_key text, p_net_key text,
+  p_wide_key text, p_wider_key text, p_session_hashes text[], p_new_session_hash text)
 returns jsonb
 language plpgsql security definer
 set search_path = ''
 as $$
 declare
-  v_session public.shop_sessions;
-  v_child public.children;
+  v_hashes text[] := coalesce(p_session_hashes, '{}');
+  v_tripped boolean;
+  v_device text := p_device_key;
+  v_issued boolean := false;
+  v_own_kind text;
+  v_own_key text;
+  v_known boolean := false;
+  v_lock bigint;
   v_until timestamptz;
-  v_pair_until timestamptz;
-  v_ip_until timestamptz;
+  v_network_until timestamptz;
+  v_alert boolean;
+  v_child public.children;
+  v_session public.shop_sessions;
+  v_live text[];
+  v_result jsonb;
 begin
-  if coalesce(p_pair_key, '') !~ '^[0-9a-f]{64}$' or coalesce(p_ip_key, '') !~ '^[0-9a-f]{64}$'
-     or p_code_hash !~ '^[0-9a-f]{64}$' or p_session_hash !~ '^[0-9a-f]{64}$'
-     or p_new_session_hash !~ '^[0-9a-f]{64}$'
-     or (p_session_hash is null and p_new_session_hash is null) then
+  if coalesce(p_net_key, '') !~ '^[0-9a-f]{64}$' or coalesce(p_wide_key, '') !~ '^[0-9a-f]{64}$'
+     or p_wider_key !~ '^[0-9a-f]{64}$' or p_device_key !~ '^[0-9a-f]{64}$'
+     or p_new_device_key !~ '^[0-9a-f]{64}$' or p_code_hash !~ '^[0-9a-f]{64}$'
+     or coalesce(p_new_session_hash, '') !~ '^[0-9a-f]{64}$'
+     or cardinality(v_hashes) > 3
+     or exists (select 1 from unnest(v_hashes) h where coalesce(h, '') !~ '^[0-9a-f]{64}$') then
     raise exception 'Send the keys and a session' using errcode = '22023';
   end if;
-  if p_new_session_hash is null then
-    v_session := app.shop_session_row(p_session_hash, true);
-  end if;
 
-  -- The network's row, then the device's (always in this order), locked until the call ends.
-  insert into app.shop_code_attempts (kind, key_hash) values ('ip', p_ip_key), ('pair', p_pair_key)
-  on conflict (kind, key_hash) do nothing;
-  perform 1 from app.shop_code_attempts a
-  where (a.kind, a.key_hash) in (('ip', p_ip_key), ('pair', p_pair_key))
-  order by a.kind
-  for update;
+  v_tripped := exists (select 1 from app.shop_code_attempts a
+                       where a.kind = 'region' and a.key_hash = repeat('0', 64) and a.locked_until > now());
+  if v_device is null and p_new_device_key is not null and not v_tripped
+     and app.shop_issue_device(p_net_key, p_wide_key, p_wider_key) then
+    v_device := p_new_device_key;
+    v_issued := true;
+  end if;
+  v_own_kind := case when v_device is null then 'nodevice' else 'device' end;
+  v_own_key := coalesce(v_device, p_net_key);
+
+  for v_lock in
+    select distinct hashtextextended(k, 0) from unnest(array[v_own_kind || ':' || v_own_key, 'net:' || p_net_key,
+      'wide:' || p_wide_key, 'wider:' || p_wider_key]) k where k is not null order by 1
+  loop
+    perform pg_advisory_xact_lock(v_lock);
+  end loop;
+
+  if v_device is not null and not v_tripped then
+    select a.known and (a.locked_at is null or a.locked_at <= now() - interval '24 hours') into v_known
+    from app.shop_code_attempts a where a.kind = 'device' and a.key_hash = v_device;
+    v_known := coalesce(v_known, false);
+  end if;
   select max(a.locked_until) into v_until from app.shop_code_attempts a
-  where (a.kind, a.key_hash) in (('ip', p_ip_key), ('pair', p_pair_key)) and a.locked_until > now();
+  where a.locked_until > now()
+    and ((a.kind = v_own_kind and a.key_hash = v_own_key)
+         or (not v_known and (a.kind, a.key_hash) in (('net', p_net_key), ('wide', p_wide_key),
+                                                     ('wider', p_wider_key))));
   if v_until is not null then
-    return jsonb_build_object('outcome', 'locked',
+    return jsonb_build_object('outcome', 'locked', 'device_issued', v_issued,
       'retry_after', greatest(ceil(extract(epoch from v_until - now()))::int, 1));
   end if;
 
@@ -317,46 +462,73 @@ begin
     select * into v_child from public.children c where c.access_code_hash = p_code_hash;
   end if;
   if v_child.id is null then
-    v_ip_until := app.shop_code_failed('ip', p_ip_key);
-    v_pair_until := app.shop_code_failed('pair', p_pair_key);
-    v_until := greatest(v_ip_until, v_pair_until);
+    v_until := app.shop_code_failed(v_own_kind, v_own_key, 5, interval '24 hours');
+    v_network_until := greatest(
+      app.shop_code_failed('net', p_net_key, case when v_tripped then 10 else 30 end, interval '15 minutes'),
+      app.shop_code_failed('wide', p_wide_key, case when v_tripped then 30 else 100 end, interval '15 minutes'),
+      case when p_wider_key is not null then
+        app.shop_code_failed('wider', p_wider_key, case when v_tripped then 100 else 300 end, interval '15 minutes')
+      end);
+    v_alert := app.shop_breaker_failed();
+    if not v_known then
+      v_until := greatest(v_until, v_network_until);
+    end if;
     if v_until is not null then
-      return jsonb_build_object('outcome', 'locked',
+      return jsonb_build_object('outcome', 'locked', 'device_issued', v_issued, 'alert', v_alert,
         'retry_after', greatest(ceil(extract(epoch from v_until - now()))::int, 1));
     end if;
-    return jsonb_build_object('outcome', 'not_found');
+    return jsonb_build_object('outcome', 'not_found', 'device_issued', v_issued, 'alert', v_alert);
   end if;
 
-  if p_new_session_hash is not null then
-    if p_session_hash is not null then
-      delete from public.shop_sessions s where s.token_hash = p_session_hash;
+  -- A device that opens a gallery is known: it keeps its own allowance on a locked network (M3).
+  if v_device is not null then
+    insert into app.shop_code_attempts as a (kind, key_hash, known) values ('device', v_device, true)
+    on conflict (kind, key_hash) do update set known = true, updated_at = now();
+  end if;
+
+  select array_agg(s.token_hash order by s.created_at, s.id) into v_live from public.shop_sessions s
+  where s.token_hash = any (v_hashes) and s.expires_at > now();
+  v_live := coalesce(v_live, '{}');
+  select * into v_session from public.shop_sessions s
+  where s.token_hash = any (v_live) and s.studio_id = v_child.studio_id
+  order by s.created_at desc, s.id limit 1
+  for update;
+
+  if v_session.id is not null then
+    v_result := jsonb_build_object('child_id', v_child.id, 'session_hash', v_session.token_hash, 'live', v_live,
+      'device_issued', v_issued);
+    if exists (select 1 from public.shop_session_children sc
+               where sc.session_id = v_session.id and sc.studio_id = v_session.studio_id
+                 and sc.child_id = v_child.id) then
+      return v_result || jsonb_build_object('outcome', 'already');
     end if;
-    insert into public.shop_sessions (studio_id, token_hash) values (v_child.studio_id, p_new_session_hash)
-    returning * into v_session;
+    if (select count(*) from public.shop_session_children sc
+        where sc.session_id = v_session.id and sc.studio_id = v_session.studio_id) >= 5 then
+      return jsonb_build_object('outcome', 'limit', 'live', v_live, 'device_issued', v_issued);
+    end if;
     insert into public.shop_session_children (session_id, studio_id, job_id, child_id)
-    values (v_session.id, v_child.studio_id, v_child.job_id, v_child.id);
-    return jsonb_build_object('outcome', 'opened', 'child_id', v_child.id, 'expires_at', v_session.expires_at);
+    values (v_session.id, v_session.studio_id, v_child.job_id, v_child.id);
+    perform app.shop_trim_child_sessions(v_child.studio_id, v_child.id, v_session.id);
+    return v_result || jsonb_build_object('outcome', 'added');
   end if;
 
-  if v_child.studio_id <> v_session.studio_id then
-    return jsonb_build_object('outcome', 'other_studio');
+  if cardinality(v_live) >= 3 then
+    return jsonb_build_object('outcome', 'gallery_limit', 'live', v_live, 'device_issued', v_issued);
   end if;
-  if exists (select 1 from public.shop_session_children sc
-             where sc.session_id = v_session.id and sc.child_id = v_child.id) then
-    return jsonb_build_object('outcome', 'already', 'child_id', v_child.id);
-  end if;
-  if (select count(*) from public.shop_session_children sc where sc.session_id = v_session.id) >= 5 then
-    return jsonb_build_object('outcome', 'limit');
-  end if;
+  insert into public.shop_sessions (studio_id, token_hash) values (v_child.studio_id, p_new_session_hash)
+  returning * into v_session;
   insert into public.shop_session_children (session_id, studio_id, job_id, child_id)
-  values (v_session.id, v_session.studio_id, v_child.job_id, v_child.id);
-  return jsonb_build_object('outcome', 'added', 'child_id', v_child.id);
+  values (v_session.id, v_child.studio_id, v_child.job_id, v_child.id);
+  perform app.shop_trim_child_sessions(v_child.studio_id, v_child.id, v_session.id);
+  return jsonb_build_object('outcome', 'opened', 'child_id', v_child.id, 'session_hash', v_session.token_hash,
+    'live', v_live || v_session.token_hash, 'device_issued', v_issued);
 end;
 $$;
 
--- The session: its studio's name, when it ends, the delivery chosen, how many things are in the bag, and each child:
--- first name and last initial only (call 2), the job, the school (the client's name, else the job's), picture day, the
--- closing date, whether the job delivers to school, and its state.
+-- The session: its studio's name, when it ends, the delivery chosen, how many things are in the bag, and each child.
+-- A child whose shop is open: first name and last initial only (call 2), the job, the school (the client's name, else
+-- the job's), picture day, the closing date, whether the job delivers to school. A closed, draft or unavailable child:
+-- the id and state only (security review M1: a stale card never reveals a name, a school or a date).
 create function public.shop_session(p_session_hash text) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -371,21 +543,23 @@ begin
     'bag_count', (select coalesce(sum(l.quantity), 0) from public.shop_cart_lines l
                   where l.session_id = v.id and l.studio_id = v.studio_id),
     'children', coalesce((
-      select jsonb_agg(jsonb_build_object(
-          'id', c.id, 'first_name', c.first_name, 'last_initial', upper(left(c.last_name, 1)), 'job_id', j.id,
-          'school', coalesce(cl.name, j.name), 'picture_day', j.picture_day, 'closes_at', j.closes_at,
-          'deliver_to_school', j.deliver_to_school, 'state', app.shop_child_state(c.id))
+      select jsonb_agg(jsonb_build_object('id', c.id, 'state', st.state) || case when st.state = 'open' then
+          jsonb_build_object('first_name', c.first_name, 'last_initial', upper(left(c.last_name, 1)), 'job_id', j.id,
+            'school', coalesce(cl.name, j.name), 'picture_day', j.picture_day, 'closes_at', j.closes_at,
+            'deliver_to_school', j.deliver_to_school)
+          else '{}'::jsonb end
         order by sc.added_at, c.id)
       from public.shop_session_children sc
       join public.children c on c.id = sc.child_id and c.studio_id = sc.studio_id and c.job_id = sc.job_id
       join public.jobs j on j.id = c.job_id and j.studio_id = c.studio_id
       left join public.clients cl on cl.id = j.client_id and cl.studio_id = j.studio_id
+      cross join lateral (select app.shop_child_state(c.id) as state) st
       where sc.session_id = v.id and sc.studio_id = v.studio_id), '[]'::jsonb));
 end;
 $$;
 
 -- A child's gallery: their portraits and their own class's photo set, in tagging order, each with its size; ids only
--- (the API signs the watermarked previews). Nothing unless the state is open. Class photos only for a child in a class.
+-- (the API signs the watermarked previews). Only the state unless it is open. Class photos only for a child in a class.
 create function public.shop_gallery(p_session_hash text, p_child_id uuid) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -396,8 +570,7 @@ declare
   v_state text := app.shop_child_state(v_child.id);
 begin
   if v_state <> 'open' then
-    return jsonb_build_object('state', v_state, 'studio_id', v.studio_id, 'job_id', v_child.job_id,
-      'portraits', '[]'::jsonb, 'class_photos', '[]'::jsonb);
+    return jsonb_build_object('state', v_state);
   end if;
   return jsonb_build_object('state', v_state, 'studio_id', v.studio_id, 'job_id', v_child.job_id,
     'portraits', coalesce((
@@ -445,10 +618,10 @@ end;
 $$;
 
 -- The bag, priced now: each line with its item's current name, size and price, its pose's size, whether it needs
--- delivery (a print, or a package holding prints) and whether it can still be bought (available: the item is on the
--- job's current list, the child's shop is open, and the pose is still one of the child's visible portraits). Lines in
--- the order the children were added, then as added. Each job in the bag with its current home shipping fee and
--- whether it delivers to school, and the studio's id (for the previews' keys). The API totals it (core cartTotals).
+-- delivery (app.shop_line_physical) and whether it can still be bought (app.shop_line_available). Lines in the order
+-- the children were added, then as added. Each job in the bag with its current home shipping fee and whether it
+-- delivers to school; the studio's id (for the previews' keys) and currency (its region's, ADR 0006). The API totals it
+-- (core cartTotals).
 create function public.shop_cart(p_session_hash text) returns jsonb
 language plpgsql stable security definer
 set search_path = ''
@@ -458,30 +631,22 @@ declare
 begin
   return (
     with kids as (
-      select sc.child_id, sc.job_id, sc.added_at, app.shop_child_state(sc.child_id) as state
+      select sc.child_id, sc.job_id, sc.added_at
       from public.shop_session_children sc where sc.session_id = v.id and sc.studio_id = v.studio_id
-    ), visible as (
-      select k.child_id, p.id from kids k
-      cross join lateral app.parent_visible_photos(k.job_id, k.child_id, null) p
-      where k.state = 'open'
     ), lines as (
-      select l.*, k.added_at, k.state, i.name, i.print_size, i.price_cents, pl.currency, ph.width, ph.height,
-        (l.kind = 'print' or (l.kind = 'package' and exists (
-          select 1 from public.price_list_package_lines pk
-          where pk.package_item_id = l.item_id and pk.studio_id = l.studio_id and pk.line_kind = 'print'))) as physical,
-        (j.price_list_id = l.price_list_id and k.state = 'open'
-          and (l.photo_id is null
-               or exists (select 1 from visible x where x.child_id = l.child_id and x.id = l.photo_id))) as available
+      select l.*, k.added_at, i.name, i.print_size, i.price_cents, pl.currency, ph.width, ph.height,
+        app.shop_line_physical(l) as physical, app.shop_line_available(l) as available
       from public.shop_cart_lines l
       join kids k on k.child_id = l.child_id
       join public.price_list_items i on i.id = l.item_id and i.studio_id = l.studio_id
       join public.price_lists pl on pl.id = l.price_list_id and pl.studio_id = l.studio_id
-      join public.jobs j on j.id = l.job_id and j.studio_id = l.studio_id
       left join public.photos ph on ph.id = l.photo_id and ph.studio_id = l.studio_id
       where l.session_id = v.id and l.studio_id = v.studio_id
     )
     select jsonb_build_object(
       'studio_id', v.studio_id,
+      'currency', (select case s.data_region when 'us' then 'USD' else 'CAD' end
+                   from public.studios s where s.id = v.studio_id),
       'shipping_method', v.shipping_method,
       'lines', coalesce((
         select jsonb_agg(jsonb_build_object(
@@ -540,10 +705,10 @@ begin
     where p.id = p_photo_id and p.place = 'child') then
     raise exception 'photo_unavailable' using errcode = 'P0001';
   end if;
-  if (select count(*) from public.shop_cart_lines l where l.session_id = v.id) >= 100
+  if (select count(*) from public.shop_cart_lines l where l.session_id = v.id and l.studio_id = v.studio_id) >= 100
      and not exists (select 1 from public.shop_cart_lines l
-                     where l.session_id = v.id and l.child_id = v_child.id and l.item_id = v_item.id
-                       and l.photo_id is not distinct from p_photo_id) then
+                     where l.session_id = v.id and l.studio_id = v.studio_id and l.child_id = v_child.id
+                       and l.item_id = v_item.id and l.photo_id is not distinct from p_photo_id) then
     raise exception 'bag_full' using errcode = 'P0001';
   end if;
   insert into public.shop_cart_lines as l (studio_id, session_id, child_id, job_id, price_list_id, item_id, kind,
@@ -558,7 +723,8 @@ begin
 end;
 $$;
 
--- Changes a line's quantity (1 to 99; a digital download stays 1), while its child's shop is open (shop_closed).
+-- Changes a line's quantity (1 to 99; a digital download stays 1), only while the line can still be bought (code
+-- review N2): shop_closed (the child's shop is closed), item_unavailable (off the job's list) or photo_unavailable.
 create function public.shop_cart_set_quantity(p_session_hash text, p_line_id uuid, p_quantity integer) returns void
 language plpgsql security definer
 set search_path = ''
@@ -576,10 +742,16 @@ begin
      or (v_line.kind in ('digital_single', 'digital_all') and p_quantity <> 1) then
     raise exception 'A quantity is 1 to 99; a digital download once' using errcode = '22023';
   end if;
-  if app.shop_child_state(v_line.child_id) <> 'open' then
-    raise exception 'shop_closed' using errcode = 'P0001';
+  if not app.shop_line_available(v_line) then
+    if app.shop_child_state(v_line.child_id) = 'closed' then
+      raise exception 'shop_closed' using errcode = 'P0001';
+    elsif not exists (select 1 from public.jobs j where j.id = v_line.job_id and j.studio_id = v_line.studio_id
+                        and j.price_list_id = v_line.price_list_id) then
+      raise exception 'item_unavailable' using errcode = 'P0001';
+    end if;
+    raise exception 'photo_unavailable' using errcode = 'P0001';
   end if;
-  update public.shop_cart_lines l set quantity = p_quantity where l.id = v_line.id;
+  update public.shop_cart_lines l set quantity = p_quantity where l.id = v_line.id and l.studio_id = v.studio_id;
 end;
 $$;
 
@@ -598,7 +770,8 @@ begin
 end;
 $$;
 
--- Chooses delivery (call 9): home always; school only when every job with something to deliver in the bag delivers
+-- Chooses delivery (call 9), looking only at lines that can still be bought (code review M2, the same rule as the bag's
+-- totals): home always; school only when something needs delivery and every job with something to deliver delivers
 -- to school (school_delivery_off otherwise).
 create function public.shop_set_shipping(p_session_hash text, p_method public.shop_shipping_method) returns void
 language plpgsql security definer
@@ -611,16 +784,16 @@ begin
     raise exception 'Choose home or school' using errcode = '22023';
   end if;
   if p_method = 'school' and (
-    not exists (select 1 from public.shop_cart_lines l where l.session_id = v.id)
+    not exists (select 1 from public.shop_cart_lines l
+                where l.session_id = v.id and l.studio_id = v.studio_id
+                  and app.shop_line_physical(l) and app.shop_line_available(l))
     or exists (select 1 from public.shop_cart_lines l
                join public.jobs j on j.id = l.job_id and j.studio_id = l.studio_id
-               where l.session_id = v.id and not j.deliver_to_school
-                 and (l.kind = 'print' or (l.kind = 'package' and exists (
-                   select 1 from public.price_list_package_lines pk
-                   where pk.package_item_id = l.item_id and pk.line_kind = 'print'))))) then
+               where l.session_id = v.id and l.studio_id = v.studio_id and not j.deliver_to_school
+                 and app.shop_line_physical(l) and app.shop_line_available(l))) then
     raise exception 'school_delivery_off' using errcode = 'P0001';
   end if;
-  update public.shop_sessions s set shipping_method = p_method where s.id = v.id;
+  update public.shop_sessions s set shipping_method = p_method where s.id = v.id and s.studio_id = v.studio_id;
 end;
 $$;
 
@@ -659,8 +832,9 @@ begin
 end;
 $$;
 
--- The jobs cron's tidy-up: up to p_limit expired sessions (with their children and bags), then wrong-code counts and
--- request counts untouched for 24 hours (and no longer locked). Returns how many rows went.
+-- The jobs cron's tidy-up, one page: up to p_limit expired sessions (with their children and bags), up to p_limit
+-- counts untouched for 24 hours and no longer locked (a known device's after 30 days), and up to p_limit request
+-- counts over an hour old. Returns how many rows went; the cron calls it again while that is at least p_limit (M2).
 create function public.prune_shop(p_limit integer) returns integer
 language plpgsql security definer
 set search_path = ''
@@ -680,11 +854,12 @@ begin
   where (a.kind, a.key_hash) in (
     select x.kind, x.key_hash from app.shop_code_attempts x
     where x.updated_at < now() - interval '24 hours' and (x.locked_until is null or x.locked_until <= now())
+      and (not x.known or x.updated_at < now() - interval '30 days')
     limit p_limit);
   get diagnostics v_attempts = row_count;
   delete from app.shop_rate r
   where r.key_hash in (select x.key_hash from app.shop_rate x
-                       where x.window_start < now() - interval '24 hours' limit p_limit);
+                       where x.window_start < now() - interval '1 hour' limit p_limit);
   get diagnostics v_rate = row_count;
   return v_sessions + v_attempts + v_rate;
 end;
@@ -692,12 +867,15 @@ $$;
 
 -- ── Grants ────────────────────────────────────────────────────────────────────────────────────────────────────────
 revoke all on function app.guard_shop_session_child(), app.parent_visible_photos(uuid, uuid, uuid),
-  app.shop_child_state(uuid), app.shop_session_row(text, boolean),
-  app.shop_session_child(public.shop_sessions, uuid), app.shop_code_failed(text, text)
+  app.shop_child_state(uuid), app.shop_line_available(public.shop_cart_lines),
+  app.shop_line_physical(public.shop_cart_lines), app.shop_session_row(text, boolean),
+  app.shop_session_child(public.shop_sessions, uuid), app.shop_code_failed(text, text, integer, interval),
+  app.shop_breaker_failed(), app.shop_issue_device(text, text, text),
+  app.shop_trim_child_sessions(uuid, uuid, uuid)
   from public, anon, authenticated;
 -- The parent shop's work: the service role only (the /api/v1/shop routes), never browsers.
 revoke all on function
-  public.shop_enter_code(text, text, text, text, text),
+  public.shop_enter_code(text, text, text, text, text, text, text[], text),
   public.shop_session(text),
   public.shop_gallery(text, uuid),
   public.shop_price_list(text, uuid),
@@ -711,7 +889,7 @@ revoke all on function
   public.prune_shop(integer)
   from public, anon, authenticated;
 grant execute on function
-  public.shop_enter_code(text, text, text, text, text),
+  public.shop_enter_code(text, text, text, text, text, text, text[], text),
   public.shop_session(text),
   public.shop_gallery(text, uuid),
   public.shop_price_list(text, uuid),

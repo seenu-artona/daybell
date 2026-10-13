@@ -11,6 +11,7 @@ import { DockedCta } from "../../../_components/docked-cta";
 import { money, useContents } from "../../../_components/format";
 import { Loading, MessageScreen } from "../../../_components/message-screen";
 import { ShopHeader } from "../../../_components/shop-header";
+import { ShopTitle } from "../../../_components/shop-title";
 import { shopButton, shopLink } from "../../../_components/styles";
 import { useChildData } from "../../../_components/use-child";
 
@@ -19,7 +20,8 @@ function Packages() {
   const t = useTranslations("shop");
   const contents = useContents();
   const photo = useSearchParams().get("photo");
-  const { childId, child, studio, data } = useChildData<ShopPriceListResponse>(shopApi.priceList);
+  const { childId, galleryId, child, studio, data, failed, reload } =
+    useChildData<ShopPriceListResponse>(shopApi.priceList);
   const packages = data?.priceList?.items.filter((i) => i.kind === "package") ?? [];
   const [chosen, setChosen] = useState<string | null>(null);
   useEffect(() => {
@@ -29,10 +31,26 @@ function Packages() {
   const pose = photo ? `?photo=${encodeURIComponent(photo)}` : "";
   const back = `/shop/c/${childId}`;
 
-  if (!child || !data) return <Loading label={t("loading")} />;
+  const title = <ShopTitle>{t("titles.packages")}</ShopTitle>;
+  if (!child || !data)
+    return (
+      <>
+        {title}
+        {failed ? (
+          <MessageScreen>
+            <button type="button" onClick={() => void reload()} className={shopButton}>
+              {t("retry")}
+            </button>
+          </MessageScreen>
+        ) : (
+          <Loading label={t("loading")} />
+        )}
+      </>
+    );
   return (
     <>
-      <ShopHeader title={t("buy.packagesTitle")} back={back} />
+      {title}
+      <ShopHeader title={t("buy.packagesTitle")} back={back} gallery={galleryId} />
       <main className="px-4 pt-4 pb-32">
         {data.state !== "open" ? (
           <MessageScreen>

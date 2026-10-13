@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The parent shop's routes (ADR 0022): a code opens a gallery with an httpOnly session cookie; a wrong code, a code of
-// a region not set up here and anything that isn't a code get the same answer; a locked caller gets 429 with
-// Retry-After; previews are only the watermarked proofs, signed for 10 minutes at most; Canadian data is handled in
-// Montréal only; no session, or a forged one, is 401; answers are never cached; cross-site writes are refused; and
-// nothing is ever logged (no code, name, address or token). The database and storage are faked.
+// The parent shop's routes (ADR 0022): a code opens a gallery, or joins this device's gallery of the same studio, with
+// an httpOnly session cookie holding up to 3 studios' sessions (S6); a wrong code, a code of a region not set up here
+// and anything that isn't a code get the same answer; only a device cookie the server signed counts as a device (H1);
+// a locked caller gets 429 with Retry-After; every request is counted before its body is read (L7); previews are only
+// the watermarked proofs, signed for 10 minutes at most; Canadian data is handled in Montréal only; no session, or a
+// forged one, is 401; cookies are __Host- and Secure over HTTPS (L1); a closed child shows no name (M1); answers are
+// never cached; cross-site writes are refused; and nothing is ever logged (no code, name, address or token). The
+// database and storage are faked.
 vi.mock("server-only", () => ({}));
 const { rpc, signed, databases } = vi.hoisted(() => ({
   rpc: vi.fn(),
@@ -36,24 +39,36 @@ vi.stubEnv("ACCESS_CODE_HMAC_KEY", key(1));
 vi.stubEnv("ACCESS_CODE_ENCRYPTION_KEY", key(2));
 vi.stubEnv("SHOP_THROTTLE_KEY", key(3));
 
+const { galleryId } = await import("@/lib/shop/session");
+const { signDevice } = await import("@/lib/shop/throttle");
+
 const STUDIO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const JOB = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
 const CHILD = "c0000000-0000-4000-8000-000000000001";
 const PHOTO = (n: number) => `f0000000-0000-4000-8000-00000000000${n}`;
 const TOKEN = "T".repeat(43);
-const COOKIE = `daybell_shop=ca.${TOKEN}; daybell_device=${"D".repeat(43)}`;
+const TOKEN_B = "U".repeat(43);
+const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+const DEVICE = signDevice("D".repeat(43), Math.floor(Date.now() / 1000));
+const COOKIE = `daybell_shop=ca.${TOKEN}; daybell_device=${DEVICE}`;
 const HEX = /^[0-9a-f]{64}$/;
 const CODE = "K7QM-4XPA";
 
 type Answers = Record<string, { data?: unknown; error?: unknown }>;
 /** Each shop function answers from `answers` (take_shop_request lets everything in unless told otherwise). */
-function database(answers: Answers) {
-  rpc.mockImplementation(async (_region: string, fn: string) => {
+function database(answers: Answers | ((fn: string, args: Record<string, unknown>) => unknown)) {
+  rpc.mockImplementation(async (_region: string, fn: string, args: Record<string, unknown>) => {
+    if (typeof answers === "function") {
+      if (fn === "take_shop_request") return { data: true, error: null };
+      return { data: answers(fn, args) ?? null, error: null };
+    }
     const answer = answers[fn] ?? (fn === "take_shop_request" ? { data: true } : { data: null });
     return { data: answer.data ?? null, error: answer.error ?? null };
   });
 }
 const calls = (fn: string) => rpc.mock.calls.filter((c) => c[1] === fn);
+const setCookie = (res: Response, name: string) =>
+  res.headers.getSetCookie().find((c) => c.startsWith(`${name}=`));
 
 function request(
   method: string,
@@ -95,41 +110,149 @@ afterEach(() => {
 });
 
 const access = async () => (await import("./shop/access/route")).POST;
+const opened = (sessionHash: string, live: string[] = [sessionHash]) => ({
+  outcome: "opened",
+  child_id: CHILD,
+  session_hash: sessionHash,
+  live,
+  device_issued: false,
+});
 
-describe("POST /shop/access (answers 1–3; calls 4, 5)", () => {
+describe("POST /shop/access (answers 1–3; calls 4, 5; S5, S6)", () => {
   it("opens the gallery with an httpOnly 30-day cookie whose token only the database's hash names", async () => {
-    database({ shop_enter_code: { data: { outcome: "opened", child_id: CHILD } } });
+    database((fn, args) =>
+      fn === "shop_enter_code"
+        ? { ...opened(args.p_new_session_hash as string), device_issued: true }
+        : null,
+    );
     const res = await (await access())(request("POST", { code: "k7qm 4xpa" }));
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ childId: CHILD });
-    expect(res.headers.get("cache-control")).toBe("no-store");
-    const cookies = res.headers.getSetCookie();
-    const session = cookies.find((c) => c.startsWith("daybell_shop=")) ?? "";
+    const session = setCookie(res, "daybell_shop") ?? "";
     expect(session).toMatch(/^daybell_shop=ca\.[A-Za-z0-9_-]{43};/);
+    const token = /daybell_shop=ca\.([^;]+)/.exec(session)?.[1] ?? "";
+    expect(await res.json()).toEqual({ childId: CHILD, galleryId: galleryId(token) });
+    expect(res.headers.get("cache-control")).toBe("no-store");
     expect(session).toContain("HttpOnly");
     expect(session).toMatch(/SameSite=lax/i);
     expect(session).toContain("Path=/");
     expect(session).toContain("Max-Age=2592000");
-    expect(cookies.some((c) => c.startsWith("daybell_device=") && c.includes("HttpOnly"))).toBe(
-      true,
-    );
-    const token = /daybell_shop=ca\.([^;]+)/.exec(session)?.[1] ?? "";
+    expect(session).not.toMatch(/Domain=/i);
+    const device = setCookie(res, "daybell_device") ?? "";
+    expect(device).toContain("HttpOnly");
+    expect(device).toContain("Max-Age=2592000");
     const [args] = calls("shop_enter_code").map((c) => c[2]);
     expect(args).toMatchObject({
-      p_new_session_hash: createHash("sha256").update(token).digest("hex"),
-      p_session_hash: null,
+      p_new_session_hash: sha(token),
+      p_session_hashes: [],
+      p_device_key: null,
+      p_wider_key: null,
     });
-    for (const field of ["p_code_hash", "p_pair_key", "p_ip_key"]) expect(args[field]).toMatch(HEX);
+    for (const field of ["p_code_hash", "p_new_device_key", "p_net_key", "p_wide_key"])
+      expect(args[field]).toMatch(HEX);
     // Neither the code nor the address reaches the database.
     expect(JSON.stringify(rpc.mock.calls)).not.toMatch(/K7QM|4XPA|203\.0\.113/);
   });
 
-  it("forgets this device's earlier session when a new code opens", async () => {
-    database({ shop_enter_code: { data: { outcome: "opened", child_id: CHILD } } });
-    await (await access())(withSession("POST", { code: CODE }));
-    expect(calls("shop_enter_code")[0]?.[2].p_session_hash).toBe(
-      createHash("sha256").update(TOKEN).digest("hex"),
+  it("uses __Host- cookies, Secure, over HTTPS, and ignores a plain cookie a sibling site could plant (L1)", async () => {
+    database((fn, args) =>
+      fn === "shop_enter_code" ? opened(args.p_new_session_hash as string) : null,
     );
+    const res = await (await access())(
+      request(
+        "POST",
+        { code: CODE },
+        { cookie: `daybell_shop=ca.${TOKEN}` },
+        "https://shop.example.test/api/v1/shop/access",
+      ),
+    );
+    const session = setCookie(res, "__Host-daybell_shop") ?? "";
+    expect(session).toContain("Secure");
+    expect(session).toContain("Path=/");
+    expect(session).not.toMatch(/Domain=/i);
+    expect(setCookie(res, "daybell_shop")).toBeUndefined();
+    expect(calls("shop_enter_code")[0]?.[2].p_session_hashes).toEqual([]);
+  });
+
+  it("sets a device cookie only when the database issued the device (H1)", async () => {
+    database((fn, args) =>
+      fn === "shop_enter_code" ? opened(args.p_new_session_hash as string) : null,
+    );
+    const res = await (await access())(request("POST", { code: CODE }));
+    expect(setCookie(res, "daybell_device")).toBeUndefined();
+  });
+
+  it("counts a device by its signed cookie only, the same on any network; a forged one is no device (H1)", async () => {
+    database({ shop_enter_code: { data: { outcome: "not_found" } } });
+    const route = await access();
+    await route(withSession("POST", { code: CODE }));
+    await route(withSession("POST", { code: CODE }, { "x-forwarded-for": "198.51.100.1" }));
+    await route(request("POST", { code: CODE }, { cookie: `daybell_device=${"D".repeat(43)}` }));
+    const [a, b, c] = calls("shop_enter_code").map((call) => call[2]);
+    expect(a.p_device_key).toMatch(HEX);
+    expect(a.p_new_device_key).toBeNull();
+    expect(b.p_device_key).toBe(a.p_device_key);
+    expect(b.p_net_key).not.toBe(a.p_net_key);
+    expect(c.p_device_key).toBeNull();
+    expect(c.p_new_device_key).toMatch(HEX);
+    expect(c.p_net_key).toBe(a.p_net_key);
+  });
+
+  it("adds a same-studio code to this device's gallery, keeping the cookie and the bag (S5)", async () => {
+    database({
+      shop_enter_code: {
+        data: { outcome: "added", child_id: CHILD, session_hash: sha(TOKEN), live: [sha(TOKEN)] },
+      },
+    });
+    const res = await (await access())(withSession("POST", { code: CODE }));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ childId: CHILD, galleryId: galleryId(TOKEN) });
+    expect(calls("shop_enter_code")[0]?.[2].p_session_hashes).toEqual([sha(TOKEN)]);
+    expect(setCookie(res, "daybell_shop")).toBeUndefined();
+  });
+
+  it("answers 200 for a child already in the gallery", async () => {
+    database({
+      shop_enter_code: {
+        data: { outcome: "already", child_id: CHILD, session_hash: sha(TOKEN), live: [sha(TOKEN)] },
+      },
+    });
+    expect((await (await access())(withSession("POST", { code: CODE }))).status).toBe(200);
+  });
+
+  it("opens another studio's code as a gallery of its own beside the first (S6)", async () => {
+    database((fn, args) =>
+      fn === "shop_enter_code"
+        ? opened(args.p_new_session_hash as string, [sha(TOKEN), args.p_new_session_hash as string])
+        : null,
+    );
+    const res = await (await access())(withSession("POST", { code: CODE }));
+    const value = /daybell_shop=([^;]+)/.exec(setCookie(res, "daybell_shop") ?? "")?.[1] ?? "";
+    const [first, second] = value.split("~");
+    expect(first).toBe(`ca.${TOKEN}`);
+    expect(second).toMatch(/^ca\.[A-Za-z0-9_-]{43}$/);
+    expect((await res.json()).galleryId).toBe(galleryId(second?.slice(3) ?? ""));
+  });
+
+  it("refuses a 4th studio, and drops galleries that no longer last from the cookie", async () => {
+    const three = `daybell_shop=ca.${TOKEN}~ca.${TOKEN_B}~ca.${"V".repeat(43)}`;
+    database({
+      shop_enter_code: {
+        data: { outcome: "gallery_limit", live: [sha(TOKEN), sha(TOKEN_B), sha("V".repeat(43))] },
+      },
+    });
+    const full = await (await access())(request("POST", { code: CODE }, { cookie: three }));
+    expect(full.status).toBe(409);
+    expect((await full.json()).error.fields.form).toBe("shop.galleryLimit");
+    expect(setCookie(full, "daybell_shop")).toBeUndefined();
+    database({ shop_enter_code: { data: { outcome: "not_found", live: [sha(TOKEN)] } } });
+    const res = await (await access())(request("POST", { code: CODE }, { cookie: three }));
+    expect(setCookie(res, "daybell_shop")).toMatch(new RegExp(`^daybell_shop=ca\\.${TOKEN};`));
+  });
+
+  it("names the 5-child limit", async () => {
+    database({ shop_enter_code: { data: { outcome: "limit", live: [sha(TOKEN)] } } });
+    const res = await (await access())(withSession("POST", { code: CODE }));
+    expect([res.status, (await res.json()).error.fields.form]).toEqual([409, "shop.siblingLimit"]);
   });
 
   it("answers a wrong code, another region's code and a non-code exactly alike, and counts each", async () => {
@@ -160,8 +283,10 @@ describe("POST /shop/access (answers 1–3; calls 4, 5)", () => {
     ]);
   });
 
-  it("gives a locked caller 429 with Retry-After, and sets the device cookie first time", async () => {
-    database({ shop_enter_code: { data: { outcome: "locked", retry_after: 840 } } });
+  it("gives a locked caller 429 with Retry-After, and still sets an issued device", async () => {
+    database({
+      shop_enter_code: { data: { outcome: "locked", retry_after: 840, device_issued: true } },
+    });
     const res = await (await access())(request("POST", { code: CODE }));
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("840");
@@ -169,29 +294,35 @@ describe("POST /shop/access (answers 1–3; calls 4, 5)", () => {
       code: "rate_limited",
       fields: { form: "shop.locked" },
     });
-    expect(res.headers.getSetCookie().some((c) => c.startsWith("daybell_device="))).toBe(true);
-    expect(res.headers.getSetCookie().some((c) => c.startsWith("daybell_shop="))).toBe(false);
+    expect(setCookie(res, "daybell_device")).toBeDefined();
+    expect(setCookie(res, "daybell_shop")).toBeUndefined();
   });
 
-  it("counts the same device on the same network as the same pair, and another network apart", async () => {
-    database({ shop_enter_code: { data: { outcome: "not_found" } } });
-    const route = await access();
-    await route(withSession("POST", { code: CODE }));
-    await route(withSession("POST", { code: CODE }));
-    await route(withSession("POST", { code: CODE }, { "x-forwarded-for": "198.51.100.1" }));
-    const [a, b, c] = calls("shop_enter_code").map((call) => call[2]);
-    expect(a.p_pair_key).toBe(b.p_pair_key);
-    expect(a.p_ip_key).toBe(b.p_ip_key);
-    expect(c.p_ip_key).not.toBe(a.p_ip_key);
-    expect(c.p_pair_key).not.toBe(a.p_pair_key);
+  it("logs one code-free alert when a wrong code trips the region's breaker (H1)", async () => {
+    database({ shop_enter_code: { data: { outcome: "not_found", alert: true } } });
+    await (await access())(withSession("POST", { code: CODE }));
+    const logged = logs.flatMap((s) => s.mock.calls);
+    expect(logged).toEqual([["shop_lockout_breaker_tripped", "ca"]]);
+    for (const spy of logs) spy.mockClear();
   });
 
-  it("refuses more than 120 requests a minute from a network, before looking anything up", async () => {
+  it("refuses more than 120 requests a minute from a network, before reading the body (L7)", async () => {
     database({ take_shop_request: { data: false } });
-    const res = await (await access())(request("POST", { code: CODE }));
-    expect(res.status).toBe(429);
-    expect(res.headers.get("retry-after")).toBe("60");
+    for (const body of [{ code: CODE }, { code: "" }, { nope: 1 }]) {
+      const res = await (await access())(request("POST", body));
+      expect(res.status).toBe(429);
+      expect(res.headers.get("retry-after")).toBe("60");
+    }
+    expect(calls("take_shop_request")).toHaveLength(3);
     expect(calls("take_shop_request")[0]?.[2]).toMatchObject({ p_limit: 120 });
+    expect(calls("shop_enter_code")).toHaveLength(0);
+  });
+
+  it("counts malformed bodies too, then refuses them (L7)", async () => {
+    database({});
+    const empty = await (await access())(request("POST", { code: "  " }));
+    expect(empty.status).toBe(400);
+    expect(calls("take_shop_request")).toHaveLength(1);
     expect(calls("shop_enter_code")).toHaveLength(0);
   });
 
@@ -209,9 +340,20 @@ describe("POST /shop/access (answers 1–3; calls 4, 5)", () => {
       }),
     );
     expect(form.status).toBe(400);
-    const empty = await (await access())(request("POST", { code: "  " }));
-    expect(empty.status).toBe(400);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(calls("shop_enter_code")).toHaveLength(0);
+  });
+
+  it("on Vercel, counts by Vercel's own address header only; without it, one strict bucket (L4)", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_REGION", "yul1");
+    database({ shop_enter_code: { data: { outcome: "not_found" } } });
+    const route = await access();
+    await route(request("POST", { code: CODE }, { "x-vercel-forwarded-for": "203.0.113.7" }));
+    await route(request("POST", { code: CODE }, { "x-forwarded-for": "198.51.100.1" }));
+    await route(request("POST", { code: CODE }, { "x-forwarded-for": "198.51.100.2" }));
+    const [a, b, c] = calls("shop_enter_code").map((call) => call[2]);
+    expect(b.p_net_key).not.toBe(a.p_net_key);
+    expect(c.p_net_key).toBe(b.p_net_key);
   });
 
   it("runs Canadian lookups in Montréal only (D113)", async () => {
@@ -240,41 +382,26 @@ describe("POST /shop/access (answers 1–3; calls 4, 5)", () => {
   });
 });
 
-describe("POST /shop/children (call 1)", () => {
-  const add = async () => (await import("./shop/children/route")).POST;
-
-  it("needs a session, and looks nothing up without one", async () => {
-    database({});
-    const res = await (await add())(request("POST", { code: CODE }));
-    expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe("shop_session_required");
-    expect(calls("shop_enter_code")).toHaveLength(0);
-  });
-
-  it("adds a sibling into the session's own database", async () => {
-    database({ shop_enter_code: { data: { outcome: "added", child_id: CHILD } } });
-    const res = await (await add())(withSession("POST", { code: CODE }));
-    expect(res.status).toBe(201);
-    expect(calls("shop_enter_code")[0]?.[2]).toMatchObject({
-      p_session_hash: createHash("sha256").update(TOKEN).digest("hex"),
-      p_new_session_hash: null,
-    });
-  });
-
-  it("names the limit, another studio and a child already here", async () => {
-    const answer = async (outcome: Record<string, unknown>) => {
-      database({ shop_enter_code: { data: outcome } });
-      const res = await (await add())(withSession("POST", { code: CODE }));
-      return [res.status, (await res.json()).error?.fields?.form ?? null];
-    };
-    expect(await answer({ outcome: "limit" })).toEqual([409, "shop.siblingLimit"]);
-    expect(await answer({ outcome: "other_studio" })).toEqual([409, "shop.otherStudio"]);
-    expect(await answer({ outcome: "already", child_id: CHILD })).toEqual([200, null]);
-    expect(await answer({ outcome: "not_found" })).toEqual([404, "shop.codeNotFound"]);
-  });
+const dbSession = (children: unknown[], studio = "Maple Lane Photography") => ({
+  studio_name: studio,
+  expires_at: "2026-11-11T12:00:00+00:00",
+  shipping_method: null,
+  bag_count: 2,
+  children,
 });
+const ava = {
+  id: CHILD,
+  state: "open",
+  first_name: "Ava",
+  last_initial: "P",
+  job_id: JOB,
+  school: "Maple Grove Elementary",
+  picture_day: "2026-10-13",
+  closes_at: null,
+  deliver_to_school: true,
+};
 
-describe("GET and DELETE /shop/session (answer 3, call 11)", () => {
+describe("GET and DELETE /shop/session (answer 3, call 11; S6)", () => {
   const routes = async () => await import("./shop/session/route");
 
   it("is 401 without a cookie, with a malformed one, or one for a region not set up here", async () => {
@@ -286,73 +413,104 @@ describe("GET and DELETE /shop/session (answer 3, call 11)", () => {
       expect(res.headers.get("cache-control")).toBe("no-store");
     }
     expect(calls("shop_session")).toHaveLength(0);
+    expect(calls("take_shop_request")).toHaveLength(3);
   });
 
   it("clears a cookie the database no longer knows", async () => {
     database({ shop_session: { error: { code: "P0001", message: "session_required" } } });
     const res = await (await routes()).GET(withSession("GET"));
     expect(res.status).toBe(401);
-    expect(res.headers.getSetCookie().find((c) => c.startsWith("daybell_shop="))).toMatch(
-      /Max-Age=0/,
-    );
+    expect(setCookie(res, "daybell_shop")).toMatch(/Max-Age=0/);
   });
 
-  it("shows first names and last initials only", async () => {
-    database({
-      shop_session: {
-        data: {
-          studio_name: "Maple Lane Photography",
-          expires_at: "2026-11-11T12:00:00+00:00",
-          shipping_method: null,
-          bag_count: 2,
+  it("lists the device's galleries: first names and last initials of open children only (M1)", async () => {
+    database((fn, args) =>
+      fn === "shop_session"
+        ? args.p_session_hash === sha(TOKEN)
+          ? dbSession([ava, { id: "c0000000-0000-4000-8000-000000000002", state: "closed" }])
+          : dbSession(
+              [{ id: "c0000000-0000-4000-8000-000000000003", state: "unavailable" }],
+              "Studio B",
+            )
+        : null,
+    );
+    const res = await (await routes()).GET(
+      request("GET", undefined, { cookie: `daybell_shop=ca.${TOKEN}~ca.${TOKEN_B}` }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      galleries: [
+        {
+          id: galleryId(TOKEN),
+          studio: { name: "Maple Lane Photography" },
+          expiresAt: "2026-11-11T12:00:00+00:00",
+          bagCount: 2,
           children: [
             {
               id: CHILD,
-              first_name: "Ava",
-              last_initial: "P",
-              job_id: JOB,
-              school: "Maple Grove Elementary",
-              picture_day: "2026-10-13",
-              closes_at: null,
-              deliver_to_school: true,
               state: "open",
+              displayName: "Ava P.",
+              firstName: "Ava",
+              jobId: JOB,
+              school: "Maple Grove Elementary",
+              pictureDay: "2026-10-13",
+              closesAt: null,
+              deliverToSchool: true,
             },
+            { id: "c0000000-0000-4000-8000-000000000002", state: "closed" },
           ],
         },
-      },
-    });
-    const res = await (await routes()).GET(withSession("GET"));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      studio: { name: "Maple Lane Photography" },
-      expiresAt: "2026-11-11T12:00:00+00:00",
-      bagCount: 2,
-      children: [
         {
-          id: CHILD,
-          displayName: "Ava P.",
-          firstName: "Ava",
-          jobId: JOB,
-          school: "Maple Grove Elementary",
-          pictureDay: "2026-10-13",
-          closesAt: null,
-          deliverToSchool: true,
-          state: "open",
+          id: galleryId(TOKEN_B),
+          studio: { name: "Studio B" },
+          expiresAt: "2026-11-11T12:00:00+00:00",
+          bagCount: 2,
+          children: [{ id: "c0000000-0000-4000-8000-000000000003", state: "unavailable" }],
         },
       ],
     });
+    expect(setCookie(res, "daybell_shop")).toBeUndefined();
   });
 
-  it("forgets the device: the database's session and the cookie", async () => {
-    database({ shop_forget: { data: true } });
-    const res = await (await routes()).DELETE(withSession("DELETE"));
-    expect(res.status).toBe(204);
-    expect(calls("shop_forget")[0]?.[2]).toEqual({
-      p_session_hash: createHash("sha256").update(TOKEN).digest("hex"),
-    });
-    expect(res.headers.getSetCookie().find((c) => c.startsWith("daybell_shop="))).toMatch(
-      /Max-Age=0/,
+  it("drops a gallery that no longer lasts from the cookie and lists the rest", async () => {
+    rpc.mockImplementation(async (_r: string, fn: string, args: Record<string, unknown>) =>
+      fn === "take_shop_request"
+        ? { data: true, error: null }
+        : args.p_session_hash === sha(TOKEN)
+          ? { data: null, error: { code: "P0001", message: "session_required" } }
+          : { data: dbSession([ava]), error: null },
     );
+    const res = await (await routes()).GET(
+      request("GET", undefined, { cookie: `daybell_shop=ca.${TOKEN}~ca.${TOKEN_B}` }),
+    );
+    expect((await res.json()).galleries.map((g: { id: string }) => g.id)).toEqual([
+      galleryId(TOKEN_B),
+    ]);
+    expect(setCookie(res, "daybell_shop")).toMatch(new RegExp(`^daybell_shop=ca\\.${TOKEN_B};`));
+  });
+
+  it("forgets one gallery, keeping the others, or every gallery", async () => {
+    database({ shop_forget: { data: true } });
+    const { DELETE } = await routes();
+    const both = { cookie: `daybell_shop=ca.${TOKEN}~ca.${TOKEN_B}` };
+    const one = await DELETE(
+      request(
+        "DELETE",
+        undefined,
+        both,
+        `http://localhost/api/v1/shop/session?gallery=${galleryId(TOKEN_B)}`,
+      ),
+    );
+    expect(one.status).toBe(204);
+    expect(calls("shop_forget").map((c) => c[2])).toEqual([{ p_session_hash: sha(TOKEN_B) }]);
+    expect(setCookie(one, "daybell_shop")).toMatch(new RegExp(`^daybell_shop=ca\\.${TOKEN};`));
+    rpc.mockClear();
+    const all = await DELETE(request("DELETE", undefined, both));
+    expect(calls("shop_forget").map((c) => c[2])).toEqual([
+      { p_session_hash: sha(TOKEN) },
+      { p_session_hash: sha(TOKEN_B) },
+    ]);
+    expect(setCookie(all, "daybell_shop")).toMatch(/Max-Age=0/);
   });
 });
 
@@ -387,13 +545,28 @@ describe("GET /shop/children/:childId/gallery (D60, D119)", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("reads the gallery the request names, and refuses one not on this device (S6)", async () => {
+    database({ shop_gallery: { data: { state: "closed" } } });
+    const cookie = { cookie: `daybell_shop=ca.${TOKEN}~ca.${TOKEN_B}` };
+    const url = (g: string) =>
+      `http://localhost/api/v1/shop/children/${CHILD}/gallery?gallery=${g}`;
+    const res = await (await gallery())(
+      request("GET", undefined, cookie, url(galleryId(TOKEN_B))),
+      child(),
+    );
+    expect(res.status).toBe(200);
+    expect(calls("shop_gallery")[0]?.[2].p_session_hash).toBe(sha(TOKEN_B));
+    const other = await (await gallery())(
+      request("GET", undefined, cookie, url("0".repeat(32))),
+      child(),
+    );
+    expect(other.status).toBe(401);
+    expect(calls("shop_gallery")).toHaveLength(1);
+  });
+
   it("signs nothing for a closed or unavailable child", async () => {
     for (const state of ["closed", "unavailable"]) {
-      database({
-        shop_gallery: {
-          data: { state, studio_id: STUDIO, job_id: JOB, portraits: [], class_photos: [] },
-        },
-      });
+      database({ shop_gallery: { data: { state } } });
       const res = await (await gallery())(withSession("GET"), child());
       expect(await res.json()).toEqual({ state, cover: null, portraits: [], classPhotos: [] });
     }
@@ -416,11 +589,14 @@ describe("GET /shop/children/:childId/gallery (D60, D119)", () => {
 });
 
 describe("the bag (calls 8, 9)", () => {
-  const cartRow = (lines: unknown[], method: string | null = null) => ({
+  const cartRow = (lines: unknown[], method: string | null = null, jobs?: unknown[]) => ({
     studio_id: STUDIO,
+    currency: "CAD",
     shipping_method: method,
     lines,
-    jobs: [{ job_id: JOB, deliver_to_school: true, home_shipping_cents: 1195, currency: "CAD" }],
+    jobs: jobs ?? [
+      { job_id: JOB, deliver_to_school: true, home_shipping_cents: 1195, currency: "CAD" },
+    ],
   });
   const dbLine = (over: Record<string, unknown>) => ({
     id: "11111111-0000-4000-8000-000000000001",
@@ -474,6 +650,41 @@ describe("the bag (calls 8, 9)", () => {
     expect(signed.map((s) => s.key)).toEqual([`${STUDIO}/${JOB}/${PHOTO(1)}/proof-thumb.webp`]);
   });
 
+  it("an empty bag is in the studio's currency, never a guess (N4)", async () => {
+    database({ shop_cart: { data: { ...cartRow([], null, []), currency: "USD" } } });
+    const body = await (await (await import("./shop/cart/route")).GET(withSession("GET"))).json();
+    expect(body.subtotal).toEqual({ cents: 0, currency: "USD" });
+  });
+
+  it("offers school delivery by the lines that can still be bought, and the choice is then accepted (M2)", async () => {
+    // Noah's print (a job without school delivery) can't be bought any more; Ava's (school delivery) can.
+    const lines = [
+      dbLine({ kind: "print", job_id: JOB, quantity: 1 }),
+      dbLine({
+        id: "11111111-0000-4000-8000-000000000009",
+        kind: "print",
+        job_id: STUDIO,
+        available: false,
+      }),
+    ];
+    const jobs = [
+      { job_id: JOB, deliver_to_school: true, home_shipping_cents: 1195, currency: "CAD" },
+      { job_id: STUDIO, deliver_to_school: false, home_shipping_cents: 1500, currency: "CAD" },
+    ];
+    database({ shop_cart: { data: cartRow(lines, null, jobs) } });
+    const bag = await (await (await import("./shop/cart/route")).GET(withSession("GET"))).json();
+    expect(bag.shipping).toMatchObject({ school: true, home: { cents: 1195, currency: "CAD" } });
+    database({
+      shop_set_shipping: { data: null },
+      shop_cart: { data: cartRow(lines, "school", jobs) },
+    });
+    const res = await (await import("./shop/cart/shipping/route")).PUT(
+      withSession("PUT", { method: "school" }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).total).toEqual({ cents: 8500, currency: "CAD" });
+  });
+
   it("adds a line through the database and answers with the bag", async () => {
     database({
       shop_cart_add: { data: "11111111-0000-4000-8000-000000000001" },
@@ -488,7 +699,7 @@ describe("the bag (calls 8, 9)", () => {
     );
     expect(res.status).toBe(201);
     expect(calls("shop_cart_add")[0]?.[2]).toEqual({
-      p_session_hash: createHash("sha256").update(TOKEN).digest("hex"),
+      p_session_hash: sha(TOKEN),
       p_child_id: CHILD,
       p_item_id: "22222222-0000-4000-8000-000000000001",
       p_photo_id: PHOTO(1),
@@ -528,6 +739,19 @@ describe("the bag (calls 8, 9)", () => {
     expect((await res.json()).error.fields.form).toBe("shop.schoolDeliveryOff");
   });
 
+  it("refuses a quantity for a line that can't be bought any more (N2)", async () => {
+    database({ shop_cart_set_quantity: { error: { code: "P0001", message: "item_unavailable" } } });
+    const routes = await import("./shop/cart/lines/[id]/route");
+    const res = await routes.PATCH(
+      withSession("PATCH", { quantity: 3 }),
+      line("11111111-0000-4000-8000-000000000001"),
+    );
+    expect([res.status, (await res.json()).error.fields.form]).toEqual([
+      409,
+      "shop.itemUnavailable",
+    ]);
+  });
+
   it("changes and removes lines of the session only", async () => {
     database({ shop_cart: { data: cartRow([]) } });
     const routes = await import("./shop/cart/lines/[id]/route");
@@ -541,17 +765,25 @@ describe("the bag (calls 8, 9)", () => {
   });
 });
 
-describe("shop pages and routes are never indexed, framed or referred (next.config)", () => {
-  it("sends noindex, no-referrer and DENY for /shop and /api/v1/shop", async () => {
+describe("shop pages and routes are never indexed, framed or referred (next.config; L2)", () => {
+  it("sends noindex, no-referrer, DENY, HSTS and a closed Permissions-Policy for /shop and /api/v1/shop", async () => {
     const config = (await import("../../../next.config")).default;
     const rules = await config.headers?.();
-    for (const source of ["/shop", "/shop/:path*", "/api/v1/shop/:path*"]) {
-      const rule = rules?.find((r) => r.source === source);
-      expect(rule?.headers).toEqual([
-        { key: "X-Robots-Tag", value: "noindex, nofollow" },
-        { key: "Referrer-Policy", value: "no-referrer" },
-        { key: "X-Frame-Options", value: "DENY" },
-      ]);
-    }
+    const shopHeaders = [
+      { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "Strict-Transport-Security", value: "max-age=63072000" },
+      {
+        key: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()",
+      },
+    ];
+    for (const source of ["/shop", "/shop/:path*"])
+      expect(rules?.find((r) => r.source === source)?.headers).toEqual(shopHeaders);
+    expect(rules?.find((r) => r.source === "/api/v1/shop/:path*")?.headers).toEqual([
+      ...shopHeaders,
+      { key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" },
+    ]);
   });
 });

@@ -7,18 +7,24 @@ import { useEffect, useId, useRef, useState } from "react";
 import { shopApi } from "@/lib/shop-client";
 import { useShop } from "./shop-context";
 import { ShopDialog } from "./shop-dialog";
-import { shopButton, shopIconButton } from "./styles";
+import { shopButton, shopIconButton, shopSecondaryButton } from "./styles";
 
-/** The ⋯ menu: "Forget this device", after a confirmation (answer 3, call 11). */
-export function ShopMenu() {
+/**
+ * The ⋯ menu: "Forget this device", after a confirmation (answer 3, call 11). With galleries of more than one studio on
+ * the device (S6), the confirmation offers this gallery or all of them.
+ */
+export function ShopMenu({ gallery }: { gallery: string | null }) {
   const t = useTranslations("shop");
   const router = useRouter();
-  const { refresh } = useShop();
+  const shop = useShop();
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const panelId = useId();
   const wrapper = useRef<HTMLDivElement>(null);
+  const galleries = shop.state.status === "ready" ? shop.state.galleries : [];
+  const current = shop.gallery(gallery);
+  const many = galleries.length > 1 && current !== null;
 
   useEffect(() => {
     if (!open) return;
@@ -38,10 +44,11 @@ export function ShopMenu() {
     };
   }, [open]);
 
-  const forget = async () => {
+  /** Forgets one gallery (by id) or, with null, every gallery on the device. */
+  const forget = async (which: string | null) => {
     setBusy(true);
-    await shopApi.forget();
-    await refresh();
+    await shopApi.forget(which);
+    await shop.refresh();
     setBusy(false);
     setConfirming(false);
     router.replace("/shop");
@@ -80,18 +87,48 @@ export function ShopMenu() {
         onClose={() => setConfirming(false)}
         title={t("menu.forgetTitle")}
       >
-        <p className="mt-2 mb-5 text-body text-muted">{t("menu.forgetBody")}</p>
+        <p className="mt-2 mb-5 text-body text-muted">
+          {many && current
+            ? t("menu.forgetBodyMany", { studio: current.studio.name })
+            : t("menu.forgetBody")}
+        </p>
         <div className="flex flex-wrap justify-end gap-2">
           <button
             type="button"
             onClick={() => setConfirming(false)}
-            className="inline-flex min-h-12 items-center rounded-full border border-line-strong px-5 font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-studio-ring"
+            className={shopSecondaryButton}
           >
             {t("menu.cancel")}
           </button>
-          <button type="button" onClick={forget} disabled={busy} className={shopButton}>
-            {t("menu.forgetConfirm")}
-          </button>
+          {many && current ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void forget(current.id)}
+                disabled={busy}
+                className={shopSecondaryButton}
+              >
+                {t("menu.forgetOne")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void forget(null)}
+                disabled={busy}
+                className={shopButton}
+              >
+                {t("menu.forgetAll")}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void forget(null)}
+              disabled={busy}
+              className={shopButton}
+            >
+              {t("menu.forgetConfirm")}
+            </button>
+          )}
         </div>
       </ShopDialog>
     </div>

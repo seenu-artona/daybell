@@ -5,7 +5,7 @@ import { cn } from "@daybell/ui";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { type PointerEvent, useId, useRef } from "react";
+import { type PointerEvent, useEffect, useId, useRef } from "react";
 import { ProtectedImage } from "./protected-image";
 import { ShopDialog } from "./shop-dialog";
 import { shopButton } from "./styles";
@@ -14,7 +14,9 @@ const SWIPE_PX = 50;
 
 /**
  * One photo, full screen. Swipe, or the Previous and Next buttons and the arrow keys (the non-swipe alternatives, WCAG
- * 2.5.7). "Use this photo" starts the package flow with that pose; class photos are to view only (call 8).
+ * 2.5.7). "Use this photo" starts the package flow with that pose; class photos are to view only (call 8). At either
+ * end the button that can't go further is disabled and hidden, so focus moves to the other one, or to Close when
+ * there is only one photo (code review N5).
  */
 export function PhotoViewer({
   photos,
@@ -35,12 +37,32 @@ export function PhotoViewer({
   const t = useTranslations("shop.viewer");
   const counterId = useId();
   const start = useRef<number | null>(null);
+  const previousButton = useRef<HTMLButtonElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const photo = index === null ? null : (photos[index] ?? null);
   const total = photos.length;
   const go = (step: number) => {
     if (index === null) return;
     const next = index + step;
     if (next >= 0 && next < total) onIndex(next);
+  };
+  // After a button reaches an end (and is disabled), focus moves once the photo has changed.
+  const focusNext = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (index === null || !focusNext.current) return;
+    focusNext.current.focus();
+    focusNext.current = null;
+  }, [index]);
+  /** A button click: moves, and keeps focus on a button that is still there. */
+  const press = (step: number) => {
+    if (index === null) return;
+    const next = index + step;
+    const end = step > 0 ? next >= total - 1 : next <= 0;
+    if (end)
+      focusNext.current =
+        total > 1 ? (step > 0 ? previousButton.current : nextButton.current) : closeButton.current;
+    go(step);
   };
   const onPointerDown = (e: PointerEvent) => {
     start.current = e.clientX;
@@ -69,6 +91,7 @@ export function PhotoViewer({
         >
           <div className="flex min-h-14 items-center gap-2 px-1.5">
             <button
+              ref={closeButton}
               type="button"
               aria-label={t("close")}
               onClick={onClose}
@@ -91,19 +114,21 @@ export function PhotoViewer({
           >
             <ProtectedImage src={photo.viewUrl} alt={alt(index + 1, total)} fit="contain" eager />
             <button
+              ref={previousButton}
               type="button"
               aria-label={t("previous")}
               disabled={index === 0}
-              onClick={() => go(-1)}
+              onClick={() => press(-1)}
               className="absolute top-1/2 left-1 grid size-11 -translate-y-1/2 place-items-center rounded-full bg-ink/60 disabled:invisible focus-visible:outline-3 focus-visible:outline-surface"
             >
               <ChevronLeft className="size-6" aria-hidden="true" />
             </button>
             <button
+              ref={nextButton}
               type="button"
               aria-label={t("next")}
               disabled={index === total - 1}
-              onClick={() => go(1)}
+              onClick={() => press(1)}
               className="absolute top-1/2 right-1 grid size-11 -translate-y-1/2 place-items-center rounded-full bg-ink/60 disabled:invisible focus-visible:outline-3 focus-visible:outline-surface"
             >
               <ChevronRight className="size-6" aria-hidden="true" />

@@ -4,30 +4,33 @@ import type { ShopGalleryResponse, ShopPhoto } from "@daybell/api";
 import { cn } from "@daybell/ui";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { shopApi } from "@/lib/shop-client";
 import { ChildSwitcher } from "../../_components/child-switcher";
 import { Cover } from "../../_components/cover";
 import { DockedCta } from "../../_components/docked-cta";
-import { useShopDates } from "../../_components/format";
+import { useChildName, useShopDates } from "../../_components/format";
 import { Loading, MessageScreen } from "../../_components/message-screen";
 import { PhotoGrid } from "../../_components/photo-grid";
 import { PhotoViewer } from "../../_components/photo-viewer";
 import { ShopHeader } from "../../_components/shop-header";
+import { ShopTitle } from "../../_components/shop-title";
 import { shopButton } from "../../_components/styles";
 import { useChildData } from "../../_components/use-child";
 
 const coverKey = (childId: string) => `daybell-shop-cover:${childId}`;
+const strong = (chunks: ReactNode) => <strong>{chunks}</strong>;
 
 /**
  * A child's gallery (D119, D60): the full-screen cover first, then the grid of portraits, the class photo set as a
- * second tab, the children as links, the order-by date and delivery to school. Closed and unavailable shops say so,
- * naming the studio (answer 4, call 6).
+ * second tab, the children as links, the last day to order and delivery to school. Closed and unavailable shops say
+ * so, naming the studio and never the child (answer 4, call 6; security review M1).
  */
 export default function GalleryPage() {
   const t = useTranslations("shop");
   const dates = useShopDates();
-  const { childId, child, studio, data, failed, reload, onImageError } =
+  const childName = useChildName();
+  const { childId, galleryId, child, studio, data, failed, reload, onImageError } =
     useChildData<ShopGalleryResponse>(shopApi.gallery);
   const [showCover, setShowCover] = useState<boolean | null>(null);
   const [set, setSet] = useState<"portraits" | "classPhotos">("portraits");
@@ -48,9 +51,13 @@ export default function GalleryPage() {
     }
   }, [showCover]);
 
+  const name = childName(child);
+  const title = <ShopTitle>{t("titles.gallery", { name })}</ShopTitle>;
+
   if (!child || !data || showCover === null)
     return (
       <main className="px-6">
+        {title}
         {failed ? (
           <MessageScreen>
             <button type="button" onClick={() => void reload()} className={shopButton}>
@@ -63,39 +70,44 @@ export default function GalleryPage() {
       </main>
     );
 
-  const open = data.state === "open" && data.cover !== null;
-  if (open && showCover && data.cover)
+  const open = child.state === "open" && data.state === "open" && data.cover !== null;
+  if (open && child.state === "open" && showCover && data.cover)
     return (
-      <Cover
-        studio={studio}
-        child={child}
-        photo={data.cover}
-        total={data.portraits.length}
-        onImageError={onImageError}
-        onSeePhotos={() => {
-          window.sessionStorage.setItem(coverKey(childId), "1");
-          focusHeading.current = true;
-          setShowCover(false);
-        }}
-      />
+      <>
+        {title}
+        <Cover
+          studio={studio}
+          child={child}
+          photo={data.cover}
+          total={data.portraits.length}
+          onImageError={onImageError}
+          onSeePhotos={() => {
+            window.sessionStorage.setItem(coverKey(childId), "1");
+            focusHeading.current = true;
+            setShowCover(false);
+          }}
+        />
+      </>
     );
 
   const photos: ShopPhoto[] = set === "portraits" ? data.portraits : data.classPhotos;
+  const firstName = child.state === "open" ? child.firstName : name;
   const alt = (n: number, total: number) =>
     set === "portraits"
-      ? t("gallery.photoAlt", { name: child.firstName, n, total })
-      : t("gallery.classAlt", { name: child.firstName, n, total });
+      ? t("gallery.photoAlt", { name: firstName, n, total })
+      : t("gallery.classAlt", { name: firstName, n, total });
 
   return (
     <>
+      {title}
       <div ref={heading}>
-        <ShopHeader title={child.displayName} />
+        <ShopHeader title={name} gallery={galleryId} />
       </div>
       <main className={cn("px-4", open ? "pb-32" : "pb-10")}>
         <ChildSwitcher current={childId} />
         {data.state === "closed" ? (
           <MessageScreen>{t("gallery.closed", { studio })}</MessageScreen>
-        ) : !open ? (
+        ) : !open || child.state !== "open" ? (
           <MessageScreen>{t("gallery.unavailable", { studio })}</MessageScreen>
         ) : (
           <>
@@ -119,15 +131,26 @@ export default function GalleryPage() {
             ) : null}
             {child.closesAt || child.deliverToSchool ? (
               <p className="m-0 mt-3 text-body">
-                {child.closesAt ? (
-                  <strong>{t("gallery.orderBy", { date: dates.moment(child.closesAt) })}</strong>
-                ) : null}
-                {child.closesAt && child.deliverToSchool ? " · " : null}
-                {child.deliverToSchool ? t("gallery.schoolDelivery") : null}
+                {child.closesAt
+                  ? t.rich(child.deliverToSchool ? "gallery.orderAndDelivery" : "gallery.orderBy", {
+                      date: dates.lastDay(child.closesAt),
+                      strong,
+                    })
+                  : t("gallery.schoolDelivery")}
               </p>
             ) : null}
             <p className="m-0 mt-1 text-caption text-muted">{t("gallery.protected")}</p>
-            <PhotoGrid photos={photos} alt={alt} onOpen={setViewer} onImageError={onImageError} />
+            <PhotoGrid
+              label={
+                set === "portraits"
+                  ? t("gallery.portraitsGrid", { name: child.displayName })
+                  : t("gallery.classGrid", { name: child.displayName })
+              }
+              photos={photos}
+              alt={alt}
+              onOpen={setViewer}
+              onImageError={onImageError}
+            />
             <PhotoViewer
               photos={photos}
               index={viewer}
@@ -135,7 +158,9 @@ export default function GalleryPage() {
               onClose={() => setViewer(null)}
               alt={alt}
               orderHref={
-                set === "portraits" ? (photo) => `/shop/c/${childId}/buy?photo=${photo.id}` : null
+                set === "portraits"
+                  ? (photo) => `/shop/c/${childId}/buy?photo=${encodeURIComponent(photo.id)}`
+                  : null
               }
             />
           </>

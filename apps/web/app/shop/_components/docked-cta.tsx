@@ -1,9 +1,12 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
 /**
- * One main action per screen, docked at the bottom with its price beside it (the ShopFlow board). Pages leave room at
- * the bottom, and globals.css adds scroll padding while it is shown, so a focused control is never hidden under it
- * (WCAG 2.4.11).
+ * One main action per screen, docked at the bottom with its price beside it (the ShopFlow board), as a named region
+ * (code review S4). Pages leave room at the bottom, and globals.css adds scroll padding while it is shown, so a
+ * focused control is never hidden under it (WCAG 2.4.11).
  */
 export function DockedCta({
   price,
@@ -14,8 +17,10 @@ export function DockedCta({
   label?: string;
   children: ReactNode;
 }) {
+  const t = useTranslations("shop.header");
   return (
-    <div
+    <section
+      aria-label={t("docked")}
       data-docked-cta=""
       className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]"
     >
@@ -28,6 +33,6 @@ export function DockedCta({
         ) : null}
         <div className={price ? "shrink-0" : "flex-1 [&>*]:w-full"}>{children}</div>
       </div>
-    </div>
+    </section>
   );
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { readCart, requireShopSession, shopHandle } from "@/lib/shop/shop";
+import { readCart } from "@/lib/shop/gallery";
+import { requireShopSession, shopHandle } from "@/lib/shop/http";
 
 export const runtime = "nodejs";
 export const preferredRegion = "yul1";

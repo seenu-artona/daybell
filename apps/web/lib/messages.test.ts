@@ -52,9 +52,10 @@ describe("locale files", () => {
       for (const key of [...Object.values(SHOP_CONFLICTS), SHOP_CODE_NOT_FOUND, SHOP_LOCKED])
         expect(refusals, key).toContain(key.slice("shop.".length));
     }
-    expect(enUS.shop.refusals.otherStudio).toBe(
-      "This code is from a different photographer. Open it separately.",
+    expect(enUS.shop.refusals.galleryLimit).toBe(
+      "This device already has galleries from 3 photographers. Forget one, then try again.",
     );
+    expect(enUS.shop.yourChild).toBe("Your child");
     expect(enUS.shop.gallery.closed).toBe("This shop is closed. Contact {studio}.");
     expect(enUS.shop.entry.lostAnswer).toBe("Ask your photographer or school for a new card.");
   });

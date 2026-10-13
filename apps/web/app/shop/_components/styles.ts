@@ -7,3 +7,6 @@ export const shopIconButton =
 
 export const shopLink =
   "inline-flex min-h-11 items-center font-semibold text-ink underline underline-offset-4 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-studio-ring";
+
+export const shopSecondaryButton =
+  "inline-flex min-h-12 items-center justify-center rounded-full border border-line-strong px-5 font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-studio-ring disabled:pointer-events-none disabled:opacity-45";

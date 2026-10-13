@@ -1,13 +1,15 @@
 -- The parent gallery (D24, D60, D116, D119, F17, D113, D96; Seenu's answers 1–4, Claude's calls 1–13; ADR 0022):
 -- shop tables and functions are the service role's only; codes are looked up by HMAC among children only, after the
--- lock is checked; 5 wrong codes per network+device and 30 per network lock for 15 minutes, a right code never
--- resets the count; a session holds up to 5 children of one studio for a fixed 30 days; parents see exactly the photos
+-- lock is checked; 5 wrong codes per device (or per network without one) and 30, 100 and 300 per network, /56 and /48
+-- lock for 15 minutes, a known device keeps its own allowance, new devices are capped, the region's breaker tightens
+-- everything; a right code never resets the count; a session holds up to 5 children of one studio for a fixed 30
+-- days, a device up to 3 sessions, a child at most 10; closed children show no name; parents see exactly the photos
 -- photo_parent_visible allows, a child's own portraits and their own class's set, nothing for closed, draft or
 -- unavailable children; the bag is priced from the job's current list and refuses what parents may not buy; another
 -- studio's session reads or changes nothing of this one's; nothing writes events or stores a code, name or address.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(113);
+select plan(168);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -106,16 +108,36 @@ update public.upload_batches set tag_round = tag_round + 1 where id = 'e1000000-
 update public.jobs set status = 'selling' where id in ('a0000000-0000-4000-8000-000000000001',
   'a0000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001');
 
+-- Studios C and D, a child each, for the device's limit of 3 studios (code review S6).
+insert into public.studios (id, name, slug, data_region) values
+  ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'Studio C', 'studio-c', 'us'),
+  ('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'Studio D', 'studio-d', 'us');
+insert into public.jobs (id, studio_id, name, type, picture_day, internal_number) values
+  ('c9000000-0000-4000-8000-000000000001', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'C Fall', 'school', '2026-10-13', 'JOB00001'),
+  ('d9000000-0000-4000-8000-000000000001', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'D Fall', 'school', '2026-10-13', 'JOB00001');
+insert into public.children (id, studio_id, job_id, first_name, last_name, access_code_hash, access_code_ciphertext)
+values
+  ('cc000000-0000-4000-8000-000000000001', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+   'c9000000-0000-4000-8000-000000000001', 'Cal', 'Cole', pg_temp.h('code-cc1'), 'v1.' || repeat('A', 48)),
+  ('cd000000-0000-4000-8000-000000000001', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+   'd9000000-0000-4000-8000-000000000001', 'Dot', 'Dunn', pg_temp.h('code-cd1'), 'v1.' || repeat('A', 48));
+
 create function pg_temp.item(p_job uuid, p_kind text, p_name text default null) returns uuid language sql as $$
   select i.id from public.price_list_items i join public.jobs j on j.price_list_id = i.price_list_id
   where j.id = p_job and i.kind::text = p_kind and (p_name is null or i.name = p_name) order by i.position limit 1 $$;
--- A code typed on a device (pair) on a network (ip): the API's HMACs, here SHA-256 of names.
-create function pg_temp.enter(p_code text, p_pair text, p_ip text, p_session text, p_new text) returns jsonb
+-- A code typed: the API's HMACs, here SHA-256 of names. enter_raw takes every key; enter is a device the API issued
+-- (null: none) on a network whose /56 and /48 are its own, with the device's sessions (tokens) and a new token.
+create function pg_temp.enter_raw(p_code text, p_device text, p_new_device text, p_net text, p_wide text,
+  p_wider text, p_sessions text[], p_new text) returns jsonb
 language sql as $$
-  select public.shop_enter_code(pg_temp.h(p_code), pg_temp.h(p_pair), pg_temp.h(p_ip), pg_temp.h(p_session),
+  select public.shop_enter_code(pg_temp.h(p_code), pg_temp.h(p_device), pg_temp.h(p_new_device), pg_temp.h(p_net),
+    pg_temp.h(p_wide), pg_temp.h(p_wider), (select coalesce(array_agg(pg_temp.h(x)), '{}') from unnest(p_sessions) x),
     pg_temp.h(p_new)) $$;
-create function pg_temp.outcome(p_code text, p_pair text, p_ip text, p_session text, p_new text) returns text
-language sql as $$ select pg_temp.enter(p_code, p_pair, p_ip, p_session, p_new) ->> 'outcome' $$;
+create function pg_temp.enter(p_code text, p_device text, p_net text, p_sessions text[], p_new text) returns jsonb
+language sql as $$
+  select pg_temp.enter_raw(p_code, p_device, null, p_net, p_net || '/56', p_net || '/48', p_sessions, p_new) $$;
+create function pg_temp.outcome(p_code text, p_device text, p_net text, p_sessions text[], p_new text) returns text
+language sql as $$ select pg_temp.enter(p_code, p_device, p_net, p_sessions, p_new) ->> 'outcome' $$;
 create function pg_temp.try(p_sql text) returns text language plpgsql as $$
 begin
   execute p_sql;
@@ -125,7 +147,12 @@ exception when others then
 end;
 $$;
 create function pg_temp.events() returns bigint language sql as $$ select count(*) from public.events $$;
+create function pg_temp.attempt_rows() returns bigint language sql as $$
+  select count(*) from app.shop_code_attempts $$;
+create function pg_temp.sessions_of(p_child uuid) returns bigint language sql as $$
+  select count(*) from public.shop_session_children where child_id = p_child $$;
 create temp table before_events (n bigint) on commit drop;
+create temp table before_rows (n bigint) on commit drop;
 
 -- ── Shape: the service role's only ────────────────────────────────────────────────────────────────────────────────
 select is((select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -145,10 +172,11 @@ select ok((select bool_and(prosecdef and proconfig @> array['search_path=""']) f
   where proname in ('shop_enter_code', 'shop_session', 'shop_gallery', 'shop_price_list', 'shop_cart',
     'shop_cart_add', 'shop_cart_set_quantity', 'shop_cart_remove', 'shop_set_shipping', 'shop_forget',
     'take_shop_request', 'prune_shop', 'parent_visible_photos', 'shop_child_state', 'shop_session_row',
-    'shop_session_child', 'shop_code_failed')),
+    'shop_session_child', 'shop_code_failed', 'shop_breaker_failed', 'shop_issue_device', 'shop_line_available',
+    'shop_line_physical', 'shop_trim_child_sessions')),
   'every shop function is SECURITY DEFINER with an empty search_path');
 create temp table shop_fns on commit drop as select unnest(array[
-  'public.shop_enter_code(text, text, text, text, text)', 'public.shop_session(text)',
+  'public.shop_enter_code(text, text, text, text, text, text, text[], text)', 'public.shop_session(text)',
   'public.shop_gallery(text, uuid)', 'public.shop_price_list(text, uuid)', 'public.shop_cart(text)',
   'public.shop_cart_add(text, uuid, uuid, uuid, integer)', 'public.shop_cart_set_quantity(text, uuid, integer)',
   'public.shop_cart_remove(text, uuid)', 'public.shop_set_shipping(text, public.shop_shipping_method)',
@@ -158,7 +186,9 @@ select is((select count(*) from shop_fns, unnest(array['anon', 'authenticated'])
 select ok((select bool_and(has_function_privilege('service_role', f, 'execute')) from shop_fns),
   'the service role runs them all');
 select is((select count(*) from unnest(array['app.parent_visible_photos(uuid, uuid, uuid)',
-    'app.shop_child_state(uuid)', 'app.shop_code_failed(text, text)', 'app.shop_session_row(text, boolean)']) f,
+    'app.shop_child_state(uuid)', 'app.shop_code_failed(text, text, integer, interval)',
+    'app.shop_session_row(text, boolean)', 'app.shop_breaker_failed()', 'app.shop_issue_device(text, text, text)',
+    'app.shop_line_available(public.shop_cart_lines)', 'app.shop_trim_child_sessions(uuid, uuid, uuid)']) f,
     unnest(array['anon', 'authenticated', 'service_role']) r
   where has_function_privilege(r, f, 'execute')), 0::bigint, 'nobody runs the app helpers directly');
 set local role anon;
@@ -168,14 +198,16 @@ reset role;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}',
   true) is not null as signed_in;
-select throws_ok($$ select public.shop_enter_code(null, null, null, null, null) $$, '42501', null,
+select throws_ok($$ select public.shop_enter_code(null, null, null, null, null, null, null, null) $$, '42501', null,
   'nor a signed-in studio owner enter a code');
 select throws_ok($$ select * from public.shop_sessions $$, '42501', null, 'or read sessions');
 reset role;
 
 -- ── Codes: by HMAC among children only, the lock checked first (answer 2; calls 4, 5) ─────────────────────────────
-select throws_ok($$ select public.shop_enter_code(null, 'nope', 'nope', null, null) $$, '22023', null,
-  'keys must be HMACs, and a session must be named');
+select throws_ok($$ select public.shop_enter_code(null, 'nope', null, 'nope', 'nope', null, null, null) $$, '22023',
+  null, 'keys must be HMACs, and a new session named');
+select throws_ok($$ select pg_temp.enter('x', 'p', 'n', array['a', 'b', 'c', 'd'], 'x') $$, '22023', null,
+  'and a device holds at most 3 sessions');
 select is(pg_temp.outcome('code-blank', 'phone1', 'school-wifi', null, 'tok-x'), 'not_found',
   'a blank card''s code counts as a wrong code (call 5)');
 select is(pg_temp.outcome('ABCDEFGHJKMNPQRSTVWX', 'phone1', 'school-wifi', null, 'tok-x'), 'not_found',
@@ -184,20 +216,23 @@ select is(pg_temp.outcome(null, 'phone1', 'school-wifi', null, 'tok-x'), 'not_fo
   'and a code of a region not set up here (no hash)');
 select is(pg_temp.outcome('code-nope', 'phone1', 'school-wifi', null, 'tok-x'), 'not_found', 'a 4th wrong code');
 select is(pg_temp.enter('code-nope2', 'phone1', 'school-wifi', null, 'tok-x'),
-  '{"outcome": "locked", "retry_after": 900}'::jsonb, 'the 5th locks the phone on that network for 15 minutes');
+  '{"outcome": "locked", "retry_after": 900, "device_issued": false, "alert": false}'::jsonb,
+  'the 5th locks the phone for 15 minutes');
 select is(pg_temp.outcome('code-c1', 'phone1', 'school-wifi', null, 'tok-x'), 'locked',
   'a locked caller gets locked even with a right code');
 select is((select count(*) from public.shop_sessions), 0::bigint, 'and no session is made');
-select is((select failures from app.shop_code_attempts where kind = 'pair' and key_hash = pg_temp.h('phone1')), 5,
+select is((select hits from app.shop_code_attempts where kind = 'device' and key_hash = pg_temp.h('phone1')), 5,
   'nor is anything counted while locked');
+select is(pg_temp.outcome('code-nope', 'phone1', 'other-wifi', null, 'tok-x'), 'locked',
+  'a device''s lock follows it to another network');
 select is(pg_temp.outcome('code-c1', 'phone2', 'school-wifi', null, 'tok-a'), 'opened',
   'another phone on the same network opens the gallery');
 update app.shop_code_attempts set locked_until = now() - interval '1 second'
-  where kind = 'pair' and key_hash = pg_temp.h('phone1');
+  where kind = 'device' and key_hash = pg_temp.h('phone1');
 select is(pg_temp.outcome('code-nope', 'phone1', 'school-wifi', null, 'tok-x'), 'not_found',
   'once the 15 minutes are over, a wrong code is just wrong');
-select is((select (failures, locked_until) from app.shop_code_attempts
-  where kind = 'pair' and key_hash = pg_temp.h('phone1')), (1, null::timestamptz), 'and the count starts again');
+select is((select (hits, locked_until) from app.shop_code_attempts
+  where kind = 'device' and key_hash = pg_temp.h('phone1')), (1, null::timestamptz), 'and the count starts again');
 -- A right code never resets the count: 4 wrong, 1 right, 1 wrong locks.
 select is((select array_agg(pg_temp.outcome(c, 'phone3', 'home-net', null, 'tok-y') order by o)
   from unnest(array['w1', 'w2', 'w3', 'w4', 'code-c7', 'w5']) with ordinality u (c, o)),
@@ -214,7 +249,80 @@ select is(pg_temp.outcome('code-c1', 'device-31', 'library', null, 'tok-z'), 'lo
 select is((select count(*) from app.shop_code_attempts where key_hash !~ '^[0-9a-f]{64}$'), 0::bigint,
   'attempts are kept as HMACs only, never a code or an address');
 
--- ── Sessions: one studio, up to 5 children, 30 days (answers 1, 3; calls 1, 11) ───────────────────────────────────
+-- ── Devices the server issued, and wider networks (security review H1) ────────────────────────────────────────────
+select is((select array_agg(pg_temp.enter_raw('wrong', null, null, 'cafe', 'cafe/56', 'cafe/48', null, 'tok-z')
+    ->> 'outcome' order by g) from generate_series(1, 5) g),
+  array['not_found', 'not_found', 'not_found', 'not_found', 'locked'],
+  'requests without a device share one bucket per network: the 5th wrong code locks it');
+select is(pg_temp.enter_raw('code-c1', null, null, 'cafe', 'cafe/56', 'cafe/48', null, 'tok-z') ->> 'outcome', 'locked',
+  'for every device-less request there, even with a right code');
+select is(pg_temp.outcome('wrong', 'cafe-phone', 'cafe', null, 'tok-z'), 'not_found',
+  'while a device of its own on that network is just wrong');
+select is(pg_temp.enter_raw('wrong', null, 'fresh-1', 'new-net', 'new-net/56', null, null, 'tok-z'),
+  '{"outcome": "not_found", "device_issued": true, "alert": false}'::jsonb,
+  'a request without a device gets a new one');
+select is((select (kind, hits) from app.shop_code_attempts where key_hash = pg_temp.h('fresh-1')), ('device'::text, 1),
+  'and its wrong code counts on that device');
+update app.shop_code_attempts set hits = 50 where kind = 'issue_net' and key_hash = pg_temp.h('new-net');
+select is(pg_temp.enter_raw('wrong', null, 'fresh-2', 'new-net', 'new-net/56', null, null, 'tok-z') ->> 'device_issued',
+  'false', 'but no more than 50 new devices a day per network');
+select is((select hits from app.shop_code_attempts where kind = 'nodevice' and key_hash = pg_temp.h('new-net')), 1,
+  'beyond that, its requests share the network''s no-device bucket');
+select is((select count(*) from app.shop_code_attempts where key_hash = pg_temp.h('fresh-2')), 0::bigint,
+  'and a device not issued is never counted');
+select is((select count(*) from generate_series(1, 99) g
+  where pg_temp.enter_raw('wrong', 'cd-' || g, null, 'campus-' || g, 'campus/56', 'campus/48', null, 'tok-z')
+    ->> 'outcome' = 'not_found'), 99::bigint, '99 wrong codes from 99 networks of one IPv6 /56 are each just wrong');
+select is(pg_temp.enter_raw('wrong', 'cd-100', null, 'campus-100', 'campus/56', 'campus/48', null, 'tok-z')
+  ->> 'outcome', 'locked', 'the 100th locks the /56 (or IPv4 /24)');
+select is(pg_temp.enter_raw('code-c1', 'cd-101', null, 'campus-101', 'campus/56', 'campus/48', null, 'tok-z')
+  ->> 'outcome', 'locked', 'for every network in it');
+update app.shop_code_attempts set hits = 299 where kind = 'wider' and key_hash = pg_temp.h('campus/48');
+select is(pg_temp.enter_raw('wrong', 'isp-1', null, 'isp-a', 'isp-a/56', 'campus/48', null, 'tok-z') ->> 'outcome',
+  'locked', 'the 300th wrong code in an IPv6 /48 locks the /48');
+
+-- A known device: one that has opened a gallery keeps its own allowance on a locked network (M3).
+update app.shop_code_attempts set locked_until = now() + interval '15 minutes'
+  where kind = 'net' and key_hash = pg_temp.h('school-wifi');
+delete from before_rows;
+insert into before_rows select pg_temp.attempt_rows();
+select is(pg_temp.outcome('code-c1', 'stranger', 'school-wifi', null, 'tok-s'), 'locked',
+  'a new phone on a locked network is locked, even with a right code');
+select is(pg_temp.attempt_rows() - (select n from before_rows), 0::bigint,
+  'and a locked request writes no row (M2)');
+select is(pg_temp.outcome('code-c1', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'already',
+  'a phone that opened a gallery there still gets in (M3)');
+select is(pg_temp.outcome('code-wrong', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'not_found',
+  'and its wrong code is just wrong, counted on the phone');
+update app.shop_code_attempts set locked_at = now() - interval '1 hour'
+  where kind = 'device' and key_hash = pg_temp.h('phone2');
+select is(pg_temp.outcome('code-c1', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'locked',
+  'but not if the phone itself was locked in the last 24 hours');
+update app.shop_code_attempts set locked_at = null, hits = 0 where kind = 'device' and key_hash = pg_temp.h('phone2');
+update app.shop_code_attempts set locked_until = null, hits = 0
+  where kind = 'net' and key_hash = pg_temp.h('school-wifi');
+
+-- The region's circuit breaker: 600 wrong codes in a minute trip it, tighten the limits and raise one alert.
+insert into app.shop_code_attempts (kind, key_hash, hits, window_start) values ('region', repeat('0', 64), 0, now())
+  on conflict (kind, key_hash) do update set hits = 598, window_start = now(), locked_until = null;
+select is(pg_temp.enter('wrong', 'br-1', 'br-net', null, 'tok-z') ->> 'alert', 'false', 'the 599th: no alert');
+select is(pg_temp.enter('wrong', 'br-2', 'br-net', null, 'tok-z') ->> 'alert', 'true',
+  'the 600th wrong code in a minute trips the breaker, with an alert');
+select is(pg_temp.enter('wrong', 'br-3', 'br-net', null, 'tok-z') ->> 'alert', 'false', 'once');
+select is((select count(*) from generate_series(4, 9) g
+  where pg_temp.outcome('wrong', 'br-' || g, 'br-net', null, 'tok-z') = 'not_found'), 6::bigint,
+  'while it is tripped, 9 wrong codes on one network are each just wrong');
+select is(pg_temp.outcome('wrong', 'br-10', 'br-net', null, 'tok-z'), 'locked', 'the 10th locks it, not the 30th');
+select is(pg_temp.enter_raw('wrong', null, 'fresh-3', 'br-net-2', 'br-net-2/56', null, null, 'tok-z')
+  ->> 'device_issued', 'false', 'no new devices are issued');
+update app.shop_code_attempts set locked_until = now() + interval '15 minutes'
+  where kind = 'net' and key_hash = pg_temp.h('school-wifi');
+select is(pg_temp.outcome('code-c1', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'locked',
+  'and a known phone gets no allowance of its own on a locked network');
+update app.shop_code_attempts set locked_until = null, hits = 0
+  where (kind = 'net' and key_hash = pg_temp.h('school-wifi')) or kind = 'region';
+
+-- ── Sessions: one studio each, up to 5 children, 30 days, 3 studios a device (answers 1, 3; calls 1, 11; S6) ──────
 select is((select count(*) from public.shop_sessions), 2::bigint, 'two right codes made two sessions');
 select is((select expires_at - created_at from public.shop_sessions where token_hash = pg_temp.h('tok-a')),
   interval '30 days', 'a session lasts 30 days');
@@ -226,16 +334,39 @@ select is(public.shop_session(pg_temp.h('tok-a')) - 'expires_at', jsonb_build_ob
     'last_initial', 'P', 'job_id', 'a0000000-0000-4000-8000-000000000001', 'school', 'Maple Grove Elementary',
     'picture_day', '2026-10-13', 'closes_at', null, 'deliver_to_school', false, 'state', 'open'))),
   'the session: the studio''s name and the child''s first name and last initial only (call 2), the school, the day');
-select is(pg_temp.enter('code-c2', 'phone2', 'school-wifi', 'tok-a', null),
-  '{"outcome": "added", "child_id": "c0000000-0000-4000-8000-000000000002"}'::jsonb, 'a brother is added');
-select is(pg_temp.outcome('code-c2', 'phone2', 'school-wifi', 'tok-a', null), 'already', 'only once');
-select is(pg_temp.outcome('code-c5', 'phone2', 'school-wifi', 'tok-a', null), 'added',
+select is(pg_temp.enter('code-c2', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused') - 'live',
+  jsonb_build_object('outcome', 'added', 'child_id', 'c0000000-0000-4000-8000-000000000002',
+    'session_hash', pg_temp.h('tok-a'), 'device_issued', false),
+  'a brother is added to the studio''s session on this device (S5: never a new session)');
+select is(pg_temp.outcome('code-c2', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'already', 'only once');
+select is(pg_temp.outcome('code-c5', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'added',
   'a sibling in another of the studio''s jobs too (call 1)');
-select is(pg_temp.outcome('code-b1', 'phone2', 'school-wifi', 'tok-a', null), 'other_studio',
-  'another studio''s code is refused (call 1)');
-select is(pg_temp.outcome('code-c3', 'phone2', 'school-wifi', 'tok-a', null), 'added', 'a 4th child');
-select is(pg_temp.outcome('code-c6', 'phone2', 'school-wifi', 'tok-a', null), 'added', 'a 5th');
-select is(pg_temp.outcome('code-c4', 'phone2', 'school-wifi', 'tok-a', null), 'limit', 'never a 6th');
+select is(pg_temp.enter('code-b1', 'phone2', 'school-wifi', array['tok-a'], 'tok-ab') ->> 'outcome', 'opened',
+  'another studio''s code opens a gallery of its own on the device (S6)');
+select is((select array[(select count(*) from public.shop_session_children sc join public.shop_sessions s
+    on s.id = sc.session_id where s.token_hash = pg_temp.h('tok-a')),
+  (select count(*) from public.shop_session_children sc join public.shop_sessions s
+    on s.id = sc.session_id where s.token_hash = pg_temp.h('tok-ab'))]), array[3::bigint, 1::bigint],
+  'leaving the first studio''s untouched');
+create function pg_temp.live(p jsonb) returns text[] language sql as $$
+  select array_agg(x order by x) from jsonb_array_elements_text(p -> 'live') x $$;
+select is(pg_temp.live(pg_temp.enter('code-cc1', 'phone2', 'school-wifi', array['tok-a', 'tok-ab', 'tok-dead'],
+    'tok-ac')),
+  (select array_agg(x order by x) from unnest(array[pg_temp.h('tok-a'), pg_temp.h('tok-ab'), pg_temp.h('tok-ac')]) x),
+  'a third studio''s too; sessions that no longer last are left out of the device''s list');
+create temp table limit_answer on commit drop as
+  select pg_temp.enter('code-cd1', 'phone2', 'school-wifi', array['tok-a', 'tok-ab', 'tok-ac'], 'tok-ad') as a;
+select is((select a - 'live' from limit_answer), '{"outcome": "gallery_limit", "device_issued": false}'::jsonb,
+  'but never a fourth');
+select is((select pg_temp.live(a) from limit_answer),
+  (select array_agg(x order by x) from unnest(array[pg_temp.h('tok-a'), pg_temp.h('tok-ab'), pg_temp.h('tok-ac')]) x),
+  'and the device keeps its three');
+select is((select count(*) from public.shop_sessions where token_hash = pg_temp.h('tok-ad')), 0::bigint,
+  'so no session is made');
+select is(pg_temp.outcome('code-c3', 'phone2', 'school-wifi', array['tok-a', 'tok-ab', 'tok-ac'], 'tok-unused'),
+  'added', 'a 4th child');
+select is(pg_temp.outcome('code-c6', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'added', 'a 5th');
+select is(pg_temp.outcome('code-c4', 'phone2', 'school-wifi', array['tok-a'], 'tok-unused'), 'limit', 'never a 6th');
 select is(pg_temp.try($$ insert into public.shop_session_children (session_id, studio_id, job_id, child_id)
   select s.id, s.studio_id, 'a0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000004'
   from public.shop_sessions s where s.token_hash = pg_temp.h('tok-a') $$), 'P0001 sibling_limit',
@@ -247,16 +378,30 @@ select is(pg_temp.try($$ insert into public.shop_session_children (session_id, s
   'a session never holds another studio''s child, whoever writes');
 select is((select expires_at - created_at from public.shop_sessions where token_hash = pg_temp.h('tok-a')),
   interval '30 days', 'adding siblings doesn''t extend the session (call 11)');
-select is(pg_temp.try($$ select public.shop_enter_code(pg_temp.h('code-c4'), pg_temp.h('p'), pg_temp.h('n'),
-  pg_temp.h('tok-unknown'), null) $$), 'P0001 session_required', 'adding needs a live session');
-select is(pg_temp.outcome('code-c7', 'phone3b', 'home-net-2', 'tok-y', 'tok-y2'), 'opened',
-  'opening again on a device');
-select is((select count(*) from public.shop_sessions where token_hash in (pg_temp.h('tok-y'), pg_temp.h('tok-y2'))),
-  1::bigint, 'forgets the device''s old session');
+select is(pg_temp.enter('code-c7', 'phone3b', 'home-net-2', array['tok-y'], 'tok-y2') ->> 'session_hash',
+  pg_temp.h('tok-y'), 'entering a code already in the device''s session keeps that session (S5)');
 update public.shop_sessions set created_at = now() - interval '31 days', expires_at = now() - interval '1 day'
-  where token_hash = pg_temp.h('tok-y2');
-select is(pg_temp.try($$ select public.shop_session(pg_temp.h('tok-y2')) $$), 'P0001 session_required',
+  where token_hash = pg_temp.h('tok-y');
+select is(pg_temp.try($$ select public.shop_session(pg_temp.h('tok-y')) $$), 'P0001 session_required',
   'an expired session is like no session');
+select is(pg_temp.enter('code-c7', 'phone3b', 'home-net-2', array['tok-y'], 'tok-y2') ->> 'outcome', 'opened',
+  'so the code opens a new one');
+-- At most 10 sessions show one child (M2): opening an 11th forgets the oldest.
+select is((select count(*) from generate_series(1, 11) g
+  where pg_temp.outcome('code-c7', 'cap-' || g, 'cap-net-' || g, null, 'cap-tok-' || g) = 'opened'), 11::bigint,
+  'Ivy''s code opened on 11 more devices');
+select is(pg_temp.sessions_of('c0000000-0000-4000-8000-000000000007'), 10::bigint,
+  'only 10 sessions show her');
+select is((select count(*) from public.shop_sessions where token_hash = pg_temp.h('cap-tok-11')), 1::bigint,
+  'the newest is kept');
+
+-- ── What a closed or unavailable child shows (security review M1) ─────────────────────────────────────────────────
+select is((select x from jsonb_array_elements(public.shop_session(pg_temp.h('tok-a')) -> 'children') x
+  where x ->> 'id' = 'c0000000-0000-4000-8000-000000000003'),
+  '{"id": "c0000000-0000-4000-8000-000000000003", "state": "closed"}'::jsonb,
+  'a draft job''s child: the id and state only');
+select ok(public.shop_session(pg_temp.h('tok-a'))::text !~ '(Mia|Draft Job|2026-10-14)',
+  'never a closed or draft child''s name, school or picture day');
 
 -- ── The gallery (D60; calls 3, 6, 8, 12) ──────────────────────────────────────────────────────────────────────────
 select is(public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000001'),
@@ -281,12 +426,14 @@ select is((select count(*) from public.photos p left join public.photo_tags t on
 select is((select count(*) from public.photos p where public.photo_parent_visible(p.id)), 11::bigint,
   '(11 of the 20 photos are visible to someone)');
 select is(public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000003'),
-  '{"state": "closed", "studio_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "job_id": "a0000000-0000-4000-8000-000000000002", "portraits": [], "class_photos": []}'::jsonb,
-  'a draft job''s child: closed, no photos (answer 4)');
+  '{"state": "closed"}'::jsonb, 'a draft job''s child: closed, no photos, nothing else (answer 4)');
 select is(pg_temp.outcome('code-c4', 'phone4', 'net-4', null, 'tok-dnp'), 'opened',
   'a Do not publish child''s code opens');
-select is(public.shop_gallery(pg_temp.h('tok-dnp'), 'c0000000-0000-4000-8000-000000000004') ->> 'state',
-  'unavailable', 'to "not available yet", with no photos (call 6)');
+select is(public.shop_gallery(pg_temp.h('tok-dnp'), 'c0000000-0000-4000-8000-000000000004'),
+  '{"state": "unavailable"}'::jsonb, 'to "not available yet", with no photos (call 6)');
+select is(public.shop_session(pg_temp.h('tok-dnp')) -> 'children',
+  '[{"id": "c0000000-0000-4000-8000-000000000004", "state": "unavailable"}]'::jsonb,
+  'and no name (M1)');
 select is(pg_temp.try($$ select public.shop_gallery(pg_temp.h('tok-dnp'), 'c0000000-0000-4000-8000-000000000001') $$),
   'P0002 Child not found', 'a child not in the session is not found');
 select is(pg_temp.outcome('code-b1', 'phone5', 'net-5', null, 'tok-b'), 'opened', 'studio B''s parent opens B''s');
@@ -294,6 +441,8 @@ select is(pg_temp.try($$ select public.shop_gallery(pg_temp.h('tok-b'), 'c000000
   'P0002 Child not found', 'and can''t read A''s child, even with its id');
 select is(pg_temp.try($$ select public.shop_price_list(pg_temp.h('tok-b'), 'c0000000-0000-4000-8000-000000000001') $$),
   'P0002 Child not found', 'nor A''s prices');
+select is(pg_temp.try($$ select public.shop_gallery(pg_temp.h('tok-ab'), 'c0000000-0000-4000-8000-000000000001') $$),
+  'P0002 Child not found', 'nor can the same device''s studio B gallery');
 alter table public.jobs disable trigger jobs_guard_closes_at;
 update public.jobs set closes_at = now() - interval '1 minute' where id = 'a0000000-0000-4000-8000-000000000003';
 alter table public.jobs enable trigger jobs_guard_closes_at;
@@ -320,11 +469,18 @@ insert into ids values
   ('print', pg_temp.item('a0000000-0000-4000-8000-000000000001', 'print')),
   ('single', pg_temp.item('a0000000-0000-4000-8000-000000000001', 'digital_single')),
   ('all', pg_temp.item('a0000000-0000-4000-8000-000000000001', 'digital_all')),
+  ('print3', pg_temp.item('a0000000-0000-4000-8000-000000000003', 'print')),
   ('b_pkg', pg_temp.item('b0000000-0000-4000-8000-000000000001', 'package'));
 create function pg_temp.add(p_tok text, p_child text, p_item text, p_photo int, p_qty int) returns text
 language sql as $$
   select pg_temp.try(format('select public.shop_cart_add(%L, %L, %L, %L, %s)', pg_temp.h(p_tok), p_child,
     (select id from ids where name = p_item), pg_temp.pid(p_photo), coalesce(p_qty::text, 'null'))) $$;
+create function pg_temp.set_qty(p_tok text, p_kind text, p_qty int) returns text language sql as $$
+  select pg_temp.try(format('select public.shop_cart_set_quantity(%L, %L, %s)', pg_temp.h(p_tok),
+    (select l.id from public.shop_cart_lines l join public.shop_sessions s on s.id = l.session_id
+     where s.token_hash = pg_temp.h(p_tok) and l.kind::text = p_kind order by l.created_at limit 1), p_qty)) $$;
+create function pg_temp.ship(p_tok text, p_method text) returns text language sql as $$
+  select pg_temp.try(format('select public.shop_set_shipping(%L, %L)', pg_temp.h(p_tok), p_method)) $$;
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 1, 1), 'ok',
   'Package A with Ava''s first pose');
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 1, 2), 'ok', 'and again, two more');
@@ -368,20 +524,19 @@ select is((select jsonb_agg(jsonb_build_object('kind', x ->> 'kind', 'price', x 
 select is(public.shop_cart(pg_temp.h('tok-a')) -> 'jobs',
   '[{"job_id": "a0000000-0000-4000-8000-000000000001", "currency": "USD", "deliver_to_school": false, "home_shipping_cents": 895}]'::jsonb,
   'with each job''s home fee and school delivery');
-select is(pg_temp.try(format('select public.shop_set_shipping(%L, %L)', pg_temp.h('tok-a'), 'school')),
-  'P0001 school_delivery_off', 'school delivery only when the job allows it (call 9)');
+select is(public.shop_cart(pg_temp.h('tok-a')) ->> 'currency', 'USD',
+  'and the studio''s currency, even for an empty bag (N4)');
+select is(pg_temp.ship('tok-a', 'school'), 'P0001 school_delivery_off',
+  'school delivery only when the job allows it (call 9)');
 update public.jobs set deliver_to_school = true where id = 'a0000000-0000-4000-8000-000000000001';
-select is(pg_temp.try(format('select public.shop_set_shipping(%L, %L)', pg_temp.h('tok-a'), 'school')), 'ok',
-  'now it does');
+select is(pg_temp.ship('tok-a', 'school'), 'ok', 'now it does');
 select is(public.shop_session(pg_temp.h('tok-a')) ->> 'shipping_method', 'school', 'and the bag remembers');
 update public.price_list_items set price_cents = 7000 where id = (select id from ids where name = 'pkg');
 select is((select (x -> 'price_cents')::int from jsonb_array_elements(public.shop_cart(pg_temp.h('tok-a')) -> 'lines') x
   where x ->> 'kind' = 'package'), 7000, 'a price change shows at once: nothing is stored on the line');
-select is(pg_temp.try(format('select public.shop_cart_set_quantity(%L, %L, 5)', pg_temp.h('tok-a'),
-  (select id from public.shop_cart_lines where kind = 'digital_single'))),
+select is(pg_temp.set_qty('tok-a', 'digital_single', 5),
   '22023 A quantity is 1 to 99; a digital download once', 'a download''s quantity stays 1');
-select is(pg_temp.try(format('select public.shop_cart_set_quantity(%L, %L, 4)', pg_temp.h('tok-a'),
-  (select id from public.shop_cart_lines where kind = 'package'))), 'ok', 'a package''s can change');
+select is(pg_temp.set_qty('tok-a', 'package', 4), 'ok', 'a package''s can change');
 select is(pg_temp.try(format('select public.shop_cart_set_quantity(%L, %L, 4)', pg_temp.h('tok-b'),
   (select id from public.shop_cart_lines where kind = 'package'))), 'P0002 Line not found',
   'but not from another studio''s session');
@@ -399,11 +554,16 @@ select is((select bool_or((x ->> 'available')::boolean) from jsonb_array_element
   public.shop_cart(pg_temp.h('tok-a')) -> 'lines') x), false, 'a list switch makes every line unavailable');
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'print', 2, 1), 'P0001 item_unavailable',
   'and the old list''s items can''t be added');
+select is(pg_temp.set_qty('tok-a', 'package', 2), 'P0001 item_unavailable',
+  'nor can their quantities change (N2)');
+select is(pg_temp.ship('tok-a', 'school'), 'P0001 school_delivery_off',
+  'and with nothing left to deliver, school delivery is refused');
 update public.jobs set price_list_id = (select default_price_list_id from public.studios
   where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') where id = 'a0000000-0000-4000-8000-000000000001';
 update public.photo_tags set flag = 'after_unreadable' where photo_id = pg_temp.pid(2);
 select is((select (x ->> 'available')::boolean from jsonb_array_elements(public.shop_cart(pg_temp.h('tok-a')) -> 'lines') x
   where x ->> 'kind' = 'digital_single'), false, 'a pose that is hidden again makes its line unavailable');
+select is(pg_temp.set_qty('tok-a', 'digital_single', 1), 'P0001 photo_unavailable', 'and its quantity fixed');
 delete from public.price_list_items where id = (select id from ids where name = 'all');
 select is((select count(*) from public.shop_cart_lines where kind = 'digital_all'), 0::bigint,
   'deleting an item removes its lines');
@@ -411,39 +571,80 @@ delete from public.photo_tags where photo_id = pg_temp.pid(2);
 delete from public.photos where id = pg_temp.pid(2);
 select is((select count(*) from public.shop_cart_lines where photo_id = pg_temp.pid(2)), 0::bigint,
   'and purging a photo removes its lines');
-select is(public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000001') -> 'portraits', '[]'::jsonb,
-  'until its batch is tagged again, none of the batch''s photos show');
+select is(public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000001'),
+  '{"state": "unavailable"}'::jsonb, 'until its batch is tagged again, none of the batch''s photos show');
 update public.upload_batches set tagged_round = tag_round where id = 'e1000000-0000-4000-8000-000000000001';
 select is(pg_temp.try(format('select public.shop_cart_remove(%L, %L)', pg_temp.h('tok-a'),
   (select id from public.shop_cart_lines where kind = 'package'))), 'ok', 'the parent removes a line');
 select is((select count(*) from public.shop_cart_lines), 0::bigint, 'the bag is empty');
 
+-- School delivery looks only at lines that can still be bought (code review M2): Ava's job delivers to school,
+-- Zoe's doesn't; once Zoe's print can't be bought, school delivery is offered and accepted.
+alter table public.jobs disable trigger jobs_guard_closes_at;
+update public.jobs set closes_at = null where id = 'a0000000-0000-4000-8000-000000000003';
+alter table public.jobs enable trigger jobs_guard_closes_at;
+select is(pg_temp.outcome('code-c1', 'm2-phone', 'm2-net', null, 'tok-m2'), 'opened', 'a parent opens Ava''s gallery');
+select is(pg_temp.outcome('code-c5', 'm2-phone', 'm2-net', array['tok-m2'], 'tok-unused'), 'added',
+  'and adds Zoe, of a job without school delivery');
+select is(pg_temp.add('tok-m2', 'c0000000-0000-4000-8000-000000000001', 'print', 1, 1) ||
+  pg_temp.add('tok-m2', 'c0000000-0000-4000-8000-000000000005', 'print3', 18, 1), 'okok', 'a print for each');
+select is(pg_temp.ship('tok-m2', 'school'), 'P0001 school_delivery_off', 'so school delivery is refused');
+alter table public.jobs disable trigger jobs_guard_closes_at;
+update public.jobs set closes_at = now() - interval '1 minute' where id = 'a0000000-0000-4000-8000-000000000003';
+alter table public.jobs enable trigger jobs_guard_closes_at;
+select is((select jsonb_agg(x -> 'available' order by x ->> 'child_id') from jsonb_array_elements(
+  public.shop_cart(pg_temp.h('tok-m2')) -> 'lines') x), '[true, false]'::jsonb,
+  'Zoe''s shop closes: her print can''t be bought');
+select is(pg_temp.ship('tok-m2', 'school'), 'ok', 'and school delivery, offered for Ava''s print, is accepted');
+create function pg_temp.m2_qty(p_child uuid) returns text language sql as $$
+  select pg_temp.try(format('select public.shop_cart_set_quantity(%L, %L, 3)', pg_temp.h('tok-m2'),
+    (select l.id from public.shop_cart_lines l join public.shop_sessions s on s.id = l.session_id
+     where s.token_hash = pg_temp.h('tok-m2') and l.child_id = p_child))) $$;
+select is(pg_temp.m2_qty('c0000000-0000-4000-8000-000000000001') || '/' ||
+  pg_temp.m2_qty('c0000000-0000-4000-8000-000000000005'),
+  'ok/P0001 shop_closed', 'Ava''s print''s quantity can change; Zoe''s can''t (N2)');
+select is(pg_temp.try(format('select public.shop_cart_remove(%L, %L)', pg_temp.h('tok-m2'),
+  (select id from public.shop_cart_lines where child_id = 'c0000000-0000-4000-8000-000000000001'))), 'ok',
+  'with Ava''s print removed');
+select is(pg_temp.ship('tok-m2', 'school'), 'P0001 school_delivery_off',
+  'nothing left needs delivery, so school delivery is refused');
+
 -- ── Forgetting, requests, tidy-up ─────────────────────────────────────────────────────────────────────────────────
 select ok(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'print', 1, 2) = 'ok', 'a print in the bag');
 select is(public.shop_forget(pg_temp.h('tok-a')), true, '"Forget this device"');
 select is((select count(*) from public.shop_sessions where token_hash = pg_temp.h('tok-a')) +
-  (select count(*) from public.shop_cart_lines) +
+  (select count(*) from public.shop_cart_lines l where not exists (
+    select 1 from public.shop_sessions s where s.id = l.session_id)) +
   (select count(*) from public.shop_session_children sc where not exists (
     select 1 from public.shop_sessions s where s.id = sc.session_id)), 0::bigint,
   'deletes the session, its children and its bag (call 11)');
+select is((select count(*) from public.shop_sessions where token_hash in (pg_temp.h('tok-ab'), pg_temp.h('tok-ac'))),
+  2::bigint, 'forgetting one gallery leaves the device''s others');
 select is(public.shop_forget('nope'), false, 'a bad token forgets nothing');
 select is(array[public.take_shop_request(pg_temp.h('net'), 2), public.take_shop_request(pg_temp.h('net'), 2),
   public.take_shop_request(pg_temp.h('net'), 2)], array[true, true, false], 'requests per network are counted');
 update app.shop_code_attempts set updated_at = now() - interval '25 hours'
-  where kind = 'pair' and key_hash = pg_temp.h('phone4');
-update app.shop_rate set window_start = now() - interval '25 hours';
-select is(public.prune_shop(1000), 3, 'the tidy-up removes the expired session, the old attempt and request count');
+  where (kind = 'device' and key_hash in (pg_temp.h('phone4'), pg_temp.h('phone5'))) or kind in ('issue_net', 'issue_wide');
+update app.shop_code_attempts set updated_at = now() - interval '31 days'
+  where kind = 'device' and key_hash = pg_temp.h('cap-1');
+update app.shop_rate set window_start = now() - interval '2 hours';
+select ok(public.prune_shop(1) between 1 and 3, 'the tidy-up removes a page at a time (the cron calls it again)');
+select ok(public.prune_shop(1000) > 0, 'and then the rest');
 select is((select count(*) from public.shop_sessions where expires_at <= now()), 0::bigint, 'no expired session left');
+select is((select count(*) from app.shop_rate), 0::bigint, 'no old request count');
+select is((select count(*) from app.shop_code_attempts where kind = 'issue_net' and updated_at < now() - interval '24 hours'),
+  0::bigint, 'no day-old count');
+select is((select array_agg(key_hash = pg_temp.h('phone4') order by key_hash = pg_temp.h('phone4'))
+  from app.shop_code_attempts where kind = 'device' and key_hash in (pg_temp.h('phone4'), pg_temp.h('cap-1'))),
+  array[true], 'a known device is kept 30 days, then goes');
 
 -- ── No events, no personal data ───────────────────────────────────────────────────────────────────────────────────
 delete from before_events;
 insert into before_events select pg_temp.events();
 select is(pg_temp.outcome('code-c1', 'phone9', 'net-9', null, 'tok-e'), 'opened', 'a parent opens a gallery');
 select is(pg_temp.add('tok-e', 'c0000000-0000-4000-8000-000000000001', 'print', 1, 1), 'ok', 'adds to the bag');
-select is(pg_temp.try(format('select public.shop_set_shipping(%L, %L)', pg_temp.h('tok-e'), 'home')), 'ok',
-  'chooses delivery');
-select is(pg_temp.try(format('select public.shop_cart_set_quantity(%L, %L, 2)', pg_temp.h('tok-e'),
-  (select id from public.shop_cart_lines limit 1))), 'ok', 'changes a quantity');
+select is(pg_temp.ship('tok-e', 'home'), 'ok', 'chooses delivery');
+select is(pg_temp.set_qty('tok-e', 'print', 2), 'ok', 'changes a quantity');
 select is(public.shop_forget(pg_temp.h('tok-e')), true, 'and forgets the device');
 select is(pg_temp.events() - (select n from before_events), 0::bigint,
   'none of which writes an event (call 10)');

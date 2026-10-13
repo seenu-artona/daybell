@@ -11,11 +11,9 @@ import { shopButton } from "./styles";
  * or autofills. The code is sent in the request body only and is never kept in the page's address or storage.
  */
 export function CodeForm({
-  mode,
   submitLabel,
   onOpened,
 }: {
-  mode: "open" | "add";
   submitLabel: string;
   onOpened: (childId: string) => void | Promise<void>;
 }) {
@@ -39,8 +37,8 @@ export function CodeForm({
     }
     setBusy(true);
     setError(null);
-    const result: ShopResult<{ childId: string }> =
-      mode === "open" ? await shopApi.open(code) : await shopApi.addChild(code);
+    // Opening and adding are the same call (S6): the code's studio decides which gallery the child joins.
+    const result: ShopResult<{ childId: string }> = await shopApi.open(code);
     if (result.ok) {
       setCode("");
       await onOpened(result.data.childId);

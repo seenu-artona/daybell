@@ -1185,31 +1185,39 @@ const shopChildState = z.enum(SHOP_CHILD_STATES).meta({
     "open: the gallery. closed: the job isn't selling (drafts too) or its closing date has passed. unavailable: no photos to show yet (or never, for a child marked Do not publish). Closed and unavailable show no photos.",
 });
 
-export const shopChild = z
-  .object({
-    id: z.uuid(),
-    displayName: z
-      .string()
-      .meta({ description: 'First name and last initial only, e.g. "Ava P."' }),
-    firstName: z.string().meta({ description: "For the photos' descriptions." }),
-    jobId: z.uuid(),
-    school: z.string().meta({ description: "The job's client (the school), else the job's name." }),
-    pictureDay: z.iso.date(),
-    closesAt: z.iso
-      .datetime({ offset: true })
-      .nullable()
-      .meta({ description: "Order by this moment; null when the shop has no closing date." }),
-    deliverToSchool: z.boolean().meta({ description: "The job offers free delivery to school." }),
-    state: shopChildState,
-  })
-  .meta({
-    id: "ShopChild",
-    description: "A child in the parent's shop session. Never a full name.",
-  });
-export type ShopChild = z.infer<typeof shopChild>;
+const shopOpenChild = z.object({
+  id: z.uuid(),
+  state: z.literal("open"),
+  displayName: z.string().meta({ description: 'First name and last initial only, e.g. "Ava P."' }),
+  firstName: z.string().meta({ description: "For the photos' descriptions." }),
+  jobId: z.uuid(),
+  school: z.string().meta({ description: "The job's client (the school), else the job's name." }),
+  pictureDay: z.iso.date(),
+  closesAt: z.iso
+    .datetime({ offset: true })
+    .nullable()
+    .meta({ description: "Order by this moment; null when the shop has no closing date." }),
+  deliverToSchool: z.boolean().meta({ description: "The job offers free delivery to school." }),
+});
+const shopHiddenChild = z.object({
+  id: z.uuid(),
+  state: z.enum(["closed", "unavailable"]),
+});
 
-export const shopSessionResponse = z
+export const shopChild = z.discriminatedUnion("state", [shopOpenChild, shopHiddenChild]).meta({
+  id: "ShopChild",
+  description:
+    "A child in the parent's shop session. Never a full name. A closed, draft or unavailable child is only an id and a state: no name, school or date (a stale card reveals nothing).",
+});
+export type ShopChild = z.infer<typeof shopChild>;
+export type ShopOpenChild = z.infer<typeof shopOpenChild>;
+
+export const shopGallerySession = z
   .object({
+    id: z.string().meta({
+      description:
+        "The gallery's id on this device (not a credential): name it in ?gallery= on the other shop calls.",
+    }),
     studio: z.object({ name: z.string() }),
     expiresAt: z.iso
       .datetime({ offset: true })
@@ -1219,11 +1227,23 @@ export const shopSessionResponse = z
       .meta({ description: "In the order their codes were entered; at most 5." }),
     bagCount: z.number().int().meta({ description: "Things in the bag (quantities added)." }),
   })
+  .meta({ id: "ShopGallerySession", description: "One studio's gallery and bag on this device." });
+export type ShopGallerySession = z.infer<typeof shopGallerySession>;
+
+export const shopSessionResponse = z
+  .object({
+    galleries: z.array(shopGallerySession).meta({
+      description: "One per studio, at most 3, in the order they were opened on this device.",
+    }),
+  })
   .meta({ id: "ShopSession" });
 export type ShopSessionResponse = z.infer<typeof shopSessionResponse>;
 
 export const shopOpenedResponse = z
-  .object({ childId: z.uuid().meta({ description: "The child the code belongs to." }) })
+  .object({
+    childId: z.uuid().meta({ description: "The child the code belongs to." }),
+    galleryId: z.string().meta({ description: "The gallery (the studio's) the child is in." }),
+  })
   .meta({ id: "ShopOpened" });
 export type ShopOpenedResponse = z.infer<typeof shopOpenedResponse>;
 
@@ -1355,8 +1375,8 @@ export const SHOP_CONFLICTS = {
   closed: "shop.closed",
   /** A session holds at most 5 children. */
   siblingLimit: "shop.siblingLimit",
-  /** The code is another studio's: open it separately (call 1). */
-  otherStudio: "shop.otherStudio",
+  /** The device already holds galleries of 3 other studios: forget one first (S6). */
+  galleryLimit: "shop.galleryLimit",
   /** The item isn't on the job's current price list. */
   itemUnavailable: "shop.itemUnavailable",
   /** The pose isn't one of the child's photos that can be shown. */

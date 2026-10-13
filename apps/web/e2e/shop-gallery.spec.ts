@@ -9,8 +9,9 @@ import { cardCodes, photo, signUpOwner } from "./helpers";
 // studio app is desktop only, D136) sells a job with two children; a parent types the first code, sees the cover and
 // "See photos", the grid, blur while the page is hidden, the viewer with Previous and Next, "Use this photo", a package
 // and its pose; adds the brother's code and switches between them; buys a print and a single download; chooses
-// delivery and sees the totals; forgets the device. A draft job's code says the shop is closed. Five wrong codes lock
-// a phone out. Reduced motion: the cover's words don't slide.
+// delivery and sees the totals; forgets the device. A draft job's code says the shop is closed, without the child's
+// name. Five wrong codes lock a phone out. Reduced motion: the cover's words don't slide. Locators are scoped to a
+// landmark and exact (code review S4).
 test.use({ reducedMotion: "reduce" });
 
 const run = `${Date.now()}`;
@@ -113,6 +114,8 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
   const studio = await studioSellingTwoChildren(browser, baseURL, tag);
   const main = page.getByRole("main");
   const header = page.getByRole("banner");
+  // The one main action of each screen, docked at the bottom (code review S4).
+  const docked = page.getByRole("region", { name: "Next step", exact: true });
 
   // 1. The one shop address; neutral until a code is entered (answer 1). The code opens the cover (D24, D119).
   await page.goto("/shop");
@@ -142,7 +145,7 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
       exact: true,
     }),
   ).toBeVisible();
-  const grid = main.getByRole("list").last();
+  const grid = main.getByRole("list", { name: "Photos of Ava P.", exact: true });
   await expect(grid.getByRole("button")).toHaveCount(2);
   const images = await grid
     .locator("img")
@@ -176,16 +179,17 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
   await expect(
     header.getByRole("heading", { name: "Choose a package", level: 1, exact: true }),
   ).toBeVisible();
-  await main.getByText("Package B", { exact: true }).click();
-  await page.getByRole("link", { name: "Continue", exact: true }).click();
+  await main.getByRole("radio", { name: "Package B", exact: true }).check();
+  await docked.getByRole("link", { name: "Continue", exact: true }).click();
   await expect(
     header.getByRole("heading", { name: "Package B", level: 1, exact: true }),
   ).toBeVisible();
   const poses = main.getByRole("group", { name: "Pose", exact: true });
   await expect(poses.getByRole("radio", { name: "Pose 1 of 2", exact: true })).toBeChecked();
-  await page.getByRole("button", { name: "Add to bag", exact: true }).click();
+  await docked.getByRole("button", { name: "Add to bag", exact: true }).click();
   await expect(header.getByRole("heading", { name: "Bag", level: 1, exact: true })).toBeVisible();
   await expect(header.getByRole("link", { name: "Bag, 1 item", exact: true })).toBeVisible();
+  await expect(page).toHaveTitle("Bag");
 
   // 6. A brother's code (call 1), then switching between the children.
   await header.getByRole("link", { name: "Back", exact: true }).click();
@@ -212,12 +216,12 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
 
   // 7. A print and a single download for Noah.
   for (const item of ["5×7 print", "Digital download"]) {
-    await page.getByRole("link", { name: "Choose a package", exact: true }).click();
+    await docked.getByRole("link", { name: "Choose a package", exact: true }).click();
     await main.getByRole("link", { name: "Single prints and downloads", exact: true }).click();
-    await main.getByText(item, { exact: true }).click();
-    await page.getByRole("link", { name: "Continue", exact: true }).click();
+    await main.getByRole("radio", { name: item, exact: true }).check();
+    await docked.getByRole("link", { name: "Continue", exact: true }).click();
     await expect(header.getByRole("heading", { name: item, level: 1, exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Add to bag", exact: true }).click();
+    await docked.getByRole("button", { name: "Add to bag", exact: true }).click();
     await expect(header.getByRole("heading", { name: "Bag", level: 1, exact: true })).toBeVisible();
     await header.getByRole("link", { name: "Back", exact: true }).click();
     await children.getByRole("link", { name: "Noah P.", exact: true }).click();
@@ -232,10 +236,10 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
   await expect(noah.getByText("Digital download", { exact: true })).toBeVisible();
   const delivery = main.getByRole("group", { name: "Delivery", exact: true });
   await expect(main.getByText("Choose delivery", { exact: true })).toBeVisible();
-  await delivery.getByRole("radio", { name: /^Delivery to school/ }).check();
+  await delivery.getByRole("radio", { name: "Delivery to school", exact: true }).check();
   await expect(main.getByText("Total $111.00", { exact: true })).toBeVisible();
   await expect(main.getByText("+ tax", { exact: true })).toBeVisible();
-  await delivery.getByRole("radio", { name: /^Home delivery/ }).check();
+  await delivery.getByRole("radio", { name: "Home delivery", exact: true }).check();
   await expect(main.getByText("Total $122.95", { exact: true })).toBeVisible();
   await noah
     .getByRole("group", { name: "How many: 5×7 print", exact: true })
@@ -260,6 +264,11 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
     main.getByText(`This shop is closed. Contact ${studio.studio}.`, { exact: true }),
   ).toBeVisible();
   await expect(main.locator("img")).toHaveCount(0);
+  // Never the child's name for a closed or draft shop (security review M1).
+  await expect(
+    header.getByRole("heading", { name: "Your child", level: 1, exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("Mia");
 
   // 11. Five wrong codes lock a phone out for 15 minutes (answer 2), on another phone.
   const other = await browser.newContext({ ...devices["Pixel 7"], baseURL });

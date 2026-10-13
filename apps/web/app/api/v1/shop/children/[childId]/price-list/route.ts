@@ -1,7 +1,8 @@
 import { ApiError } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireShopSession, shop, shopHandle, toShopPriceList } from "@/lib/shop/shop";
+import { toShopPriceList } from "@/lib/shop/gallery";
+import { callShopFunction, requireShopSession, shopHandle } from "@/lib/shop/http";
 
 export const runtime = "nodejs";
 export const preferredRegion = "yul1";
@@ -13,9 +14,13 @@ export const GET = shopHandle(async (request: Request, ctx: Ctx) => {
   const session = await requireShopSession(request);
   const { childId } = await ctx.params;
   if (!z.uuid().safeParse(childId).success) throw new ApiError("not_found", "Child not found.");
-  const row = await shop<Parameters<typeof toShopPriceList>[0]>(session.region, "shop_price_list", {
-    p_session_hash: session.hash,
-    p_child_id: childId,
-  });
+  const row = await callShopFunction<Parameters<typeof toShopPriceList>[0]>(
+    session.region,
+    "shop_price_list",
+    {
+      p_session_hash: session.hash,
+      p_child_id: childId,
+    },
+  );
   return NextResponse.json(toShopPriceList(row));
 });

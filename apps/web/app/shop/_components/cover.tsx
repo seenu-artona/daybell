@@ -1,6 +1,6 @@
 "use client";
 
-import type { ShopChild, ShopPhoto } from "@daybell/api";
+import type { ShopOpenChild, ShopPhoto } from "@daybell/api";
 import { cn } from "@daybell/ui";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
@@ -21,7 +21,7 @@ export function Cover({
   onImageError,
 }: {
   studio: string;
-  child: ShopChild;
+  child: ShopOpenChild;
   photo: ShopPhoto;
   total: number;
   onSeePhotos: () => void;

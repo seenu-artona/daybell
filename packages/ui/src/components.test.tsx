@@ -111,6 +111,17 @@ describe("components", () => {
     await expectNoA11yViolations(container);
   });
 
+  it("names an option by its title alone, and describes it by the rest (WCAG 4.1.2)", () => {
+    render(<OptionCard name="pk" title="Family" description="2 prints" price="$54" />);
+    const radio = screen.getByRole("radio", { name: "Family" });
+    expect(
+      radio
+        .getAttribute("aria-describedby")
+        ?.split(" ")
+        .map((id) => document.getElementById(id)?.textContent),
+    ).toEqual(["2 prints", "$54"]);
+  });
+
   it("marks an input invalid and links the error message", () => {
     render(<Field label="Access code" error="Codes need 6 characters." />);
     const input = screen.getByLabelText("Access code");

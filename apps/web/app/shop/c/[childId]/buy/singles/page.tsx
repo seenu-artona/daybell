@@ -12,6 +12,7 @@ import { money, useRefusal } from "../../../../_components/format";
 import { Loading, MessageScreen } from "../../../../_components/message-screen";
 import { useShop } from "../../../../_components/shop-context";
 import { ShopHeader } from "../../../../_components/shop-header";
+import { ShopTitle } from "../../../../_components/shop-title";
 import { shopButton, shopLink } from "../../../../_components/styles";
 import { useChildData } from "../../../../_components/use-child";
 
@@ -22,7 +23,8 @@ function Singles() {
   const router = useRouter();
   const { setBagCount } = useShop();
   const photo = useSearchParams().get("photo");
-  const { childId, child, studio, data } = useChildData<ShopPriceListResponse>(shopApi.priceList);
+  const { childId, galleryId, child, studio, data, failed, reload } =
+    useChildData<ShopPriceListResponse>(shopApi.priceList);
   const [chosen, setChosen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,22 +42,49 @@ function Singles() {
   const pose = photo ? `?photo=${encodeURIComponent(photo)}` : "";
 
   const addAll = async (item: ShopItem) => {
+    if (!galleryId) return;
     setBusy(true);
     setError(null);
-    const result = await shopApi.addLine({ childId, itemId: item.id, photoId: null, quantity: 1 });
+    const result = await shopApi.addLine(galleryId, {
+      childId,
+      itemId: item.id,
+      photoId: null,
+      quantity: 1,
+    });
     setBusy(false);
     if (!result.ok) {
       setError(refusal(result));
       return;
     }
-    setBagCount(bagCount(result.data));
-    router.push("/shop/bag");
+    setBagCount(galleryId, bagCount(result.data));
+    router.push(`/shop/bag?gallery=${encodeURIComponent(galleryId)}`);
   };
 
-  if (!child || !data) return <Loading label={t("loading")} />;
+  const title = <ShopTitle>{t("titles.singles")}</ShopTitle>;
+  if (!child || !data)
+    return (
+      <>
+        {title}
+        {failed ? (
+          <MessageScreen>
+            <button type="button" onClick={() => void reload()} className={shopButton}>
+              {t("retry")}
+            </button>
+          </MessageScreen>
+        ) : (
+          <Loading label={t("loading")} />
+        )}
+      </>
+    );
+  const firstName = child.state === "open" ? child.firstName : t("yourChild");
   return (
     <>
-      <ShopHeader title={t("buy.singlesTitle")} back={`/shop/c/${childId}/buy${pose}`} />
+      {title}
+      <ShopHeader
+        title={t("buy.singlesTitle")}
+        back={`/shop/c/${childId}/buy${pose}`}
+        gallery={galleryId}
+      />
       <main className="px-4 pt-4 pb-32">
         {data.state !== "open" ? (
           <MessageScreen>
@@ -78,7 +107,7 @@ function Singles() {
                     title={i.name}
                     description={
                       i.kind === "digital_all"
-                        ? (i.description ?? t("buy.allDigitalsHint", { name: child.firstName }))
+                        ? (i.description ?? t("buy.allDigitalsHint", { name: firstName }))
                         : i.description
                     }
                     price={money(i.price)}

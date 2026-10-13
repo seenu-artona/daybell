@@ -3,20 +3,22 @@
 import type { ShopPhoto } from "@daybell/api";
 import { ProtectedImage } from "./protected-image";
 
-/** The gallery's grid: each photo opens the full-screen viewer. Photos are the only colour (D116). */
+/** The gallery's grid, named (code review S4): each photo opens the full-screen viewer. Photos are the only colour (D116). */
 export function PhotoGrid({
+  label,
   photos,
   alt,
   onOpen,
   onImageError,
 }: {
+  label: string;
   photos: ShopPhoto[];
   alt: (n: number, total: number) => string;
   onOpen: (index: number) => void;
   onImageError: () => void;
 }) {
   return (
-    <ul className="m-0 mt-4 grid list-none grid-cols-2 gap-2 p-0">
+    <ul aria-label={label} className="m-0 mt-4 grid list-none grid-cols-2 gap-2 p-0">
       {photos.map((photo, index) => (
         <li key={photo.id}>
           <button

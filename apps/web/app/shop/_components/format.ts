@@ -1,7 +1,7 @@
 "use client";
 
-import type { MoneyAmount, PackageLineOut } from "@daybell/api";
-import { formatMoney, localeForCurrency } from "@daybell/core";
+import type { MoneyAmount, PackageLineOut, ShopChild } from "@daybell/api";
+import { closingDay, formatMoney, localeForCurrency } from "@daybell/core";
 import { useFormatter, useTranslations } from "next-intl";
 import { useCallback } from "react";
 
@@ -10,18 +10,28 @@ export function money(amount: MoneyAmount): string {
   return formatMoney(amount, localeForCurrency(amount.currency));
 }
 
-/** A picture day (a calendar date) and an order-by moment, in words. */
+/**
+ * A picture day (a calendar date), and the last day to order: the day a closing moment ends, as ADR 0021 shows it to
+ * studios (closingDay: the shop closes at the midnight that ends it), not the date of that midnight (code review N6).
+ */
 export function useShopDates() {
   const format = useFormatter();
+  const day = (date: string, month: "short" | "long" = "short") =>
+    format.dateTime(new Date(`${date}T00:00:00Z`), { month, day: "numeric", timeZone: "UTC" });
   return {
-    day: (date: string) =>
-      format.dateTime(new Date(`${date}T00:00:00Z`), {
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      }),
-    moment: (at: string) => format.dateTime(new Date(at), { month: "long", day: "numeric" }),
+    day: (date: string) => day(date),
+    lastDay: (closesAt: string) => day(closingDay(closesAt), "long"),
   };
+}
+
+/** A child as parents see them: "Ava P." while their shop is open; "Your child" otherwise (security review M1). */
+export function useChildName() {
+  const t = useTranslations("shop");
+  return useCallback(
+    (child: ShopChild | null | undefined) =>
+      child?.state === "open" ? child.displayName : t("yourChild"),
+    [t],
+  );
 }
 
 /** What a package holds, as one line: "8×10, 2 × 5×7, 8 wallets, digital download". */
