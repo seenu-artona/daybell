@@ -1038,3 +1038,10 @@ export type PayoutConflict = (typeof PAYOUT_CONFLICTS)[keyof typeof PAYOUT_CONFL
  * deployment at all (e.g. PR previews), as opposed to the studio's region not having payouts yet.
  */
 export const PAYOUT_NOT_CONFIGURED = "payouts.notConfigured";
+
+/**
+ * In the error's `fields.form` when Stripe refuses to create a studio's account because Daybell's own Stripe platform
+ * setup isn't finished (e.g. the platform hasn't acknowledged loss liability; ADR 0020 amendment). Nothing the studio
+ * can fix: Daybell finishes the setup in the Stripe Dashboard.
+ */
+export const PAYOUT_PLATFORM_SETUP = "payouts.platformSetup";

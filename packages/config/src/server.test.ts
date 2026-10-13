@@ -91,20 +91,37 @@ describe("stripeSettings (ADR 0020)", () => {
 describe("stripeWebhookSecrets (ADR 0020)", () => {
   const ONE = ["whsec", "a".repeat(24)].join("_");
   const TWO = ["whsec", "z".repeat(24)].join("_");
+  const THREE = ["whsec", "m".repeat(24)].join("_");
+  const FOUR = ["whsec", "q".repeat(24)].join("_");
 
-  it("reads one or two signing secrets", () => {
+  it("reads one to four signing secrets (snapshot and thin destinations, each mid-rotation)", () => {
     expect(stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: ONE })).toEqual([ONE]);
     expect(stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: ` ${ONE} , ${TWO} ` })).toEqual([
       ONE,
       TWO,
     ]);
+    expect(
+      stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: [ONE, TWO, THREE, FOUR].join(",") }),
+    ).toEqual([ONE, TWO, THREE, FOUR]);
+  });
+
+  it("refuses the same secret twice, so a copy-paste mistake is visible (security review 8)", () => {
+    for (const value of [[ONE, ONE].join(","), [ONE, TWO, ONE].join(",")])
+      expect(() => stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: value })).toThrow(
+        /^STRIPE_WEBHOOK_SECRET lists the same signing secret twice$/,
+      );
   });
 
   it("refuses anything else, by name only", () => {
     expect(() => stripeWebhookSecrets({})).toThrow(/^STRIPE_WEBHOOK_SECRET is not set$/);
-    for (const value of ["secret", `${ONE},${TWO},${ONE}`, ["whsec", "short"].join("_")])
+    for (const value of [
+      "secret",
+      [ONE, TWO, THREE, FOUR, ["whsec", "b".repeat(24)].join("_")].join(","),
+      `${ONE},secret`,
+      ["whsec", "short"].join("_"),
+    ])
       expect(() => stripeWebhookSecrets({ STRIPE_WEBHOOK_SECRET: value })).toThrow(
-        /^STRIPE_WEBHOOK_SECRET must be one or two whsec_ signing secrets$/,
+        /^STRIPE_WEBHOOK_SECRET must be one to four whsec_ signing secrets$/,
       );
   });
 });

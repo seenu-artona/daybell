@@ -4,8 +4,15 @@ import { type ComponentProps, createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import messages from "@/messages/en-CA.json";
+import enUS from "@/messages/en-US.json";
 import { SellChecklist } from "../../jobs/[id]/sell-checklist";
-import { PayoutsCard, ScheduleCard, StatusCard, scheduleFormKey } from "./payout-cards";
+import {
+  PayoutsCard,
+  payoutProblemKey,
+  ScheduleCard,
+  StatusCard,
+  scheduleFormKey,
+} from "./payout-cards";
 
 // Settings › Payouts and the Start selling dialog (ADR 0020; code review N3, N7, N9, N10): rendered to HTML with the
 // real Canadian English words. What admins are told, the buttons' descriptions, the neutral "Manual payouts", the
@@ -126,5 +133,35 @@ describe("SellChecklist: Payouts connected", () => {
     expect(row(undefined)).toBe("Checking…");
     expect(row(true)).toBe("Done");
     expect(row(false)).toBe("To do");
+  });
+});
+
+describe("payoutProblemKey (code review N5)", () => {
+  const word = (m: typeof messages, key: string) =>
+    key.split(".").reduce<unknown>((o, k) => (o as Record<string, unknown>)?.[k], m.app.payouts);
+
+  it("shows each payout form code's own words in both locales, and the general text otherwise", () => {
+    expect(payoutProblemKey({ form: "payouts.platformSetup" })).toBe("platformSetup");
+    expect(payoutProblemKey({ form: "payouts.notConfigured" })).toBe("notConfigured");
+    expect(payoutProblemKey({ form: "payouts.alreadyConnected" })).toBe(
+      "conflicts.alreadyConnected",
+    );
+    expect(payoutProblemKey({ form: "payouts.notConnected" })).toBe("conflicts.notConnected");
+    expect(payoutProblemKey({})).toBeNull();
+    expect(payoutProblemKey({ form: "something.else" })).toBeNull();
+    for (const key of [
+      "platformSetup",
+      "notConfigured",
+      "conflicts.alreadyConnected",
+      "conflicts.notConnected",
+    ])
+      for (const m of [messages, enUS]) expect(typeof word(m, key), key).toBe("string");
+  });
+
+  it("tells the owner Daybell's platform setup isn't finished and to contact support, not to try again (N2)", () => {
+    for (const m of [messages, enUS]) {
+      expect(m.app.payouts.platformSetup).toContain("contact Daybell support");
+      expect(m.app.payouts.platformSetup).not.toMatch(/try again/i);
+    }
   });
 });

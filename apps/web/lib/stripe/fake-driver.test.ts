@@ -15,11 +15,32 @@ describe("fakeDriver (ADR 0020)", () => {
       country: "CA" as const,
       idempotencyKey: "k1",
     };
-    const a = await fake.createAccount(input);
-    expect(a.id).toMatch(/^acct_[A-Za-z0-9]+$/);
+    const created = await fake.createAccount(input);
+    // The id only, like the real driver's v2 create (security review 1).
+    expect(Object.keys(created)).toEqual(["id"]);
+    expect(created.id).toMatch(/^acct_[A-Za-z0-9]+$/);
     // The same idempotency key gives the same account.
-    expect((await fake.createAccount(input)).id).toBe(a.id);
+    expect((await fake.createAccount(input)).id).toBe(created.id);
+    const a = await fake.retrieveAccount(created.id);
     expect(accountForDatabase(a).status).toBe("needs_info");
+    // Stripe's own schedule, not marked as set by Daybell, until Daybell sets its default (D56; Q6).
+    expect(accountForDatabase(a).schedule).toMatchObject({ payout_interval: "daily" });
+    expect(a.metadata).toEqual({ daybell_studio_id: "s1", daybell_region: "ca" });
+    const scheduled = await fake.updatePayoutSchedule(a.id, {
+      interval: "weekly",
+      weeklyAnchor: "friday",
+    });
+    expect(accountForDatabase(scheduled).schedule).toMatchObject({
+      payout_interval: "weekly",
+      weekly_anchor: "friday",
+    });
+    expect(scheduled.metadata).toEqual({
+      daybell_studio_id: "s1",
+      daybell_region: "ca",
+      daybell_schedule_set: "true",
+    });
+    // Another key (e.g. the v2 key after the v1 one) is another request.
+    expect((await fake.createAccount({ ...input, idempotencyKey: "k2" })).id).not.toBe(a.id);
     const link = await fake.createAccountLink({
       accountId: a.id,
       refreshUrl: "http://x/refresh",

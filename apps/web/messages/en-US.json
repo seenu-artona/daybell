@@ -1230,6 +1230,7 @@
       "notForRole": "Only the studio’s owner and admins can see payouts.",
       "unavailable": "Payouts aren’t available in this region yet.",
       "notConfigured": "Payouts aren’t set up in this environment.",
+      "platformSetup": "Daybell’s platform setup with Stripe isn’t finished yet, so payouts can’t be set up. Please contact Daybell support.",
       "status": {
         "title": "Connection",
         "notStarted": "Not started",

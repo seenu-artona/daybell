@@ -1,6 +1,13 @@
 "use client";
 
-import type { PayoutFees, PayoutScheduleResponse, StudioPayoutsResponse } from "@daybell/api";
+import {
+  PAYOUT_CONFLICTS,
+  PAYOUT_NOT_CONFIGURED,
+  PAYOUT_PLATFORM_SETUP,
+  type PayoutFees,
+  type PayoutScheduleResponse,
+  type StudioPayoutsResponse,
+} from "@daybell/api";
 import {
   DEFAULT_MONTHLY_ANCHOR,
   DEFAULT_WEEKLY_ANCHOR,
@@ -65,6 +72,32 @@ function CardSection({ title, children }: { title: string; children: React.React
       </section>
     </Card>
   );
+}
+
+/**
+ * The app.payouts message for a payout error's form code, or null for the general error text (code review N5): already
+ * connected, not connected, not set up in this environment, and Daybell's Stripe platform setup not finished.
+ */
+export function payoutProblemKey(
+  fields: Record<string, string>,
+):
+  | "conflicts.alreadyConnected"
+  | "conflicts.notConnected"
+  | "notConfigured"
+  | "platformSetup"
+  | null {
+  switch (fields.form) {
+    case PAYOUT_CONFLICTS.alreadyConnected:
+      return "conflicts.alreadyConnected";
+    case PAYOUT_CONFLICTS.notConnected:
+      return "conflicts.notConnected";
+    case PAYOUT_NOT_CONFIGURED:
+      return "notConfigured";
+    case PAYOUT_PLATFORM_SETUP:
+      return "platformSetup";
+    default:
+      return null;
+  }
 }
 
 type StripePath = "/studio/payouts/onboarding-link" | "/studio/payouts/dashboard-link";

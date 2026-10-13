@@ -1,12 +1,14 @@
 import "server-only";
-import { ApiError } from "@daybell/api";
+import { ApiError, PAYOUT_PLATFORM_SETUP } from "@daybell/api";
 import Stripe from "stripe";
-import type {
-  NewAccount,
-  PaymentsProvider,
-  ScheduleRequest,
-  StripeAccountData,
-  StripePayoutData,
+import { StripeCallError, type StripeOutcome, type StripeStage } from "./errors";
+import {
+  type NewAccount,
+  type PaymentsProvider,
+  SCHEDULE_SET_KEY,
+  type ScheduleRequest,
+  type StripeAccountData,
+  type StripePayoutData,
 } from "./types";
 
 /**
@@ -17,23 +19,90 @@ import type {
 export const STRIPE_API_VERSION = "2026-08-26.dahlia" as const;
 
 /**
- * Stripe Connect controller properties for every studio account (Seenu, Q1 and Q2; ADR 0020): Stripe collects and
- * verifies requirements, Daybell carries negative balances and pays Stripe's fees (passed on, D98), and the studio
- * gets the Express dashboard.
+ * Stripe Accounts v2 settings for every studio account (Seenu, Q1 and Q2; ADR 0020 amendment). Stripe refuses v1
+ * account creation for new Connect platforms, so accounts are created with POST /v2/core/accounts:
+ * - dashboard "express": the studio gets the Express dashboard (Q2);
+ * - fees_collector and losses_collector "application": Daybell pays Stripe's fees (passed on, D98) and carries
+ *   negative balances. With losses on the platform and a Stripe dashboard, Stripe computes requirements_collector as
+ *   "stripe": Stripe collects and verifies requirements. This is the v2 form of the v1 controller properties Seenu
+ *   chose in Q1; dashboard "express" requires both responsibilities on the application.
  */
-export const CONTROLLER = {
-  requirement_collection: "stripe",
-  losses: { payments: "application" },
-  fees: { payer: "application" },
-  stripe_dashboard: { type: "express" },
+export const RESPONSIBILITIES = {
+  fees_collector: "application",
+  losses_collector: "application",
 } as const;
 
-/** Errors carry Stripe's error type only, never its message (it can echo request data). */
-function failed(err: unknown): never {
-  const type = err instanceof Stripe.errors.StripeError ? err.type : "unknown";
-  console.error("stripe_error", type);
-  throw new ApiError("internal", "We couldn't reach Stripe. Please try again.");
+/** The configurations each account is onboarded for: merchant (card payments) and recipient (transfers). */
+export const CONFIGURATIONS = ["merchant", "recipient"] as const;
+
+/**
+ * Stripe error codes that mean Daybell's own platform setup isn't finished (ADR 0020 amendment), e.g. the platform
+ * hasn't acknowledged loss liability or submitted its Connect profile. Only Daybell can fix these in the Stripe
+ * Dashboard, so the owner is told Daybell's platform setup isn't finished and to contact support (code review N2).
+ */
+export const PLATFORM_SETUP_CODES = new Set([
+  "account_creation_liability_unacknowledged",
+  "connect_profile_not_submitted",
+  "account_create_activation_required",
+  "accounts_v2_access_blocked",
+  "capability_not_available_in_country",
+  "cross_border_connected_account_creation_not_allowed",
+]);
+
+const ERROR_CODE = /^[a-z0-9_]{1,100}$/;
+
+/** Stripe's own identifier, or "none" when there is none, or "other" when it isn't an identifier (never free text). */
+const identifier = (value: unknown) =>
+  value === undefined || value === null
+    ? "none"
+    : typeof value === "string" && ERROR_CODE.test(value)
+      ? value
+      : "other";
+
+/**
+ * Stripe errors that mean Stripe refused the request outright, so nothing was made (code review S1): invalid request
+ * (400/404), authentication (401), permission (403) and rate limits (429; v1 and v2 classes). Anything else (5xx, a
+ * timeout or lost connection, an idempotency conflict while the first request is still running, a non-Stripe error)
+ * is "unknown": the request may have taken effect.
+ */
+const REFUSALS = new Set([
+  "StripeInvalidRequestError",
+  "StripeAuthenticationError",
+  "StripePermissionError",
+  "StripeRateLimitError",
+  "RateLimitError",
+]);
+
+/**
+ * Errors carry Stripe's error class, raw type and code only, never its message or the request (they can echo request
+ * data), so staging failures are diagnosable from the logs. v2 errors may carry their reason in the raw type rather than
+ * the code (stripe-node's generateV2Error; security review 3), so both are logged and both are matched against the
+ * platform-setup codes. Anything that isn't one of Stripe's identifiers is logged as "other".
+ */
+function failed(stage: StripeStage, err: unknown): never {
+  const stripeError = err instanceof Stripe.errors.StripeError ? err : null;
+  const type = stripeError?.type ?? "unknown";
+  const rawType = identifier(stripeError?.rawType);
+  const code = identifier(stripeError?.code);
+  console.error("stripe_error", stage, type, rawType, code);
+  const outcome: StripeOutcome = stripeError && REFUSALS.has(type) ? "refused" : "unknown";
+  if (PLATFORM_SETUP_CODES.has(code) || PLATFORM_SETUP_CODES.has(rawType))
+    throw new StripeCallError(
+      "Daybell's Stripe platform setup isn't finished. Please contact Daybell support.",
+      stage,
+      outcome,
+      { form: PAYOUT_PLATFORM_SETUP },
+    );
+  throw new StripeCallError("We couldn't reach Stripe. Please try again.", stage, outcome);
 }
+
+/** Seconds since the epoch from Stripe v2's RFC 3339 timestamps. */
+const epochSeconds = (iso: string) => {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms))
+    throw new ApiError("internal", "We couldn't reach Stripe. Please try again.");
+  return Math.floor(ms / 1000);
+};
 
 export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProvider {
   const stripe = new Stripe(secretKey, {
@@ -42,41 +111,66 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
     timeout: 10_000,
     telemetry: false,
   });
-  const call = <T>(promise: Promise<T>) => promise.catch(failed);
+  const call = <T>(promise: Promise<T>, stage: StripeStage = "other") =>
+    promise.catch((err: unknown) => failed(stage, err));
+
   return {
     driver: "stripe",
     livemode,
     async createAccount({ studioId, region, country, idempotencyKey }: NewAccount) {
-      // Country only: no business name, email or person is sent (Claude's call Q4). Default schedule: weekly on
-      // Friday, Stripe's own delay (D56; Seenu, Q6).
-      return (await call(
-        stripe.accounts.create(
+      // Canada only in Phase 1 (US payouts not decided; Seenu, Q3): the region guard refuses US studios before this.
+      if (country !== "CA")
+        throw new ApiError("region_unavailable", "Payouts aren't available here yet.");
+      // Country, currency and Daybell's ids only: no business name, email or person is sent (Claude's call Q4). Only
+      // the create: the payout schedule is a separate step, after Daybell has recorded the account (security review 1).
+      const created = await call(
+        stripe.v2.core.accounts.create(
           {
-            country,
-            controller: CONTROLLER,
-            capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+            identity: { country: "ca" },
+            dashboard: "express",
+            defaults: { currency: "cad", responsibilities: RESPONSIBILITIES },
+            configuration: {
+              // card_payments for D106's destination charges on_behalf_of the Canadian studio (merchant of record);
+              // stripe_transfers (v1 "transfers") so destination charges can reach the account (step 10).
+              merchant: { capabilities: { card_payments: { requested: true } } },
+              recipient: {
+                capabilities: { stripe_balance: { stripe_transfers: { requested: true } } },
+              },
+            },
             metadata: { daybell_studio_id: studioId, daybell_region: region },
-            settings: { payouts: { schedule: { interval: "weekly", weekly_anchor: "friday" } } },
           },
           { idempotencyKey },
         ),
-      )) as StripeAccountData;
+        "create",
+      );
+      return { id: created.id };
     },
+    /**
+     * Accounts v1 endpoints still take a v2 account's id ("the response is structured as a v1 Account, but any updates
+     * still apply to the v2 object"; docs.stripe.com/connect/accounts-v2). Daybell reads and updates through v1 because
+     * the payout schedule exists only there (Accounts v2 has no payout settings in stripe-node 22.6.2), and one v1 read
+     * gives the flags, requirements, schedule and metadata the facts mapping already uses.
+     */
     async retrieveAccount(accountId) {
       return (await call(stripe.accounts.retrieve(accountId))) as StripeAccountData;
     },
     async createAccountLink({ accountId, refreshUrl, returnUrl }) {
-      // account_onboarding also continues an unfinished one; account_update isn't allowed for accounts with a
-      // Stripe-hosted dashboard (stripe-node's AccountLinkCreateParams.type).
+      // Accounts v2 links. account_onboarding also continues an unfinished one, and is used for "Update details" too
+      // (as with v1, where account_update isn't allowed for accounts with a Stripe-hosted dashboard).
       const link = await call(
-        stripe.accountLinks.create({
+        stripe.v2.core.accountLinks.create({
           account: accountId,
-          type: "account_onboarding",
-          refresh_url: refreshUrl,
-          return_url: returnUrl,
+          use_case: {
+            type: "account_onboarding",
+            account_onboarding: {
+              configurations: [...CONFIGURATIONS],
+              refresh_url: refreshUrl,
+              return_url: returnUrl,
+            },
+          },
         }),
       );
-      return { url: link.url, expiresAt: link.expires_at };
+      return { url: link.url, expiresAt: epochSeconds(link.expires_at) };
     },
     async updatePayoutSchedule(accountId, schedule: ScheduleRequest) {
       const params =
@@ -85,8 +179,13 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
           : schedule.interval === "monthly"
             ? { interval: "monthly" as const, monthly_anchor: schedule.monthlyAnchor }
             : { interval: "daily" as const };
+      // v1 metadata updates merge keys, so the studio and region ids stay.
       return (await call(
-        stripe.accounts.update(accountId, { settings: { payouts: { schedule: params } } }),
+        stripe.accounts.update(accountId, {
+          settings: { payouts: { schedule: params } },
+          metadata: { [SCHEDULE_SET_KEY]: "true" },
+        }),
+        "schedule",
       )) as StripeAccountData;
     },
     async retrievePayout(accountId, payoutId) {
@@ -95,6 +194,7 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
       )) as StripePayoutData;
     },
     async createLoginLink(accountId) {
+      // v1 only: Accounts v2 has no login links in stripe-node 22.6.2. Express dashboard accounts only.
       const link = await call(stripe.accounts.createLoginLink(accountId));
       return { url: link.url };
     },

@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  PAYOUT_NOT_CONFIGURED,
-  type PayoutLinkResponse,
-  type StudioPayoutsResponse,
-} from "@daybell/api";
+import type { PayoutLinkResponse, StudioPayoutsResponse } from "@daybell/api";
 import { canSeePayouts } from "@daybell/core";
 import { Banner } from "@daybell/ui";
 import { useTranslations } from "next-intl";
@@ -13,7 +9,14 @@ import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { onRestoredFromCache } from "@/lib/page-restored";
 import { useStudio } from "../../me-context";
-import { FeesCard, PayoutsCard, ScheduleCard, StatusCard, scheduleFormKey } from "./payout-cards";
+import {
+  FeesCard,
+  PayoutsCard,
+  payoutProblemKey,
+  ScheduleCard,
+  StatusCard,
+  scheduleFormKey,
+} from "./payout-cards";
 
 /**
  * Settings › Payouts (Phase 1 step 7; D56, D98, D106; Seenu, answers 1–4; ADR 0020): connection status, the payout
@@ -39,14 +42,10 @@ export default function PayoutsPage() {
   const handledReturn = useRef(false);
 
   const conflictText = useCallback(
-    (fields: Record<string, string>, code: string) =>
-      fields.form === "payouts.alreadyConnected"
-        ? t("conflicts.alreadyConnected")
-        : fields.form === "payouts.notConnected"
-          ? t("conflicts.notConnected")
-          : fields.form === PAYOUT_NOT_CONFIGURED
-            ? t("notConfigured")
-            : text.error(code),
+    (fields: Record<string, string>, code: string) => {
+      const key = payoutProblemKey(fields);
+      return key ? t(key) : text.error(code);
+    },
     [t, text],
   );
 
