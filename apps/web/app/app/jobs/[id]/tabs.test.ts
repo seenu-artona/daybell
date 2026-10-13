@@ -40,9 +40,9 @@ describe("job tabs", () => {
     expect(tabForPath("/app")).toBeNull();
   });
 
-  it("show coming soon for the unbuilt tabs only (Shop is real since step 6, ADR 0019)", () => {
-    for (const tab of ["messages", "orders", "settings"]) expect(isSoonTab(tab)).toBe(true);
-    for (const tab of ["", "people", "photos", "shop", "import", "overview", "nope"])
+  it("show coming soon for the unbuilt tabs only (Shop since step 6, Orders since step 11)", () => {
+    for (const tab of ["messages", "settings"]) expect(isSoonTab(tab)).toBe(true);
+    for (const tab of ["", "people", "photos", "shop", "orders", "import", "overview", "nope"])
       expect(isSoonTab(tab)).toBe(false);
   });
 

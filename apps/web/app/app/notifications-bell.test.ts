@@ -45,6 +45,14 @@ describe("the bell's words", () => {
     expect(t("notificationText.tagging_ready", { job: "Fall", leftovers: 3, flagged: 1 })).toBe(
       "Fall: photos are tagged, with 3 in Leftovers and 1 to check",
     );
+    // Orders (ADR 0024): the reference, never a name or an amount.
+    expect(t("notificationText.order_paid", { order: "7KQ2-M9XA" })).toBe("New order 7KQ2-M9XA");
+    expect(t("notificationText.refund_failed", { order: "7KQ2-M9XA" })).toBe(
+      "A refund of order 7KQ2-M9XA failed: the parent wasn’t refunded",
+    );
+    expect(t("notificationText.dispute_opened", { order: "7KQ2-M9XA" })).toBe(
+      "A dispute was opened on order 7KQ2-M9XA",
+    );
   });
 });
 

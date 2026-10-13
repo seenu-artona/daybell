@@ -34,6 +34,8 @@ const api = vi.hoisted(() => ({
   orders: vi.fn(),
   order: vi.fn(),
   download: vi.fn(),
+  cancelOrder: vi.fn(),
+  downloadAll: vi.fn(),
 }));
 vi.mock("@/lib/shop-client", async (original) => ({
   ...(await original<typeof import("@/lib/shop-client")>()),
@@ -95,12 +97,22 @@ const order = (over: Partial<ShopOrder> = {}): ShopOrder => ({
   id: ORDER,
   reference: "7KQ2M9XA",
   status: "paid",
+  fulfilment: "complete",
+  refund: null,
+  canCancel: false,
+  tracking: null,
   view: "full",
   paidAt: "2026-10-13T12:01:00.000Z",
   createdAt: "2026-10-13T12:00:00.000Z",
   studio: { name: "Maple Lane Photography" },
   shippingMethod: "home",
-  totals: { products: money(3300), shipping: money(1195), tax: money(585), total: money(5080) },
+  totals: {
+    products: money(3300),
+    shipping: money(1195),
+    tax: money(585),
+    total: money(5080),
+    refunded: money(0),
+  },
   registrations: [{ kind: "gst_hst", province: null, number: "123456789RT0001" }],
   children: [{ id: AVA, state: "open", displayName: "Ava P." }],
   lines: [
@@ -111,6 +123,7 @@ const order = (over: Partial<ShopOrder> = {}): ShopOrder => ({
       name: "Digital download",
       printSize: null,
       quantity: 1,
+      refundedQuantity: 0,
       unitPrice: money(3300),
       lineTotal: money(3300),
       contents: [],
@@ -377,5 +390,142 @@ describe("Your orders", () => {
     expect(link?.textContent).toContain("Order 7KQ2-M9XA");
     expect(link?.textContent).toContain("3 downloads");
     expect(link?.textContent).toContain("For Ava P.");
+  });
+});
+
+describe("the order page after payment (ADR 0024)", () => {
+  beforeEach(() => {
+    nav.params = { orderId: ORDER };
+    // jsdom has no modal dialogs.
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+      this.open = false;
+    };
+  });
+  const print = {
+    id: "2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b",
+    childId: AVA,
+    kind: "print" as const,
+    name: "5×7 print",
+    printSize: "5x7" as const,
+    quantity: 1,
+    refundedQuantity: 0,
+    unitPrice: money(1900),
+    lineTotal: money(1900),
+    contents: [],
+    downloads: [],
+  };
+
+  it("reads the galleries again once paid, so the bag's count is right", async () => {
+    api.order.mockResolvedValue(ok({ order: order() }));
+    await render(<OrderPage />);
+    // Once on opening the shop, once more after the paid order arrives; never again.
+    expect(api.session).toHaveBeenCalledTimes(2);
+    await wait(50);
+    expect(api.session).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the status, the refund badge and the tracking with its link", async () => {
+    api.order.mockResolvedValue(
+      ok({
+        order: order({
+          fulfilment: "shipped",
+          refund: "partly_refunded",
+          tracking: {
+            carrier: "canada_post",
+            number: "7023 4567",
+            url: null,
+            link: "https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=70234567",
+          },
+        }),
+      }),
+    );
+    await render(<OrderPage />);
+    expect(container.textContent).toContain("Status: Shipped · Partly refunded");
+    expect(container.textContent).toContain("Tracking: Canada Post: 7023 4567");
+    const link = [...container.querySelectorAll("a")].find((a) =>
+      a.textContent?.includes("Track your package"),
+    );
+    expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(link?.getAttribute("target")).toBe("_blank");
+  });
+
+  it("cancels only after the parent confirms, then says the order was canceled", async () => {
+    api.order.mockResolvedValue(
+      ok({ order: order({ fulfilment: "paid", canCancel: true, lines: [print] }) }),
+    );
+    api.cancelOrder.mockResolvedValue(
+      ok({
+        order: order({
+          fulfilment: "canceled",
+          refund: "refunded",
+          canCancel: false,
+          lines: [{ ...print, refundedQuantity: 1 }],
+        }),
+      }),
+    );
+    await render(<OrderPage />);
+    expect(container.textContent).toContain(
+      "You can cancel for a full refund until the studio prints your order.",
+    );
+    await act(async () => button("Cancel order")?.click());
+    expect(api.cancelOrder).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("You’ll get $50.80 back on your card");
+    await act(async () => button("Yes, cancel and refund")?.click());
+    await wait(20);
+    expect(api.cancelOrder).toHaveBeenCalledWith(G, ORDER);
+    expect(container.textContent).toContain("Your order was canceled and refunded.");
+    expect(container.textContent).toContain("Status: Canceled · Refunded");
+    expect(container.textContent).toContain("1 refunded");
+    expect(button("Cancel order")).toBeNull();
+  });
+
+  it("says a refusal of the cancel in words", async () => {
+    api.order.mockResolvedValue(ok({ order: order({ fulfilment: "paid", canCancel: true }) }));
+    api.cancelOrder.mockResolvedValue(refused(409, "conflict", "shop.cannotCancel"));
+    await render(<OrderPage />);
+    await act(async () => button("Cancel order")?.click());
+    await act(async () => button("Yes, cancel and refund")?.click());
+    await wait(20);
+    expect(container.textContent).toContain(
+      "This order can’t be canceled here. Contact the studio.",
+    );
+  });
+
+  it("never offers Cancel to a gallery that didn't pay, or once printed", async () => {
+    api.order.mockResolvedValue(ok({ order: order({ fulfilment: "printed", canCancel: false }) }));
+    await render(<OrderPage />);
+    expect(button("Cancel order")).toBeNull();
+  });
+
+  it("downloads every photo as one zip, and says when it is being prepared", async () => {
+    const two = {
+      ...order().lines[0],
+      downloads: [
+        { photoId: PHOTO, n: 1 },
+        { photoId: "f0000000-0000-4000-8000-000000000003", n: 2 },
+      ],
+    } as ShopOrder["lines"][number];
+    api.order.mockResolvedValue(ok({ order: order({ lines: [two] }) }));
+    api.downloadAll.mockResolvedValueOnce(refused(409, "conflict", "shop.downloadPreparing"));
+    await render(<OrderPage />);
+    await act(async () => button("Download all")?.click());
+    await wait(20);
+    expect(api.downloadAll).toHaveBeenCalledWith(G, ORDER);
+    expect(container.textContent).toContain(
+      "Your download is being prepared. Try again in a minute.",
+    );
+    api.downloadAll.mockResolvedValueOnce(ok(undefined));
+    await act(async () => button("Download all")?.click());
+    await wait(20);
+    expect(container.textContent).toContain("Your photos are downloading as one zip file.");
+  });
+
+  it("offers Download all only for more than one photo", async () => {
+    api.order.mockResolvedValue(ok({ order: order() }));
+    await render(<OrderPage />);
+    expect(button("Download all")).toBeNull();
   });
 });
