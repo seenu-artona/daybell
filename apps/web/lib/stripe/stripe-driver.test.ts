@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // The real driver's calls (ADR 0020 and its amendment), with stripe-node replaced: accounts are created with Accounts
 // v2 (dashboard express, Daybell collecting fees and carrying losses: Seenu, Q1 and Q2), country and currency only
 // (Q4), the pinned API version, the v2 idempotency key, v2 onboarding links, and the v1 endpoints (with the v2 account
-// id) for the schedule, reads, payouts and login links. Stripe errors are logged by type and code only; codes that mean
-// Daybell's platform setup isn't finished get their own form code.
+// id) for the schedule, reads, payouts and login links. The create is the create only: the schedule is a separate step
+// (security review 1). Stripe errors are logged by stage, class, raw type and code only, and come back typed with the
+// stage and whether Stripe refused (code review S1); codes that mean Daybell's platform setup isn't finished get their
+// own form code.
 vi.mock("server-only", () => ({}));
 const { created, client } = vi.hoisted(() => ({
   created: [] as unknown[],
@@ -26,12 +28,20 @@ const { created, client } = vi.hoisted(() => ({
   },
 }));
 vi.mock("stripe", () => {
+  // Like stripe-node's: `type` is the class name, `rawType` and `code` come from Stripe's answer.
   class StripeError extends Error {
-    type = "StripeInvalidRequestError";
+    type: string;
     code: string | undefined;
-    constructor(message: string, code?: string) {
+    rawType: string | undefined;
+    constructor(
+      message: string,
+      code?: string,
+      { type = "StripeInvalidRequestError", rawType }: { type?: string; rawType?: string } = {},
+    ) {
       super(message);
       this.code = code;
+      this.type = type;
+      this.rawType = rawType;
     }
   }
   function Stripe(this: unknown, ...args: unknown[]) {
@@ -43,10 +53,17 @@ vi.mock("stripe", () => {
 });
 
 const { stripeDriver, STRIPE_API_VERSION, PLATFORM_SETUP_CODES } = await import("./stripe-driver");
+const { StripeCallError } = await import("./errors");
 const { default: Stripe } = await import("stripe");
 const StripeError = (
   Stripe as unknown as {
-    errors: { StripeError: new (message: string, code?: string) => Error };
+    errors: {
+      StripeError: new (
+        message: string,
+        code?: string,
+        options?: { type?: string; rawType?: string },
+      ) => Error;
+    };
   }
 ).errors.StripeError;
 
@@ -83,7 +100,8 @@ describe("stripeDriver", () => {
   });
 
   it("creates the account with Accounts v2: Seenu's responsibilities, express dashboard, country, currency and ids only", async () => {
-    expect(await driver.createAccount(newAccount)).toEqual({ id: "acct_1", v1: true });
+    // The id only: nothing else happens in the same step (security review 1).
+    expect(await driver.createAccount(newAccount)).toEqual({ id: "acct_1" });
     expect(client.v2.core.accounts.create).toHaveBeenCalledWith(
       {
         identity: { country: "ca" },
@@ -107,21 +125,16 @@ describe("stripeDriver", () => {
     const sent = JSON.stringify(client.v2.core.accounts.create.mock.calls);
     for (const field of ["display_name", "contact_email", "business_details", "individual"])
       expect(sent).not.toContain(field);
-    // Then the default schedule through v1 with the v2 id: weekly on Friday, Stripe's own delay (D56; Q6). Its answer
-    // is the v1-shaped account Daybell records.
-    expect(client.accounts.update).toHaveBeenCalledWith("acct_1", {
-      settings: { payouts: { schedule: { interval: "weekly", weekly_anchor: "friday" } } },
-    });
+    // The schedule is not part of the create (security review 1).
+    expect(client.accounts.update).not.toHaveBeenCalled();
+    expect(client.accounts.retrieve).not.toHaveBeenCalled();
   });
 
-  it("logs the studio id (only) when the schedule fails after Stripe made the account, so support can find it", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    client.accounts.update.mockRejectedValueOnce(new StripeError("acct_1 owner jane@example.test"));
-    await expect(driver.createAccount(newAccount)).rejects.toMatchObject({ code: "internal" });
-    expect(log).toHaveBeenCalledWith("stripe_account_unrecorded", "studio-1");
-    expect(JSON.stringify(log.mock.calls)).not.toContain("acct_1");
-    expect(JSON.stringify(log.mock.calls)).not.toContain("jane");
-    log.mockRestore();
+  it("creates Canadian accounts only (code review N4; US payouts not decided, Seenu Q3)", async () => {
+    await expect(driver.createAccount({ ...newAccount, country: "US" })).rejects.toMatchObject({
+      code: "region_unavailable",
+    });
+    expect(client.v2.core.accounts.create).not.toHaveBeenCalled();
   });
 
   it("makes v2 onboarding links for both configurations, and turns Stripe's RFC 3339 expiry into seconds", async () => {
@@ -160,18 +173,22 @@ describe("stripeDriver", () => {
     ).rejects.toMatchObject({ code: "internal" });
   });
 
-  it("uses v1 with the v2 account id for schedules, reads, payouts and login links", async () => {
+  it("uses v1 with the v2 account id for schedules (marking them as set by Daybell), reads, payouts and login links", async () => {
+    const marked = { daybell_schedule_set: "true" };
     await driver.updatePayoutSchedule("acct_1", { interval: "weekly", weeklyAnchor: "monday" });
     expect(client.accounts.update).toHaveBeenLastCalledWith("acct_1", {
       settings: { payouts: { schedule: { interval: "weekly", weekly_anchor: "monday" } } },
+      metadata: marked,
     });
     await driver.updatePayoutSchedule("acct_1", { interval: "monthly", monthlyAnchor: 31 });
     expect(client.accounts.update).toHaveBeenLastCalledWith("acct_1", {
       settings: { payouts: { schedule: { interval: "monthly", monthly_anchor: 31 } } },
+      metadata: marked,
     });
     await driver.updatePayoutSchedule("acct_1", { interval: "daily" });
     expect(client.accounts.update).toHaveBeenLastCalledWith("acct_1", {
       settings: { payouts: { schedule: { interval: "daily" } } },
+      metadata: marked,
     });
     await driver.retrieveAccount("acct_1");
     expect(client.accounts.retrieve).toHaveBeenCalledWith("acct_1");
@@ -181,7 +198,7 @@ describe("stripeDriver", () => {
     expect(client.accounts.createLoginLink).toHaveBeenCalledWith("acct_1");
   });
 
-  it("turns Stripe's errors into a plain internal error, logging the error type and code only", async () => {
+  it("turns Stripe's errors into an internal error, logging the stage, class, raw type and code only", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     client.accounts.retrieve.mockRejectedValueOnce(
       new StripeError("No such account: acct_1 for jane@example.test", "resource_missing"),
@@ -189,42 +206,155 @@ describe("stripeDriver", () => {
     await expect(driver.retrieveAccount("acct_1")).rejects.toMatchObject({
       code: "internal",
       fields: undefined,
+      stage: "other",
+      outcome: "refused",
     });
     expect(log).toHaveBeenCalledWith(
       "stripe_error",
+      "other",
       "StripeInvalidRequestError",
+      "none",
       "resource_missing",
     );
     client.accounts.retrieve.mockRejectedValueOnce(new StripeError("no code"));
     await expect(driver.retrieveAccount("acct_1")).rejects.toMatchObject({ code: "internal" });
-    expect(log).toHaveBeenLastCalledWith("stripe_error", "StripeInvalidRequestError", "none");
-    // A code that isn't one of Stripe's identifiers is never logged as given.
-    client.accounts.retrieve.mockRejectedValueOnce(new StripeError("x", "jane@example.test"));
+    expect(log).toHaveBeenLastCalledWith(
+      "stripe_error",
+      "other",
+      "StripeInvalidRequestError",
+      "none",
+      "none",
+    );
+    // A code or raw type that isn't one of Stripe's identifiers is never logged as given.
+    client.accounts.retrieve.mockRejectedValueOnce(
+      new StripeError("x", "jane@example.test", { rawType: "Jane Doe" }),
+    );
     await expect(driver.retrieveAccount("acct_1")).rejects.toMatchObject({ code: "internal" });
-    expect(log).toHaveBeenLastCalledWith("stripe_error", "StripeInvalidRequestError", "other");
+    expect(log).toHaveBeenLastCalledWith(
+      "stripe_error",
+      "other",
+      "StripeInvalidRequestError",
+      "other",
+      "other",
+    );
     client.accounts.retrieve.mockRejectedValueOnce(new Error("socket"));
-    await expect(driver.retrieveAccount("acct_1")).rejects.toMatchObject({ code: "internal" });
-    expect(log).toHaveBeenLastCalledWith("stripe_error", "unknown", "none");
+    await expect(driver.retrieveAccount("acct_1")).rejects.toMatchObject({
+      code: "internal",
+      outcome: "unknown",
+    });
+    expect(log).toHaveBeenLastCalledWith("stripe_error", "other", "unknown", "none", "none");
     expect(JSON.stringify(log.mock.calls)).not.toContain("jane");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("Jane");
     expect(JSON.stringify(log.mock.calls)).not.toContain("acct_1");
     log.mockRestore();
   });
 
-  it.each([...PLATFORM_SETUP_CODES])(
-    "maps %s to 'Stripe needs the platform setup finished' (payouts.platformSetup), logging the code",
-    async (code) => {
+  describe("typed failures (code review S1; security review 1)", () => {
+    it.each([
+      ["StripeInvalidRequestError", "refused"],
+      ["StripeAuthenticationError", "refused"],
+      ["StripePermissionError", "refused"],
+      ["StripeRateLimitError", "refused"],
+      ["RateLimitError", "refused"],
+      // A 5xx, a lost connection or timeout, or the same key still running: an account may exist.
+      ["StripeAPIError", "unknown"],
+      ["StripeConnectionError", "unknown"],
+      ["StripeIdempotencyError", "unknown"],
+    ])("a create failing with %s is stage create, %s", async (type, outcome) => {
       const log = vi.spyOn(console, "error").mockImplementation(() => {});
       client.v2.core.accounts.create.mockRejectedValueOnce(
+        new StripeError("Request for jane@example.test failed", undefined, { type }),
+      );
+      const err = await driver.createAccount(newAccount).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StripeCallError);
+      expect(err).toMatchObject({ code: "internal", stage: "create", outcome, fields: undefined });
+      expect(log).toHaveBeenCalledWith("stripe_error", "create", type, "none", "none");
+      expect(JSON.stringify(log.mock.calls)).not.toContain("jane");
+      log.mockRestore();
+    });
+
+    it("a create that times out (not a Stripe error at all) is unknown", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      client.v2.core.accounts.create.mockRejectedValueOnce(new Error("timeout"));
+      await expect(driver.createAccount(newAccount)).rejects.toMatchObject({
+        stage: "create",
+        outcome: "unknown",
+      });
+      log.mockRestore();
+    });
+
+    it("a generic create failure leaves no traces: no schedule call, no unrecorded-account alert (code review N3)", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      client.v2.core.accounts.create.mockRejectedValueOnce(
+        new StripeError("Internal error", undefined, { type: "StripeAPIError" }),
+      );
+      await expect(driver.createAccount(newAccount)).rejects.toMatchObject({ stage: "create" });
+      expect(client.accounts.update).not.toHaveBeenCalled();
+      expect(client.accounts.retrieve).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalledWith("stripe_account_unrecorded", expect.anything());
+      log.mockRestore();
+    });
+
+    it("a schedule failure after the create is stage schedule (the account exists)", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(await driver.createAccount(newAccount)).toEqual({ id: "acct_1" });
+      client.accounts.update.mockRejectedValueOnce(
+        new StripeError("acct_1 owner jane@example.test", "parameter_unknown"),
+      );
+      await expect(
+        driver.updatePayoutSchedule("acct_1", { interval: "weekly", weeklyAnchor: "friday" }),
+      ).rejects.toMatchObject({ code: "internal", stage: "schedule", outcome: "refused" });
+      expect(log).toHaveBeenCalledWith(
+        "stripe_error",
+        "schedule",
+        "StripeInvalidRequestError",
+        "none",
+        "parameter_unknown",
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain("jane");
+      log.mockRestore();
+    });
+  });
+
+  it.each([...PLATFORM_SETUP_CODES])(
+    "maps %s, as a code or as v2's raw type, to payouts.platformSetup (contact support), logging it",
+    async (code) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      for (const error of [
         new StripeError(
           "Please review the responsibilities at https://dashboard.stripe.com/…",
           code,
         ),
+        // stripe-node's generateV2Error keeps v2's error type in rawType (security review 3).
+        new StripeError("Please review https://dashboard.stripe.com/…", undefined, {
+          rawType: code,
+        }),
+      ]) {
+        client.v2.core.accounts.create.mockRejectedValueOnce(error);
+        const err = await driver.createAccount(newAccount).catch((e: unknown) => e);
+        expect(err).toMatchObject({
+          code: "internal",
+          stage: "create",
+          outcome: "refused",
+          fields: { form: "payouts.platformSetup" },
+        });
+        expect((err as Error).message).toMatch(/contact Daybell support/);
+        expect((err as Error).message).not.toMatch(/try again/i);
+      }
+      expect(log).toHaveBeenCalledWith(
+        "stripe_error",
+        "create",
+        "StripeInvalidRequestError",
+        "none",
+        code,
       );
-      await expect(driver.createAccount(newAccount)).rejects.toMatchObject({
-        code: "internal",
-        fields: { form: "payouts.platformSetup" },
-      });
-      expect(log).toHaveBeenCalledWith("stripe_error", "StripeInvalidRequestError", code);
+      expect(log).toHaveBeenCalledWith(
+        "stripe_error",
+        "create",
+        "StripeInvalidRequestError",
+        code,
+        "none",
+      );
       expect(JSON.stringify(log.mock.calls)).not.toContain("dashboard.stripe.com");
       // Nothing was made, so there's nothing for support to find.
       expect(log).not.toHaveBeenCalledWith("stripe_account_unrecorded", expect.anything());

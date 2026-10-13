@@ -7,7 +7,9 @@ import { fakeDriver } from "./fake-driver";
 import { stripeDriver } from "./stripe-driver";
 import type { PaymentsProvider } from "./types";
 
+export { StripeCallError, type StripeOutcome, type StripeStage } from "./errors";
 export type * from "./types";
+export { DEFAULT_SCHEDULE, SCHEDULE_SET_KEY } from "./types";
 
 /**
  * Daybell's Stripe (ADR 0020), from STRIPE_DRIVER: the real API or the fake. Misconfiguration is logged by variable
@@ -91,6 +93,8 @@ export interface ThinStripeEvent {
   /** RFC 3339. */
   created: string;
   related_object?: { id?: unknown; type?: unknown } | null;
+  /** The connected account the event happened on, for events about one. */
+  context?: unknown;
 }
 
 export type VerifiedStripeEvent =

@@ -1,19 +1,21 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { siteUrl } from "@daybell/config";
-import type {
-  PaymentsProvider,
-  ScheduleRequest,
-  StripeAccountData,
-  StripePayoutData,
+import {
+  type PaymentsProvider,
+  SCHEDULE_SET_KEY,
+  type ScheduleRequest,
+  type StripeAccountData,
+  type StripePayoutData,
 } from "./types";
 
 /**
  * The fake Stripe (STRIPE_DRIVER=fake; ADR 0020): development, CI and end-to-end tests only, refused on Vercel. It
  * keeps accounts and payouts in this server process's memory (one `next start` in end-to-end tests), behaves like the
  * parts of Stripe Daybell uses, and sends its "hosted onboarding" to /dev/stripe-onboarding. Ids look like Stripe's.
- * Like the real driver since the Accounts v2 move (ADR 0020 amendment), a new account comes back as Daybell reads it
- * through v1: needing its details, with the default schedule (weekly on Friday) already set.
+ * Like the real driver since the Accounts v2 move (ADR 0020 amendment), creating an account returns its id only; read
+ * back, it needs its details and has Stripe's own schedule (daily) until Daybell sets one, which marks the schedule as
+ * set in its metadata (SCHEDULE_SET_KEY; security review 1).
  */
 interface FakeState {
   accounts: Map<string, StripeAccountData>;
@@ -60,7 +62,7 @@ export function fakeDriver(): PaymentsProvider {
     async createAccount({ studioId, region, idempotencyKey }) {
       const s = state();
       const known = s.idempotency.get(idempotencyKey);
-      if (known) return account(known);
+      if (known) return { id: known };
       const id = fakeId("acct");
       s.accounts.set(id, {
         id,
@@ -74,13 +76,11 @@ export function fakeDriver(): PaymentsProvider {
           disabled_reason: "requirements.past_due",
           current_deadline: null,
         },
-        settings: {
-          payouts: { schedule: { interval: "weekly", weekly_anchor: "friday", delay_days: 2 } },
-        },
+        settings: { payouts: { schedule: { interval: "daily", delay_days: 2 } } },
         metadata: { daybell_studio_id: studioId, daybell_region: region },
       });
       s.idempotency.set(idempotencyKey, id);
-      return account(id);
+      return { id };
     },
     async retrieveAccount(accountId) {
       return account(accountId);
@@ -103,6 +103,7 @@ export function fakeDriver(): PaymentsProvider {
             ? { interval: "monthly", monthly_anchor: schedule.monthlyAnchor, delay_days: delay }
             : { interval: "daily", delay_days: delay };
       a.settings = { payouts: { schedule: next } };
+      a.metadata = { ...a.metadata, [SCHEDULE_SET_KEY]: "true" };
       return a;
     },
     async retrievePayout(accountId, payoutId) {

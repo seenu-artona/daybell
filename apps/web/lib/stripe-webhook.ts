@@ -2,7 +2,12 @@ import "server-only";
 import { ApiError } from "@daybell/api";
 import { regionDatabase } from "@daybell/config";
 import { NextResponse } from "next/server";
-import { accountForDatabase, payoutForDatabase, regionOfAccount } from "./payouts";
+import {
+  payoutForDatabase,
+  regionOfAccount,
+  syncAccountCopy,
+  withDefaultSchedule,
+} from "./payouts";
 import { assertFunctionRegion, assertPayoutFunctionRegion } from "./region-guard";
 import { payments, type VerifiedStripeEvent, verifyStripeWebhook, webhookSecrets } from "./stripe";
 import { payoutSystemRpc } from "./supabase/service";
@@ -23,7 +28,8 @@ import { readCapped } from "./worker-auth";
  *    again; 409 while another delivery is processing it; 200 if it was already processed), taking its lease;
  * 7. check that the studio Daybell wrote in the account's metadata is the one the database maps it to (a backstop:
  *    the database's mapping is what's used);
- * 8. copy the account or the payout as Stripe had it when asked (an older answer never overwrites a newer copy), and
+ * 8. copy the account or the payout as Stripe had it when asked, first setting Daybell's default payout schedule on an
+ *    account whose schedule Daybell hasn't set yet (security review 1) (an older answer never overwrites a newer copy), and
  *    mark the event done with the lease. A failure that a retry can fix (Stripe or the database unreachable) is
  *    recorded by its code and answered with 500, so Stripe tries again; one that can never succeed (a payout in the
  *    wrong currency, an object Daybell can't read, a studio mismatch) is recorded as processed with its code, logged
@@ -64,21 +70,25 @@ const PAYOUT_ID = /^po_[A-Za-z0-9]{1,250}$/;
 const EVENT_ID = /^evt_[A-Za-z0-9]{1,250}$/;
 /** v2 event ids can hold underscores (e.g. evt_test_…). */
 const THIN_EVENT_ID = /^evt_[A-Za-z0-9_]{1,250}$/;
+const MAX_EVENT_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
 /** What Daybell needs from either payload style: ids, the type, the mode and the time. */
-interface Incoming {
+interface NormalizedStripeEvent {
   id: string;
   type: string;
   livemode: unknown;
   handled: boolean;
-  account: unknown;
+  /** The connected account the event is about (checked below), else null. */
+  accountId: unknown;
   /** The payout's id for payout events (checked below), else null. */
   payoutId: unknown;
   createdMs: number;
-  idPattern: RegExp;
+  eventIdPattern: RegExp;
+  /** False when a thin event's context names another account than its related object (security review 5). */
+  contextMatches: boolean;
 }
 
-function incoming(verified: VerifiedStripeEvent): Incoming {
+function normalizeStripeEvent(verified: VerifiedStripeEvent): NormalizedStripeEvent {
   if (verified.payload === "snapshot") {
     const event = verified.event;
     return {
@@ -86,27 +96,34 @@ function incoming(verified: VerifiedStripeEvent): Incoming {
       type: event.type,
       livemode: event.livemode,
       handled: HANDLED_EVENTS.has(event.type),
-      account: event.account,
+      accountId: event.account,
       payoutId:
         typeof event.type === "string" && event.type.startsWith("payout.")
           ? (event.data?.object as { id?: unknown } | undefined)?.id
           : null,
       createdMs: event.created * 1000,
-      idPattern: EVENT_ID,
+      eventIdPattern: EVENT_ID,
+      contextMatches: true,
     };
   }
   const event = verified.event;
   const related = event.related_object;
+  const accountId = related?.type === "v2.core.account" ? related.id : null;
   return {
     id: event.id,
     type: event.type,
     livemode: event.livemode,
     handled: HANDLED_THIN_EVENTS.has(event.type),
     // The account the event is about. Its id is the same for v1 and v2 endpoints.
-    account: related?.type === "v2.core.account" ? related.id : null,
+    accountId,
     payoutId: null,
     createdMs: typeof event.created === "string" ? Date.parse(event.created) : Number.NaN,
-    idPattern: THIN_EVENT_ID,
+    eventIdPattern: THIN_EVENT_ID,
+    // An event about a connected account carries it as its context too; the two must agree.
+    contextMatches:
+      typeof event.context !== "string" ||
+      !event.context.startsWith("acct_") ||
+      event.context === accountId,
   };
 }
 
@@ -156,22 +173,29 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
     webhookSecrets(),
   );
   if (!verified) throw refused("stripe_webhook_bad_signature");
-  const event = incoming(verified);
+  const event = normalizeStripeEvent(verified);
   const provider = payments();
   if (event.livemode !== provider.livemode) throw refused("stripe_webhook_wrong_mode");
-  if (!event.handled || !event.account) {
+  if (!event.handled || !event.accountId) {
     console.warn("stripe_webhook_ignored", typeof event.type === "string" ? event.type : "unknown");
     return received();
   }
   if (
-    typeof event.account !== "string" ||
-    !ACCOUNT_ID.test(event.account) ||
+    typeof event.accountId !== "string" ||
+    !ACCOUNT_ID.test(event.accountId) ||
     typeof event.id !== "string" ||
-    !event.idPattern.test(event.id)
+    !event.eventIdPattern.test(event.id) ||
+    !event.contextMatches
   )
     throw refused("stripe_webhook_bad_ids");
-  if (!Number.isFinite(event.createdMs)) throw refused("stripe_webhook_bad_time");
-  const accountId = event.account;
+  // A finite time within a year of now (security review 7): Stripe retries for days, never a year, and a time out of
+  // Date's range would otherwise fail later as a generic 500.
+  if (
+    !Number.isFinite(event.createdMs) ||
+    Math.abs(event.createdMs - Date.now()) > MAX_EVENT_AGE_MS
+  )
+    throw refused("stripe_webhook_bad_time");
+  const accountId = event.accountId;
   const payoutId = event.payoutId;
   if (payoutId !== null && (typeof payoutId !== "string" || !PAYOUT_ID.test(payoutId)))
     throw refused("stripe_webhook_bad_ids");
@@ -225,14 +249,9 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
         });
         failure = syncFailure(synced.error);
       } else {
-        const { status, facts, schedule } = accountForDatabase(account);
-        const synced = await payoutSystemRpc(region, "sync_payout_account", {
-          p_stripe_account_id: accountId,
-          p_facts: facts,
-          p_schedule: schedule,
-          p_status: status,
-          p_fetched_at: fetchedAt,
-        });
+        // Daybell's default schedule if its first try (after the account was recorded) failed (security review 1).
+        const scheduled = await withDefaultSchedule(provider, accountId, account);
+        const synced = await syncAccountCopy(region, accountId, scheduled, fetchedAt);
         failure = syncFailure(synced.error);
       }
     } catch (err) {

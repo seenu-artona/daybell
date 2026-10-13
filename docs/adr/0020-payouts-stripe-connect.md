@@ -222,7 +222,9 @@ environment", not the region message (code review N12).
 
 ## 5a. Limits on calls to Stripe (security review N1)
 
-`refresh`, `onboarding-link`, `dashboard-link` and `schedule` each make one or two Stripe calls. Together they may run
+`refresh`, `onboarding-link`, `dashboard-link` and `schedule` each make one to four Stripe calls (since section 16 the
+first `onboarding-link` creates, reads back, sets the schedule and links; `refresh` may set the default schedule).
+Together they may run
 at most **10 times a minute per studio** (`STRIPE_CALLS_PER_MINUTE`); the next answers 429 `rate_limited` and calls
 nothing. The count is kept in the studio's own regional database (`take_stripe_call`, fixed one-minute windows), so it
 holds across serverless instances with no extra service. It is taken after the role and region checks, so refused
@@ -352,7 +354,8 @@ Setup steps are in `docs/stripe-staging.md`.
 - Disconnecting or replacing an account (support only, Q16).
 - Aligning the webhook destination's API version with the pinned one.
 - Orphans (security review N4): if a create succeeds at Stripe but the database write fails, the retry uses the same
-  idempotency key, but only within Stripe's 24-hour idempotency window. The route now logs the fixed line
+  idempotency key, but only within Stripe's idempotency window (24 hours on v1; 30 days for the v2 create since
+  section 16, https://docs.stripe.com/api-v2-overview). The route now logs the fixed line
   `stripe_account_unrecorded` with the studio id (never the Stripe id), which support matches to the account's
   `daybell_studio_id` metadata on Stripe. A runbook step to record or close such accounts is a follow-up.
 - US studios: onboarding stays open until US payouts exist (Seenu, Oct 12). When they launch, nothing else is needed:
@@ -383,8 +386,15 @@ integrations and asks for `POST /v2/core/accounts`, unless v1 support is switche
 compatibility case (none applies to Daybell). The v1 limits that would keep an integration on v1 (OAuth, the recipient
 service agreement, Treasury or Issuing, deprecated capabilities) don't apply either.
 
-**New idempotency key.** Stripe keeps a key's first answer for 24 hours, so `daybell-payout-account-{studio}` would
-replay that 400. The key is now `daybell-payout-account-v2-{studio}`.
+**New idempotency key.** API v1 keeps a key's first answer, even an error, for 24 hours, so
+`daybell-payout-account-{studio}` would replay that 400. The key is now `daybell-payout-account-v2-{studio}`. API v2
+behaves differently (https://docs.stripe.com/api-v2-overview, checked by the orchestrator on Oct 12): "All POST and
+DELETE API v2 requests accept idempotency keys and behave idempotently"; a replay is the same key, API and account
+"within 30 days"; and "if the first request failed (or partially failed), the API re-executes the failed requests and
+returns the new response", whereas "API v1 always returns the previously-saved response of the first API request, even
+if it was an error". So a refused v2 create doesn't lock the studio out: once the cause is fixed, the next click with
+the same key creates the account. A successful create is replayed (same account) for 30 days. No key rotation is
+needed, and none is built (it would risk a second account per studio; security review 2).
 
 **The account** (`POST /v2/core/accounts`, `stripe.v2.core.accounts.create` in stripe-node 22.6.2, which has it in its
 types; no package change):
@@ -399,9 +409,20 @@ types; no package change):
   D106's destination charges `on_behalf_of`) and `configuration.recipient.capabilities.stripe_balance.stripe_transfers
   .requested` (v2's name for v1 `transfers`, needed for destination charges in step 10).
 - `metadata`: `daybell_studio_id`, `daybell_region`. No name, email or business details (Q4).
-- The v2 create can't set a payout schedule, so the driver then sets weekly on Friday through v1 (below). If that second
-  call fails after Stripe made the account, the driver logs `stripe_account_unrecorded` with the studio id (as in
-  section 14) and a retry replays the create and sets it again.
+- The v2 create can't set a payout schedule, and the create is the only thing `createAccount` does: it returns the new
+  account's id (security review 1). The route then reads the account back through v1, records it
+  (`create_payout_account`), and only then sets Daybell's default schedule (weekly on Friday; D56, Q6) through v1 as
+  its own step, saving Stripe's answer with `sync_payout_account`. If the schedule step fails, the account is still
+  recorded and the owner still gets their link; the next click finds the recorded account and never creates again.
+  Every schedule Daybell sets (the default or the owner's) also writes `daybell_schedule_set: "true"` to the account's
+  metadata (v1 metadata updates merge keys). Refresh and the account webhooks set the default on any account without
+  that key, so a failed first try is retried, and a schedule the owner chose is never overwritten. (A webhook setting
+  the default at the same moment as the owner's very first schedule change could overwrite it; the owner sees the
+  result and can change it again. Accepted.)
+- Anything that stops Daybell recording an account Stripe made (reading it back, or the database write) logs
+  `stripe_account_unrecorded` with the studio id (as in section 14). A create whose outcome is unknown (a 5xx, a
+  timeout, a lost connection, an idempotency conflict) logs `stripe_account_create_unknown` with the studio id: an
+  account may exist, and the next click gets it back with the same key (within 30 days).
 
 **Which endpoints are v2 and which v1.** Stripe documents that a v2 account's id works on Accounts v1 endpoints: "the
 response is structured as a v1 Account, but any updates still apply to the v2 object".
@@ -417,11 +438,18 @@ response is structured as a v1 Account, but any updates still apply to the v2 ob
 
 The status rule, the facts mapping, the database functions and the screens are unchanged.
 
-**Errors.** The driver now logs `stripe_error` with Stripe's error **type and code** (never the message or the request),
-so staging failures can be told apart; a code that isn't a lower-case identifier is logged as `other`. These codes mean
-Daybell's own platform setup isn't finished and are answered with `fields.form = "payouts.platformSetup"`, which the
-page shows as "Stripe needs the platform setup finished. Please try again later." (locale key
-`app.payouts.platformSetup`): `account_creation_liability_unacknowledged`, `connect_profile_not_submitted`,
+**Errors.** The driver now logs `stripe_error` with the **stage** (`create`, `schedule` or `other`), Stripe's error
+**class, raw type and code** (never the message or the request), so staging failures can be told apart; a raw type or
+code that isn't a lower-case identifier is logged as `other`, a missing one as `none`. v2 errors may carry their reason
+in the raw type rather than the code (stripe-node's `generateV2Error`; security review 3), so both are matched. Every
+Stripe failure is a `StripeCallError` (an `ApiError` with server-only `stage` and `outcome`; code review S1): `refused`
+when Stripe refused the request outright (invalid request, authentication, permission, rate limit: nothing was made),
+otherwise `unknown` (5xx, timeout or lost connection, an idempotency conflict, anything else: it may have taken
+effect). These codes mean Daybell's own platform setup isn't finished and are answered with
+`fields.form = "payouts.platformSetup"`, which the page shows as "Daybell’s platform setup with Stripe isn’t finished
+yet, so payouts can’t be set up. Please contact Daybell support." (locale key `app.payouts.platformSetup`; code review
+N2: only Daybell can fix them, so the owner isn't told to try again): `account_creation_liability_unacknowledged`,
+`connect_profile_not_submitted`,
 `account_create_activation_required`, `accounts_v2_access_blocked`, `capability_not_available_in_country` and
 `cross_border_connected_account_creation_not_allowed`. Anything else stays "We couldn't reach Stripe".
 
@@ -438,36 +466,47 @@ with v2 could not be checked. Both are supported:
   `v2.core.account[configuration.recipient].updated` and
   `v2.core.account[configuration.recipient].capability_status_updated`. Other thin events are acknowledged and stored
   nowhere.
+- A thin event whose `context` names an account (`acct_…`) must name the same one as `related_object`, and every event's
+  time must be within a year of now; otherwise the event is refused with 400 (security review 5 and 7).
 - The same rules apply to both: the signature is checked with stripe-node's own `webhooks.signature.verifyHeader` and
   its default five-minute tolerance (what `constructEvent` and `parseEventNotification` both call), the body's
   `object` (`event` or `v2.core.event`) says which style it is, the mode must match the key, the account id comes from
   `related_object` (only when its type is `v2.core.account`), the function region is checked before any Stripe call,
   the account is read again through v1 (the thin event's `fetchRelatedObject` is never used), and the inbox records
   the event once by its id. Ids, the type and the time only.
-- `STRIPE_WEBHOOK_SECRET` takes one to four secrets: one per destination, plus one for each during a rotation.
+- `STRIPE_WEBHOOK_SECRET` takes one to four secrets: one per destination, plus one for each during a rotation. The same
+  secret twice is refused, so pasting one destination's secret twice is caught (security review 8).
 - Getting both a v1 and a v2 event for one change is harmless: each is a separate inbox row, the second read changes
   nothing, and a sync that changes nothing writes no event.
 
-**Data.** Forward migration `20261012400000_stripe_thin_events.sql` widens two checks on `stripe_events`: types may
-hold digits and a bracketed part (`v2.core.account[requirements].updated`), and event ids may hold underscores (v2 ids
-such as `evt_test_…`). Both stay anchored and length-capped. pgTAP `017_stripe_thin_events` (12 tests): v2 events are
-recorded once for the account's own studio, a v2 event id never moves to another studio's account, and free text or
-trailing text in a type is still refused.
+**Data.** Forward migration `20261012400000_stripe_thin_events.sql` changes two checks on `stripe_events`: the type
+must be one of the 13 the webhook handles (an allowlist, not a pattern, so nothing else can be stored; security review
+4; a unit test keeps it equal to `HANDLED_EVENTS` and `HANDLED_THIN_EVENTS`), and event ids may hold underscores (v2
+ids such as `evt_test_…`), still anchored and length-capped. pgTAP `017_stripe_thin_events` (16 tests): v2 events are
+recorded once for the account's own studio, a v2 event id never moves to another studio's account, every handled type
+is accepted, and free text, lower-case names (`v2.core.account[maya_johnson].updated`, `john.smith`), unhandled Stripe
+types and trailing text are refused. No new column or table: the schedule marker lives in Stripe's metadata.
 
 **Not checked (follow-ups).**
 - Whether v1 snapshot events fire for v2-created accounts (section 16 supports both).
 - The exact host of v2 Account Link URLs (assumed `connect.stripe.com`, as for v1).
 - The restricted-key permission names for the v2 endpoints, if Seenu uses a restricted key.
 - The exact shape of v2 event ids (underscores allowed to be safe).
-- **Open question for Seenu:** a refused create may be replayed for 24 hours under the same per-studio key (as the v1
-  refusal was), so a studio whose first try hit a platform-setup code can't retry until then, even after the fix.
-  Changing the key scheme (e.g. a new key after a refusal that made no account) needs a decision, because a key that
-  changes too freely risks a second account. docs/stripe-staging.md tells Seenu to finish the platform profile before
-  the first try.
+- That Stripe enables payouts (`stripe_balance.payouts`) on an account created this way once onboarding is complete:
+  the v2 create params in stripe-node 22.6.2 can't request it (it appears only on the response). The staging smoke test
+  checks `payouts_enabled` after onboarding (docs/stripe-staging.md, section 5; code review S2).
+- Whether Stripe's v1 `accounts.update` accepts the payout schedule (and metadata) on a v2 account with
+  `losses_collector: application` (security review 1). If it refuses, accounts are still recorded; the
+  `stripe_schedule_default_failed` line and the staging smoke test show it.
+- Which v2 errors carry the platform-setup reason in `code` and which in the raw `type` (both are matched and logged).
+- Idempotency (settled, not open): v2 re-executes failed requests and replays successful ones for 30 days
+  (https://docs.stripe.com/api-v2-overview), so a refused create doesn't lock a studio out and no key rotation is
+  built.
 
 **Sources** (fetched Oct 12, 2026 by the orchestrator; checked here against stripe-node 22.6.2's types:
 `resources/V2/Core/Accounts.d.ts`, `resources/V2/Core/AccountLinks.d.ts`, `resources/V2/Core/Events.d.ts`,
-`Webhooks.js`, `stripe.core.js`):
+`Webhooks.js`, `Error.js`, `stripe.core.js`):
+- https://docs.stripe.com/api-v2-overview (idempotency in API v2)
 - https://docs.stripe.com/connect/accounts-v2.md
 - https://docs.stripe.com/connect/accounts-v2/connected-account-configuration.md
 - https://docs.stripe.com/api/v2/core/accounts/create.md

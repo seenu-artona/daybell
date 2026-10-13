@@ -146,7 +146,7 @@ export function stripeSettings(
 /**
  * STRIPE_WEBHOOK_SECRET: the signing secrets (whsec_…) of the event destinations that send to the webhook,
  * comma-separated: one for the snapshot (v1) destination, one for the thin (Accounts v2) destination, and a second for
- * either while it is being rolled; at most four (ADR 0020 amendment). The fake driver signs its simulated events with
+ * either while it is being rolled; at most four, none twice (ADR 0020 amendment). The fake driver signs its simulated events with
  * the first one, so CI sets a random one per run.
  */
 export function stripeWebhookSecrets(
@@ -162,5 +162,8 @@ export function stripeWebhookSecrets(
     secrets.some((s) => !/^whsec_[A-Za-z0-9+/=_-]{16,}$/.test(s))
   )
     throw new Error("STRIPE_WEBHOOK_SECRET must be one to four whsec_ signing secrets");
+  // Security review 8: a repeated secret is almost always a missing one (the other destination's) pasted twice.
+  if (new Set(secrets).size !== secrets.length)
+    throw new Error("STRIPE_WEBHOOK_SECRET lists the same signing secret twice");
   return secrets;
 }

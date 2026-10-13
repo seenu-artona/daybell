@@ -1,9 +1,10 @@
 -- Stripe Accounts v2 thin events in the webhook inbox (D106, D96, D113; ADR 0020 amendment): v2 event types and ids
--- are recorded once like v1 ones, still for the account's own studio only; anything that isn't an event type or id
--- shape (free text, personal data, injection) is still refused; v1 types keep working.
+-- are recorded once like v1 ones, still for the account's own studio only; only the 13 types the webhook handles are
+-- stored (security review 4), so free text, personal data (even lower-case) and injection are refused; v1 types keep
+-- working.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(12);
+select plan(16);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -47,6 +48,22 @@ select throws_ok($$ select public.record_stripe_event('evt_test-65R6', 'v2.core.
   now()) $$, '23514', null, 'event ids are still checked');
 select throws_ok($$ select public.record_stripe_event('evt_test_65R7', 'v2', 'acct_A1', false, now()) $$, '23514',
   null, 'a type needs at least two parts');
+
+select throws_ok($$ select public.record_stripe_event('evt_test_65R8', 'v2.core.account[maya_johnson].updated',
+  'acct_A1', false, now()) $$, '23514', null, 'a lower-case name in a bracketed type is refused');
+select throws_ok($$ select public.record_stripe_event('evt_test_65R9', 'john.smith', 'acct_A1', false, now()) $$,
+  '23514', null, 'a lower-case name shaped like a type is refused');
+select throws_ok($$ select public.record_stripe_event('evt_test_65R10', 'v2.core.account_person.updated', 'acct_A1',
+  false, now()) $$, '23514', null, 'a real Stripe type the webhook doesn''t handle is refused');
+select is((select array_agg(t order by t) from unnest(array['capability.updated', 'payout.created', 'payout.updated',
+  'payout.failed', 'payout.canceled', 'v2.core.account[configuration.merchant].updated',
+  'v2.core.account[configuration.recipient].updated',
+  'v2.core.account[configuration.recipient].capability_status_updated']) as t
+  where (public.record_stripe_event('evt_test_65T' || md5(t), t, 'acct_A1', false, now()) ->> 'claimed')::boolean),
+  array['capability.updated', 'payout.canceled', 'payout.created', 'payout.failed', 'payout.updated',
+  'v2.core.account[configuration.merchant].updated', 'v2.core.account[configuration.recipient].capability_status_updated',
+  'v2.core.account[configuration.recipient].updated'],
+  'every other handled type is recorded');
 
 select * from finish();
 rollback;

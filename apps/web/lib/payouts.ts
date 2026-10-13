@@ -29,7 +29,8 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
 import { PAYOUT_REGIONS } from "./region-guard";
-import type { StripeAccountData, StripePayoutData } from "./stripe";
+import type { PaymentsProvider, StripeAccountData, StripePayoutData } from "./stripe";
+import { DEFAULT_SCHEDULE, SCHEDULE_SET_KEY } from "./stripe/types";
 import { payoutSystemRpc } from "./supabase/service";
 
 /**
@@ -116,6 +117,47 @@ export function accountForDatabase(account: StripeAccountData): {
       delay_days: s.delayDays,
     },
   };
+}
+
+/**
+ * Copies the facts, status and schedule of the account `accountId` (the id Daybell already holds, never one from the
+ * answer) as Stripe had them at `fetchedAt` (service role; an older answer never overwrites a newer copy).
+ */
+export function syncAccountCopy(
+  region: DataRegion,
+  accountId: string,
+  account: StripeAccountData,
+  fetchedAt: string,
+) {
+  const { status, facts, schedule } = accountForDatabase(account);
+  return payoutSystemRpc(region, "sync_payout_account", {
+    p_stripe_account_id: accountId,
+    p_facts: facts,
+    p_schedule: schedule,
+    p_status: status,
+    p_fetched_at: fetchedAt,
+  });
+}
+
+/**
+ * Daybell's default schedule (weekly on Friday; D56, Q6) on an account whose schedule Daybell hasn't set yet (security
+ * review 1): a separate step after the account is recorded, retried by refresh and the webhook until it works. An
+ * account whose metadata says Daybell set its schedule (the default or the owner's choice) is left alone. Returns
+ * Stripe's answer, or the account as given when nothing was needed or Stripe refused (logged by a fixed name; the
+ * driver logs Stripe's codes).
+ */
+export async function withDefaultSchedule(
+  provider: PaymentsProvider,
+  accountId: string,
+  account: StripeAccountData,
+): Promise<StripeAccountData> {
+  if (account.metadata?.[SCHEDULE_SET_KEY] === "true") return account;
+  try {
+    return await provider.updatePayoutSchedule(accountId, DEFAULT_SCHEDULE);
+  } catch {
+    console.error("stripe_schedule_default_failed");
+    return account;
+  }
 }
 
 const isoDay = (seconds: number) => new Date(seconds * 1000).toISOString().slice(0, 10);

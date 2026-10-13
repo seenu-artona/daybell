@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // the region before Stripe), every read filtered by the caller's studio, Stripe's account made once with an
 // idempotency key and only the country and Daybell's ids, return addresses from siteUrl() never the request, the
 // schedule saved as Stripe answered it with the time Stripe was asked, named 409s, a per-studio budget of Stripe calls
-// (429), Stripe links that must be Stripe's own, and an alert when Stripe made an account Daybell couldn't record.
+// (429), Stripe links that must be Stripe's own, and an alert when Stripe made an account Daybell couldn't record. The
+// account is recorded before Daybell's default schedule is set, as its own step (security review 1).
 // Stripe and the database are faked; row-level security is covered by 015_payouts.test.sql.
 vi.mock("server-only", () => ({}));
 const { scope, writeRpc, systemRpc, provider } = vi.hoisted(() => ({
@@ -51,9 +52,27 @@ const stripeAccount = (over: Record<string, unknown> = {}) => ({
   settings: {
     payouts: { schedule: { interval: "weekly", weekly_anchor: "friday", delay_days: 2 } },
   },
-  metadata: { daybell_studio_id: STUDIO, daybell_region: "ca" },
+  // Daybell has set this account's schedule (security review 1).
+  metadata: { daybell_studio_id: STUDIO, daybell_region: "ca", daybell_schedule_set: "true" },
   ...over,
 });
+
+/** An account as Stripe has it just after the v2 create: details needed, Stripe's own schedule, no marker. */
+const newStripeAccount = () =>
+  stripeAccount({
+    details_submitted: false,
+    charges_enabled: false,
+    payouts_enabled: false,
+    requirements: {
+      currently_due: ["external_account"],
+      past_due: ["external_account"],
+      pending_verification: [],
+      disabled_reason: "requirements.past_due",
+      current_deadline: null,
+    },
+    settings: { payouts: { schedule: { interval: "daily", delay_days: 2 } } },
+    metadata: { daybell_studio_id: STUDIO, daybell_region: "ca" },
+  });
 
 const accountRow = (over: Record<string, unknown> = {}) => ({
   id: "row-1",
@@ -240,20 +259,17 @@ describe("POST /studio/payouts/onboarding-link", () => {
     expect(stripeCalls()).toBe(0);
   });
 
-  it("creates the account once (the v2 idempotency key, country only), records it for the owner, then links to Stripe", async () => {
+  it("creates the account once (the v2 idempotency key, country only), records it for the owner, then sets the default schedule and links to Stripe", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     signIn("owner", {});
-    provider.createAccount.mockResolvedValue(
+    provider.createAccount.mockResolvedValue({ id: ACCOUNT });
+    provider.retrieveAccount.mockResolvedValue(newStripeAccount());
+    provider.updatePayoutSchedule.mockResolvedValue(
       stripeAccount({
-        details_submitted: false,
-        charges_enabled: false,
-        payouts_enabled: false,
-        requirements: {
-          currently_due: ["external_account"],
-          past_due: ["external_account"],
-          pending_verification: [],
-          disabled_reason: "requirements.past_due",
-          current_deadline: null,
+        ...newStripeAccount(),
+        metadata: { daybell_studio_id: STUDIO, daybell_region: "ca", daybell_schedule_set: "true" },
+        settings: {
+          payouts: { schedule: { interval: "weekly", weekly_anchor: "friday", delay_days: 2 } },
         },
       }),
     );
@@ -275,20 +291,37 @@ describe("POST /studio/payouts/onboarding-link", () => {
       studioId: STUDIO,
       region: "ca",
       country: "CA",
-      // A new key: the v1 one replays Stripe's refusal of v1 account creation for 24 hours (ADR 0020 amendment).
+      // A new key: the v1 one replayed Stripe's refusal of v1 account creation (ADR 0020 amendment).
       idempotencyKey: `daybell-payout-account-v2-${STUDIO}`,
     });
+    // Read back through v1 and recorded as Stripe has it, before anything else is asked of Stripe.
+    expect(provider.retrieveAccount).toHaveBeenCalledWith(ACCOUNT);
     expect(writeRpc).toHaveBeenCalledWith("ca", "create_payout_account", "user-1", {
       p_studio_id: STUDIO,
       p_stripe_account_id: ACCOUNT,
       p_livemode: false,
       p_facts: expect.objectContaining({ details_submitted: false, currently_due_count: 1 }),
       p_schedule: {
-        payout_interval: "weekly",
-        weekly_anchor: "friday",
+        payout_interval: "daily",
+        weekly_anchor: null,
         monthly_anchor: null,
         delay_days: 2,
       },
+      p_status: "needs_info",
+      p_fetched_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+    // Then the default schedule (weekly on Friday; D56, Q6), as its own step, and its answer saved.
+    expect(provider.updatePayoutSchedule).toHaveBeenCalledWith(ACCOUNT, {
+      interval: "weekly",
+      weeklyAnchor: "friday",
+    });
+    expect(writeRpc.mock.invocationCallOrder[0]).toBeLessThan(
+      provider.updatePayoutSchedule.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(systemRpc).toHaveBeenCalledWith("ca", "sync_payout_account", {
+      p_stripe_account_id: ACCOUNT,
+      p_facts: expect.objectContaining({ details_submitted: false }),
+      p_schedule: expect.objectContaining({ payout_interval: "weekly", weekly_anchor: "friday" }),
       p_status: "needs_info",
       p_fetched_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
@@ -297,8 +330,52 @@ describe("POST /studio/payouts/onboarding-link", () => {
       refreshUrl: "https://staging.daybell.test/app/settings/payouts?stripe=refresh",
       returnUrl: "https://staging.daybell.test/app/settings/payouts?stripe=return",
     });
-    // The single-use link is never logged.
+    // The single-use link is never logged, and nothing went wrong.
     expect(JSON.stringify(log.mock.calls)).not.toContain("connect.stripe.com");
+    expect(log).not.toHaveBeenCalledWith("stripe_account_unrecorded", expect.anything());
+    log.mockRestore();
+  });
+
+  it("records the account even when the schedule fails, and the next POST never creates again (security review 1)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { StripeCallError } = await import("@/lib/stripe");
+    // The database as the routes see it: create_payout_account fills it in.
+    const rows: Record<string, unknown> = {};
+    signIn("owner", rows);
+    writeRpc.mockImplementation(async (_region: string, fn: string, _actor: string, args) => {
+      if (fn === "create_payout_account")
+        rows.payout_accounts = accountRow({
+          stripe_account_id: (args as { p_stripe_account_id: string }).p_stripe_account_id,
+          status: "needs_info",
+        });
+      return { data: "row-1", error: null };
+    });
+    provider.createAccount.mockResolvedValue({ id: ACCOUNT });
+    provider.retrieveAccount.mockResolvedValue(newStripeAccount());
+    provider.updatePayoutSchedule.mockRejectedValue(
+      new StripeCallError("We couldn't reach Stripe. Please try again.", "schedule", "refused"),
+    );
+    provider.createAccountLink.mockResolvedValue({
+      url: "https://connect.stripe.com/x",
+      expiresAt: 1,
+    });
+    // The owner still gets their link: the schedule is set later by refresh or the webhook.
+    expect((await routes.onboarding()).status).toBe(200);
+    expect(writeRpc).toHaveBeenCalledWith(
+      "ca",
+      "create_payout_account",
+      "user-1",
+      expect.objectContaining({ p_stripe_account_id: ACCOUNT }),
+    );
+    expect(log).toHaveBeenCalledWith("stripe_schedule_default_failed");
+    expect(log).not.toHaveBeenCalledWith("stripe_account_unrecorded", expect.anything());
+    expect(systemRpc.mock.calls.map((c) => c[1])).not.toContain("sync_payout_account");
+    // A second click continues with the recorded account.
+    expect((await routes.onboarding()).status).toBe(200);
+    expect(provider.createAccount).toHaveBeenCalledTimes(1);
+    expect(provider.createAccountLink).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accountId: ACCOUNT }),
+    );
     log.mockRestore();
   });
 
@@ -317,8 +394,10 @@ describe("POST /studio/payouts/onboarding-link", () => {
   });
 
   it("answers 409 payouts.alreadyConnected when the studio got another account meanwhile", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     signIn("owner", {});
-    provider.createAccount.mockResolvedValue(stripeAccount());
+    provider.createAccount.mockResolvedValue({ id: ACCOUNT });
+    provider.retrieveAccount.mockResolvedValue(newStripeAccount());
     writeRpc.mockResolvedValue({
       data: null,
       error: { code: "P0001", message: "already_connected" },
@@ -327,15 +406,18 @@ describe("POST /studio/payouts/onboarding-link", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error.fields).toEqual({ form: "payouts.alreadyConnected" });
     expect(provider.createAccountLink).not.toHaveBeenCalled();
+    expect(provider.updatePayoutSchedule).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 });
 
 describe("POST /studio/payouts/onboarding-link: Stripe's platform setup (ADR 0020 amendment)", () => {
-  it("tells the owner Stripe needs the platform setup finished, recording nothing", async () => {
+  it("tells the owner Daybell's platform setup isn't finished, recording nothing", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     signIn("owner", {});
-    const { ApiError } = await import("@daybell/api");
+    const { StripeCallError } = await import("@/lib/stripe");
     provider.createAccount.mockRejectedValue(
-      new ApiError("internal", "Stripe needs the platform setup finished.", {
+      new StripeCallError("Daybell's Stripe platform setup isn't finished.", "create", "refused", {
         form: "payouts.platformSetup",
       }),
     );
@@ -346,7 +428,30 @@ describe("POST /studio/payouts/onboarding-link: Stripe's platform setup (ADR 002
       fields: { form: "payouts.platformSetup" },
     });
     expect(writeRpc).not.toHaveBeenCalled();
+    expect(provider.retrieveAccount).not.toHaveBeenCalled();
     expect(provider.createAccountLink).not.toHaveBeenCalled();
+    // Refused: Stripe made nothing, so there's nothing for support to find.
+    expect(log).not.toHaveBeenCalledWith("stripe_account_create_unknown", expect.anything());
+    log.mockRestore();
+  });
+
+  it("raises an alert with the studio id only when the create's outcome is unknown (a 5xx or timeout)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    signIn("owner", {});
+    const { StripeCallError } = await import("@/lib/stripe");
+    for (const err of [
+      new StripeCallError("We couldn't reach Stripe. Please try again.", "create", "unknown"),
+      new Error("socket hang up"),
+    ]) {
+      provider.createAccount.mockRejectedValueOnce(err);
+      expect((await routes.onboarding()).status).toBe(500);
+    }
+    expect(log.mock.calls.filter((c) => c[0] === "stripe_account_create_unknown")).toEqual([
+      ["stripe_account_create_unknown", STUDIO],
+      ["stripe_account_create_unknown", STUDIO],
+    ]);
+    expect(writeRpc).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 });
 
@@ -375,6 +480,46 @@ describe("POST /studio/payouts/refresh", () => {
         p_fetched_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
       });
     }
+    // Daybell already set this account's schedule: it is left alone.
+    expect(provider.updatePayoutSchedule).not.toHaveBeenCalled();
+  });
+
+  it("sets Daybell's default schedule if its first try failed, and saves Stripe's answer (security review 1)", async () => {
+    signIn("admin", { payout_accounts: accountRow({ status: "needs_info" }) });
+    provider.retrieveAccount.mockResolvedValue(newStripeAccount());
+    provider.updatePayoutSchedule.mockResolvedValue(
+      stripeAccount({ details_submitted: false, charges_enabled: false, payouts_enabled: false }),
+    );
+    expect((await routes.refresh()).status).toBe(200);
+    expect(provider.updatePayoutSchedule).toHaveBeenCalledWith(ACCOUNT, {
+      interval: "weekly",
+      weeklyAnchor: "friday",
+    });
+    expect(systemRpc).toHaveBeenLastCalledWith(
+      "ca",
+      "sync_payout_account",
+      expect.objectContaining({
+        p_stripe_account_id: ACCOUNT,
+        p_schedule: expect.objectContaining({ payout_interval: "weekly", weekly_anchor: "friday" }),
+      }),
+    );
+  });
+
+  it("still saves what Stripe has when setting the default schedule fails again", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    signIn("owner", { payout_accounts: accountRow({ status: "needs_info" }) });
+    provider.retrieveAccount.mockResolvedValue(newStripeAccount());
+    provider.updatePayoutSchedule.mockRejectedValue(new Error("stripe down"));
+    expect((await routes.refresh()).status).toBe(200);
+    expect(systemRpc).toHaveBeenLastCalledWith(
+      "ca",
+      "sync_payout_account",
+      expect.objectContaining({
+        p_schedule: expect.objectContaining({ payout_interval: "daily" }),
+      }),
+    );
+    expect(log).toHaveBeenCalledWith("stripe_schedule_default_failed");
+    log.mockRestore();
   });
 });
 
@@ -521,11 +666,19 @@ describe("an account Stripe made but Daybell couldn't record (security review N4
   it("is logged with the studio id only, so support can find it on Stripe by its metadata", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     signIn("owner", {});
-    provider.createAccount.mockResolvedValue(stripeAccount());
+    provider.createAccount.mockResolvedValue({ id: ACCOUNT });
+    provider.retrieveAccount.mockResolvedValue(newStripeAccount());
     writeRpc.mockResolvedValue({ data: null, error: { code: "08006", message: "connection" } });
     expect((await routes.onboarding()).status).toBe(500);
-    expect(errors).toHaveBeenCalledWith("stripe_account_unrecorded", STUDIO);
+    // Reading it back failing is the same: Stripe has the account, Daybell doesn't.
+    provider.retrieveAccount.mockRejectedValueOnce(new Error("stripe down"));
+    expect((await routes.onboarding()).status).toBe(500);
+    expect(errors.mock.calls.filter((c) => c[0] === "stripe_account_unrecorded")).toEqual([
+      ["stripe_account_unrecorded", STUDIO],
+      ["stripe_account_unrecorded", STUDIO],
+    ]);
     expect(JSON.stringify(errors.mock.calls)).not.toContain(ACCOUNT);
+    expect(provider.updatePayoutSchedule).not.toHaveBeenCalled();
     expect(provider.createAccountLink).not.toHaveBeenCalled();
     errors.mockRestore();
   });

@@ -48,12 +48,25 @@ export type ScheduleRequest =
   | { interval: "weekly"; weeklyAnchor: PayoutWeekdayChoice }
   | { interval: "monthly"; monthlyAnchor: number };
 
+/** Daybell's default schedule for a new account: weekly on Friday, Stripe's own delay (D56; Seenu, Q6). */
+export const DEFAULT_SCHEDULE: ScheduleRequest = { interval: "weekly", weeklyAnchor: "friday" };
+
+/**
+ * Set to "true" in an account's metadata whenever Daybell sets its payout schedule (security review 1). A new account
+ * doesn't have it until Daybell's default schedule has been set, so the onboarding route, refresh and the webhook can
+ * set the default later if the first try failed, without ever overwriting a schedule the owner chose.
+ */
+export const SCHEDULE_SET_KEY = "daybell_schedule_set";
+
 export interface NewAccount {
   studioId: string;
   region: DataRegion;
-  /** ISO country of the studio's region (CA in Phase 1). */
+  /** ISO country of the studio's region. Only CA is created in Phase 1 (Seenu, Q3); the drivers refuse US. */
   country: "CA" | "US";
-  /** Stripe's idempotency key, so a retried request never makes a second account. */
+  /**
+   * Stripe's idempotency key, so a retried request never makes a second account. Accounts v2 replays a successful
+   * create for 30 days and re-executes a failed one (docs.stripe.com/api-v2-overview).
+   */
   idempotencyKey: string;
 }
 
@@ -65,13 +78,19 @@ export interface PaymentsProvider {
   readonly driver: "stripe" | "fake";
   /** Whether the key is a live-mode key; webhook events must match. */
   readonly livemode: boolean;
-  createAccount(input: NewAccount): Promise<StripeAccountData>;
+  /**
+   * Creates the studio's account (Accounts v2) and returns its id only: nothing else is set in the same step, so a
+   * later failure can never leave an account Daybell hasn't recorded (security review 1). The payout schedule is set
+   * afterwards with updatePayoutSchedule.
+   */
+  createAccount(input: NewAccount): Promise<{ id: string }>;
   retrieveAccount(accountId: string): Promise<StripeAccountData>;
   createAccountLink(input: {
     accountId: string;
     refreshUrl: string;
     returnUrl: string;
   }): Promise<{ url: string; expiresAt: number }>;
+  /** Sets the schedule and marks it as set by Daybell (SCHEDULE_SET_KEY in the account's metadata). */
   updatePayoutSchedule(accountId: string, schedule: ScheduleRequest): Promise<StripeAccountData>;
   retrievePayout(accountId: string, payoutId: string): Promise<StripePayoutData>;
   createLoginLink(accountId: string): Promise<{ url: string }>;

@@ -112,6 +112,15 @@ Notes:
    - Bank account: Stripe's Canadian test numbers.
 4. Back in Daybell, the status should read **Active**. If it reads Pending verification, wait a minute and reload: the
    `account.updated` webhook updates it.
+   - **Check payouts are enabled (code review S2).** Daybell can't request payouts when it creates a v2 account (the
+     create has no payouts setting); it assumes Stripe turns them on for an Express-dashboard account with the merchant
+     and recipient configurations. In the Stripe Dashboard, open the connected account: **Payouts** must show as
+     enabled (`payouts_enabled: true` on the account, e.g. `stripe accounts retrieve <the account id>`). Daybell's
+     Settings › Payouts shows a next payout date only when it is. If payouts stay off after onboarding is complete,
+     stop and tell the developers: account creation needs another configuration.
+   - **Check the default schedule.** The connected account's payout schedule should be weekly on Friday, and its
+     metadata should include `daybell_schedule_set: true` (Daybell sets the schedule just after recording the account;
+     if that failed, refresh or the next webhook sets it).
 5. Change the schedule to monthly and save. In the Stripe Dashboard, the connected account's payout schedule should
    match.
 6. Trigger a payout event for the connected account with the Stripe CLI, e.g.
@@ -128,12 +137,15 @@ addresses, and never webhook payloads.
 
 ## If setting up payouts fails
 
-Vercel's function logs for `POST /api/v1/studio/payouts/onboarding-link` show a line `stripe_error <type> <code>`
-(never Stripe's message). Stripe's full message for the same request is in the Stripe Dashboard under
+Vercel's function logs for `POST /api/v1/studio/payouts/onboarding-link` show a line
+`stripe_error <stage> <class> <raw type> <code>` (never Stripe's message): the stage is `create` (the v2 account),
+`schedule` (the payout schedule, after the account is recorded) or `other`; v2 errors may carry their reason in the
+raw type rather than the code, so look at both (`none` when Stripe sent nothing, `other` when it wasn't an
+identifier). Stripe's full message for the same request is in the Stripe Dashboard under
 **Developers › Logs**. Codes that mean the platform setup isn't finished, with the likely fix (from Stripe's Accounts v2
 docs and the codes' names; the message in Stripe's log is the authority):
 
-| Code | What to do |
+| Code (or raw type) | What to do |
 |---|---|
 | `account_creation_liability_unacknowledged` | Connect › Settings › Platform profile: acknowledge responsibility for losses. |
 | `connect_profile_not_submitted` | Finish and submit the Connect platform profile. |
@@ -142,9 +154,20 @@ docs and the codes' names; the message in Stripe's log is the authority):
 | `capability_not_available_in_country` | A requested capability isn't offered for Canada: check Connect settings, then tell the developers. |
 | `cross_border_connected_account_creation_not_allowed` | Connect › Settings › Countries: allow Canada. |
 
-The owner sees "Stripe needs the platform setup finished. Please try again later." for these.
+The owner sees "Daybell’s platform setup with Stripe isn’t finished yet, so payouts can’t be set up. Please contact
+Daybell support." for these: only Daybell can fix them.
 
-**Finish the platform profile before the first try.** Stripe may keep the first answer to an idempotency key for 24
-hours and replay it (that is what happened with the v1 refusal). Daybell's key is fixed per studio
-(`daybell-payout-account-v2-{studio}`), so if the first try for a studio is refused, the same studio may see the same
-code for up to 24 hours even after the setup is fixed. Use another test studio meanwhile, or wait.
+**Retrying after fixing the setup works at once.** Daybell's key is fixed per studio
+(`daybell-payout-account-v2-{studio}`). Accounts v2 handles idempotency keys differently from v1
+(https://docs.stripe.com/api-v2-overview): v1 keeps a key's first answer, even an error, for 24 hours and replays it
+(that is what happened with the v1 refusal); v2 replays a *successful* request for 30 days but re-executes a request
+that failed. So once the platform setup is fixed, the same studio's next click creates the account.
+
+Other alert lines (the studio id only, never the Stripe id):
+- `stripe_account_create_unknown <studio>`: the create timed out or Stripe answered 5xx, so an account may exist. The
+  owner's next click gets the same account (same key, within 30 days). If nobody retries, find the account in the
+  Stripe Dashboard by its `daybell_studio_id` metadata.
+- `stripe_account_unrecorded <studio>`: Stripe made the account but Daybell couldn't read it back or record it. The same
+  applies: the next click records it; otherwise support finds it by its metadata.
+- `stripe_schedule_default_failed`: the account is recorded but its default schedule couldn't be set. Refresh (coming
+  back from Stripe) and the next account webhook try again; nothing to do unless it keeps appearing.
