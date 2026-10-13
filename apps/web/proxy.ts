@@ -5,9 +5,13 @@ import { REGION_COOKIE, resolveRegion } from "./lib/region";
 
 /**
  * Runs before pages: keeps the Supabase session fresh and sends signed-out visitors away from the studio app.
- * API routes check the session themselves.
+ * API routes check the session themselves. The parent shop's pages are passed straight through.
  */
 export async function proxy(request: NextRequest) {
+  // The parent shop never touches studio sign-in (ADR 0022): parents have no account, and their requests shouldn't
+  // refresh (or read) a studio session that may share the browser.
+  const path = request.nextUrl.pathname;
+  if (path === "/shop" || path.startsWith("/shop/")) return NextResponse.next();
   let response = NextResponse.next({ request });
   const region = resolveRegion(request.cookies.get(REGION_COOKIE)?.value);
   const db = region ? regionDatabase(region) : null;

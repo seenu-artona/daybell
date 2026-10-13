@@ -457,11 +457,12 @@ describe("GET /internal/cron/jobs", () => {
     );
     const res = await cron(`Bearer ${SECRET}`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ closedJobs: 503, prunedNotifications: 7 });
+    expect(await res.json()).toEqual({ closedJobs: 503, prunedNotifications: 7, prunedShop: 7 });
     expect(systemRpc.mock.calls.map((c) => [c[0], c[1], c[2]])).toEqual([
       ["ca", "close_due_jobs", { p_limit: 500 }],
       ["ca", "close_due_jobs", { p_limit: 500 }],
       ["ca", "prune_notifications", { p_limit: 1000 }],
+      ["ca", "prune_shop", { p_limit: 1000 }],
     ]);
   });
 

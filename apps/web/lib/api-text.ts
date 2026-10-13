@@ -18,6 +18,7 @@ const ERROR_KEYS = {
   network: 1,
   invalid_input: 1,
   not_signed_in: 1,
+  shop_session_required: 1,
   forbidden: 1,
   not_found: 1,
   conflict: 1,

@@ -30,6 +30,20 @@ const config: NextConfig = {
   outputFileTracingIncludes: { "/api/v1/jobs/[id]/qr-cards": ["./assets/fonts/*.ttf"] },
   poweredByHeader: false,
   reactStrictMode: true,
+  // The parent shop (ADR 0022): never indexed, never framed (screenshots in a frame dodge the deterrents), and no
+  // Referer, so the signed preview URLs never travel to another site in one.
+  async headers() {
+    const shopHeaders = [
+      { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "X-Frame-Options", value: "DENY" },
+    ];
+    return [
+      { source: "/shop", headers: shopHeaders },
+      { source: "/shop/:path*", headers: shopHeaders },
+      { source: "/api/v1/shop/:path*", headers: shopHeaders },
+    ];
+  },
 };
 
 export default withNextIntl(config);

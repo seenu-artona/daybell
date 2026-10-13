@@ -189,3 +189,33 @@ export function stripeWebhookSecrets(
     throw new Error("STRIPE_WEBHOOK_SECRET lists the same signing secret twice");
   return secrets;
 }
+
+// ── The parent shop (Phase 1 step 9; ADR 0022) ───────────────────────────────────────────────────────────────────────
+
+/**
+ * SHOP_THROTTLE_KEY: keys the HMACs the parent shop counts wrong access codes and requests by (a network, and a network
+ * with a device; answer 2 and call 4 of the step 9 brief), so no address is ever stored. Standard base64 of exactly 32
+ * random bytes (`openssl rand -base64 32`), different from both access code keys. Server-only, never NEXT_PUBLIC_*;
+ * read on first use, never at build time. Errors name the variable, never the value. Changing it only restarts every
+ * count.
+ */
+export function shopThrottleKey(
+  env: Record<string, string | undefined> = process.env,
+): Uint8Array<ArrayBuffer> {
+  const problem = new Error(
+    "SHOP_THROTTLE_KEY must be 32 random bytes, base64-encoded (openssl rand -base64 32)",
+  );
+  const text = env.SHOP_THROTTLE_KEY?.trim() ?? "";
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(text)) throw problem;
+  let binary: string;
+  try {
+    binary = atob(text);
+  } catch {
+    throw problem;
+  }
+  if (binary.length !== 32) throw problem;
+  for (const other of ["ACCESS_CODE_HMAC_KEY", "ACCESS_CODE_ENCRYPTION_KEY"])
+    if (env[other]?.trim() === text)
+      throw new Error(`SHOP_THROTTLE_KEY must be different from ${other}`);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}

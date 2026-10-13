@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { JOB_CONFLICTS } from "@daybell/api";
+import { JOB_CONFLICTS, SHOP_CODE_NOT_FOUND, SHOP_CONFLICTS, SHOP_LOCKED } from "@daybell/api";
 import { MILESTONES, ONBOARDING_TASKS, TASK_KEYS, UP_NEXT_REASONS } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import enCA from "../messages/en-CA.json";
@@ -44,6 +44,19 @@ describe("locale files", () => {
     expect(enUS.app.job.conflicts.closesAtPassed).toBe(
       "The closing date has passed. Change or remove it first.",
     );
+  });
+
+  it("have words for every refusal of the parent shop (ADR 0022)", () => {
+    for (const messages of [enUS, enCA]) {
+      const refusals = Object.keys(messages.shop.refusals);
+      for (const key of [...Object.values(SHOP_CONFLICTS), SHOP_CODE_NOT_FOUND, SHOP_LOCKED])
+        expect(refusals, key).toContain(key.slice("shop.".length));
+    }
+    expect(enUS.shop.refusals.otherStudio).toBe(
+      "This code is from a different photographer. Open it separately.",
+    );
+    expect(enUS.shop.gallery.closed).toBe("This shop is closed. Contact {studio}.");
+    expect(enUS.shop.entry.lostAnswer).toBe("Ask your photographer or school for a new card.");
   });
 
   it("name every milestone, task, onboarding task and Up next reason (D143)", () => {

@@ -192,7 +192,8 @@
     "payoutInterval": "Choose weekly, daily or monthly.",
     "payoutWeekday": "Choose a weekday, Monday to Friday.",
     "payoutMonthDay": "Choose a day of the month from 1 to 31.",
-    "closesAt": "Choose a day after today, no more than 400 days ahead."
+    "closesAt": "Choose a day after today, no more than 400 days ahead.",
+    "accessCode": "Type the code from the photo card."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -205,7 +206,8 @@
     "invalid_credentials": "That email and password don't match. Never set a password? Use “Forgot password” to choose one.",
     "email_not_confirmed": "Please confirm your email first — check your inbox.",
     "rate_limited": "Too many tries. Wait a minute and try again.",
-    "internal": "Something went wrong on our side. Please try again."
+    "internal": "Something went wrong on our side. Please try again.",
+    "shop_session_required": "Enter your access code to see your photos."
   },
   "auth": {
     "brand": "Daybell",
@@ -1442,7 +1444,8 @@
       "Contacts": "Contacts",
       "Search": "Search",
       "Notifications": "Notifications",
-      "Internal": "Internal"
+      "Internal": "Internal",
+      "Shop": "Parent shop"
     },
     "access": {
       "public": "Anyone",
@@ -1451,7 +1454,8 @@
       "owner": "Owners",
       "roster-editor": "Owners, admins and photographers",
       "uploader": "Owners, admins and photographers",
-      "internal": "Internal: the image worker, the daily clean-up and Stripe's webhook"
+      "internal": "Internal: the image worker, the daily clean-up and Stripe's webhook",
+      "parent": "A parent's shop session (from an access code)"
     },
     "englishOnly": "Endpoint descriptions are in English, for developers.",
     "query": "Query parameters"
@@ -1465,6 +1469,132 @@
       "accessCode": "Access code",
       "instructions": "Go to {link}, enter your code",
       "foldBack": "Fold back before picture day"
+    }
+  },
+  "shop": {
+    "metaTitle": "Your photos",
+    "privacy": "Private to your family.",
+    "loading": "Loading…",
+    "retry": "Try again",
+    "entry": {
+      "title": "See your child’s photos",
+      "hint": "Type the code from the photo card.",
+      "codeLabel": "Access code",
+      "submit": "View photos",
+      "submitting": "Opening…",
+      "lost": "Lost your code?",
+      "lostAnswer": "Ask your photographer or school for a new card."
+    },
+    "add": {
+      "title": "Add a brother or sister",
+      "hint": "Type the code from their photo card.",
+      "submit": "Add",
+      "back": "Back to photos"
+    },
+    "refusals": {
+      "codeNotFound": "We couldn’t find that code. Check it and try again.",
+      "locked": "Too many tries. Wait {minutes, plural, one {# minute} other {# minutes}} and try again.",
+      "rateLimited": "Too many requests. Wait a minute and try again.",
+      "sessionGone": "Enter your code again to see your photos.",
+      "closed": "This shop is closed, so nothing can be ordered.",
+      "siblingLimit": "You can add up to 5 children.",
+      "otherStudio": "This code is from a different photographer. Open it separately.",
+      "itemUnavailable": "That isn’t for sale any more. Choose something else.",
+      "photoUnavailable": "That photo can’t be chosen. Choose another one.",
+      "schoolDeliveryOff": "Delivery to school isn’t offered for everything in your bag.",
+      "bagFull": "Your bag is full. Remove something first."
+    },
+    "header": {
+      "bag": "Bag, {count, plural, =0 {empty} one {# item} other {# items}}",
+      "menu": "More",
+      "children": "Children",
+      "addChild": "Add a brother or sister",
+      "back": "Back"
+    },
+    "menu": {
+      "forget": "Forget this device",
+      "forgetTitle": "Forget this device?",
+      "forgetBody": "You’ll need the code again to see these photos on this device. Your bag will be emptied.",
+      "forgetConfirm": "Forget",
+      "cancel": "Cancel"
+    },
+    "cover": {
+      "seePhotos": "See photos",
+      "details": "{school} · {date}"
+    },
+    "gallery": {
+      "sets": "Photo sets",
+      "portraits": "Portraits",
+      "classPhotos": "Class photo",
+      "orderBy": "Order by {date}",
+      "schoolDelivery": "Free delivery to school",
+      "choosePackage": "Choose a package",
+      "photoAlt": "{name}, photo {n} of {total}",
+      "classAlt": "{name}’s class, photo {n} of {total}",
+      "protected": "Photos are protected and shown at low resolution with a watermark.",
+      "closed": "This shop is closed. Contact {studio}.",
+      "unavailable": "Photos aren’t available yet. Contact {studio}."
+    },
+    "viewer": {
+      "label": "Photo {n} of {total}",
+      "close": "Close",
+      "previous": "Previous photo",
+      "next": "Next photo",
+      "use": "Use this photo",
+      "viewOnly": "Class photos can be viewed here. They can’t be ordered yet."
+    },
+    "buy": {
+      "packagesTitle": "Choose a package",
+      "singlesTitle": "Single prints and downloads",
+      "singlesLink": "Single prints and downloads",
+      "packagesLink": "Packages",
+      "prints": "Prints",
+      "downloads": "Downloads",
+      "continue": "Continue",
+      "nothing": "Nothing to choose here yet.",
+      "allDigitalsHint": "Every photo of {name}",
+      "selected": "{name}, {price}"
+    },
+    "contents": {
+      "print": "{quantity, plural, one {{size}} other {# × {size}}}",
+      "digital": "digital download",
+      "list": "{items}"
+    },
+    "sizes": {
+      "4x6": "4×6",
+      "5x7": "5×7",
+      "8x10": "8×10",
+      "11x14": "11×14",
+      "wallets_8": "8 wallets"
+    },
+    "pose": {
+      "title": "Choose a pose",
+      "legend": "Pose",
+      "poseAlt": "Pose {n} of {total}",
+      "quantity": "How many",
+      "decrease": "One fewer",
+      "increase": "One more",
+      "add": "Add to bag",
+      "summary": "{name} · {count, plural, one {# pose} other {# poses}}"
+    },
+    "bag": {
+      "title": "Bag",
+      "empty": "Your bag is empty.",
+      "backToPhotos": "Back to photos",
+      "forChild": "For {name}",
+      "unavailable": "No longer available",
+      "remove": "Remove {item}",
+      "quantity": "How many: {item}",
+      "allDigitals": "Every photo",
+      "delivery": "Delivery",
+      "home": "Home delivery",
+      "school": "Delivery to school",
+      "free": "Free",
+      "subtotal": "Subtotal",
+      "chooseDelivery": "Choose delivery",
+      "total": "Total {amount}",
+      "plusTax": "+ tax",
+      "count": "{count, plural, one {# item} other {# items}}"
     }
   }
 }

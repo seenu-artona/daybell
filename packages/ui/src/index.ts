@@ -21,10 +21,14 @@ export { Table, TableCell, TableHead, type TableProps, TableRow } from "./compon
 export { cn } from "./lib/cn";
 export {
   contrastRatio,
+  DEFAULT_SHOP_ACCENT,
   MIN_TEXT_CONTRAST,
   MIN_UI_CONTRAST,
   normalizeHex,
   readableTextOn,
+  type ShopAccent,
+  shopAccent,
+  shopAccentVariables,
   uiColorOn,
 } from "./lib/contrast";
 export {

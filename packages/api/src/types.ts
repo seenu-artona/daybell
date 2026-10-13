@@ -16,6 +16,7 @@ import {
   PHOTO_PLACES,
   PRICE_ITEM_KINDS,
   PRINT_SIZES,
+  SHOP_SHIPPING_METHODS,
   TASK_KEYS,
   UP_NEXT_SHOWN,
 } from "@daybell/core";
@@ -1168,5 +1169,206 @@ export type UnreadCountResponse = z.infer<typeof unreadCountResponse>;
 export const cronJobsResponse = z.object({
   closedJobs: z.number().int().meta({ description: "Shops closed by their closing date." }),
   prunedNotifications: z.number().int().meta({ description: "Old notifications removed." }),
+  prunedShop: z.number().int().meta({
+    description: "Expired shop sessions and day-old wrong-code and request counts removed.",
+  }),
 });
 export type CronJobsResponse = z.infer<typeof cronJobsResponse>;
+
+// ── The parent shop (Phase 1 step 9, ADR 0022) ─────────────────────────────────────────────────────────────────────
+
+export const SHOP_CHILD_STATES = ["open", "closed", "unavailable"] as const;
+export type ShopChildState = (typeof SHOP_CHILD_STATES)[number];
+
+const shopChildState = z.enum(SHOP_CHILD_STATES).meta({
+  description:
+    "open: the gallery. closed: the job isn't selling (drafts too) or its closing date has passed. unavailable: no photos to show yet (or never, for a child marked Do not publish). Closed and unavailable show no photos.",
+});
+
+export const shopChild = z
+  .object({
+    id: z.uuid(),
+    displayName: z
+      .string()
+      .meta({ description: 'First name and last initial only, e.g. "Ava P."' }),
+    firstName: z.string().meta({ description: "For the photos' descriptions." }),
+    jobId: z.uuid(),
+    school: z.string().meta({ description: "The job's client (the school), else the job's name." }),
+    pictureDay: z.iso.date(),
+    closesAt: z.iso
+      .datetime({ offset: true })
+      .nullable()
+      .meta({ description: "Order by this moment; null when the shop has no closing date." }),
+    deliverToSchool: z.boolean().meta({ description: "The job offers free delivery to school." }),
+    state: shopChildState,
+  })
+  .meta({
+    id: "ShopChild",
+    description: "A child in the parent's shop session. Never a full name.",
+  });
+export type ShopChild = z.infer<typeof shopChild>;
+
+export const shopSessionResponse = z
+  .object({
+    studio: z.object({ name: z.string() }),
+    expiresAt: z.iso
+      .datetime({ offset: true })
+      .meta({ description: "30 days after the first code; adding a sibling doesn't extend it." }),
+    children: z
+      .array(shopChild)
+      .meta({ description: "In the order their codes were entered; at most 5." }),
+    bagCount: z.number().int().meta({ description: "Things in the bag (quantities added)." }),
+  })
+  .meta({ id: "ShopSession" });
+export type ShopSessionResponse = z.infer<typeof shopSessionResponse>;
+
+export const shopOpenedResponse = z
+  .object({ childId: z.uuid().meta({ description: "The child the code belongs to." }) })
+  .meta({ id: "ShopOpened" });
+export type ShopOpenedResponse = z.infer<typeof shopOpenedResponse>;
+
+export const shopPhoto = z
+  .object({
+    id: z.uuid(),
+    thumbUrl: z.url().meta({
+      description:
+        "A 400 px watermarked preview (WebP), signed for 10 minutes. Never the original, never an unwatermarked preview.",
+    }),
+    viewUrl: z
+      .url()
+      .meta({ description: "A 1600 px watermarked preview (WebP), signed for 10 minutes." }),
+    width: z.number().int().nullable(),
+    height: z.number().int().nullable(),
+  })
+  .meta({
+    id: "ShopPhoto",
+    description: "A photo a parent may see: low resolution, watermarked (D60).",
+  });
+export type ShopPhoto = z.infer<typeof shopPhoto>;
+
+export const shopGalleryResponse = z
+  .object({
+    state: shopChildState,
+    cover: shopPhoto.nullable().meta({
+      description:
+        "The child's first portrait in tagging order (the cover, D119); null unless open.",
+    }),
+    portraits: z
+      .array(shopPhoto)
+      .meta({ description: "The child's own photos, in tagging order." }),
+    classPhotos: z.array(shopPhoto).meta({
+      description: "The child's class photo set, to view only in Phase 1; empty without a class.",
+    }),
+  })
+  .meta({ id: "ShopGallery" });
+export type ShopGalleryResponse = z.infer<typeof shopGalleryResponse>;
+
+export const shopItem = z
+  .object({
+    id: z.uuid(),
+    kind: z.enum(PRICE_ITEM_KINDS),
+    name: z.string(),
+    description: z.string().nullable(),
+    printSize: z.enum(PRINT_SIZES).nullable(),
+    price: money,
+    contents: z.array(packageLine).meta({ description: "Packages only." }),
+  })
+  .meta({
+    id: "ShopItem",
+    description: "Something the child's job sells, priced now, before tax.",
+  });
+export type ShopItem = z.infer<typeof shopItem>;
+
+export const shopPriceListResponse = z
+  .object({
+    state: shopChildState,
+    priceList: z
+      .object({
+        currency: z.enum(CURRENCIES),
+        homeShipping: money,
+        deliverToSchool: z.boolean(),
+        items: z.array(shopItem).meta({ description: "In the studio's order." }),
+      })
+      .nullable()
+      .meta({ description: "The job's current list; null unless open." }),
+  })
+  .meta({ id: "ShopPriceList" });
+export type ShopPriceListResponse = z.infer<typeof shopPriceListResponse>;
+
+export const shopCartLine = z
+  .object({
+    id: z.uuid(),
+    childId: z.uuid(),
+    itemId: z.uuid(),
+    kind: z.enum(PRICE_ITEM_KINDS),
+    name: z.string(),
+    printSize: z.enum(PRINT_SIZES).nullable(),
+    unitPrice: money,
+    quantity: z.number().int(),
+    lineTotal: money,
+    available: z.boolean().meta({
+      description:
+        "Can still be bought: the item is on the job's current list, the shop is open and the pose can still be shown. Unavailable lines don't count in the totals.",
+    }),
+    physical: z.boolean().meta({ description: "Needs delivery (prints)." }),
+    photo: z
+      .object({ id: z.uuid(), thumbUrl: z.url().nullable() })
+      .nullable()
+      .meta({ description: "The pose; null for all digitals. No preview for unavailable lines." }),
+  })
+  .meta({ id: "ShopCartLine" });
+export type ShopCartLine = z.infer<typeof shopCartLine>;
+
+export const shopCartResponse = z
+  .object({
+    lines: z.array(shopCartLine).meta({ description: "By child (as added), then as added." }),
+    count: z.number().int().meta({ description: "Things that can be bought (quantities added)." }),
+    subtotal: money,
+    shipping: z.object({
+      needed: z.boolean().meta({ description: "Something in the bag needs delivery." }),
+      home: money.meta({
+        description: "One home fee per bag: the highest of its jobs' (with something to deliver).",
+      }),
+      school: z
+        .boolean()
+        .meta({ description: "Free delivery to school is offered: every such job allows it." }),
+      method: z.enum(SHOP_SHIPPING_METHODS).nullable().meta({
+        description:
+          "The delivery that applies; null when nothing needs delivery or still to choose.",
+      }),
+      cost: money.nullable().meta({ description: "Null until delivery is chosen." }),
+    }),
+    total: money
+      .nullable()
+      .meta({ description: "Subtotal plus delivery, before tax; null until delivery is chosen." }),
+  })
+  .meta({
+    id: "ShopCart",
+    description:
+      "The bag, priced from each job's current list on every read (nothing is stored but ids and quantities).",
+  });
+export type ShopCartResponse = z.infer<typeof shopCartResponse>;
+
+/** Why a shop request was refused with 409, in the error's `fields.form`. */
+export const SHOP_CONFLICTS = {
+  /** The child's shop is closed (or a draft): nothing can be bought. */
+  closed: "shop.closed",
+  /** A session holds at most 5 children. */
+  siblingLimit: "shop.siblingLimit",
+  /** The code is another studio's: open it separately (call 1). */
+  otherStudio: "shop.otherStudio",
+  /** The item isn't on the job's current price list. */
+  itemUnavailable: "shop.itemUnavailable",
+  /** The pose isn't one of the child's photos that can be shown. */
+  photoUnavailable: "shop.photoUnavailable",
+  /** Delivery to school isn't offered for everything in the bag. */
+  schoolDeliveryOff: "shop.schoolDeliveryOff",
+  /** At most 100 lines in a bag. */
+  bagFull: "shop.bagFull",
+} as const;
+export type ShopConflict = (typeof SHOP_CONFLICTS)[keyof typeof SHOP_CONFLICTS];
+
+/** In `fields.form` of the 404 for a code that opens nothing: wrong, unknown or not a code, all alike. */
+export const SHOP_CODE_NOT_FOUND = "shop.codeNotFound";
+/** In `fields.form` of the 429 after too many wrong codes; Retry-After gives the seconds. */
+export const SHOP_LOCKED = "shop.locked";
