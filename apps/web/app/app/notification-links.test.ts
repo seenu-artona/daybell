@@ -18,6 +18,7 @@ describe("notificationHref", () => {
       `/app/orders/${ORDER}`,
       `/app/orders/${ORDER}`,
       `/app/orders/${ORDER}`,
+      `/app/orders/${ORDER}`,
     ]);
   });
 

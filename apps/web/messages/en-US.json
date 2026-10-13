@@ -402,7 +402,8 @@
         "tagging_ready": "{job}: photos are tagged, with {leftovers, number} in Leftovers and {flagged, number} to check",
         "order_paid": "New order {order}",
         "refund_failed": "A refund of order {order} failed: the parent wasn’t refunded",
-        "dispute_opened": "A dispute was opened on order {order}"
+        "dispute_opened": "A dispute was opened on order {order}",
+        "refund_external": "Refund made outside Daybell on order {order}: check it before you print or ship"
       },
       "anOrder": "an order"
     },
@@ -1552,7 +1553,9 @@
         "reference": "Order reference",
         "referenceHelp": "For example 7KQ2-M9XA",
         "search": "Search",
-        "clear": "Clear filters"
+        "clear": "Clear filters",
+        "delivery": "Delivery",
+        "anyDelivery": "Any delivery"
       },
       "loadMore": "Show more orders",
       "statuses": {
@@ -1593,7 +1596,8 @@
         "statusInvalid": "That isn’t this order’s next step. Reload the page to see where it is.",
         "overRefund": "That’s more than is left to refund.",
         "nothingToRefund": "Choose something to refund.",
-        "refundRefused": "Stripe refused this refund, so nothing was refunded."
+        "refundRefused": "Stripe refused this refund, so nothing was refunded.",
+        "externalRefund": "A refund was made outside Daybell. An owner or admin must check it before this order is printed or shipped."
       },
       "detail": {
         "title": "Order {reference}",
@@ -1782,6 +1786,13 @@
           },
           "note": "Each transaction adds up to zero. Positive amounts are money in hand or owed to Daybell; negative ones are owed to you or earned.",
           "none": "Nothing yet: the sale is written once Stripe says its fee."
+        },
+        "externalRefund": {
+          "title": "A refund was made outside Daybell",
+          "body": "Someone refunded this payment in Stripe on {date}. Daybell’s totals and ledger don’t include it, and your share wasn’t taken back. Check it in Stripe and with the parent before you print or ship.",
+          "check": "Mark as checked",
+          "checked": "Checked on {date}. Printing and shipping can go on.",
+          "saved": "Marked as checked."
         }
       }
     }

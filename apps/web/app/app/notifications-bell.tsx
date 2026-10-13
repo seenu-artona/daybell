@@ -148,6 +148,7 @@ function NotificationsPanel({
       case "order_paid":
       case "refund_failed":
       case "dispute_opened":
+      case "refund_external":
         return t(`notificationText.${n.kind}`, {
           order: n.order ? formatOrderReference(n.order.reference) : t("anOrder"),
         });

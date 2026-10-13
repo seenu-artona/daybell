@@ -30,6 +30,7 @@ vi.mock("../activity-card", () => ({ ActivityCard: () => <p>Activity card</p> })
 
 const { OrdersList } = await import("./orders-list");
 const { RefundForm, RefundsSection } = await import("./[id]/refunds");
+const { FulfilmentPanel } = await import("./[id]/fulfilment");
 const { default: HomePage } = await import("../page");
 
 const STUDIO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -45,49 +46,78 @@ const me = (role: "owner" | "admin" | "staff" | "photographer") => ({
   studio: { id: STUDIO, name: "Maple Lane Photography", role, region: "ca" },
 });
 
-const listed = (id: string, reference: string): StudioOrder =>
-  ({
-    id,
-    reference,
-    paidAt: "2026-10-13T12:00:00.000Z",
-    children: [{ id: L1, displayName: "Ava P." }],
-    items: 2,
-    total: money(4520),
-    fulfilment: "paid",
-    refund: "none",
-    disputed: false,
-    shippingMethod: "school",
-  }) as unknown as StudioOrder;
+const listed = (id: string, reference: string, over: Partial<StudioOrder> = {}): StudioOrder => ({
+  id,
+  reference,
+  paidAt: "2026-10-13T12:00:00.000Z",
+  children: [{ id: L1, displayName: "Ava P." }],
+  items: 2,
+  total: money(4520),
+  fulfilment: "paid",
+  refund: null,
+  disputed: false,
+  shippingMethod: "school",
+  ...over,
+});
+
+const line = (
+  id: string,
+  name: string,
+  quantity: number,
+  unit: number,
+): StudioOrderDetail["lines"][number] => ({
+  id,
+  kind: "print",
+  name,
+  printSize: "5x7",
+  quantity,
+  refundedQuantity: 0,
+  unitPrice: money(unit),
+  lineTotal: money(unit * quantity),
+  physical: true,
+  child: { id: "c0000000-0000-4000-8000-000000000001", firstName: "Ava", lastName: "Patel" },
+  photoId: null,
+  contents: [],
+});
 
 /** 2 prints at $20 and one at $60, $10 shipping, 13% HST, Daybell's 3% on products. */
-const detail = (over: Partial<StudioOrderDetail> = {}): StudioOrderDetail =>
-  ({
-    id: O1,
-    reference: "7KQ2M9XA",
-    paidAt: "2026-10-13T12:00:00.000Z",
+const detail = (over: Partial<StudioOrderDetail> = {}): StudioOrderDetail => ({
+  id: O1,
+  reference: "7KQ2M9XA",
+  paidAt: "2026-10-13T12:00:00.000Z",
+  products: money(10_000),
+  shipping: money(1_000),
+  tax: money(1_430),
+  total: money(12_430),
+  daybellFee: { basisPoints: 300, amount: money(300) },
+  cardFee: money(390),
+  paidToStudio: money(11_740),
+  feesSettled: true,
+  shippingMethod: "home",
+  fulfilment: "paid",
+  printedAt: null,
+  shippedAt: null,
+  deliveredAt: null,
+  canceledAt: null,
+  disputedAt: null,
+  shipToPurgedAt: null,
+  externalRefund: null,
+  tracking: null,
+  refund: null,
+  refundInFlight: false,
+  lines: [line(L1, "5×7 print", 2, 2_000), line(L2, "Package A", 1, 6_000)],
+  shipTo: null,
+  refunds: [],
+  refundable: {
     products: money(10_000),
     shipping: money(1_000),
     tax: money(1_430),
-    total: money(12_430),
-    daybellFee: { basisPoints: 300, amount: money(300) },
-    feesSettled: true,
-    refundInFlight: false,
-    refund: "none",
-    fulfilment: "paid",
-    lines: [
-      { id: L1, name: "5×7 print", quantity: 2, refundedQuantity: 0, unitPrice: money(2_000) },
-      { id: L2, name: "Package A", quantity: 1, refundedQuantity: 0, unitPrice: money(6_000) },
-    ],
-    refunds: [],
-    refundable: {
-      products: money(10_000),
-      shipping: money(1_000),
-      tax: money(1_430),
-      daybellFee: money(300),
-      refunded: money(0),
-    },
-    ...over,
-  }) as unknown as StudioOrderDetail;
+    daybellFee: money(300),
+    refunded: money(0),
+  },
+  ledger: [],
+  ...over,
+});
 
 let root: Root;
 let container: HTMLDivElement;
@@ -199,6 +229,30 @@ describe("the orders list", () => {
     });
   });
 
+  it("shows a refund badge only for a refunded order (code review S4)", async () => {
+    api.mockImplementation(async (path: string) =>
+      path.startsWith("/jobs")
+        ? ok({ jobs: [] })
+        : ok({
+            orders: [listed(O1, "7KQ2M9XA"), listed(O2, "8ABC2DEF", { refund: "partly_refunded" })],
+            nextCursor: null,
+          }),
+    );
+    await render(<OrdersList />);
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows[0]?.textContent).not.toMatch(/refunded/i);
+    expect(rows[1]?.textContent).toContain(messages.app.orders.refundBadges.partly_refunded);
+  });
+
+  it("filters by delivery, and Home's To do links ask for what they count (code review N3)", async () => {
+    api.mockImplementation(async (path: string) =>
+      path.startsWith("/jobs") ? ok({ jobs: [] }) : ok({ orders: [], nextCursor: null }),
+    );
+    await render(<OrdersList initialStatus="printed" initialDelivery="home" />);
+    expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=home");
+    expect((field("Delivery") as HTMLSelectElement).value).toBe("home");
+  });
+
   it("gives photographers no checkboxes", async () => {
     answer();
     await render(<OrdersList />, "photographer");
@@ -242,6 +296,54 @@ describe("the refund dialog (Q1, Q3)", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  it("refunds only the shipping by item, with tax in proportion (code review S5)", async () => {
+    api.mockResolvedValue(ok({ refund: { id: "r", status: "succeeded", amount: money(1130) } }));
+    await render(<RefundForm order={detail()} onCancel={() => {}} onDone={() => {}} />);
+    await act(async () => (field("Also refund the shipping ($10.00)") as HTMLInputElement).click());
+    // $10 + tax 1430 × 1000 / 11000 = 130.
+    await act(async () => button("Review refund")?.click());
+    await act(async () => button("Refund $11.30")?.click());
+    expect(api.mock.calls[0]?.[1]).toEqual({
+      body: {
+        requestId: expect.any(String),
+        kind: "lines",
+        lines: [],
+        shipping: true,
+        reason: null,
+      },
+    });
+  });
+
+  it("makes a new request id after a refusal, and keeps it after a lost connection (code review N2)", async () => {
+    api
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 0,
+        code: "network",
+        message: "",
+        fields: {},
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        code: "conflict",
+        message: "",
+        fields: { form: "orders.refundRefused" },
+      })
+      .mockResolvedValue(ok({ refund: { id: "r", status: "succeeded", amount: money(2260) } }));
+    await render(<RefundForm order={detail()} onCancel={() => {}} onDone={() => {}} />);
+    await type(field("Refund how many of 5×7 print"), "1");
+    for (let i = 0; i < 3; i++) {
+      await act(async () => button("Review refund")?.click());
+      await act(async () => button("Refund $22.60")?.click());
+      if (i === 1)
+        expect(container.textContent).toContain(messages.app.orders.conflicts.refundRefused);
+    }
+    const ids = api.mock.calls.map((c) => (c[1] as { body: { requestId: string } }).body.requestId);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[1]);
+  });
+
   it("refuses more than is left and keeps Review off", async () => {
     await render(
       <RefundForm
@@ -276,6 +378,24 @@ describe("the refund dialog (Q1, Q3)", () => {
   });
 });
 
+describe("a refund made outside Daybell (security review S5)", () => {
+  it("stops fulfilment until it is checked", async () => {
+    const flagged = detail({ externalRefund: { at: "2026-10-13T12:00:00.000Z", checkedAt: null } });
+    await render(<FulfilmentPanel order={flagged} onChanged={() => {}} />, "staff");
+    expect(button("Mark printed")).toBeUndefined();
+    await render(
+      <FulfilmentPanel
+        order={detail({
+          externalRefund: { at: "2026-10-13T12:00:00.000Z", checkedAt: "2026-10-13T13:00:00.000Z" },
+        })}
+        onChanged={() => {}}
+      />,
+      "staff",
+    );
+    expect(button("Mark printed")).toBeDefined();
+  });
+});
+
 describe("Home (Q4)", () => {
   const sales = {
     sales: {
@@ -296,9 +416,10 @@ describe("Home (Q4)", () => {
     expect(container.querySelector('a[href="/app/orders?status=paid"]')?.textContent).toBe(
       "2 orders to print",
     );
-    expect(container.querySelector('a[href="/app/orders?status=printed"]')?.textContent).toBe(
-      "1 order to ship",
-    );
+    // (The selector engine trips on "&" in an attribute value, so the links are found by their href.)
+    const link = (href: string) =>
+      [...container.querySelectorAll("a")].find((a) => a.getAttribute("href") === href);
+    expect(link("/app/orders?status=printed&delivery=home")?.textContent).toBe("1 order to ship");
     expect(container.querySelector("select")).toBeNull();
     expect(container.textContent).not.toContain("$");
     expect(container.textContent).not.toContain("Activity card");

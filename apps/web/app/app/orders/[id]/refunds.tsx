@@ -115,7 +115,9 @@ export function RefundsSection({
  * left; or a custom amount of products before tax. Then a reason from the list (or none; never free text). A live
  * summary computed with the same rule as the database (core refundSplit): products, shipping, tax pro rata, what the
  * parent gets back, Daybell's fee returned to the studio and that Stripe's card fee isn't. Review, then a confirm step
- * that says the amount; the request carries an id made when the dialog opened, so a double tap is one refund.
+ * that says the amount; the request carries an id made when the dialog opened, so a double tap is one refund. After a
+ * refusal (Stripe refused it, or the amounts were wrong) the next try gets a new id (code review N2). By item with no
+ * items but the shipping is a shipping-only refund (code review S5).
  */
 export function RefundForm({
   order,
@@ -129,7 +131,7 @@ export function RefundForm({
   const t = useTranslations("app.orders.detail.refundDialog");
   const tr = useTranslations("app.orders.detail.refunds");
   const refusal = useOrderRefusal();
-  const [requestId] = useState(() => crypto.randomUUID());
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [mode, setMode] = useState<"lines" | "custom">("lines");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [shipping, setShipping] = useState(false);
@@ -217,6 +219,8 @@ export function RefundForm({
     const res = await api<RefundResponse>(`/orders/${order.id}/refunds`, { body });
     busy.current = false;
     if (res.ok) return onDone(res.data.refund);
+    // A refusal is final for this id: the next try is a new refund. A lost connection keeps the id (same refund).
+    if (res.status >= 400 && res.status < 500) setRequestId(crypto.randomUUID());
     setStep("edit");
     setProblem(refusal(res));
   }

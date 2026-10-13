@@ -174,14 +174,14 @@ export default function HomePage() {
                 ) : null}
                 {todo.toShip > 0 ? (
                   <li>
-                    <Link href="/app/orders?status=printed" className={LINK}>
+                    <Link href="/app/orders?status=printed&delivery=home" className={LINK}>
                       {th("todo.toShip", { count: todo.toShip })}
                     </Link>
                   </li>
                 ) : null}
                 {todo.toDeliver > 0 ? (
                   <li>
-                    <Link href="/app/orders?status=printed" className={LINK}>
+                    <Link href="/app/orders?status=printed&delivery=school" className={LINK}>
                       {th("todo.toDeliver", { count: todo.toDeliver })}
                     </Link>
                   </li>

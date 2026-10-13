@@ -2,7 +2,7 @@
 
 import type { OrderResponse, Refund, StudioOrderDetail } from "@daybell/api";
 import { SHOP_CONFLICTS } from "@daybell/api";
-import { canFulfil, formatBasisPoints, formatOrderReference } from "@daybell/core";
+import { canFulfil, canRefund, formatBasisPoints, formatOrderReference } from "@daybell/core";
 import { Banner, Button, Card } from "@daybell/ui";
 import { ArrowLeft, Download } from "lucide-react";
 import Link from "next/link";
@@ -14,6 +14,7 @@ import { api, download } from "@/lib/client-api";
 import { useStudio } from "../../me-context";
 import { PageFrame } from "../../page-frame";
 import { OrderBadges, orderMoney } from "../order-badges";
+import { useOrderRefusal } from "../order-text";
 import { FulfilmentPanel } from "./fulfilment";
 import { LedgerSection } from "./ledger";
 import { RefundsSection } from "./refunds";
@@ -32,7 +33,9 @@ export default function OrderPage() {
   const td = useTranslations("app.orders");
   const tr = useTranslations("app.orders.detail.refundDialog");
   const ts = useTranslations("shop");
+  const tx = useTranslations("app.orders.detail.externalRefund");
   const text = useApiText();
+  const refusal = useOrderRefusal();
   const format = useFormatter();
   const { me } = useStudio();
   const { id } = useParams<{ id: string }>();
@@ -41,6 +44,7 @@ export default function OrderPage() {
   const [status, setStatus] = useState("");
   const [filesNote, setFilesNote] = useState<string | null>(null);
   const filesBusy = useRef(false);
+  const checkBusy = useRef(false);
   const [preparing, setPreparing] = useState(false);
   const itemsId = useId();
   const totalsId = useId();
@@ -72,6 +76,19 @@ export default function OrderPage() {
     if (res.fields.form === SHOP_CONFLICTS.downloadUnavailable)
       return setFilesNote(t("printFilesUnavailable"));
     setFilesNote(text.error(res.code));
+  }
+
+  // A refund made outside Daybell, checked by an owner or admin (security review S5).
+  async function checkExternalRefund() {
+    if (!order || checkBusy.current) return;
+    checkBusy.current = true;
+    const res = await api<OrderResponse>(`/orders/${order.id}/external-refund/checked`, {
+      method: "POST",
+    });
+    checkBusy.current = false;
+    if (!res.ok) return setStatus(refusal(res));
+    setOrder(res.data.order);
+    setStatus(tx("saved"));
   }
 
   const date = (iso: string) => format.dateTime(new Date(iso), { dateStyle: "medium" });
@@ -119,6 +136,20 @@ export default function OrderPage() {
       ) : null}
       {order.disputedAt ? (
         <Banner tone="danger" title={t("disputedNote", { date: date(order.disputedAt) })} />
+      ) : null}
+      {order.externalRefund ? (
+        <Banner tone={order.externalRefund.checkedAt ? "info" : "warning"} title={tx("title")}>
+          <p className="m-0">{tx("body", { date: date(order.externalRefund.at) })}</p>
+          {order.externalRefund.checkedAt ? (
+            <p className="m-0 mt-1">
+              {tx("checked", { date: date(order.externalRefund.checkedAt) })}
+            </p>
+          ) : canRefund(me.studio.role) ? (
+            <Button variant="secondary" className="mt-2" onClick={() => void checkExternalRefund()}>
+              {tx("check")}
+            </Button>
+          ) : null}
+        </Banner>
       ) : null}
 
       <Card className="flex flex-col gap-4 p-6">

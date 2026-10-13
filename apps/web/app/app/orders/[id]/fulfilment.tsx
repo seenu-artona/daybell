@@ -59,7 +59,11 @@ export function FulfilmentPanel({
   const at = steps.indexOf(order.fulfilment as (typeof steps)[number]);
   const next = fulfilmentNext(order.fulfilment, order.shippingMethod);
   const previous = fulfilmentPrevious(order.fulfilment);
-  const blocked = order.refund === "refunded" || order.fulfilment === "canceled";
+  // Nothing to deliver, or a refund made outside Daybell not yet checked (security review S5; the banner says so).
+  const blocked =
+    order.refund === "refunded" ||
+    order.fulfilment === "canceled" ||
+    (order.externalRefund !== null && order.externalRefund.checkedAt === null);
 
   async function mark(status: "printed" | "delivered") {
     if (busy.current) return;
@@ -139,7 +143,7 @@ export function FulfilmentPanel({
           {next === "delivered" ? (
             <Button onClick={() => void mark("delivered")}>{t("markDelivered")}</Button>
           ) : null}
-          {order.fulfilment === "shipped" ? (
+          {order.fulfilment === "shipped" && !order.shipToPurgedAt ? (
             <Button variant="secondary" onClick={() => setShipping("tracking")}>
               {t("editTracking")}
             </Button>

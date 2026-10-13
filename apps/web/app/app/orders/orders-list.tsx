@@ -11,6 +11,8 @@ import {
   formatOrderReference,
   ORDER_FULFILMENTS,
   type OrderFulfilment,
+  SHOP_SHIPPING_METHODS,
+  type ShopShippingMethod,
 } from "@daybell/core";
 import { Banner, Button, Field, Table, TableCell, TableHead, TableRow } from "@daybell/ui";
 import { Search } from "lucide-react";
@@ -31,6 +33,7 @@ const CHECKBOX =
 
 interface Filters {
   status: OrderFulfilment | "";
+  delivery: ShopShippingMethod | "";
   jobId: string;
   q: string;
 }
@@ -38,24 +41,32 @@ interface Filters {
 /**
  * The studio's paid orders (ADR 0024; D25), shared by the Orders page and a job's Orders tab (which passes `jobId`):
  * a table with a caption; reference, date, children (first name and last initial), items, total, the status with its
- * refund and dispute badges (words and icons, never colour alone: D91), delivery. Filters: status, job (on the Orders
- * page) and a reference search (never a name, and nothing personal in the URL). Load more by cursor. Owners, admins
+ * refund and dispute badges (words and icons, never colour alone: D91), delivery. Filters: status, delivery, job (on
+ * the Orders page) and a reference search (never a name, and nothing personal in the URL). Filtered by Paid or
+ * Printed, fully refunded orders are left out, so Home's To do links list what they count (code review N3). Load more by cursor. Owners, admins
  * and staff select orders with a checkbox each (and one for all shown) for Mark printed or Mark delivered to school,
  * in a bar that stays in view; each order's result is counted and announced.
  */
 export function OrdersList({
   jobId,
   initialStatus = "",
+  initialDelivery = "",
 }: {
   jobId?: string;
   initialStatus?: OrderFulfilment | "";
+  initialDelivery?: ShopShippingMethod | "";
 }) {
   const t = useTranslations("app.orders");
   const text = useApiText();
   const format = useFormatter();
   const { me } = useStudio();
   const canMark = canFulfil(me.studio.role);
-  const [filters, setFilters] = useState<Filters>({ status: initialStatus, jobId: "", q: "" });
+  const [filters, setFilters] = useState<Filters>({
+    status: initialStatus,
+    delivery: initialDelivery,
+    jobId: "",
+    q: "",
+  });
   const [typed, setTyped] = useState("");
   const [orders, setOrders] = useState<StudioOrder[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -74,6 +85,7 @@ export function OrdersList({
       if (jobId) q.set("jobId", jobId);
       else if (filters.jobId) q.set("jobId", filters.jobId);
       if (filters.status) q.set("status", filters.status);
+      if (filters.delivery) q.set("delivery", filters.delivery);
       if (filters.q) q.set("q", filters.q);
       if (after) q.set("cursor", after);
       const s = q.toString();
@@ -167,6 +179,17 @@ export function OrdersList({
             ]}
           />
         </div>
+        <div className="min-w-48">
+          <SelectField
+            label={t("filters.delivery")}
+            value={filters.delivery}
+            onChange={(v) => setFilters((f) => ({ ...f, delivery: v as Filters["delivery"] }))}
+            options={[
+              { value: "", label: t("filters.anyDelivery") },
+              ...SHOP_SHIPPING_METHODS.map((m) => ({ value: m, label: t(`deliveries.${m}`) })),
+            ]}
+          />
+        </div>
         {jobId ? null : (
           <div className="min-w-56">
             <SelectField
@@ -195,13 +218,13 @@ export function OrdersList({
             {t("filters.search")}
           </Button>
         </form>
-        {filters.status || filters.jobId || filters.q ? (
+        {filters.status || filters.delivery || filters.jobId || filters.q ? (
           <Button
             variant="ghost"
             className="mb-6"
             onClick={() => {
               setTyped("");
-              setFilters({ status: "", jobId: "", q: "" });
+              setFilters({ status: "", delivery: "", jobId: "", q: "" });
             }}
           >
             {t("filters.clear")}
@@ -218,7 +241,9 @@ export function OrdersList({
         <p className="m-0 text-muted">{t("loading")}</p>
       ) : orders.length === 0 ? (
         <p className="m-0 text-muted">
-          {filters.status || filters.jobId || filters.q ? t("emptyFiltered") : t("empty")}
+          {filters.status || filters.delivery || filters.jobId || filters.q
+            ? t("emptyFiltered")
+            : t("empty")}
         </p>
       ) : (
         <Table>
