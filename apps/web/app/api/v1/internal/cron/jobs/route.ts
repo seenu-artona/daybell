@@ -28,11 +28,12 @@ const PURGE = 1000;
  * - removes read notifications over 90 days old and any over 180 (Claude's call);
  * - removes expired shop sessions with their bags, and day-old wrong-code and hour-old request counts (ADR 0022), a
  *   page at a time until none are left or the region's time is up;
- * - removes home delivery addresses 90 days after shipping, or after payment once cancelled or refunded, and 180 days
- *   after payment at most (ADR 0024; step 10's launch blocker), a page at a time;
+ * - removes home delivery addresses and tracking numbers 90 days after shipping, or after payment once cancelled or
+ *   refunded, and 365 days after payment at most (ADR 0024; step 10's launch blocker), a page at a time;
  * - where payments are set up (a payout region with Stripe), settles paid orders whose Stripe fee came late and
- *   expires checkouts that ran out, after asking Stripe (ADR 0023; lib/checkout/cron.ts); retries refunds, recovers
- *   refund shortfalls from later sales and absorbs those 180 days old (ADR 0024; lib/orders/cron.ts).
+ *   expires checkouts that ran out, after asking Stripe (ADR 0023; lib/checkout/cron.ts); retries refunds (sending
+ *   back a failed refund's share), recovers refund shortfalls from later sales and absorbs those owed after 180 days
+ *   without a settled sale (ADR 0024; lib/orders/cron.ts).
  * Each region gets an equal share of the time budget, so one region's backlog never starves the next (code review
  * S2). A region this function can't serve (its data must be handled in another function region, D113) is skipped and
  * logged by name, while the others still run; if no region could run, the request is refused as before (security

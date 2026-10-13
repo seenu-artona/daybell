@@ -6,11 +6,12 @@ import { noteRefundFailure, recoverShortfalls, runRefund } from "./refunds";
 
 /**
  * The jobs cron's refund backstops (ADR 0024), a page each, within the region's share of the time:
- * - refunds Stripe hasn't accepted after a minute, accepted ones whose reversal isn't done, and pending ones to ask
- *   Stripe about, run again (runRefund is idempotent; each failure backs off; a problem no retry can fix is kept for
- *   support and never retried);
+ * - refunds Stripe hasn't accepted after a minute, accepted ones whose reversal isn't done, pending ones to ask
+ *   Stripe about, and failed ones whose share the studio gave back isn't sent back yet (Q7), run again (runRefund is
+ *   idempotent; each failure backs off; a problem no retry can fix is kept for support and never retried);
  * - shortfalls owed by studios, tried against their latest settled sale (Q2);
- * - shortfalls still owed after 180 days, absorbed by Daybell (Q2; the database writes the ledger).
+ * - shortfalls still owed after 180 days without a settled sale, absorbed by Daybell (Q2; the database writes the
+ *   ledger).
  * Ids only; logs hold fixed names and codes.
  */
 export const REFUND_PAGE = 50;

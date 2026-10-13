@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Refunds (ADR 0024; Q1, Q2): Stripe refunds the parent Daybell's exact amount with Daybell's ids only and no Stripe
-// flags; the studio's share (the refund less Daybell's fee on it) is taken back from the transfer as far as it goes
-// and the rest is a shortfall; a refusal Stripe will never take cancels the refund, anything else is retried; a run
-// resumes where the last one stopped. The database functions are faked in memory; nothing personal is logged.
+// Refunds (ADR 0024; Q1, Q2, Q7): Stripe refunds the parent Daybell's exact amount with Daybell's ids only and no
+// Stripe flags; the studio's share (the refund less Daybell's fee on it) is taken back from the transfer as far as it
+// goes and the rest is a shortfall; a refusal Stripe will never take cancels the refund (once the payment's refunds,
+// listed again, hold none for it), anything else is retried; a run resumes where the last one stopped, even after a
+// reversal was made and its record lost (code review B1); a refund that fails after its reversal sends the share
+// back. Stripe's transfers and the database functions are faked in memory; nothing personal is logged.
 vi.mock("server-only", () => ({}));
 const { db, notes } = vi.hoisted(() => ({
   db: new Map<string, Record<string, unknown>>(),
@@ -44,6 +46,7 @@ function database(fn: string, args: Record<string, unknown>) {
     }
     case "refund_recovered": {
       if (!r) return { data: null, error: { code: "P0002" } };
+      if (r.reversal_cents !== null) return { data: r.unrecovered, error: null };
       r.reversal_cents = args.p_cents;
       const owed = Number(r.reversal_needed_cents) - Number(args.p_cents);
       return { data: owed, error: null };
@@ -52,8 +55,17 @@ function database(fn: string, args: Record<string, unknown>) {
       if (r && r.status === "pending") r.status = "succeeded";
       return { data: r?.status, error: null };
     case "refund_failed":
-      if (r) r.status = "failed";
+      if (r) {
+        r.status = "failed";
+        r.return_needed_cents = Number(r.reversal_cents ?? 0);
+      }
       return { data: "failed", error: null };
+    case "refund_share_returned":
+      if (r) {
+        r.returned_at = "2026-10-14T00:00:00Z";
+        r.return_needed_cents = 0;
+      }
+      return { data: null, error: null };
     case "refund_abandoned":
       if (r && r.status === "requested") r.status = "canceled";
       return { data: null, error: null };
@@ -89,6 +101,9 @@ const refundRow = (over: Record<string, unknown> = {}) => ({
   reversal_needed_cents: 2200,
   payment_intent_id: "pi_1",
   transfer_id: "tr_1",
+  stripe_account_id: "acct_A1",
+  returned_at: null,
+  return_needed_cents: 0,
   ...over,
 });
 
@@ -105,26 +120,53 @@ const stripeRefund = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** Stripe's transfers, as the driver sees them: what each holds, and its reversals with Daybell's ids. */
+const transfers = new Map<
+  string,
+  { amount: number; reversals: { id: string; amount: number; key: string }[] }
+>();
 const provider = {
   createRefund: vi.fn(),
   retrieveRefund: vi.fn(),
-  transferRemaining: vi.fn(),
+  findRefund: vi.fn(),
   reverseForRefund: vi.fn(),
+  returnRefundShare: vi.fn(),
 };
+/** The real driver's rule: an earlier reversal for the refund (and sale) first, then at most what is left. */
+async function reverseLikeStripe(input: {
+  transferId: string;
+  neededCents: number;
+  refundId: string;
+  purpose: string;
+  orderId: string;
+}) {
+  const t = transfers.get(input.transferId);
+  if (!t) throw new Error("no transfer");
+  const key = `${input.purpose}:${input.refundId}:${input.purpose === "refund" ? "" : input.orderId}`;
+  const earlier = t.reversals.find((r) => r.key === key);
+  if (earlier) return { reversalId: earlier.id, amountCents: earlier.amount };
+  const left = t.amount - t.reversals.reduce((sum, r) => sum + r.amount, 0);
+  const amountCents = Math.min(input.neededCents, Math.max(0, left));
+  if (amountCents <= 0) return { reversalId: null, amountCents: 0 };
+  const id = `trr_${t.reversals.length + 1}`;
+  t.reversals.push({ id, amount: amountCents, key });
+  return { reversalId: id, amountCents };
+}
 const asProvider = () => provider as unknown as Parameters<typeof runRefund>[1];
 let logs: ReturnType<typeof vi.spyOn>[] = [];
 
 beforeEach(() => {
   db.clear();
   notes.length = 0;
+  transfers.clear();
+  transfers.set("tr_1", { amount: 12_253, reversals: [] });
+  transfers.set("tr_sale", { amount: 300, reversals: [] });
   call.mockImplementation(database);
   provider.createRefund.mockResolvedValue(stripeRefund());
   provider.retrieveRefund.mockResolvedValue(stripeRefund());
-  provider.transferRemaining.mockResolvedValue({ remainingCents: 12_253, currency: "cad" });
-  provider.reverseForRefund.mockImplementation(async (input: { amountCents: number }) => ({
-    reversalId: "trr_1",
-    amountCents: input.amountCents,
-  }));
+  provider.findRefund.mockResolvedValue(null);
+  provider.reverseForRefund.mockImplementation(reverseLikeStripe);
+  provider.returnRefundShare.mockResolvedValue({ transferId: "tr_back" });
   logs = (["log", "warn", "error"] as const).map((m) =>
     vi.spyOn(console, m).mockImplementation(() => {}),
   );
@@ -154,7 +196,7 @@ describe("runRefund (Q1)", () => {
     // 2,260 less Daybell's 60: the studio gives back 2,200 from its transfer.
     expect(provider.reverseForRefund).toHaveBeenCalledWith({
       transferId: "tr_1",
-      amountCents: 2200,
+      neededCents: 2200,
       refundId: R,
       purpose: "refund",
       orderId: ORDER,
@@ -181,9 +223,8 @@ describe("runRefund (Q1)", () => {
       refundRow({ amount_cents: 10_390, daybell_fee_cents: 240, reversal_needed_cents: 10_150 }),
     );
     provider.createRefund.mockResolvedValue(stripeRefund({ amountCents: 10_390 }));
-    provider.transferRemaining.mockResolvedValue({ remainingCents: 10_053, currency: "cad" });
+    transfers.set("tr_1", { amount: 10_053, reversals: [] });
     await runRefund("ca", asProvider(), R);
-    expect(provider.reverseForRefund.mock.calls[0]?.[0]).toMatchObject({ amountCents: 10_053 });
     expect(notes).toContainEqual([
       "refund_recovered",
       { p_refund_id: R, p_reversal_id: "trr_1", p_cents: 10_053 },
@@ -193,9 +234,8 @@ describe("runRefund (Q1)", () => {
 
   it("records a reversal of nothing when the transfer is empty", async () => {
     db.set(R, refundRow());
-    provider.transferRemaining.mockResolvedValue({ remainingCents: 0, currency: "cad" });
+    transfers.set("tr_1", { amount: 0, reversals: [] });
     await runRefund("ca", asProvider(), R);
-    expect(provider.reverseForRefund).not.toHaveBeenCalled();
     expect(notes).toContainEqual([
       "refund_recovered",
       { p_refund_id: R, p_reversal_id: null, p_cents: 0 },
@@ -212,6 +252,68 @@ describe("runRefund (Q1)", () => {
     provider.reverseForRefund.mockClear();
     expect(await runRefund("ca", asProvider(), R)).toBe("succeeded");
     expect(provider.reverseForRefund).not.toHaveBeenCalled();
+  });
+
+  it("resumes after a reversal was made but its record lost, the transfer now empty: no shortfall (code review B1)", async () => {
+    db.set(
+      R,
+      refundRow({ amount_cents: 10_390, daybell_fee_cents: 240, reversal_needed_cents: 10_150 }),
+    );
+    provider.createRefund.mockResolvedValue(stripeRefund({ amountCents: 10_390 }));
+    transfers.set("tr_1", { amount: 10_053, reversals: [] });
+    // The first run makes the reversal of 10,053, then the database write is lost.
+    call.mockImplementation((fn: string, args: Record<string, unknown>) =>
+      fn === "refund_recovered" ? { data: null, error: { code: "57014" } } : database(fn, args),
+    );
+    await expect(runRefund("ca", asProvider(), R)).rejects.toThrow();
+    expect(transfers.get("tr_1")?.reversals).toHaveLength(1);
+    // The retry finds that reversal, though the transfer holds nothing now: 10,053 recorded, 97 owed, not 10,150.
+    call.mockImplementation(database);
+    notes.length = 0;
+    await runRefund("ca", asProvider(), R);
+    expect(notes).toContainEqual([
+      "refund_recovered",
+      { p_refund_id: R, p_reversal_id: "trr_1", p_cents: 10_053 },
+    ]);
+    expect(transfers.get("tr_1")?.reversals).toHaveLength(1);
+  });
+
+  it("finds a refund Stripe made though its answer was refused, and never cancels it (security review S1)", async () => {
+    db.set(R, refundRow());
+    provider.createRefund.mockRejectedValueOnce(
+      new StripeCallError("x", "other", "refused", undefined, "StripeInvalidRequestError"),
+    );
+    provider.findRefund.mockResolvedValue(stripeRefund({ id: "re_raced" }));
+    expect(await runRefund("ca", asProvider(), R)).toBe("succeeded");
+    expect(provider.findRefund).toHaveBeenCalledWith("pi_1", R);
+    expect(notes.map((n) => n[0])).not.toContain("refund_abandoned");
+    expect(notes).toContainEqual([
+      "refund_accepted",
+      { p_refund_id: R, p_stripe_refund_id: "re_raced", p_stripe_status: "succeeded" },
+    ]);
+  });
+
+  it("sends the share back to the studio when a refund fails after its reversal (Q7)", async () => {
+    db.set(R, refundRow({ status: "pending", stripe_refund_id: "re_1", reversal_cents: 2200 }));
+    provider.retrieveRefund.mockResolvedValue(
+      stripeRefund({ status: "failed", failureReason: "expired_or_canceled_card" }),
+    );
+    expect(await runRefund("ca", asProvider(), R)).toBe("failed");
+    expect(provider.returnRefundShare).toHaveBeenCalledWith({
+      accountId: "acct_A1",
+      amountCents: 2200,
+      currency: "cad",
+      refundId: R,
+      orderId: ORDER,
+    });
+    expect(notes).toContainEqual([
+      "refund_share_returned",
+      { p_refund_id: R, p_transfer_id: "tr_back", p_cents: 2200 },
+    ]);
+    // Again (the cron): nothing more to send.
+    provider.returnRefundShare.mockClear();
+    expect(await runRefund("ca", asProvider(), R)).toBe("failed");
+    expect(provider.returnRefundShare).not.toHaveBeenCalled();
   });
 
   it("mirrors a refund Stripe then says failed", async () => {
@@ -320,7 +422,7 @@ describe("tryRefund and the studio's refund", () => {
 });
 
 describe("Stripe's word on a refund (the webhook)", () => {
-  it("keeps a refund made outside Daybell on the order as a problem for support", async () => {
+  it("keeps a refund made outside Daybell on the order and flags it, which rings the bell (security review S5)", async () => {
     expect(
       await syncStripeRefund("ca", asProvider(), ORDER, stripeRefund({ refundId: null }) as never),
     ).toBe("external");
@@ -328,6 +430,21 @@ describe("Stripe's word on a refund (the webhook)", () => {
       "note_checkout_failure",
       { p_order_id: ORDER, p_code: "external_refund", p_permanent: true },
     ]);
+    expect(notes).toContainEqual(["order_external_refund", { p_order_id: ORDER }]);
+  });
+
+  it("treats a refund Stripe made after Daybell gave it up as a problem, alerted, never synced (security review S1)", async () => {
+    db.set(R, refundRow({ status: "canceled" }));
+    expect(await syncStripeRefund("ca", asProvider(), ORDER, stripeRefund() as never)).toBe(
+      "external",
+    );
+    expect(notes).toContainEqual([
+      "note_refund_failure",
+      { p_refund_id: R, p_code: "refund_after_abandoned", p_permanent: true },
+    ]);
+    expect(notes).toContainEqual(["order_external_refund", { p_order_id: ORDER }]);
+    expect(logged()).toContain("refund_made_after_abandoned");
+    expect(provider.createRefund).not.toHaveBeenCalled();
   });
 
   it("takes Daybell's own as far as it goes, then fails it if Stripe says so", async () => {
@@ -349,21 +466,18 @@ describe("Stripe's word on a refund (the webhook)", () => {
 
 describe("recoverShortfalls (Q2)", () => {
   it("takes what is owed from a later sale's transfer, oldest first, as far as it goes", async () => {
-    provider.transferRemaining
-      .mockResolvedValueOnce({ remainingCents: 300, currency: "cad" })
-      .mockResolvedValueOnce({ remainingCents: 203, currency: "cad" });
     expect(await recoverShortfalls("ca", asProvider(), SALE, "tr_sale")).toBe(2);
     expect(provider.reverseForRefund.mock.calls.map((c) => c[0])).toEqual([
       {
         transferId: "tr_sale",
-        amountCents: 97,
+        neededCents: 97,
         refundId: R,
         purpose: "refund_shortfall",
         orderId: SALE,
       },
       {
         transferId: "tr_sale",
-        amountCents: 203,
+        neededCents: 500,
         refundId: "aaaa0000-0000-4000-8000-000000000002",
         purpose: "refund_shortfall",
         orderId: SALE,
@@ -373,10 +487,42 @@ describe("recoverShortfalls (Q2)", () => {
       "refund_shortfall_recovered",
       { p_refund_id: R, p_order_id: SALE, p_cents: 97, p_reversal_id: "trr_1" },
     ]);
+    expect(notes).toContainEqual([
+      "refund_shortfall_recovered",
+      {
+        p_refund_id: "aaaa0000-0000-4000-8000-000000000002",
+        p_order_id: SALE,
+        p_cents: 203,
+        p_reversal_id: "trr_2",
+      },
+    ]);
+  });
+
+  it("stops once the transfer is empty", async () => {
+    transfers.set("tr_sale", { amount: 97, reversals: [] });
+    expect(await recoverShortfalls("ca", asProvider(), SALE, "tr_sale")).toBe(1);
+  });
+
+  it("records an earlier recovery whose record was lost, though it emptied the transfer (code review B1)", async () => {
+    transfers.set("tr_sale", { amount: 97, reversals: [] });
+    call.mockImplementation((fn: string, args: Record<string, unknown>) =>
+      fn === "refund_shortfall_recovered"
+        ? { data: null, error: { code: "57014" } }
+        : database(fn, args),
+    );
+    expect(await recoverShortfalls("ca", asProvider(), SALE, "tr_sale")).toBe(0);
+    call.mockImplementation(database);
+    notes.length = 0;
+    expect(await recoverShortfalls("ca", asProvider(), SALE, "tr_sale")).toBe(1);
+    expect(notes).toContainEqual([
+      "refund_shortfall_recovered",
+      { p_refund_id: R, p_order_id: SALE, p_cents: 97, p_reversal_id: "trr_1" },
+    ]);
+    expect(transfers.get("tr_sale")?.reversals).toHaveLength(1);
   });
 
   it("never fails the sale: a failure is logged by name", async () => {
-    provider.transferRemaining.mockRejectedValue(new Error("down"));
+    provider.reverseForRefund.mockRejectedValue(new Error("down"));
     expect(await recoverShortfalls("ca", asProvider(), SALE, "tr_sale")).toBe(0);
     expect(logged()).toBe('[["refund_shortfall_recovery_failed"]]');
   });

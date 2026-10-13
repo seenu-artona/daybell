@@ -204,6 +204,7 @@ export type ShopRpc =
   // Orders (ADR 0024): the payer's cancel, and "Download all".
   | "shop_order_cancel_begin"
   | "shop_order_download_all"
+  | "shop_zip_take"
   | "shop_download_all_request";
 
 export function shopRpc(region: DataRegion, fn: ShopRpc, args: Record<string, unknown>) {
@@ -247,7 +248,9 @@ export type OrderWriteRpc =
   | "undo_order_status"
   | "begin_refund"
   | "order_print_files"
-  | "order_print_files_to_make";
+  | "order_zip_take"
+  | "order_print_files_to_make"
+  | "check_external_refund";
 
 export function orderWriteRpc(
   region: DataRegion,
@@ -270,6 +273,8 @@ export type OrderSystemRpc =
   | "refund_settled"
   | "refund_failed"
   | "refund_abandoned"
+  | "refund_share_returned"
+  | "order_external_refund"
   | "note_refund_failure"
   | "refunds_to_retry"
   | "refund_shortfalls_for_sale"

@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const preferredRegion = "yul1";
 
 /**
- * GET /api/v1/orders?jobId=&status=&q=&cursor=&limit= — the studio's paid orders, newest first, a page at a time (ADR
+ * GET /api/v1/orders?jobId=&status=&delivery=&q=&cursor=&limit= — the studio's paid orders, newest first, a page at a time (ADR
  * 0024): reference, date, children (first name and last initial), items, total, status, delivery and the refund badge.
  * Owners, admins and staff (Q4); the database's row-level security says so too. `q` is the start of a reference only:
  * names are never searched, and never in a URL. Every query is filtered by the studio.
@@ -20,7 +20,7 @@ export const GET = handle(async (request: Request) => {
   const { supabase, studio } = await studioScope();
   assertCanSeeOrders(studio);
   assertFunctionRegion(studio.region);
-  const { jobId, status, q, limit, cursor } = parseQuery(request, orderListQuery);
+  const { jobId, status, delivery, q, limit, cursor } = parseQuery(request, orderListQuery);
   if (jobId) {
     const job = check(
       await supabase
@@ -38,6 +38,7 @@ export const GET = handle(async (request: Request) => {
       p_job_id: jobId ?? null,
       p_status: status ?? null,
       p_reference: q ?? null,
+      p_delivery: delivery ?? null,
       p_limit: limit + 1,
       p_cursor: cursor ?? null,
     }),

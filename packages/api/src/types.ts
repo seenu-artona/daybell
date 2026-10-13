@@ -1151,7 +1151,7 @@ export const notification = z
     id: z.uuid(),
     kind: z.enum(NOTIFICATION_KINDS).meta({
       description:
-        "job_selling, job_closed (everyone); payouts_active, payouts_restricted (owners and admins); photos_failed, tagging_ready (owners, admins and photographers); order_paid (owners, admins and staff); refund_failed, dispute_opened (owners and admins).",
+        "job_selling, job_closed (everyone); payouts_active, payouts_restricted (owners and admins); photos_failed, tagging_ready (owners, admins and photographers); order_paid (owners, admins and staff); refund_failed, dispute_opened, refund_external (owners and admins).",
     }),
     createdAt: z.iso.datetime({ offset: true }),
     readAt: z.iso.datetime({ offset: true }).nullable(),
@@ -1159,10 +1159,10 @@ export const notification = z
       .object({ id: z.uuid(), name: z.string() })
       .nullable()
       .meta({ description: "The job it is about, with its current name; null for payouts." }),
-    order: z
-      .object({ id: z.uuid(), reference: z.string() })
-      .nullable()
-      .meta({ description: "The order it is about (order_paid, refund_failed, dispute_opened)." }),
+    order: z.object({ id: z.uuid(), reference: z.string() }).nullable().meta({
+      description:
+        "The order it is about (order_paid, refund_failed, dispute_opened, refund_external).",
+    }),
     data: notificationData,
   })
   .meta({
@@ -1207,10 +1207,11 @@ export const cronJobsResponse = z.object({
   }),
   purgedAddresses: z.number().int().meta({
     description:
-      "Home delivery addresses removed: 90 days after shipping, or after payment once cancelled or refunded; 180 at most.",
+      "Home delivery addresses (and tracking numbers) removed: 90 days after shipping, or after payment once cancelled or refunded; 365 days after payment at most.",
   }),
   absorbedShortfalls: z.number().int().meta({
-    description: "Refund shortfalls no sale paid back within 180 days, absorbed by Daybell (Q2).",
+    description:
+      "Refund shortfalls still owed after 180 days without a settled sale to recover them from, absorbed by Daybell (Q2).",
   }),
 });
 export type CronJobsResponse = z.infer<typeof cronJobsResponse>;
@@ -1739,8 +1740,19 @@ export const studioOrderDetail = z
     canceledAt: z.iso.datetime({ offset: true }).nullable(),
     disputedAt: z.iso.datetime({ offset: true }).nullable(),
     shipToPurgedAt: z.iso.datetime({ offset: true }).nullable().meta({
-      description: "When the home delivery address was removed (90 days after shipping).",
+      description:
+        "When the home delivery address and tracking number were removed (90 days after shipping; 365 days after payment at most).",
     }),
+    externalRefund: z
+      .object({
+        at: z.iso.datetime({ offset: true }),
+        checkedAt: z.iso.datetime({ offset: true }).nullable(),
+      })
+      .nullable()
+      .meta({
+        description:
+          "A refund made outside Daybell (the Stripe Dashboard): fulfilment stops until an owner or admin marks it checked.",
+      }),
     tracking: tracking.nullable(),
     refund: refundBadge,
     refundInFlight: z.boolean().meta({ description: "A refund Stripe hasn't accepted yet." }),
@@ -1813,6 +1825,8 @@ export const ORDER_CONFLICTS = {
   nothingToRefund: "orders.nothingToRefund",
   /** Stripe refused the refund outright: nothing happened. */
   refundRefused: "orders.refundRefused",
+  /** A refund made outside Daybell must be checked by an owner or admin before fulfilment goes on. */
+  externalRefund: "orders.externalRefund",
 } as const;
 export type OrderConflict = (typeof ORDER_CONFLICTS)[keyof typeof ORDER_CONFLICTS];
 
@@ -1828,6 +1842,7 @@ export const ORDER_DB_REFUSALS: Record<string, keyof typeof ORDER_CONFLICTS> = {
   status_invalid: "statusInvalid",
   over_refund: "overRefund",
   nothing_to_refund: "nothingToRefund",
+  external_refund: "externalRefund",
 };
 
 export const bulkOrderStatusResponse = z

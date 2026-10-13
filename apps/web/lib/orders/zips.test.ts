@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Zips (ADR 0024): streamed one file at a time, in store mode, named by the order's reference, never a child; every
 // file must exist first (a missing one is asked for and the request answered 409 with Retry-After, never a partial
-// zip; one that can't be made is a 409 for good); at most 500 files; storage is asserted to the studio's region; the
-// print files carry a manifest.csv with no names.
+// zip; one that can't be made is a 409 for good); at most 500 files; a zip is counted against the limits only when it
+// is streamed (never on a 409); a browser that goes away stops the zip and the file being read; storage is asserted to
+// the studio's region; the print files carry a manifest.csv with no names.
 vi.mock("server-only", () => ({}));
 const { shopFn, writeRpc, heads, streams, queueDownloads, storageGuard } = vi.hoisted(() => ({
   shopFn: vi.fn(),
@@ -86,6 +87,37 @@ describe("zipResponse", () => {
     expect(zip.indexOf("PK\x05\x06")).toBeGreaterThan(0);
   });
 
+  it("stops at once when the browser goes away: the file being read is destroyed (security review S4)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const abort = new AbortController();
+    let second: Readable | null = null;
+    const res = zipResponse(
+      "x.zip",
+      [
+        { name: "a.jpg", open: async () => "first" },
+        {
+          name: "b.jpg",
+          // A file that never ends, as a slow storage read would.
+          open: async () => {
+            second = new Readable({ read() {} });
+            return second;
+          },
+        },
+        { name: "c.jpg", open: vi.fn(async () => "third") },
+      ],
+      abort.signal,
+    );
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    await reader.read();
+    await new Promise((r) => setTimeout(r, 20));
+    abort.abort();
+    await new Promise((r) => setTimeout(r, 20));
+    expect((second as Readable | null)?.destroyed).toBe(true);
+    expect(logs.mock.calls).toEqual([]);
+    expect(warn.mock.calls).toEqual([["zip_stopped"]]);
+    warn.mockRestore();
+  });
+
   it("cuts the stream when a file fails part way, and logs a fixed name", async () => {
     const res = zipResponse("x.zip", [
       { name: "a.jpg", open: async () => "first" },
@@ -117,6 +149,11 @@ describe("downloadAll (a parent's Download all)", () => {
     heads.add(key(P1)).add(key(P2));
     const res = await downloadAll(session, ORDER);
     expect(storageGuard).toHaveBeenCalledWith("ca");
+    expect(shopFn.mock.calls.map((c) => c[1])).toEqual([
+      "shop_order_download_all",
+      "shop_zip_take",
+    ]);
+    expect(shopFn.mock.calls[1]?.[2]).toEqual({ p_session_hash: "h", p_order_id: ORDER });
     const disposition = res.headers.get("content-disposition") ?? "";
     expect(disposition).toContain("7KQ2M9XA");
     const names = entryNames(await body(res));
@@ -137,6 +174,8 @@ describe("downloadAll (a parent's Download all)", () => {
     });
     expect(queueDownloads).toHaveBeenCalledWith("ca", [P2]);
     expect(streams).not.toHaveBeenCalled();
+    // A 409 never counts against the limit (code review N1).
+    expect(shopFn.mock.calls.map((c) => c[1])).not.toContain("shop_zip_take");
   });
 
   it("says a file that can't be made is unavailable, and refuses too many files or none", async () => {
@@ -188,6 +227,10 @@ describe("printFiles (the studio's)", () => {
     heads.add(key(P1));
     const zip = await body(await printFiles("ca", "actor", STUDIO, ORDER));
     expect(writeRpc).toHaveBeenCalledWith("ca", "order_print_files", "actor", {
+      p_studio_id: STUDIO,
+      p_order_id: ORDER,
+    });
+    expect(writeRpc).toHaveBeenCalledWith("ca", "order_zip_take", "actor", {
       p_studio_id: STUDIO,
       p_order_id: ORDER,
     });

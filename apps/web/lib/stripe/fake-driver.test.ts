@@ -180,8 +180,13 @@ describe("fakeDriver checkout (ADR 0023)", () => {
   });
 
   it("refunds and reverses like Stripe (ADR 0024): never more than was paid or transferred", async () => {
-    const { fakePayCheckout, fakeFailRefund, fakeOpenDispute, fakeTransferReversals } =
-      await import("./fake-driver");
+    const {
+      fakePayCheckout,
+      fakeFailRefund,
+      fakeOpenDispute,
+      fakeTransferReversals,
+      fakeShareReturn,
+    } = await import("./fake-driver");
     const fake = fakeDriver();
     const { id } = await fake.createCheckoutSession(params, "daybell-checkout-o-4");
     fakePayCheckout(id, {
@@ -224,30 +229,74 @@ describe("fakeDriver checkout (ADR 0023)", () => {
     });
     const reversal = await fake.reverseForRefund({
       transferId: tr,
-      amountCents: 900,
+      neededCents: 900,
       refundId: "r-1",
       purpose: "refund",
       orderId: "o-1",
     });
+    expect(reversal.amountCents).toBe(900);
     expect(
       await fake.reverseForRefund({
         transferId: tr,
-        amountCents: 900,
+        neededCents: 900,
         refundId: "r-1",
         purpose: "refund",
         orderId: "o-1",
       }),
     ).toEqual(reversal);
-    await expect(
-      fake.reverseForRefund({
+    // More than is left: what is left, then nothing once the transfer is empty (code review B1).
+    const rest = await fake.reverseForRefund({
+      transferId: tr,
+      neededCents: total,
+      refundId: "r-3",
+      purpose: "refund",
+      orderId: "o-1",
+    });
+    expect(rest.amountCents).toBe(total - 140 - 900);
+    expect(
+      await fake.reverseForRefund({
         transferId: tr,
-        amountCents: total,
+        neededCents: 50,
+        refundId: "r-4",
+        purpose: "refund",
+        orderId: "o-1",
+      }),
+    ).toEqual({ reversalId: null, amountCents: 0 });
+    // r-3's reversal is still found once the transfer is empty.
+    expect(
+      await fake.reverseForRefund({
+        transferId: tr,
+        neededCents: total,
         refundId: "r-3",
         purpose: "refund",
         orderId: "o-1",
       }),
-    ).rejects.toMatchObject({ outcome: "refused" });
-    expect(fakeTransferReversals(tr).map((r) => r.purpose)).toEqual(["card_fee", "refund"]);
+    ).toEqual(rest);
+    // A failed refund's share goes back to the studio once (Q7).
+    const back = await fake.returnRefundShare({
+      accountId: "acct_1",
+      amountCents: 900,
+      currency: "cad",
+      refundId: "r-1",
+      orderId: "o-1",
+    });
+    expect(
+      await fake.returnRefundShare({
+        accountId: "acct_1",
+        amountCents: 900,
+        currency: "cad",
+        refundId: "r-1",
+        orderId: "o-1",
+      }),
+    ).toEqual(back);
+    expect(fakeShareReturn("r-1")).toMatchObject({ account: "acct_1", amount: 900 });
+    expect(await fake.findRefund(pi, "r-1")).toMatchObject({ id: one.id });
+    expect(await fake.findRefund(pi, "r-9")).toBeNull();
+    expect(fakeTransferReversals(tr).map((r) => r.purpose)).toEqual([
+      "card_fee",
+      "refund",
+      "refund",
+    ]);
     // A refund Stripe fails later, and a dispute.
     expect(fakeFailRefund(one.id)?.status).toBe("failed");
     expect((await fake.retrieveRefund(one.id)).status).toBe("failed");

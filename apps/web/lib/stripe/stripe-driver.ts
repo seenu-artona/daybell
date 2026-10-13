@@ -85,8 +85,9 @@ function invalidFieldNames(raw: unknown): string {
 /**
  * Stripe errors that mean Stripe refused the request outright, so nothing was made (code review S1): invalid request
  * (400/404), authentication (401), permission (403) and rate limits (429; v1 and v2 classes). Anything else (5xx, a
- * timeout or lost connection, an idempotency conflict while the first request is still running, a non-Stripe error)
- * is "unknown": the request may have taken effect.
+ * timeout or lost connection, a non-Stripe error) is "unknown": the request may have taken effect. So is a 409
+ * `idempotency_key_in_use` (another request with the same key is still running), which Stripe sends as an invalid
+ * request (step 11 security review S1).
  */
 const REFUSALS = new Set([
   "StripeInvalidRequestError",
@@ -111,7 +112,9 @@ function failed(stage: StripeStage, err: unknown): never {
   // v2 names the fields it refused (e.g. "the Account must have a contact email"): their names only (step 7c).
   if (code === "invalid_fields" || rawType === "invalid_fields")
     console.error("stripe_invalid_fields", stage, invalidFieldNames(stripeError?.raw));
-  const outcome: StripeOutcome = stripeError && REFUSALS.has(type) ? "refused" : "unknown";
+  const inUse = code === "idempotency_key_in_use" || stripeError?.statusCode === 409;
+  const outcome: StripeOutcome =
+    stripeError && REFUSALS.has(type) && !inUse ? "refused" : "unknown";
   if (PLATFORM_SETUP_CODES.has(code) || PLATFORM_SETUP_CODES.has(rawType))
     throw new StripeCallError(
       "Daybell's Stripe platform setup isn't finished. Please contact Daybell support.",
@@ -443,6 +446,12 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
     async retrieveRefund(stripeRefundId) {
       return refundFacts(await call(stripe.refunds.retrieve(stripeRefundId)));
     },
+    async findRefund(paymentIntentId, refundId) {
+      const found = (await call(allRefunds(stripe, paymentIntentId))).find(
+        (r) => r.metadata?.daybell_refund_id === refundId,
+      );
+      return found ? refundFacts(found) : null;
+    },
     async transferRemaining(transferId) {
       const transfer = await call(stripe.transfers.retrieve(transferId));
       return {
@@ -450,13 +459,23 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
         currency: transfer.currency,
       };
     },
-    async reverseForRefund({ transferId, amountCents, refundId, purpose, orderId }) {
+    async reverseForRefund({ transferId, neededCents, refundId, purpose, orderId }) {
+      // An earlier reversal first, before looking at what is left (code review B1: the first try may have emptied the
+      // transfer and lost its answer).
       const earlier = await call(allReversals(stripe, transferId));
       const found = earlier.find(
         (r) =>
-          r.metadata?.daybell_refund_id === refundId && r.metadata?.daybell_purpose === purpose,
+          r.metadata?.daybell_refund_id === refundId &&
+          r.metadata?.daybell_purpose === purpose &&
+          (purpose === "refund" || r.metadata?.daybell_order_id === orderId),
       );
       if (found) return { reversalId: found.id, amountCents: found.amount };
+      const transfer = await call(stripe.transfers.retrieve(transferId));
+      const amountCents = Math.min(
+        neededCents,
+        Math.max(0, transfer.amount - transfer.amount_reversed),
+      );
+      if (amountCents <= 0) return { reversalId: null, amountCents: 0 };
       const reversal = await call(
         stripe.transfers.createReversal(
           transferId,
@@ -477,6 +496,33 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
         ),
       );
       return { reversalId: reversal.id, amountCents: reversal.amount };
+    },
+    async returnRefundShare({ accountId, amountCents, currency, refundId, orderId }) {
+      // Once per refund: one made by an earlier try (even after Stripe's key expired) is found by its transfer group
+      // (the refund's own) first.
+      const group = `daybell-refund-return-${refundId}`;
+      const earlier = await call(stripe.transfers.list({ transfer_group: group, limit: 10 }));
+      const found = earlier.data.find(
+        (t) => t.metadata?.daybell_refund_id === refundId && t.destination === accountId,
+      );
+      if (found) return { transferId: found.id };
+      const transfer = await call(
+        stripe.transfers.create(
+          {
+            amount: amountCents,
+            currency,
+            destination: accountId,
+            transfer_group: group,
+            metadata: {
+              daybell_refund_id: refundId,
+              daybell_order_id: orderId,
+              daybell_purpose: "refund_return",
+            },
+          },
+          { idempotencyKey: `daybell-refund-return-${refundId}` },
+        ),
+      );
+      return { transferId: transfer.id };
     },
     async retrievePaymentIntentIds(paymentIntentId) {
       const intent = await call(stripe.paymentIntents.retrieve(paymentIntentId));

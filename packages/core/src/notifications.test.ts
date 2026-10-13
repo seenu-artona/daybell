@@ -25,6 +25,7 @@ describe("notification audience (ADR 0021, call 4)", () => {
       order_paid: ["owner", "admin", "staff"],
       refund_failed: ["owner", "admin"],
       dispute_opened: ["owner", "admin"],
+      refund_external: ["owner", "admin"],
     });
     expect(Object.keys(NOTIFICATION_AUDIENCE)).toEqual([...NOTIFICATION_KINDS]);
     expect(hearsAbout("outsider", "job_selling")).toBe(false);
@@ -38,6 +39,7 @@ describe("notification audience (ADR 0021, call 4)", () => {
       "payouts",
       "jobFailedPhotos",
       "jobReview",
+      "order",
       "order",
       "order",
       "order",

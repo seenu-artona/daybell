@@ -20,5 +20,5 @@ export const GET = shopHandle(async (request: Request, ctx: Ctx) => {
   const session = await requireShopSession(request);
   const { orderId } = await ctx.params;
   if (!z.uuid().safeParse(orderId).success) throw new ApiError("not_found", "Order not found.");
-  return downloadAll(session, orderId);
+  return downloadAll(session, orderId, request.signal);
 });

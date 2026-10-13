@@ -75,10 +75,18 @@ interface FakeState {
     {
       amount: number;
       currency: string;
-      reversals: { id: string; amount: number; refundId: string | null; purpose: string }[];
+      reversals: {
+        id: string;
+        amount: number;
+        refundId: string | null;
+        purpose: string;
+        orderId: string | null;
+      }[];
     }
   >;
   refunds: Map<string, RefundFacts>;
+  /** Failed refunds' shares sent back to studios (Q7), by Daybell's refund. */
+  returns: Map<string, { id: string; account: string; amount: number; currency: string }>;
   disputes: Map<string, string>;
 }
 
@@ -101,6 +109,7 @@ function state(): FakeState {
     transfers: new Map(),
     refunds: new Map(),
     disputes: new Map(),
+    returns: new Map(),
   };
   return g[STATE];
 }
@@ -316,6 +325,7 @@ export function fakeDriver(): PaymentsProvider {
         amount: amountCents,
         refundId: null,
         purpose: "card_fee",
+        orderId,
       });
       return { reversalId: id };
     },
@@ -355,6 +365,13 @@ export function fakeDriver(): PaymentsProvider {
       if (!found) throw new Error("fake_stripe_no_refund");
       return found;
     },
+    async findRefund(paymentIntentId, refundId) {
+      return (
+        [...state().refunds.values()].find(
+          (r) => r.paymentIntentId === paymentIntentId && r.refundId === refundId,
+        ) ?? null
+      );
+    },
     async transferRemaining(transferId) {
       const transfer = state().transfers.get(transferId);
       if (!transfer) throw new Error("fake_stripe_no_transfer");
@@ -364,18 +381,31 @@ export function fakeDriver(): PaymentsProvider {
         currency: transfer.currency,
       };
     },
-    async reverseForRefund({ transferId, amountCents, refundId, purpose }) {
+    async reverseForRefund({ transferId, neededCents, refundId, purpose, orderId }) {
       const transfer = state().transfers.get(transferId);
       if (!transfer) throw new Error("fake_stripe_no_transfer");
       const earlier = transfer.reversals.find(
-        (r) => r.refundId === refundId && r.purpose === purpose,
+        (r) =>
+          r.refundId === refundId &&
+          r.purpose === purpose &&
+          (purpose === "refund" || r.orderId === orderId),
       );
       if (earlier) return { reversalId: earlier.id, amountCents: earlier.amount };
       const reversed = transfer.reversals.reduce((sum, r) => sum + r.amount, 0);
-      if (amountCents < 1 || reversed + amountCents > transfer.amount) throw refusedByStripe();
+      const amountCents = Math.min(neededCents, Math.max(0, transfer.amount - reversed));
+      if (amountCents <= 0) return { reversalId: null, amountCents: 0 };
       const id = fakeId("trr");
-      transfer.reversals.push({ id, amount: amountCents, refundId, purpose });
+      transfer.reversals.push({ id, amount: amountCents, refundId, purpose, orderId });
       return { reversalId: id, amountCents };
+    },
+    async returnRefundShare({ accountId, amountCents, currency, refundId }) {
+      const returns = state().returns;
+      const earlier = returns.get(refundId);
+      if (earlier) return { transferId: earlier.id };
+      if (!Number.isSafeInteger(amountCents) || amountCents < 1) throw refusedByStripe();
+      const id = fakeId("tr");
+      returns.set(refundId, { id, account: accountId, amount: amountCents, currency });
+      return { transferId: id };
     },
     async retrievePaymentIntentIds(paymentIntentId) {
       const payment = state().payments.get(paymentIntentId);
@@ -533,10 +563,21 @@ export function fakeOpenDispute(paymentIntentId: string): string {
 }
 
 /** A transfer's reversals (tests): the card fee's, refunds' and shortfalls'. */
-export function fakeTransferReversals(
-  transferId: string,
-): { id: string; amount: number; refundId: string | null; purpose: string }[] {
+export function fakeTransferReversals(transferId: string): {
+  id: string;
+  amount: number;
+  refundId: string | null;
+  purpose: string;
+  orderId: string | null;
+}[] {
   return state().transfers.get(transferId)?.reversals ?? [];
+}
+
+/** A failed refund's share sent back to the studio (tests; Q7). */
+export function fakeShareReturn(
+  refundId: string,
+): { id: string; account: string; amount: number; currency: string } | null {
+  return state().returns.get(refundId) ?? null;
 }
 
 /** The card fee recovered for an order (tests). */

@@ -116,6 +116,8 @@ const DETAIL = {
   canceled_at: null,
   disputed_at: null,
   ship_to_purged_at: null,
+  external_refund_at: null,
+  external_refund_checked_at: null,
   tracking: { carrier: "ups", number: "1Z999", url: null },
   refund_state: {
     badge: "partly_refunded",
@@ -235,6 +237,7 @@ describe("GET /orders (Q4)", () => {
         p_job_id: null,
         p_status: "printed",
         p_reference: "7KQ2M9",
+        p_delivery: null,
         p_limit: 2,
         p_cursor: null,
       });
@@ -248,6 +251,13 @@ describe("GET /orders (Q4)", () => {
     expect(db.rpc.mock.calls[0]?.[1]).toMatchObject({ p_job_id: JOB });
     signIn("owner", {}, { jobs: null });
     expect((await list(`jobId=${JOB}`)).status).toBe(404);
+  });
+
+  it("narrows to one delivery (code review N3), and refuses another", async () => {
+    const db = signIn("staff", { studio_orders: [] });
+    expect((await list("status=printed&delivery=home")).status).toBe(200);
+    expect(db.rpc.mock.calls[0]?.[1]).toMatchObject({ p_status: "printed", p_delivery: "home" });
+    expect((await list("delivery=drone")).status).toBe(400);
   });
 
   it("refuses photographers (Q4), and a search that isn't a reference", async () => {
@@ -405,6 +415,52 @@ describe("tracking, undo and bulk", () => {
       p_order_id: ORDER,
       p_reason: "wrong_tracking",
     });
+  });
+
+  it("lets owners and admins mark a refund made outside Daybell checked, never staff (security review S5)", async () => {
+    const checked = async () =>
+      (await import("./orders/[id]/external-refund/checked/route")).POST(
+        new Request("http://localhost/api/v1/orders/x/external-refund/checked", { method: "POST" }),
+        ctx(),
+      );
+    signIn("staff");
+    expect((await checked()).status).toBe(403);
+    signIn("owner", {
+      studio_order: {
+        ...DETAIL,
+        external_refund_at: "2026-10-16T12:00:00Z",
+        external_refund_checked_at: "2026-10-16T13:00:00Z",
+      },
+    });
+    const res = await checked();
+    expect(res.status).toBe(200);
+    expect((await res.json()).order.externalRefund).toEqual({
+      at: "2026-10-16T12:00:00.000Z",
+      checkedAt: "2026-10-16T13:00:00.000Z",
+    });
+    expect(writeRpc).toHaveBeenCalledWith("ca", "check_external_refund", USER, {
+      p_studio_id: STUDIO,
+      p_order_id: ORDER,
+    });
+    writeRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "P0001", message: "status_invalid" },
+    });
+    expect((await checked()).status).toBe(409);
+  });
+
+  it("refuses fulfilment while a refund made outside Daybell isn't checked", async () => {
+    signIn("staff", { studio_order: DETAIL });
+    writeRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "P0001", message: "external_refund" },
+    });
+    const res = await (await import("./orders/[id]/status/route")).POST(
+      json("POST", { status: "printed" }),
+      ctx(),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.fields).toEqual({ form: "orders.externalRefund" });
   });
 
   it("marks orders in bulk, each on its own, and says each one's outcome as a code", async () => {
@@ -600,6 +656,12 @@ describe("GET /orders/:id/print-files", () => {
     signIn("staff");
     zips.printFiles.mockResolvedValue(new Response("zip", { status: 200 }));
     expect((await get()).status).toBe(200);
-    expect(zips.printFiles).toHaveBeenCalledWith("ca", USER, STUDIO, ORDER);
+    expect(zips.printFiles).toHaveBeenCalledWith(
+      "ca",
+      USER,
+      STUDIO,
+      ORDER,
+      expect.any(AbortSignal),
+    );
   });
 });

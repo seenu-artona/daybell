@@ -15,9 +15,9 @@ type Ctx = { params: Promise<{ id: string }> };
  * owners, admins and staff): each line left to print as <reference>-<line>-<size>-x<quantity>.jpg and a manifest.csv
  * with no names. 409 with Retry-After while a file is being made; at most 10 zips a person an hour.
  */
-export const GET = handle(async (_request: Request, ctx: Ctx) => {
+export const GET = handle(async (request: Request, ctx: Ctx) => {
   const { studio, userId } = await studioScope();
   assertCanSeeOrders(studio);
   const id = await pathId(ctx, "Order not found.");
-  return printFiles(studio.region, userId, studio.id, id);
+  return printFiles(studio.region, userId, studio.id, id, request.signal);
 });

@@ -1085,6 +1085,10 @@ export const orderListQuery = listQuery.extend({
   q: referenceSearch.optional().meta({
     description: "The start of an order's reference, e.g. 7KQ2 or 7KQ2-M9XA. References only.",
   }),
+  delivery: z.enum(SHOP_SHIPPING_METHODS, { error: "validation.invalid" }).optional().meta({
+    description:
+      "Only home delivery or delivery to school. With status paid or printed (what is waiting), fully refunded orders are left out.",
+  }),
 });
 export type OrderListQuery = z.infer<typeof orderListQuery>;
 
@@ -1183,38 +1187,44 @@ const refundCommon = {
 
 /**
  * A refund (owners and admins, answer 3): by line and quantity, or a custom amount of products before tax (Q3); tax is
- * added pro rata and Daybell's fee on it given back (answer 1).
+ * added pro rata and Daybell's fee on it given back (answer 1). By line with no lines and the shipping is a
+ * shipping-only refund.
  */
 export const refundInput = z.discriminatedUnion(
   "kind",
   [
-    z.strictObject(
-      {
-        kind: z.literal("lines"),
-        lines: z
-          .array(
-            z.strictObject(
-              {
-                lineId: z.uuid({ error: "validation.invalid" }),
-                quantity: z
-                  .number({ error: "validation.quantity" })
-                  .int({ error: "validation.quantity" })
-                  .min(1, { error: "validation.quantity" })
-                  .max(99, { error: "validation.quantity" }),
-              },
-              { error: "validation.unknownField" },
-            ),
-            { error: "validation.refundLines" },
-          )
-          .min(1, { error: "validation.refundLines" })
-          .max(100, { error: "validation.refundLines" })
-          .refine((l) => new Set(l.map((x) => x.lineId)).size === l.length, {
-            error: "validation.refundLines",
-          }),
-        ...refundCommon,
-      },
-      { error: "validation.unknownField" },
-    ),
+    z
+      .strictObject(
+        {
+          kind: z.literal("lines"),
+          lines: z
+            .array(
+              z.strictObject(
+                {
+                  lineId: z.uuid({ error: "validation.invalid" }),
+                  quantity: z
+                    .number({ error: "validation.quantity" })
+                    .int({ error: "validation.quantity" })
+                    .min(1, { error: "validation.quantity" })
+                    .max(99, { error: "validation.quantity" }),
+                },
+                { error: "validation.unknownField" },
+              ),
+              { error: "validation.refundLines" },
+            )
+            .max(100, { error: "validation.refundLines" })
+            .refine((l) => new Set(l.map((x) => x.lineId)).size === l.length, {
+              error: "validation.refundLines",
+            }),
+          ...refundCommon,
+        },
+        { error: "validation.unknownField" },
+      )
+      .superRefine((v, ctx) => {
+        // No lines is a shipping-only refund (code review S5); without the shipping it is nothing.
+        if (v.lines.length === 0 && !v.shipping)
+          ctx.addIssue({ code: "custom", path: ["lines"], message: "validation.refundLines" });
+      }),
     z.strictObject(
       {
         kind: z.literal("custom"),

@@ -2,15 +2,14 @@ import "server-only";
 import { timingSafeEqual } from "node:crypto";
 import { ApiError } from "@daybell/api";
 import { type DataRegion, isDataRegion, regionDatabase } from "@daybell/config";
-import { cronSecrets, photoWorkerSecrets } from "@daybell/config/server";
+import { cronSecret, photoWorkerSecrets } from "@daybell/config/server";
 import { verifyWorkerRequest, WORKER_REGION_HEADER, WORKER_SIGNATURE_HEADER } from "@daybell/core";
 import { assertFunctionRegion, assertStorageRegion } from "./region-guard";
 
 /**
  * Who may call the internal routes (ADR 0016): the image worker, by an HMAC-SHA256 signature over the time, region,
- * method, path and body; and the cron callers, by CRON_SECRET (Vercel Cron) or GITHUB_CRON_SECRET (GitHub Actions; ADR
- * 0021). Nobody signed in, and no browser. Refusals log a fixed
- * event name only.
+ * method, path and body; and Vercel Cron, by CRON_SECRET (the GitHub Actions token was retired in step 11: ADR 0024,
+ * security review S2). Nobody signed in, and no browser. Refusals log a fixed event name only.
  */
 
 const REFUSED = () => new ApiError("not_signed_in", "Not allowed.");
@@ -83,22 +82,19 @@ function sameSecret(given: Buffer, wanted: Buffer): boolean {
 }
 
 /**
- * Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`; GitHub Actions sends its own GITHUB_CRON_SECRET (security
- * review M1, ADR 0021), so each can be rotated or revoked alone. Every accepted secret is compared, each in constant
- * time, whichever matches.
+ * Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`, compared in constant time. Only that one token: the cron
+ * moves money since step 11, and GitHub's retired token is no longer accepted (security review S2).
  */
 export function assertCron(request: Request): void {
-  let secrets: string[];
+  let secret: string;
   try {
-    secrets = cronSecrets();
+    secret = cronSecret();
   } catch (err) {
     console.error("cron_misconfigured", err instanceof Error ? err.message : "unknown");
     throw new ApiError("internal", "Something went wrong on our side.");
   }
   const given = Buffer.from(request.headers.get("authorization") ?? "");
-  let ok = false;
-  for (const secret of secrets) ok = sameSecret(given, Buffer.from(`Bearer ${secret}`)) || ok;
-  if (!ok) {
+  if (!sameSecret(given, Buffer.from(`Bearer ${secret}`))) {
     console.error("cron_refused");
     throw REFUSED();
   }

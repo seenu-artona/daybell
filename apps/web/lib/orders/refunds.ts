@@ -23,12 +23,21 @@ import { orderCheck, orderConflict } from "./errors";
  * 3. The studio's share (the refund less Daybell's fee on it) is taken back from the order's transfer: as much as is
  *    left in it (Stripe's card fee was reversed from it at payment, so a full refund usually falls short by about the
  *    card fee less Daybell's). What couldn't be is the shortfall, recovered from the studio's next settled sale (Q2).
- * runRefund is idempotent and resumable: the route, a parent's cancel, the webhook and the cron all call it. Logs hold
- * fixed names and codes only: never an amount, an id or a name.
+ *    A reversal an earlier try made is always found first (code review B1).
+ * 4. If Stripe then fails the refund, what the studio gave back is sent back to its account by a transfer (Q7).
+ * Stripe refusing the request outright is believed only after the payment's refunds are listed again and none is this
+ * one (security review S1). runRefund is idempotent and resumable: the route, a parent's cancel, the webhook and the
+ * cron all call it. Logs hold fixed names and codes only: never an amount, an id or a name.
  */
 
 export class RefundProblem extends Error {
-  constructor(readonly code: "refund_mismatch" | "payment_missing" | "refund_unexpected") {
+  constructor(
+    readonly code:
+      | "refund_mismatch"
+      | "payment_missing"
+      | "refund_unexpected"
+      | "refund_after_abandoned",
+  ) {
     super(code);
     this.name = "RefundProblem";
   }
@@ -49,6 +58,10 @@ interface DbRefundForStripe {
   reversal_needed_cents: number;
   payment_intent_id: string | null;
   transfer_id: string | null;
+  stripe_account_id: string | null;
+  returned_at: string | null;
+  /** What the studio gave back for a refund Stripe then failed, not yet sent back (Q7). */
+  return_needed_cents: number;
 }
 
 async function load(region: DataRegion, refundId: string): Promise<DbRefundForStripe> {
@@ -91,19 +104,16 @@ async function reverse(
   let reversalId: string | null = null;
   let cents = 0;
   if (needed > 0) {
-    const { remainingCents } = await provider.transferRemaining(r.transfer_id);
-    const amount = Math.min(needed, remainingCents);
-    if (amount > 0) {
-      const reversal = await provider.reverseForRefund({
-        transferId: r.transfer_id,
-        amountCents: amount,
-        refundId: r.refund_id,
-        purpose: "refund",
-        orderId: r.order_id,
-      });
-      reversalId = reversal.reversalId;
-      cents = reversal.amountCents;
-    }
+    // The driver finds an earlier reversal before it looks at what the transfer still holds (code review B1).
+    const reversal = await provider.reverseForRefund({
+      transferId: r.transfer_id,
+      neededCents: needed,
+      refundId: r.refund_id,
+      purpose: "refund",
+      orderId: r.order_id,
+    });
+    reversalId = reversal.reversalId;
+    cents = reversalId ? reversal.amountCents : 0;
   }
   const owed = Number(
     orderCheck(
@@ -118,9 +128,35 @@ async function reverse(
   if (owed > 0) console.warn("refund_shortfall");
 }
 
+/** A failed refund's share sent back to the studio's account (Q7), once. */
+async function returnShare(
+  region: DataRegion,
+  provider: PaymentsProvider,
+  r: DbRefundForStripe,
+): Promise<void> {
+  const cents = Number(r.return_needed_cents);
+  if (r.status !== "failed" || r.returned_at || cents <= 0) return;
+  if (!r.stripe_account_id) throw new RefundProblem("payment_missing");
+  const { transferId } = await provider.returnRefundShare({
+    accountId: r.stripe_account_id,
+    amountCents: cents,
+    currency: r.currency.toLowerCase(),
+    refundId: r.refund_id,
+    orderId: r.order_id,
+  });
+  orderCheck(
+    await orderSystemRpc(region, "refund_share_returned", {
+      p_refund_id: r.refund_id,
+      p_transfer_id: transferId,
+      p_cents: cents,
+    }),
+  );
+}
+
 /**
  * Takes a refund as far as it can go: made at Stripe, accepted here, its status from Stripe, the studio's share
- * reversed. Answers its status. A Stripe failure that may pass throws (the caller notes it; the cron retries).
+ * reversed (or, failed, sent back). Answers its status. A Stripe failure that may pass throws (the caller notes it;
+ * the cron retries).
  */
 export async function runRefund(
   region: DataRegion,
@@ -130,13 +166,18 @@ export async function runRefund(
   // D113: a Canadian studio's refund is asked of Stripe and written from Montréal only.
   assertFunctionRegion(region);
   let r = await load(region, refundId);
-  if (r.status === "failed" || r.status === "canceled") return r.status;
+  if (r.status === "canceled") return r.status;
+  if (r.status === "failed") {
+    await returnShare(region, provider, r);
+    return r.status;
+  }
   if (!r.payment_intent_id || !r.transfer_id) throw new RefundProblem("payment_missing");
+  const paymentIntentId = r.payment_intent_id;
   if (r.status === "requested") {
     let facts: RefundFacts;
     try {
       facts = await provider.createRefund({
-        paymentIntentId: r.payment_intent_id,
+        paymentIntentId,
         amountCents: Number(r.amount_cents),
         refundId: r.refund_id,
         orderId: r.order_id,
@@ -144,12 +185,19 @@ export async function runRefund(
         reason: stripeRefundReason(r.kind, r.reason),
       });
     } catch (err) {
-      // Refused for good (more than is left, an old charge): nothing happened, so it is cancelled and said so.
+      // Refused for good (more than is left, an old charge): nothing happened, so it is cancelled and said so. But
+      // only once the payment's refunds, listed again, hold none for this refund: a request racing another with the
+      // same key may be refused while the other made it (security review S1).
       if (
-        err instanceof StripeCallError &&
-        err.outcome === "refused" &&
-        err.stripeType === "StripeInvalidRequestError"
-      ) {
+        !(
+          err instanceof StripeCallError &&
+          err.outcome === "refused" &&
+          err.stripeType === "StripeInvalidRequestError"
+        )
+      )
+        throw err;
+      const made = await provider.findRefund(paymentIntentId, refundId);
+      if (!made) {
         orderCheck(
           await orderSystemRpc(region, "refund_abandoned", {
             p_refund_id: refundId,
@@ -158,7 +206,7 @@ export async function runRefund(
         );
         return "canceled";
       }
-      throw err;
+      facts = made;
     }
     if (
       facts.amountCents !== Number(r.amount_cents) ||
@@ -181,6 +229,7 @@ export async function runRefund(
     await reverse(region, provider, r);
     r = await load(region, refundId);
   }
+  await returnShare(region, provider, r);
   return r.status;
 }
 
@@ -274,20 +323,44 @@ export async function syncStripeRefund(
     : null;
   if (!ours) {
     console.error("refund_external");
-    const { error } = await checkoutSystemRpc(region, "note_checkout_failure", {
-      p_order_id: orderId,
-      p_code: "external_refund",
-      p_permanent: true,
-    });
-    if (error) console.error("refund_external_unrecorded");
+    await flagExternalRefund(region, orderId);
+    return "external";
+  }
+  const before = await load(region, ours);
+  const made = facts.status !== "failed" && facts.status !== "canceled";
+  if (
+    made &&
+    (before.status === "canceled" || (before.status === "failed" && !before.stripe_refund_id))
+  ) {
+    // Stripe made a refund Daybell had given up on: money moved with no ledger entry. Kept for support, alerted,
+    // and the order flagged like a refund made outside Daybell (security review S1).
+    console.error("refund_made_after_abandoned");
+    await noteRefundFailure(region, ours, new RefundProblem("refund_after_abandoned"));
+    await flagExternalRefund(region, orderId);
     return "external";
   }
   const status = await runRefund(region, provider, ours);
-  if (accepted(status) && (facts.status === "failed" || facts.status === "canceled"))
+  if (accepted(status) && (facts.status === "failed" || facts.status === "canceled")) {
     await applyStripeStatus(region, ours, facts);
-  else if (status === "pending" && facts.status === "succeeded")
+    // Failed after the studio's share was taken back: sent back now (Q7).
+    await runRefund(region, provider, ours);
+  } else if (status === "pending" && facts.status === "succeeded")
     await applyStripeStatus(region, ours, facts);
   return "synced";
+}
+
+/**
+ * A refund made outside Daybell (security review S5): kept on the order as a problem for support, and the order is
+ * flagged, which rings owners' and admins' bell and stops fulfilment until one of them marks it checked.
+ */
+async function flagExternalRefund(region: DataRegion, orderId: string): Promise<void> {
+  const noted = await checkoutSystemRpc(region, "note_checkout_failure", {
+    p_order_id: orderId,
+    p_code: "external_refund",
+    p_permanent: true,
+  });
+  const flagged = await orderSystemRpc(region, "order_external_refund", { p_order_id: orderId });
+  if (noted.error || flagged.error) console.error("refund_external_unrecorded");
 }
 
 /**
@@ -306,16 +379,16 @@ export async function recoverShortfalls(
       await orderSystemRpc(region, "refund_shortfalls_for_sale", { p_order_id: saleOrderId }),
     );
     for (const shortfall of owed) {
-      const { remainingCents } = await provider.transferRemaining(transferId);
-      const amount = Math.min(Number(shortfall.unrecovered_cents), remainingCents);
-      if (amount <= 0) break;
+      // An earlier reversal for this shortfall and sale is found first, even when it emptied the transfer (code
+      // review B1); otherwise at most what the transfer still holds.
       const reversal = await provider.reverseForRefund({
         transferId,
-        amountCents: amount,
+        neededCents: Number(shortfall.unrecovered_cents),
         refundId: shortfall.refund_id,
         purpose: "refund_shortfall",
         orderId: saleOrderId,
       });
+      if (!reversal.reversalId || reversal.amountCents <= 0) break;
       orderCheck(
         await orderSystemRpc(region, "refund_shortfall_recovered", {
           p_refund_id: shortfall.refund_id,

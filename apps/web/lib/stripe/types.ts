@@ -182,13 +182,27 @@ export interface RefundRequest {
   reason: "requested_by_customer" | "duplicate" | null;
 }
 
-/** The studio's share taken back from a transfer: for a refund, or a refund's shortfall from a later sale (Q2). */
+/**
+ * The studio's share taken back from a transfer: for a refund, or a refund's shortfall from a later sale (Q2). The
+ * driver takes what is needed or what the transfer still holds, whichever is less; an earlier reversal for the same
+ * refund, purpose and sale is found first (code review B1: a retry after the transfer was emptied finds it).
+ */
 export interface ReversalRequest {
   transferId: string;
-  amountCents: number;
+  neededCents: number;
   refundId: string;
   purpose: "refund" | "refund_shortfall";
   /** The sale whose transfer it comes from (a shortfall's), else the refunded order. */
+  orderId: string;
+}
+
+/** What a refund Stripe then failed had taken from the studio, sent back to its account (Q7). */
+export interface ShareReturnRequest {
+  accountId: string;
+  amountCents: number;
+  /** Lowercase, as Stripe writes it. */
+  currency: string;
+  refundId: string;
   orderId: string;
 }
 
@@ -260,10 +274,19 @@ export interface PaymentsProvider {
    */
   createRefund(input: RefundRequest): Promise<RefundFacts>;
   retrieveRefund(stripeRefundId: string): Promise<RefundFacts>;
+  /** One of the payment's refunds Daybell made for this refund (by its metadata), or null (security review S1). */
+  findRefund(paymentIntentId: string, refundId: string): Promise<RefundFacts | null>;
   /** What can still be taken back from a transfer: its amount less what was reversed already. */
   transferRemaining(transferId: string): Promise<{ remainingCents: number; currency: string }>;
-  /** Takes the studio's share back from a transfer, once per refund (and sale): an earlier one is found first. */
-  reverseForRefund(input: ReversalRequest): Promise<{ reversalId: string; amountCents: number }>;
+  /**
+   * Takes the studio's share back from a transfer, once per refund (and sale): an earlier one is found first, then at
+   * most what the transfer still holds is taken. No reversal (null) when the transfer holds nothing.
+   */
+  reverseForRefund(
+    input: ReversalRequest,
+  ): Promise<{ reversalId: string | null; amountCents: number }>;
+  /** Sends a failed refund's share back to the studio's account (Q7), once per refund: an earlier one is found first. */
+  returnRefundShare(input: ShareReturnRequest): Promise<{ transferId: string }>;
   /** A payment's ids and Daybell's, with its refunds. */
   retrievePaymentIntentIds(paymentIntentId: string): Promise<PaymentIntentIds>;
   /** A dispute's payment. */

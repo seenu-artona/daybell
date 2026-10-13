@@ -442,7 +442,6 @@ describe("GET /internal/cron/jobs", () => {
   const GITHUB = "g".repeat(40);
   beforeEach(() => {
     vi.stubEnv("CRON_SECRET", SECRET);
-    vi.stubEnv("GITHUB_CRON_SECRET", "");
     databases.regions = ["ca"];
   });
 
@@ -524,25 +523,11 @@ describe("GET /internal/cron/jobs", () => {
     expect(systemRpc.mock.calls.filter((c) => c[1] === "prune_shop")).toHaveLength(3);
   });
 
-  it("accepts GitHub's own secret once it is set, and Vercel's still (security review M1)", async () => {
+  it("never accepts the retired GitHub token, even if it is still set (step 11 security review S2)", async () => {
     systemRpc.mockResolvedValue({ data: 0, error: null });
-    expect((await cron(`Bearer ${GITHUB}`)).status).toBe(401);
-    for (const spy of logs) spy.mockClear();
     vi.stubEnv("GITHUB_CRON_SECRET", GITHUB);
-    expect((await cron(`Bearer ${GITHUB}`)).status).toBe(200);
+    expect((await cron(`Bearer ${GITHUB}`)).status).toBe(401);
     expect((await cron(`Bearer ${SECRET}`)).status).toBe(200);
-    expect((await cron(`Bearer ${GITHUB}x`)).status).toBe(401);
-    for (const spy of logs) spy.mockClear();
-  });
-
-  it("refuses everyone when GITHUB_CRON_SECRET is misconfigured, naming only the variable", async () => {
-    vi.stubEnv("GITHUB_CRON_SECRET", SECRET);
-    const res = await cron(`Bearer ${SECRET}`);
-    expect(res.status).toBe(500);
-    expect(systemRpc).not.toHaveBeenCalled();
-    const logged = JSON.stringify(logs.flatMap((spy) => spy.mock.calls));
-    expect(logged).toContain("GITHUB_CRON_SECRET must be different");
-    expect(logged).not.toContain(SECRET);
     for (const spy of logs) spy.mockClear();
   });
 

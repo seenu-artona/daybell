@@ -147,6 +147,8 @@ export interface DbStudioOrderDetail {
   canceled_at: string | null;
   disputed_at: string | null;
   ship_to_purged_at: string | null;
+  external_refund_at: string | null;
+  external_refund_checked_at: string | null;
   tracking: DbTracking | null;
   refund_state: {
     badge: RefundBadge | null;
@@ -224,6 +226,9 @@ export function toStudioOrderDetail(
     canceledAt: isoOrNull(row.canceled_at),
     disputedAt: isoOrNull(row.disputed_at),
     shipToPurgedAt: isoOrNull(row.ship_to_purged_at),
+    externalRefund: row.external_refund_at
+      ? { at: iso(row.external_refund_at), checkedAt: isoOrNull(row.external_refund_checked_at) }
+      : null,
     tracking: toTracking(row.tracking),
     refund: row.refund_state?.badge ?? null,
     refundInFlight: row.refund_state?.in_flight ?? false,

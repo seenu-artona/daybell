@@ -125,28 +125,6 @@ export function cronSecret(env: Record<string, string | undefined> = process.env
   return value;
 }
 
-/**
- * GITHUB_CRON_SECRET (optional; step 8 security review M1, ADR 0021): the bearer token GitHub Actions calls the cron
- * routes with (staging's hourly jobs cron), separate from Vercel's CRON_SECRET so each caller can be rotated or
- * revoked alone. At least 32 characters and different from CRON_SECRET. Null when unset: then only Vercel Cron gets in.
- */
-export function githubCronSecret(
-  env: Record<string, string | undefined> = process.env,
-): string | null {
-  const value = env.GITHUB_CRON_SECRET?.trim() ?? "";
-  if (!value) return null;
-  if (value.length < 32) throw new Error("GITHUB_CRON_SECRET must be at least 32 characters");
-  if (value === env.CRON_SECRET?.trim())
-    throw new Error("GITHUB_CRON_SECRET must be different from CRON_SECRET");
-  return value;
-}
-
-/** Every bearer token a cron route accepts: Vercel's CRON_SECRET, then GitHub's when it is set. */
-export function cronSecrets(env: Record<string, string | undefined> = process.env): string[] {
-  const github = githubCronSecret(env);
-  return github ? [cronSecret(env), github] : [cronSecret(env)];
-}
-
 // ── Payments: Stripe Connect (Phase 1 step 7; ADR 0020) ──────────────────────────────────────────────────────────────
 
 /**

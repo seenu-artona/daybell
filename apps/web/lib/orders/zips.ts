@@ -27,8 +27,10 @@ import { orderCheck } from "./errors";
  * region (D113: from Montréal, out of ca-central-1), one file at a time and never all in memory, in store mode (JPEGs
  * don't compress). Read with the download role, which may read download.jpg only (ADR 0023). Every file must exist
  * first: a missing one is asked for (lazily made, at most every 5 minutes and 3 times) and the request answered 409
- * with Retry-After, never a partial zip. Named by the order's reference, never a child. At most 500 files, 10 zips an
- * hour per gallery or person (the database counts). Logs hold fixed names only.
+ * with Retry-After, never a partial zip. Named by the order's reference, never a child. At most 500 files; 10 zips an
+ * hour per gallery or person and 20 per order (the database counts a zip only when it is streamed, never a 409:
+ * code review N1, security review S4). A browser that goes away stops the zip: the archive and the file being read
+ * are destroyed at once. Logs hold fixed names only.
  */
 
 interface ZipEntry {
@@ -37,23 +39,59 @@ interface ZipEntry {
   open: () => Promise<Readable | string>;
 }
 
-/** A zip streamed as it is made. A failure part way cuts the stream (the browser says the download failed). */
-export function zipResponse(filename: string, entries: readonly ZipEntry[]): Response {
+/**
+ * A zip streamed as it is made. A failure part way cuts the stream (the browser says the download failed). The
+ * request's signal, or the browser no longer reading (the stream cancelled), stops it: the archive is aborted and the
+ * file being read destroyed, so no storage stream stays open (security review S4).
+ */
+export function zipResponse(
+  filename: string,
+  entries: readonly ZipEntry[],
+  signal?: AbortSignal,
+): Response {
   const archive = archiver("zip", { store: true });
   const out = new PassThrough();
+  const stop = new AbortController();
+  let current: Readable | null = null;
+  let done = false;
+  const halt = () => {
+    if (stop.signal.aborted) return;
+    stop.abort();
+    current?.destroy();
+    archive.abort();
+    if (!out.destroyed) out.destroy();
+  };
   archive.on("warning", () => console.error("zip_warning"));
   archive.pipe(out);
+  out.on("close", () => {
+    if (!done) halt();
+  });
+  if (signal) {
+    if (signal.aborted) halt();
+    else signal.addEventListener("abort", halt, { once: true });
+  }
   void (async () => {
     try {
       for (const entry of entries) {
+        if (stop.signal.aborted) return;
         const source = await entry.open();
+        current = typeof source === "string" ? null : source;
+        if (stop.signal.aborted) {
+          current?.destroy();
+          return;
+        }
         // One at a time: the next file is opened once archiver has taken this one (listened for before appending).
-        const taken = once(archive, "entry");
+        const taken = once(archive, "entry", { signal: stop.signal });
         archive.append(source, { name: entry.name });
         await taken;
       }
+      done = true;
       await archive.finalize();
     } catch {
+      if (stop.signal.aborted) {
+        console.warn("zip_stopped");
+        return;
+      }
       console.error("zip_failed");
       archive.abort();
       out.destroy(new Error("zip_failed"));
@@ -108,7 +146,11 @@ const tooBig = () =>
   });
 
 /** A parent's "Download all": every paid download this gallery may have, named as the single downloads are. */
-export async function downloadAll(session: ShopCookieSession, orderId: string): Promise<Response> {
+export async function downloadAll(
+  session: ShopCookieSession,
+  orderId: string,
+  signal?: AbortSignal,
+): Promise<Response> {
   const found = await callShopFunction<{
     studio_id: string;
     reference: string;
@@ -138,6 +180,11 @@ export async function downloadAll(session: ShopCookieSession, orderId: string): 
         p_photo_ids: lacking,
       }),
     );
+  // Counted only now, when it is streamed (zip_limit: 10 a gallery and 20 an order an hour).
+  await callShopFunction(session.region, "shop_zip_take", {
+    p_session_hash: session.hash,
+    p_order_id: orderId,
+  });
   const storage = photoDownloadStorage(session.region);
   return zipResponse(
     zipFileName(found.reference, "downloads"),
@@ -145,6 +192,7 @@ export async function downloadAll(session: ShopCookieSession, orderId: string): 
       name: zipEntryName(found.reference, f.n),
       open: () => storage.getStream(f.key),
     })),
+    signal,
   );
 }
 
@@ -168,6 +216,7 @@ export async function printFiles(
   actorId: string,
   studioId: string,
   orderId: string,
+  signal?: AbortSignal,
 ): Promise<Response> {
   assertFunctionRegion(region);
   const found = orderCheck<{ reference: string; files: DbPrintFile[] }>(
@@ -212,11 +261,22 @@ export async function printFiles(
     quantity: Number(f.quantity),
     contents: f.contents.map((c) => `${c.print_size} x${c.quantity}`).join("; "),
   }));
+  // Counted only now, when it is streamed (zip_limit: 10 a person and 20 an order an hour).
+  orderCheck(
+    await orderWriteRpc(region, "order_zip_take", actorId, {
+      p_studio_id: studioId,
+      p_order_id: orderId,
+    }),
+  );
   const storage = photoDownloadStorage(region);
-  return zipResponse(zipFileName(found.reference, "print-files"), [
-    ...files.flatMap((f) =>
-      f.key && f.file ? [{ name: f.file, open: () => storage.getStream(f.key as string) }] : [],
-    ),
-    { name: "manifest.csv", open: async () => printManifest(manifest) },
-  ]);
+  return zipResponse(
+    zipFileName(found.reference, "print-files"),
+    [
+      ...files.flatMap((f) =>
+        f.key && f.file ? [{ name: f.file, open: () => storage.getStream(f.key as string) }] : [],
+      ),
+      { name: "manifest.csv", open: async () => printManifest(manifest) },
+    ],
+    signal,
+  );
 }

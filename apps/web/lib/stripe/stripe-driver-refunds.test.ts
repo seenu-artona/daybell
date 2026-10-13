@@ -9,7 +9,13 @@ vi.mock("server-only", () => ({}));
 const { client } = vi.hoisted(() => ({
   client: {
     refunds: { list: vi.fn(), create: vi.fn(), retrieve: vi.fn() },
-    transfers: { retrieve: vi.fn(), listReversals: vi.fn(), createReversal: vi.fn() },
+    transfers: {
+      retrieve: vi.fn(),
+      listReversals: vi.fn(),
+      createReversal: vi.fn(),
+      list: vi.fn(),
+      create: vi.fn(),
+    },
     paymentIntents: { retrieve: vi.fn() },
     disputes: { retrieve: vi.fn() },
   },
@@ -17,6 +23,8 @@ const { client } = vi.hoisted(() => ({
 vi.mock("stripe", () => {
   class StripeError extends Error {
     type = "StripeInvalidRequestError";
+    code?: string;
+    statusCode?: number;
   }
   function Stripe() {
     return client;
@@ -132,13 +140,14 @@ describe("the studio's share (Q1, Q2)", () => {
     });
   });
 
-  it("reverses once per refund, with its ids and its own key; a shortfall once per sale", async () => {
+  it("takes what is needed, or what the transfer still holds, once per refund with its own key", async () => {
     client.transfers.listReversals.mockReturnValue([]);
+    client.transfers.retrieve.mockResolvedValue({ amount: 12_650, amount_reversed: 10_450 });
     client.transfers.createReversal.mockResolvedValue({ id: "trr_1", amount: 2200 });
     expect(
       await driver.reverseForRefund({
         transferId: "tr_1",
-        amountCents: 2200,
+        neededCents: 2200,
         refundId: R,
         purpose: "refund",
         orderId: ORDER,
@@ -152,37 +161,172 @@ describe("the studio's share (Q1, Q2)", () => {
       },
       { idempotencyKey: `daybell-refund-reversal-${R}` },
     );
+    // A shortfall: what is left (97 of 500), with a key per refund and sale.
+    client.transfers.retrieve.mockResolvedValue({ amount: 1000, amount_reversed: 903 });
     await driver.reverseForRefund({
       transferId: "tr_2",
-      amountCents: 97,
+      neededCents: 500,
       refundId: R,
       purpose: "refund_shortfall",
       orderId: "sale-1",
     });
+    expect(client.transfers.createReversal.mock.calls[1]?.[1]).toMatchObject({ amount: 97 });
     expect(client.transfers.createReversal.mock.calls[1]?.[2]).toEqual({
       idempotencyKey: `daybell-shortfall-${R}-sale-1`,
     });
   });
 
-  it("finds an earlier reversal by its metadata instead of making another", async () => {
+  it("finds an earlier reversal before looking at what is left, even when it emptied the transfer (code review B1)", async () => {
     client.transfers.listReversals.mockReturnValue([
       { id: "trr_fee", amount: 397, metadata: { daybell_purpose: "card_fee" } },
       {
         id: "trr_old",
-        amount: 2200,
+        amount: 10_053,
         metadata: { daybell_refund_id: R, daybell_purpose: "refund" },
       },
     ]);
+    client.transfers.retrieve.mockResolvedValue({ amount: 10_450, amount_reversed: 10_450 });
     expect(
       await driver.reverseForRefund({
         transferId: "tr_1",
-        amountCents: 2200,
+        neededCents: 10_150,
         refundId: R,
         purpose: "refund",
         orderId: ORDER,
       }),
-    ).toEqual({ reversalId: "trr_old", amountCents: 2200 });
+    ).toEqual({ reversalId: "trr_old", amountCents: 10_053 });
+    expect(client.transfers.retrieve).not.toHaveBeenCalled();
     expect(client.transfers.createReversal).not.toHaveBeenCalled();
+  });
+
+  it("finds a shortfall's earlier reversal only for the same sale", async () => {
+    client.transfers.listReversals.mockReturnValue([
+      {
+        id: "trr_s1",
+        amount: 97,
+        metadata: {
+          daybell_refund_id: R,
+          daybell_purpose: "refund_shortfall",
+          daybell_order_id: "sale-1",
+        },
+      },
+    ]);
+    expect(
+      (
+        await driver.reverseForRefund({
+          transferId: "tr_2",
+          neededCents: 97,
+          refundId: R,
+          purpose: "refund_shortfall",
+          orderId: "sale-1",
+        })
+      ).reversalId,
+    ).toBe("trr_s1");
+    client.transfers.retrieve.mockResolvedValue({ amount: 1000, amount_reversed: 1000 });
+    expect(
+      await driver.reverseForRefund({
+        transferId: "tr_2",
+        neededCents: 97,
+        refundId: R,
+        purpose: "refund_shortfall",
+        orderId: "sale-2",
+      }),
+    ).toEqual({ reversalId: null, amountCents: 0 });
+    expect(client.transfers.createReversal).not.toHaveBeenCalled();
+  });
+
+  it("sends a failed refund's share back once, found by its transfer group (Q7)", async () => {
+    client.transfers.list.mockResolvedValue({ data: [] });
+    client.transfers.create.mockResolvedValue({ id: "tr_back" });
+    expect(
+      await driver.returnRefundShare({
+        accountId: "acct_A1",
+        amountCents: 2200,
+        currency: "cad",
+        refundId: R,
+        orderId: ORDER,
+      }),
+    ).toEqual({ transferId: "tr_back" });
+    expect(client.transfers.list).toHaveBeenCalledWith({
+      transfer_group: `daybell-refund-return-${R}`,
+      limit: 10,
+    });
+    expect(client.transfers.create).toHaveBeenCalledWith(
+      {
+        amount: 2200,
+        currency: "cad",
+        destination: "acct_A1",
+        transfer_group: `daybell-refund-return-${R}`,
+        metadata: {
+          daybell_refund_id: R,
+          daybell_order_id: ORDER,
+          daybell_purpose: "refund_return",
+        },
+      },
+      { idempotencyKey: `daybell-refund-return-${R}` },
+    );
+    client.transfers.list.mockResolvedValue({
+      data: [{ id: "tr_earlier", destination: "acct_A1", metadata: { daybell_refund_id: R } }],
+    });
+    client.transfers.create.mockClear();
+    expect(
+      (
+        await driver.returnRefundShare({
+          accountId: "acct_A1",
+          amountCents: 2200,
+          currency: "cad",
+          refundId: R,
+          orderId: ORDER,
+        })
+      ).transferId,
+    ).toBe("tr_earlier");
+    expect(client.transfers.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("refusals (security review S1)", () => {
+  it("says a refund already being made with the same key (409) may have happened, never refused", async () => {
+    const { default: Stripe } = await import("stripe");
+    const inUse = Object.assign(
+      new (Stripe.errors.StripeError as unknown as new (m: string) => Error)("in use"),
+      {
+        code: "idempotency_key_in_use",
+        statusCode: 409,
+      },
+    );
+    client.refunds.list.mockReturnValue([]);
+    client.refunds.create.mockRejectedValue(inUse);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(
+      driver.createRefund({
+        paymentIntentId: "pi_1",
+        amountCents: 100,
+        refundId: R,
+        orderId: ORDER,
+        region: "ca",
+        reason: null,
+      }),
+    ).rejects.toMatchObject({ outcome: "unknown" });
+    const refused = new (Stripe.errors.StripeError as unknown as new (m: string) => Error)(
+      "too much",
+    );
+    client.refunds.create.mockRejectedValue(refused);
+    await expect(
+      driver.createRefund({
+        paymentIntentId: "pi_1",
+        amountCents: 100,
+        refundId: R,
+        orderId: ORDER,
+        region: "ca",
+        reason: null,
+      }),
+    ).rejects.toMatchObject({ outcome: "refused", stripeType: "StripeInvalidRequestError" });
+  });
+
+  it("finds one of the payment's refunds by Daybell's id", async () => {
+    client.refunds.list.mockReturnValue([refund({ id: "re_9" })]);
+    expect((await driver.findRefund("pi_1", R))?.id).toBe("re_9");
+    expect(await driver.findRefund("pi_1", "aaaa0000-0000-4000-8000-000000000009")).toBeNull();
   });
 });
 

@@ -15,6 +15,7 @@ export const NOTIFICATION_KINDS = [
   "order_paid",
   "refund_failed",
   "dispute_opened",
+  "refund_external",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -32,10 +33,12 @@ export const NOTIFICATION_AUDIENCE: Record<NotificationKind, readonly Role[]> = 
   payouts_restricted: ["owner", "admin"],
   photos_failed: ["owner", "admin", "photographer"],
   tagging_ready: ["owner", "admin", "photographer"],
-  // A new order goes to the people who fulfil it; a failed refund and a dispute to the people who refund (ADR 0024).
+  // A new order goes to the people who fulfil it; a failed refund, a dispute and a refund made outside Daybell to the
+  // people who refund (ADR 0024).
   order_paid: ["owner", "admin", "staff"],
   refund_failed: ["owner", "admin"],
   dispute_opened: ["owner", "admin"],
+  refund_external: ["owner", "admin"],
 };
 
 export function hearsAbout(role: string, kind: NotificationKind): boolean {
@@ -68,6 +71,7 @@ export function notificationTarget(kind: NotificationKind): NotificationTarget {
     case "order_paid":
     case "refund_failed":
     case "dispute_opened":
+    case "refund_external":
       return "order";
   }
 }

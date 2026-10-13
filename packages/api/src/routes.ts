@@ -1556,6 +1556,17 @@ export const ROUTES: RouteSpec[] = [
   },
   {
     method: "POST",
+    path: "/orders/{id}/external-refund/checked",
+    group: "Orders",
+    summary: "Mark a refund made outside Daybell checked",
+    description:
+      "A refund made in the Stripe Dashboard flags the order and stops fulfilment. Once an owner or admin has checked it with Stripe and the parent, fulfilment goes on.",
+    access: "owner-admin",
+    success: { status: 200, schema: orderResponse, description: "The order, updated." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+  },
+  {
+    method: "POST",
     path: "/orders/status",
     group: "Orders",
     summary: "Mark orders printed, or delivered to school",
@@ -1699,7 +1710,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Close shops whose closing date has passed",
     description:
-      "Not for integrations. Hourly from Vercel Cron, with CRON_SECRET as a bearer token (ADR 0024). Closes every selling job whose closing date has passed, in every region's database (job.closed events with no actor), then removes read notifications over 90 days old and any over 180, expired shop sessions (with their bags) and wrong-code and request counts older than a day, and home delivery addresses 90 days after shipping (180 at most). In the payout regions it also settles paid orders whose Stripe fee is still unknown after 10 minutes, expires checkouts that ran out two hours ago after asking Stripe (ADR 0023), retries refunds, recovers refund shortfalls from later sales and absorbs those older than 180 days (ADR 0024).",
+      "Not for integrations. Hourly from Vercel Cron, with CRON_SECRET as a bearer token (ADR 0024). Closes every selling job whose closing date has passed, in every region's database (job.closed events with no actor), then removes read notifications over 90 days old and any over 180, expired shop sessions (with their bags) and wrong-code and request counts older than a day, and home delivery addresses and tracking numbers 90 days after shipping (365 days after payment at most). In the payout regions it also settles paid orders whose Stripe fee is still unknown after 10 minutes, expires checkouts that ran out two hours ago after asking Stripe (ADR 0023), retries refunds (and sends back what the studio gave for a refund Stripe then failed), recovers refund shortfalls from later sales and absorbs those owed after 180 days without a settled sale (ADR 0024).",
     access: "internal",
     success: { status: 200, schema: cronJobsResponse, description: "What was done." },
     errors: ["not_signed_in", "internal", "region_unavailable"],
@@ -1710,7 +1721,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Daily photo clean-up",
     description:
-      "Not for integrations. Vercel Cron with CRON_SECRET (staging: GitHub Actions with GITHUB_CRON_SECRET), as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
+      "Not for integrations. Vercel Cron with CRON_SECRET, as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
     access: "internal",
     success: { status: 200, schema: cronPhotosResponse, description: "What was cleaned up." },
     errors: ["not_signed_in", "internal"],

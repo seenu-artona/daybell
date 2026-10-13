@@ -70,6 +70,7 @@ describe("orders and refunds match the database (ADR 0024)", () => {
     const system = [
       "refund_mismatch",
       "not_accepted",
+      "not_failed",
       "not_paid",
       "fee_currency",
       "checkout_mismatch",
