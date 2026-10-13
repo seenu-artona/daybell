@@ -1492,6 +1492,7 @@
     "refusals": {
       "codeNotFound": "We couldn’t find that code. Check it and try again.",
       "locked": "Too many tries. Wait {minutes, plural, one {# minute} other {# minutes}} and try again.",
+      "lockedHours": "Too many tries. Try again in about {hours, plural, one {# hour} other {# hours}}.",
       "rateLimited": "Too many requests. Wait a minute and try again.",
       "sessionGone": "Enter your code again to see your photos.",
       "closed": "This shop is closed, so nothing can be ordered.",

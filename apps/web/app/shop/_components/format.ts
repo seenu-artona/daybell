@@ -4,6 +4,7 @@ import type { MoneyAmount, PackageLineOut, ShopChild } from "@daybell/api";
 import { closingDay, formatMoney, localeForCurrency } from "@daybell/core";
 import { useFormatter, useTranslations } from "next-intl";
 import { useCallback } from "react";
+import { lockedWait } from "./wait";
 
 /** Money as parents in its currency read it: "$64.00" (D96: whole cents in, text out). */
 export function money(amount: MoneyAmount): string {
@@ -62,8 +63,12 @@ export function useRefusal() {
   return useCallback(
     (r: { status: number; code: string; form: string | null; retryAfter: number | null }) => {
       const key = r.form?.startsWith("shop.") ? r.form.slice("shop.".length) : null;
-      if (key === "locked")
-        return t("locked", { minutes: Math.max(1, Math.ceil((r.retryAfter ?? 900) / 60)) });
+      if (key === "locked") {
+        const wait = lockedWait(r.retryAfter);
+        return wait.key === "locked"
+          ? t("locked", { minutes: wait.minutes })
+          : t("lockedHours", { hours: wait.hours });
+      }
       if (key && t.has(key as Parameters<typeof t>[0])) return t(key as Parameters<typeof t>[0]);
       if (r.code === "rate_limited") return t("rateLimited");
       if (r.code === "shop_session_required") return t("sessionGone");
