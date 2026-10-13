@@ -35,7 +35,9 @@ test("parent orders: bag badge, Download all, tracking once shipped, cancel befo
   await expect(main.getByRole("heading", { name: "Ava P.", level: 1, exact: true })).toBeVisible();
   // The code opens the full-screen cover first; the bar with the bag comes with the grid.
   await main.getByRole("button", { name: "See photos", exact: true }).click();
-  await expect(header.getByRole("heading", { name: "Ava P.", level: 1, exact: true })).toBeVisible();
+  await expect(
+    header.getByRole("heading", { name: "Ava P.", level: 1, exact: true }),
+  ).toBeVisible();
   const bagLink = header.getByRole("link", { name: "Bag, empty", exact: true });
   const bagHref = (await bagLink.getAttribute("href")) as string;
   const galleryId = new URL(bagHref, baseURL).searchParams.get("gallery") as string;
