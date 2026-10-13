@@ -101,7 +101,48 @@ export const shopApi = {
     call<DownloadLinkResponse>(
       `/orders/${path(orderId)}/downloads/${path(photoId)}${inGallery(gallery)}`,
     ),
+  // Orders (ADR 0024): the payer's cancel; no body.
+  cancelOrder: (gallery: string, orderId: string) =>
+    call<ShopOrderResponse>(`/orders/${path(orderId)}/cancel${inGallery(gallery)}`, "POST"),
+  downloadAll: (gallery: string, orderId: string) =>
+    saveZip(`/orders/${path(orderId)}/download-all${inGallery(gallery)}`),
 };
+
+/**
+ * "Download all" (ADR 0024): the zip the server streams, saved through a short-lived object URL under the name the
+ * server gave it (the order's reference, never a child's name). A refusal (being prepared, too many) comes back like any
+ * other call's.
+ */
+async function saveZip(url: string): Promise<ShopResult<undefined>> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1/shop${url}`, { credentials: "same-origin", cache: "no-store" });
+  } catch {
+    return { ok: false, status: 0, code: "network", form: null, retryAfter: null, fields: {} };
+  }
+  if (!res.ok) {
+    const error = ((await res.json().catch(() => null)) as ApiErrorBody | null)?.error;
+    const retry = Number(res.headers.get("retry-after"));
+    return {
+      ok: false,
+      status: res.status,
+      code: error?.code ?? "internal",
+      form: error?.fields?.form ?? null,
+      retryAfter: Number.isFinite(retry) && retry > 0 ? retry : null,
+      fields: error?.fields ?? {},
+    };
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1];
+  const objectUrl = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = name ?? "daybell.zip";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+  return { ok: true, data: undefined };
+}
 
 /** Things in a bag (quantities added, unavailable lines too), as the header's count shows them. */
 export function bagCount(cart: ShopCartResponse): number {

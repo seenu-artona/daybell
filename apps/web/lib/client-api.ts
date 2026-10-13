@@ -46,17 +46,20 @@ export type DownloadResult =
     };
 
 /**
- * POSTs to /api/v1 and saves the file it answers with (e.g. the QR card PDF, ADR 0015). The request body stays out of
- * the URL; the file is handed to the browser through a short-lived object URL and never kept.
+ * POSTs to /api/v1 (or GETs, without a body) and saves the file it answers with (e.g. the QR card PDF, ADR 0015; an
+ * order's print files, ADR 0024). The request body stays out of the URL; the file is handed to the browser through a
+ * short-lived object URL and never kept.
  */
-export async function download(path: string, body: unknown): Promise<DownloadResult> {
+export async function download(path: string, body?: unknown): Promise<DownloadResult> {
   let res: Response;
   try {
+    // With no body, a GET (an order's zip, ADR 0024): nothing goes in the URL but ids.
     res = await fetch(`/api/v1${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? {} : { "content-type": "application/json" },
+      body: body === undefined ? null : JSON.stringify(body),
       credentials: "same-origin",
+      cache: "no-store",
     });
   } catch {
     return { ok: false, status: 0, code: "network", fields: {}, headers: new Headers() };

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The studio's side of checkout (ADR 0023): owners and admins read a job's paid orders with every fee (call 15; D98),
-// photographers and staff don't; Settings › Taxes is read by owners and admins and changed by the owner only (call 6),
-// Stripe first and then the database, never for a studio without payouts, never with the registration number in a
-// key or a log, and checked before Stripe is asked for anything it would refuse. Every query names the studio.
+// The studio's side of checkout (ADR 0023): Settings › Taxes is read by owners and admins and changed by the owner only
+// (call 6), Stripe first and then the database, never for a studio without payouts, never with the registration
+// number in a key or a log, and checked before Stripe is asked for anything it would refuse. Every query names the
+// studio. The studio's order routes are tested in orders-routes.test.ts (ADR 0024).
 vi.mock("server-only", () => ({}));
 const { scope, taxRpc, budgetRpc, provider } = vi.hoisted(() => ({
   scope: vi.fn(),
@@ -28,8 +28,6 @@ vi.mock("@/lib/stripe", async (original) => ({
 }));
 
 const STUDIO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const JOB = "a0000000-0000-4000-8000-000000000001";
-const ORDER = "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c";
 const REG = "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e";
 
 type Call = { table: string; ops: [string, unknown[]][] };
@@ -77,23 +75,6 @@ function signIn(
   return db;
 }
 
-const ORDER_ROW = {
-  id: ORDER,
-  reference: "7KQ2M9XA",
-  paid_at: "2026-10-13T12:00:00Z",
-  currency: "CAD",
-  products_cents: 10000,
-  shipping_cents: 1195,
-  tax_cents: 1455,
-  total_cents: 12650,
-  daybell_fee_bps: 300,
-  daybell_fee_cents: 300,
-  stripe_fee_cents: 397,
-  shipping_method: "home",
-  items: 3,
-  children: [{ id: "c1", first_name: "Ava", last_name: "Patel" }],
-};
-
 const json = (method: string, body?: unknown) =>
   new Request("http://localhost/api/v1/x", {
     method,
@@ -118,124 +99,6 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.clearAllMocks();
   vi.restoreAllMocks();
-});
-
-describe("GET /orders?jobId= (call 15)", () => {
-  const list = async (query: string) =>
-    (await import("./orders/route")).GET(new Request(`http://localhost/api/v1/orders?${query}`));
-
-  it("gives owners and admins a job's paid orders with tax, Daybell's fee and rate, the card fee and their share", async () => {
-    for (const role of ["owner", "admin"]) {
-      const db = signIn(
-        role,
-        { jobs: { id: JOB } },
-        { job_orders: [ORDER_ROW, { ...ORDER_ROW, id: "x" }] },
-      );
-      const res = await list(`jobId=${JOB}&limit=1`);
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.orders).toEqual([
-        {
-          id: ORDER,
-          reference: "7KQ2M9XA",
-          paidAt: "2026-10-13T12:00:00.000Z",
-          products: { cents: 10000, currency: "CAD" },
-          shipping: { cents: 1195, currency: "CAD" },
-          tax: { cents: 1455, currency: "CAD" },
-          total: { cents: 12650, currency: "CAD" },
-          daybellFee: { basisPoints: 300, amount: { cents: 300, currency: "CAD" } },
-          cardFee: { cents: 397, currency: "CAD" },
-          paidToStudio: { cents: 12650 - 300 - 397, currency: "CAD" },
-          shippingMethod: "home",
-          items: 3,
-          children: [{ id: "c1", firstName: "Ava", lastName: "Patel" }],
-        },
-      ]);
-      expect(body.nextCursor).toBe(ORDER);
-      expect(db.rpc).toHaveBeenCalledWith("job_orders", {
-        p_studio_id: STUDIO,
-        p_job_id: JOB,
-        p_limit: 2,
-        p_cursor: null,
-      });
-      expect(db.calls[0]?.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
-    }
-  });
-
-  it("shows the card fee as pending until Stripe says", async () => {
-    signIn(
-      "owner",
-      { jobs: { id: JOB } },
-      { job_orders: [{ ...ORDER_ROW, stripe_fee_cents: null }] },
-    );
-    const { orders } = await (await list(`jobId=${JOB}`)).json();
-    expect(orders[0]).toMatchObject({ cardFee: null, paidToStudio: null });
-  });
-
-  it("refuses photographers and staff, and another studio's job is not found", async () => {
-    for (const role of ["photographer", "staff"]) {
-      signIn(role);
-      expect((await list(`jobId=${JOB}`)).status).toBe(403);
-    }
-    signIn("owner", { jobs: null });
-    expect((await list(`jobId=${JOB}`)).status).toBe(404);
-    signIn("owner");
-    expect((await list("jobId=nope")).status).toBe(400);
-  });
-});
-
-describe("GET /orders/:id", () => {
-  const get = async (id = ORDER) =>
-    (await import("./orders/[id]/route")).GET(new Request("http://localhost/api/v1/orders/x"), {
-      params: Promise.resolve({ id }),
-    });
-
-  it("shows the lines with the children's names and, for home delivery, where it ships", async () => {
-    signIn(
-      "owner",
-      {},
-      {
-        studio_order: {
-          ...ORDER_ROW,
-          lines: [
-            {
-              id: "l1",
-              kind: "package",
-              name: "Package A",
-              print_size: null,
-              quantity: 1,
-              unit_price_cents: 10000,
-              line_total_cents: 10000,
-              photo_id: null,
-              child: { id: "c1", first_name: "Ava", last_name: "Patel" },
-              contents: [{ kind: "print", print_size: "8x10", quantity: 1 }],
-            },
-          ],
-          ship_to: {
-            name: "Priya Patel",
-            line1: "12 Maple Lane",
-            line2: null,
-            city: "Toronto",
-            province: "ON",
-            postal_code: "M5V 2T6",
-            country: "CA",
-          },
-        },
-      },
-    );
-    const { order } = await (await get()).json();
-    expect(order.lines[0]).toMatchObject({
-      child: { firstName: "Ava" },
-      contents: [{ printSize: "8x10" }],
-    });
-    expect(order.shipTo).toMatchObject({ name: "Priya Patel", postalCode: "M5V 2T6" });
-  });
-
-  it("is not found for another studio's order or a malformed id", async () => {
-    signIn("owner", {}, { studio_order: null });
-    expect((await get()).status).toBe(404);
-    expect((await get("nope")).status).toBe(404);
-  });
 });
 
 describe("Settings › Taxes (answer 2; calls 3, 6)", () => {

@@ -1,28 +1,23 @@
 import "server-only";
-import type {
-  OrdersResponse,
-  ShopOrder,
-  ShopOrderChild,
-  ShopOrderSummary,
-  StudioOrder,
-  StudioOrderDetail,
-} from "@daybell/api";
+import type { ShopOrder, ShopOrderChild, ShopOrderSummary } from "@daybell/api";
 import {
   type Currency,
+  type OrderFulfilment,
   type OrderStatus,
   type PackageLineKind,
   type PriceItemKind,
   type PrintSize,
   type PstProvince,
   parentDisplayName,
+  type RefundBadge,
   type ShopShippingMethod,
   type TaxRegistrationKind,
 } from "@daybell/core";
+import { type DbTracking, toTracking } from "../orders/views";
 
 /**
- * Orders as the API shows them (ADR 0023): the database's rows for parents (call 12: never an email, an address or a
- * last name, and no amounts in the child view) and for owners and admins (call 15), in whole cents with the currency
- * (D96).
+ * Orders as parents see them (ADR 0023, 0024): the database's rows (call 12: never an email, an address or a last name,
+ * and no amounts in the child view), in whole cents with the currency (D96). The studio's view is lib/orders/views.ts.
  */
 
 const money = (cents: number | string, currency: Currency) => ({ cents: Number(cents), currency });
@@ -41,6 +36,8 @@ export interface DbShopOrderSummary {
   id: string;
   reference: string;
   status: OrderStatus;
+  fulfilment: OrderFulfilment | null;
+  refund: RefundBadge | null;
   view: "full" | "child";
   paid_at: string | null;
   created_at: string;
@@ -55,6 +52,8 @@ export function toShopOrderSummary(row: DbShopOrderSummary): ShopOrderSummary {
     id: row.id,
     reference: row.reference,
     status: row.status,
+    fulfilment: row.fulfilment ?? null,
+    refund: row.refund ?? null,
     view: row.view,
     paidAt: row.paid_at ? iso(row.paid_at) : null,
     createdAt: iso(row.created_at),
@@ -67,6 +66,10 @@ export interface DbShopOrder {
   id: string;
   reference: string;
   status: OrderStatus;
+  fulfilment: OrderFulfilment | null;
+  refund: RefundBadge | null;
+  can_cancel: boolean;
+  tracking: DbTracking | null;
   view: "full" | "child";
   paid_at: string | null;
   created_at: string;
@@ -78,6 +81,7 @@ export interface DbShopOrder {
     shipping_cents: number;
     tax_cents: number | null;
     total_cents: number | null;
+    refunded_cents: number;
   } | null;
   registrations: { kind: TaxRegistrationKind; province: PstProvince | null; number: string }[];
   children: DbChild[];
@@ -88,6 +92,7 @@ export interface DbShopOrder {
     name: string;
     print_size: PrintSize | null;
     quantity: number;
+    refunded_quantity: number;
     unit_price_cents: number | null;
     line_total_cents: number | null;
     contents: { kind: PackageLineKind; print_size: PrintSize | null; quantity: number }[];
@@ -103,6 +108,10 @@ export function toShopOrder(row: DbShopOrder): ShopOrder {
     id: row.id,
     reference: row.reference,
     status: row.status,
+    fulfilment: row.fulfilment ?? null,
+    refund: row.refund ?? null,
+    canCancel: Boolean(row.can_cancel),
+    tracking: toTracking(row.tracking ?? null),
     view: row.view,
     paidAt: row.paid_at ? iso(row.paid_at) : null,
     createdAt: iso(row.created_at),
@@ -114,6 +123,7 @@ export function toShopOrder(row: DbShopOrder): ShopOrder {
           shipping: money(row.totals.shipping_cents, c),
           tax: row.totals.tax_cents === null ? null : money(row.totals.tax_cents, c),
           total: row.totals.total_cents === null ? null : money(row.totals.total_cents, c),
+          refunded: money(row.totals.refunded_cents ?? 0, c),
         }
       : null,
     registrations: row.registrations,
@@ -125,6 +135,7 @@ export function toShopOrder(row: DbShopOrder): ShopOrder {
       name: l.name,
       printSize: l.print_size,
       quantity: l.quantity,
+      refundedQuantity: Number(l.refunded_quantity ?? 0),
       unitPrice: l.unit_price_cents === null ? null : money(l.unit_price_cents, c),
       lineTotal: l.line_total_cents === null ? null : money(l.line_total_cents, c),
       contents: l.contents.map((x) => ({
@@ -134,130 +145,5 @@ export function toShopOrder(row: DbShopOrder): ShopOrder {
       })),
       downloads: l.downloads.map((photoId) => ({ photoId, n: ++n })),
     })),
-  };
-}
-
-// ── The studio's view (owners and admins) ─────────────────────────────────────────────────────────────────────────
-
-interface DbStudioOrderBase {
-  id: string;
-  reference: string;
-  paid_at: string;
-  currency: Currency;
-  products_cents: number;
-  shipping_cents: number;
-  tax_cents: number;
-  total_cents: number;
-  daybell_fee_bps: number;
-  daybell_fee_cents: number;
-  stripe_fee_cents: number | null;
-  shipping_method: ShopShippingMethod | null;
-}
-
-export interface DbStudioOrder extends DbStudioOrderBase {
-  items: number;
-  children: { id: string; first_name: string; last_name: string }[];
-}
-
-function studioOrderAmounts(row: DbStudioOrderBase) {
-  const c = row.currency;
-  const stripe = row.stripe_fee_cents === null ? null : Number(row.stripe_fee_cents);
-  return {
-    id: row.id,
-    reference: row.reference,
-    paidAt: iso(row.paid_at),
-    products: money(row.products_cents, c),
-    shipping: money(row.shipping_cents, c),
-    tax: money(row.tax_cents, c),
-    total: money(row.total_cents, c),
-    daybellFee: { basisPoints: row.daybell_fee_bps, amount: money(row.daybell_fee_cents, c) },
-    cardFee: stripe === null ? null : money(stripe, c),
-    // What reaches the studio's Stripe balance: the total less both fees (core studioReceivesCents).
-    paidToStudio:
-      stripe === null
-        ? null
-        : money(Number(row.total_cents) - Number(row.daybell_fee_cents) - stripe, c),
-    shippingMethod: row.shipping_method,
-  };
-}
-
-const person = (p: { id: string; first_name: string; last_name: string }) => ({
-  id: p.id,
-  firstName: p.first_name,
-  lastName: p.last_name,
-});
-
-export function toStudioOrder(row: DbStudioOrder): StudioOrder {
-  return {
-    ...studioOrderAmounts(row),
-    items: Number(row.items),
-    children: row.children.map(person),
-  };
-}
-
-/** A page of a job's orders: `limit + 1` rows asked for, the extra one says there is a next page. */
-export function toOrdersPage(rows: DbStudioOrder[], limit: number): OrdersResponse {
-  const page = rows.slice(0, limit);
-  return {
-    orders: page.map(toStudioOrder),
-    nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null,
-  };
-}
-
-export interface DbStudioOrderDetail extends DbStudioOrderBase {
-  lines: {
-    id: string;
-    kind: PriceItemKind;
-    name: string;
-    print_size: PrintSize | null;
-    quantity: number;
-    unit_price_cents: number;
-    line_total_cents: number;
-    photo_id: string | null;
-    child: { id: string; first_name: string; last_name: string } | null;
-    contents: { kind: PackageLineKind; print_size: PrintSize | null; quantity: number }[];
-  }[];
-  ship_to: {
-    name: string;
-    line1: string;
-    line2: string | null;
-    city: string;
-    province: string | null;
-    postal_code: string;
-    country: "CA";
-  } | null;
-}
-
-export function toStudioOrderDetail(row: DbStudioOrderDetail): StudioOrderDetail {
-  const c = row.currency;
-  return {
-    ...studioOrderAmounts(row),
-    lines: row.lines.map((l) => ({
-      id: l.id,
-      kind: l.kind,
-      name: l.name,
-      printSize: l.print_size,
-      quantity: l.quantity,
-      unitPrice: money(l.unit_price_cents, c),
-      lineTotal: money(l.line_total_cents, c),
-      child: l.child ? person(l.child) : null,
-      photoId: l.photo_id,
-      contents: l.contents.map((x) => ({
-        kind: x.kind,
-        printSize: x.print_size,
-        quantity: x.quantity,
-      })),
-    })),
-    shipTo: row.ship_to
-      ? {
-          name: row.ship_to.name,
-          line1: row.ship_to.line1,
-          line2: row.ship_to.line2,
-          city: row.ship_to.city,
-          province: row.ship_to.province,
-          postalCode: row.ship_to.postal_code,
-          country: row.ship_to.country,
-        }
-      : null,
   };
 }

@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // its secret, works page by page in each region's function region, and answers counts only. Scope, database and
 // service role are faked; nothing is ever logged.
 vi.mock("server-only", () => ({}));
-const { scope, statusRpc, systemRpc, databases } = vi.hoisted(() => ({
+const { scope, statusRpc, systemRpc, orderRpc, databases } = vi.hoisted(() => ({
   scope: vi.fn(),
   statusRpc: vi.fn(),
   systemRpc: vi.fn(),
+  /** The address purge (ADR 0024): nothing to purge unless a test says otherwise. */
+  orderRpc: vi.fn(async (..._args: unknown[]) => ({ data: 0, error: null })),
   /** The regions with a database in this test (Canada only unless a test says otherwise). */
   databases: { regions: ["ca"] as string[] },
 }));
@@ -18,7 +20,11 @@ vi.mock("@/lib/studio", async (original) => ({
   ...(await original<typeof import("@/lib/studio")>()),
   studioScope: () => scope(),
 }));
-vi.mock("@/lib/supabase/service", () => ({ jobStatusRpc: statusRpc, jobSystemRpc: systemRpc }));
+vi.mock("@/lib/supabase/service", () => ({
+  jobStatusRpc: statusRpc,
+  jobSystemRpc: systemRpc,
+  orderSystemRpc: orderRpc,
+}));
 vi.mock("@daybell/config", async (original) => ({
   ...(await original<typeof import("@daybell/config")>()),
   regionDatabase: (region: string) =>
@@ -101,6 +107,8 @@ afterEach(() => {
   scope.mockReset();
   statusRpc.mockReset();
   systemRpc.mockReset();
+  orderRpc.mockReset();
+  orderRpc.mockImplementation(async () => ({ data: 0, error: null }));
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
@@ -344,6 +352,7 @@ describe("the bell (call 4): only the person's own, in their studio", () => {
         createdAt: "2026-10-12T12:00:00Z",
         readAt: null,
         job: { id: JOB, name: "Fall" },
+        order: null,
         data: { scheduled: true },
       },
       {
@@ -352,6 +361,7 @@ describe("the bell (call 4): only the person's own, in their studio", () => {
         createdAt: "2026-10-12T11:00:00Z",
         readAt: "2026-10-12T11:30:00Z",
         job: { id: JOB, name: "Fall" },
+        order: null,
         data: {},
       },
     ]);
@@ -464,6 +474,9 @@ describe("GET /internal/cron/jobs", () => {
       prunedShop: 7,
       settledOrders: 0,
       expiredOrders: 0,
+      retriedRefunds: 0,
+      purgedAddresses: 0,
+      absorbedShortfalls: 0,
     });
     expect(systemRpc.mock.calls.map((c) => [c[0], c[1], c[2]])).toEqual([
       ["ca", "close_due_jobs", { p_limit: 500 }],
@@ -471,6 +484,19 @@ describe("GET /internal/cron/jobs", () => {
       ["ca", "prune_notifications", { p_limit: 1000 }],
       ["ca", "prune_shop", { p_limit: 1000 }],
     ]);
+    // Home delivery addresses go 90 days after shipping (ADR 0024), in every region, Stripe or not.
+    expect(orderRpc.mock.calls.map((c) => [c[0], c[1], c[2]])).toEqual([
+      ["ca", "purge_shipping_addresses", { p_limit: 1000 }],
+    ]);
+  });
+
+  it("purges home delivery addresses a page at a time until a page comes back short (ADR 0024)", async () => {
+    systemRpc.mockResolvedValue({ data: 0, error: null });
+    const pages = [1000, 4];
+    orderRpc.mockImplementation(async () => ({ data: pages.shift() ?? 0, error: null }));
+    const res = await cron(`Bearer ${SECRET}`);
+    expect(await res.json()).toMatchObject({ purgedAddresses: 1004 });
+    expect(orderRpc.mock.calls.filter((c) => c[1] === "purge_shipping_addresses")).toHaveLength(2);
   });
 
   it("prunes the parent shop a page at a time until a page comes back short (ADR 0022, security review M2)", async () => {

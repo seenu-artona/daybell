@@ -178,4 +178,81 @@ describe("fakeDriver checkout (ADR 0023)", () => {
     expect(fakeCancelCheckout(id)).toBe(params.cancel_url);
     expect(await fake.expireCheckoutSession(id)).toEqual({ status: "expired" });
   });
+
+  it("refunds and reverses like Stripe (ADR 0024): never more than was paid or transferred", async () => {
+    const { fakePayCheckout, fakeFailRefund, fakeOpenDispute, fakeTransferReversals } =
+      await import("./fake-driver");
+    const fake = fakeDriver();
+    const { id } = await fake.createCheckoutSession(params, "daybell-checkout-o-4");
+    fakePayCheckout(id, {
+      email: "p@example.test",
+      shipping: {
+        name: "Test Parent",
+        line1: "1 Test Street",
+        line2: null,
+        city: "Toronto",
+        state: "ON",
+        postalCode: "M5V 2T6",
+        country: "CA",
+      },
+    });
+    const facts = await fake.retrieveCheckoutSession(id);
+    const pi = facts.paymentIntentId as string;
+    const tr = facts.transferId as string;
+    const total = facts.amountTotal as number;
+    expect(await fake.retrievePaymentIntentIds(pi)).toMatchObject({
+      orderId: "o-1",
+      studioId: "s-1",
+      region: "ca",
+      refunds: [],
+    });
+    const request = { paymentIntentId: pi, orderId: "o-1", region: "ca", reason: null };
+    const one = await fake.createRefund({ ...request, amountCents: 1000, refundId: "r-1" });
+    expect(one).toMatchObject({ status: "succeeded", amountCents: 1000, refundId: "r-1" });
+    // The same Daybell refund again is the same refund.
+    expect((await fake.createRefund({ ...request, amountCents: 1000, refundId: "r-1" })).id).toBe(
+      one.id,
+    );
+    await expect(
+      fake.createRefund({ ...request, amountCents: total, refundId: "r-2" }),
+    ).rejects.toMatchObject({ outcome: "refused", stripeType: "StripeInvalidRequestError" });
+    // The transfer holds the total; the card fee's reversal and the refund's come off it.
+    await fake.recoverCardFee({ transferId: tr, amountCents: 140, orderId: "o-1" });
+    expect(await fake.transferRemaining(tr)).toEqual({
+      remainingCents: total - 140,
+      currency: "cad",
+    });
+    const reversal = await fake.reverseForRefund({
+      transferId: tr,
+      amountCents: 900,
+      refundId: "r-1",
+      purpose: "refund",
+      orderId: "o-1",
+    });
+    expect(
+      await fake.reverseForRefund({
+        transferId: tr,
+        amountCents: 900,
+        refundId: "r-1",
+        purpose: "refund",
+        orderId: "o-1",
+      }),
+    ).toEqual(reversal);
+    await expect(
+      fake.reverseForRefund({
+        transferId: tr,
+        amountCents: total,
+        refundId: "r-3",
+        purpose: "refund",
+        orderId: "o-1",
+      }),
+    ).rejects.toMatchObject({ outcome: "refused" });
+    expect(fakeTransferReversals(tr).map((r) => r.purpose)).toEqual(["card_fee", "refund"]);
+    // A refund Stripe fails later, and a dispute.
+    expect(fakeFailRefund(one.id)?.status).toBe("failed");
+    expect((await fake.retrieveRefund(one.id)).status).toBe("failed");
+    expect(fakeFailRefund("re_nope")).toBeNull();
+    const dispute = fakeOpenDispute(pi);
+    expect(await fake.retrieveDispute(dispute)).toEqual({ id: dispute, paymentIntentId: pi });
+  });
 });

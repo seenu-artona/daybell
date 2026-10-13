@@ -15,6 +15,11 @@ export class StripeCallError extends ApiError {
     readonly stage: StripeStage,
     readonly outcome: StripeOutcome,
     fields?: Record<string, string>,
+    /**
+     * Stripe's error class (e.g. StripeInvalidRequestError), so a caller can tell a request Stripe will never take (a
+     * refund of more than is left) from one it refused for now (a rate limit). Never Stripe's message.
+     */
+    readonly stripeType: string = "unknown",
   ) {
     super("internal", message, fields);
     this.name = "StripeCallError";

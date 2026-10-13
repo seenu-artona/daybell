@@ -33,7 +33,13 @@ const { rpc, sysRpc, provider, head, presign, downloadPresign, queue, databases 
     databases: { regions: ["ca"] as string[] },
   }),
 );
-vi.mock("@/lib/supabase/service", () => ({ shopRpc: rpc, checkoutSystemRpc: sysRpc }));
+// Refund shortfalls asked for after a sale is settled (ADR 0024): none owed in these tests.
+const orderRpc = vi.hoisted(() => vi.fn(async () => ({ data: [], error: null })));
+vi.mock("@/lib/supabase/service", () => ({
+  shopRpc: rpc,
+  checkoutSystemRpc: sysRpc,
+  orderSystemRpc: orderRpc,
+}));
 vi.mock("@/lib/photo-storage", () => ({
   photoStorage: () => ({ head, presignGet: presign }),
   photoDownloadStorage: () => ({ presignGet: downloadPresign }),

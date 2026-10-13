@@ -3,9 +3,10 @@ import { DATA_REGIONS, regionDatabase } from "@daybell/config";
 import { NextResponse } from "next/server";
 import { check, handle } from "@/lib/api";
 import { runCheckoutBackstops } from "@/lib/checkout/cron";
+import { runRefundBackstops } from "@/lib/orders/cron";
 import { assertFunctionRegion, PAYOUT_REGIONS } from "@/lib/region-guard";
 import { payments, paymentsConfigured } from "@/lib/stripe";
-import { jobSystemRpc } from "@/lib/supabase/service";
+import { jobSystemRpc, orderSystemRpc } from "@/lib/supabase/service";
 import { assertCron } from "@/lib/worker-auth";
 
 export const runtime = "nodejs";
@@ -17,17 +18,21 @@ export const maxDuration = 60;
 const BUDGET_MS = 50_000;
 const PAGE = 500;
 const PRUNE = 1000;
+const PURGE = 1000;
 
 /**
- * GET /api/v1/internal/cron/jobs — the jobs cron (ADR 0021): hourly from GitHub Actions (GITHUB_CRON_SECRET) and daily
- * from Vercel Cron (CRON_SECRET). In every region that has a database, in that region's function region:
+ * GET /api/v1/internal/cron/jobs — the jobs cron (ADR 0021, 0024): hourly from Vercel Cron (CRON_SECRET; vercel.json,
+ * the Pro plan). In every region that has a database, in that region's function region:
  * - closes every selling job whose closing date has passed (job.closed {scheduled: true}, no actor; the team hears
  *   through the bell), a page at a time;
  * - removes read notifications over 90 days old and any over 180 (Claude's call);
  * - removes expired shop sessions with their bags, and day-old wrong-code and hour-old request counts (ADR 0022), a
  *   page at a time until none are left or the region's time is up;
+ * - removes home delivery addresses 90 days after shipping, or after payment once cancelled or refunded, and 180 days
+ *   after payment at most (ADR 0024; step 10's launch blocker), a page at a time;
  * - where payments are set up (a payout region with Stripe), settles paid orders whose Stripe fee came late and
- *   expires checkouts that ran out, after asking Stripe (ADR 0023; lib/checkout/cron.ts).
+ *   expires checkouts that ran out, after asking Stripe (ADR 0023; lib/checkout/cron.ts); retries refunds, recovers
+ *   refund shortfalls from later sales and absorbs those 180 days old (ADR 0024; lib/orders/cron.ts).
  * Each region gets an equal share of the time budget, so one region's backlog never starves the next (code review
  * S2). A region this function can't serve (its data must be handled in another function region, D113) is skipped and
  * logged by name, while the others still run; if no region could run, the request is refused as before (security
@@ -43,6 +48,9 @@ export const GET = handle(async (request: Request) => {
     prunedShop: 0,
     settledOrders: 0,
     expiredOrders: 0,
+    retriedRefunds: 0,
+    purgedAddresses: 0,
+    absorbedShortfalls: 0,
   };
   const regions = DATA_REGIONS.filter((region) => regionDatabase(region));
   let ran = 0;
@@ -78,11 +86,23 @@ export const GET = handle(async (request: Request) => {
         totals.prunedShop += pruned;
         if (pruned < PRUNE) break;
       }
+      while (Date.now() < until) {
+        const purged = Number(
+          check(await orderSystemRpc(region, "purge_shipping_addresses", { p_limit: PURGE })) ?? 0,
+        );
+        totals.purgedAddresses += purged;
+        if (purged < PURGE) break;
+      }
     }
     if (Date.now() < until && PAYOUT_REGIONS.includes(region) && paymentsConfigured()) {
       const done = await runCheckoutBackstops(region, payments(), until);
       totals.settledOrders += done.settledOrders;
       totals.expiredOrders += done.expiredOrders;
+      if (Date.now() < until) {
+        const refunds = await runRefundBackstops(region, payments(), until);
+        totals.retriedRefunds += refunds.retriedRefunds;
+        totals.absorbedShortfalls += refunds.absorbedShortfalls;
+      }
     }
   }
   if (ran === 0 && refusal) throw refusal;

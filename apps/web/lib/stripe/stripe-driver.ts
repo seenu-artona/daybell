@@ -8,10 +8,12 @@ import {
   type CheckoutStatus,
   type NewAccount,
   type PaymentsProvider,
+  type RefundFacts,
   SCHEDULE_SET_KEY,
   type ScheduleRequest,
   type StripeAccountData,
   type StripePayoutData,
+  type StripeRefundStatus,
 } from "./types";
 
 /**
@@ -116,14 +118,25 @@ function failed(stage: StripeStage, err: unknown): never {
       stage,
       outcome,
       { form: PAYOUT_PLATFORM_SETUP },
+      type,
     );
   // The create's idempotency key was used before with other parameters (e.g. the owner's email changed since a failed
   // try; security review N1). Retrying won't help: support finds the account by its daybell_studio_id metadata.
   if (stage === "create" && type === "StripeIdempotencyError")
-    throw new StripeCallError("Payout setup needs Daybell support to finish.", stage, outcome, {
-      form: PAYOUT_CREATE_CONFLICT,
-    });
-  throw new StripeCallError("We couldn't reach Stripe. Please try again.", stage, outcome);
+    throw new StripeCallError(
+      "Payout setup needs Daybell support to finish.",
+      stage,
+      outcome,
+      { form: PAYOUT_CREATE_CONFLICT },
+      type,
+    );
+  throw new StripeCallError(
+    "We couldn't reach Stripe. Please try again.",
+    stage,
+    outcome,
+    undefined,
+    type,
+  );
 }
 
 /** Seconds since the epoch from Stripe v2's RFC 3339 timestamps. */
@@ -194,6 +207,49 @@ export function checkoutFacts(session: Stripe.Checkout.Session): CheckoutSession
 
 /** Marks Daybell's own reversals of a studio's transfer, so a retry finds the one already made (call 1). */
 export const FEE_RECOVERY_PURPOSE = "card_fee";
+
+const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const IDENTIFIER = /^[a-z0-9_]{1,100}$/;
+
+/** Stripe's refund as Daybell's facts: ids, status, amount and Daybell's ids from its metadata. Nothing else. */
+export function refundFacts(refund: Stripe.Refund): RefundFacts {
+  const status = refund.status ?? "";
+  return {
+    id: refund.id,
+    status: (REFUND_STATUSES.has(status) ? status : "other") as StripeRefundStatus,
+    amountCents: refund.amount,
+    currency: refund.currency,
+    paymentIntentId: idOf(refund.payment_intent),
+    refundId: refund.metadata?.daybell_refund_id ?? null,
+    orderId: refund.metadata?.daybell_order_id ?? null,
+    region: refund.metadata?.daybell_region ?? null,
+    failureReason:
+      refund.failure_reason && IDENTIFIER.test(refund.failure_reason)
+        ? refund.failure_reason
+        : refund.failure_reason
+          ? "other"
+          : null,
+  };
+}
+
+/** Every refund of a payment (Stripe pages them; a payment has few). */
+async function allRefunds(stripe: Stripe, paymentIntentId: string): Promise<Stripe.Refund[]> {
+  const out: Stripe.Refund[] = [];
+  for await (const refund of stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 }))
+    out.push(refund);
+  return out;
+}
+
+/** Every reversal of a transfer. */
+async function allReversals(
+  stripe: Stripe,
+  transferId: string,
+): Promise<Stripe.TransferReversal[]> {
+  const out: Stripe.TransferReversal[] = [];
+  for await (const reversal of stripe.transfers.listReversals(transferId, { limit: 100 }))
+    out.push(reversal);
+  return out;
+}
 
 export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProvider {
   const stripe = new Stripe(secretKey, {
@@ -357,6 +413,85 @@ export function stripeDriver(secretKey: string, livemode: boolean): PaymentsProv
         ),
       );
       return { reversalId: reversal.id };
+    },
+
+    // ── Refunds and disputes (ADR 0024) ──────────────────────────────────────────────────────────────────────────
+    async createRefund({ paymentIntentId, amountCents, refundId, orderId, region, reason }) {
+      // Once per Daybell refund: one made by an earlier try (even after Stripe's key has expired) is found first.
+      const earlier = await call(allRefunds(stripe, paymentIntentId));
+      const found = earlier.find((r) => r.metadata?.daybell_refund_id === refundId);
+      if (found) return refundFacts(found);
+      // Daybell's exact amount; no reverse_transfer or refund_application_fee (Q1): the studio's share is reversed
+      // separately, so the card fee already reversed is never counted twice.
+      const refund = await call(
+        stripe.refunds.create(
+          {
+            payment_intent: paymentIntentId,
+            amount: amountCents,
+            metadata: {
+              daybell_refund_id: refundId,
+              daybell_order_id: orderId,
+              daybell_region: region,
+            },
+            ...(reason ? { reason } : {}),
+          },
+          { idempotencyKey: `daybell-refund-${refundId}` },
+        ),
+      );
+      return refundFacts(refund);
+    },
+    async retrieveRefund(stripeRefundId) {
+      return refundFacts(await call(stripe.refunds.retrieve(stripeRefundId)));
+    },
+    async transferRemaining(transferId) {
+      const transfer = await call(stripe.transfers.retrieve(transferId));
+      return {
+        remainingCents: Math.max(0, transfer.amount - transfer.amount_reversed),
+        currency: transfer.currency,
+      };
+    },
+    async reverseForRefund({ transferId, amountCents, refundId, purpose, orderId }) {
+      const earlier = await call(allReversals(stripe, transferId));
+      const found = earlier.find(
+        (r) =>
+          r.metadata?.daybell_refund_id === refundId && r.metadata?.daybell_purpose === purpose,
+      );
+      if (found) return { reversalId: found.id, amountCents: found.amount };
+      const reversal = await call(
+        stripe.transfers.createReversal(
+          transferId,
+          {
+            amount: amountCents,
+            metadata: {
+              daybell_refund_id: refundId,
+              daybell_order_id: orderId,
+              daybell_purpose: purpose,
+            },
+          },
+          {
+            idempotencyKey:
+              purpose === "refund"
+                ? `daybell-refund-reversal-${refundId}`
+                : `daybell-shortfall-${refundId}-${orderId}`,
+          },
+        ),
+      );
+      return { reversalId: reversal.id, amountCents: reversal.amount };
+    },
+    async retrievePaymentIntentIds(paymentIntentId) {
+      const intent = await call(stripe.paymentIntents.retrieve(paymentIntentId));
+      const refunds = await call(allRefunds(stripe, paymentIntentId));
+      return {
+        id: intent.id,
+        orderId: intent.metadata?.daybell_order_id ?? null,
+        studioId: intent.metadata?.daybell_studio_id ?? null,
+        region: intent.metadata?.daybell_region ?? null,
+        refunds: refunds.map(refundFacts),
+      };
+    },
+    async retrieveDispute(disputeId) {
+      const dispute = await call(stripe.disputes.retrieve(disputeId));
+      return { id: dispute.id, paymentIntentId: idOf(dispute.payment_intent) };
     },
     async setCardPrefix(accountId) {
       await call(

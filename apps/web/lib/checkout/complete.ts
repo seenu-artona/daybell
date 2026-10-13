@@ -1,6 +1,7 @@
 import "server-only";
 import { ApiError } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
+import { recoverShortfalls } from "../orders/refunds";
 import { assertFunctionRegion } from "../region-guard";
 import type { CheckoutSessionFacts, PaymentsProvider } from "../stripe";
 import { checkoutSystemRpc } from "../supabase/service";
@@ -16,6 +17,8 @@ import { queuePaidDownloads } from "./downloads";
  *    transfer holds) before any money moves, then recovered from the studio's transfer (call 1) and the order's ledger
  *    transaction written (once); until then the order is paid and its fees pending (retried). No money moves without
  *    its ledger entry (D96; code review M1, security review M2).
+ * 6. Settled the first time: what the studio still owes from earlier refunds' shortfalls is taken back from this
+ *    sale's transfer (Q2; ADR 0024). A failure never fails the sale.
  * A problem no retry can fix is kept on the order (note_checkout_failure: out of the cron's backstops for good) and
  * logged as checkout_problem with its code, for an alert. Nothing personal is logged: fixed names and codes only.
  */
@@ -214,6 +217,8 @@ async function completeKnown(
     p_fee_reversal_id: reversal?.reversalId ?? null,
   });
   if (settled.error) throw dbFailure(settled.error);
+  if (settled.data === "settled")
+    await recoverShortfalls(region, provider, orderId, facts.transferId);
   return { orderId, outcome: "settled" };
 }
 

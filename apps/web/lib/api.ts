@@ -41,6 +41,18 @@ export function assertSameOrigin(request: Request): void {
   }
 }
 
+/** A refusal that passes by itself (Stripe's fee not known yet, a rate limit): Retry-After says when to try again. */
+export class ApiErrorLater extends ApiError {
+  constructor(
+    code: ConstructorParameters<typeof ApiError>[0],
+    readonly seconds: number,
+    message: string,
+    fields?: Record<string, string>,
+  ) {
+    super(code, message, fields);
+  }
+}
+
 /** Wraps an /api/v1 handler: one error shape for every failure, no internals leaked, no personal data logged. */
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
   return async (...args: A): Promise<Response> => {
@@ -55,7 +67,12 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
           : new ApiError("internal", "Something went wrong on our side.");
       if (!(err instanceof ApiError))
         console.error("api_unhandled", err instanceof Error ? err.name : typeof err);
-      return NextResponse.json(apiError.toBody(), { status: apiError.status });
+      return NextResponse.json(apiError.toBody(), {
+        status: apiError.status,
+        ...(apiError instanceof ApiErrorLater
+          ? { headers: { "retry-after": String(apiError.seconds) } }
+          : {}),
+      });
     }
   };
 }
