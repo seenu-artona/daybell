@@ -135,7 +135,7 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
   // 5. The checklist's Upload photos task ticked itself.
   await page.goto(`/app/jobs/${jobId}`);
   await expect(todo).toContainText("Done");
-  await expect(checklist.getByText("4 of 6 done", { exact: true })).toBeVisible();
+  await expect(checklist.getByText("4 of 7 done", { exact: true })).toBeVisible();
 
   // 6. The bin: move one photo there and back.
   await page.goto(`/app/jobs/${jobId}/photos`);

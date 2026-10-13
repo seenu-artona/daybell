@@ -1,7 +1,7 @@
 "use client";
 
 import { SideMenu, SideMenuItem } from "@daybell/ui";
-import { Bell, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -9,7 +9,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { MenuSearch } from "./menu-search";
 import { useMenuFolded } from "./menu-state";
 import { SECTIONS, sectionForPath } from "./nav";
-import { Popover } from "./popover";
+import { NotificationsBell } from "./notifications-bell";
 import { ProfileMenu } from "./profile-menu";
 
 const RAIL_BUTTON =
@@ -17,16 +17,20 @@ const RAIL_BUTTON =
 
 /**
  * The studio app's menu (D137, D126, D128): one dark column on every page, no top bar. Logo and the fold button,
- * the search box, the sections ("Soon" for unbuilt ones), then the profile and notifications. Folds to a 64px icon
- * rail; the choice is remembered in this browser. ⌘K / Ctrl+K focuses the search box (never shown as a label).
+ * the search box, the sections ("Soon" for unbuilt ones), then the profile and the bell (once the person belongs to a
+ * studio; ADR 0021). Folds to a 64px icon rail; the choice is remembered in this browser. ⌘K / Ctrl+K focuses the
+ * search box (never shown as a label).
  */
 export function AppMenu({
   email,
   studioName,
+  hasStudio,
   onSignOut,
 }: {
   email: string | null;
   studioName: string;
+  /** The bell shows once the person belongs to a studio: notifications are per studio. */
+  hasStudio: boolean;
   onSignOut: () => void;
 }) {
   const t = useTranslations("app");
@@ -56,25 +60,9 @@ export function AppMenu({
     return () => document.removeEventListener("keydown", onKey);
   }, [setFolded]);
 
-  const notifications = (
-    <Popover
-      tone="dark"
-      label={t("top.notifications")}
-      trigger={<Bell aria-hidden="true" />}
-      placement={folded ? "right-end" : "above-start"}
-      panelClassName="p-4"
-    >
-      {() => (
-        <>
-          <p className="m-0 mb-1 font-semibold">{t("top.notifications")}</p>
-          <p className="m-0 text-muted">{t("top.notificationsNone")}</p>
-        </>
-      )}
-    </Popover>
-  );
-
   return (
     <aside
+      aria-label={t("nav.menu")}
       className={`sticky top-0 z-30 flex h-dvh shrink-0 flex-col bg-ink text-white/75 ${folded ? "w-16" : "w-[220px]"}`}
     >
       <div
@@ -156,7 +144,7 @@ export function AppMenu({
             />
           ) : null}
         </div>
-        {notifications}
+        {hasStudio ? <NotificationsBell folded={folded} /> : null}
       </div>
     </aside>
   );

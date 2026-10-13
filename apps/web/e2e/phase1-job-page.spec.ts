@@ -111,9 +111,10 @@ test("job page layout, menu search and studio separation", async ({
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}$`));
   await expect(box).toHaveValue("");
 
-  // 4. Notifications: an empty popover for now.
-  await page.getByRole("button", { name: "Notifications" }).click();
-  await expect(page.getByText("No notifications yet.", { exact: true })).toBeVisible();
+  // 4. Notifications: the bell (ADR 0021), empty for a new studio.
+  const studioMenu = page.getByRole("complementary", { name: "Studio menu", exact: true });
+  await studioMenu.getByRole("button", { name: "Notifications", exact: true }).click();
+  await expect(studioMenu.getByText("No notifications yet.", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
 
   // 5. Overview (D140, D143): the title row (the pill shows the shop state only), the hero countdown, the checklist at
@@ -143,11 +144,12 @@ test("job page layout, menu search and studio separation", async ({
   await expect(main.getByText(/^Step \d of 5/)).toHaveCount(0);
   const checklist = main.getByRole("region", { name: "Checklist", exact: true });
   const row = (name: string) => checklist.getByRole("listitem").filter({ hasText: name });
-  await expect(checklist.getByText("1 of 6 done", { exact: true })).toBeVisible();
+  await expect(checklist.getByText("1 of 7 done", { exact: true })).toBeVisible();
   await expect(checklist.getByRole("heading", { name: /^Set up/, level: 3 })).toContainText("Now");
-  // During Set up the whole list shows: Set up, Picture day and Photos in; Selling and Fulfilment tasks aren't built.
-  await expect(checklist.getByRole("heading", { level: 3 })).toHaveCount(3);
-  await expect(checklist.getByRole("listitem")).toHaveCount(6);
+  // During Set up the whole list shows: Set up, Picture day, Photos in and Selling (Start selling, ADR 0021);
+  // Fulfilment tasks aren't built.
+  await expect(checklist.getByRole("heading", { level: 3 })).toHaveCount(4);
+  await expect(checklist.getByRole("listitem")).toHaveCount(7);
   await expect(checklist.getByRole("button", { name: "Hide tasks", exact: true })).toHaveAttribute(
     "aria-expanded",
     "true",
@@ -177,7 +179,7 @@ test("job page layout, menu search and studio separation", async ({
     checklist.getByRole("link", { name: "Next: Add the roster", exact: true }),
   ).toBeVisible();
   await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
-  await expect(checklist.getByRole("listitem")).toHaveCount(6);
+  await expect(checklist.getByRole("listitem")).toHaveCount(7);
   // The job's own activity only, not the other job's, beside the checklist.
   const recent = main.getByRole("region", { name: "Recent activity" });
   await expect(recent.getByRole("heading", { name: "Recent activity", level: 2 })).toBeVisible();
@@ -185,11 +187,11 @@ test("job page layout, menu search and studio separation", async ({
     recent.getByText(`${owner} created the job ${jobName}`, { exact: true }),
   ).toBeVisible();
   await expect(recent.getByText(otherName)).toHaveCount(0);
-  // Start selling is never disabled; for now it lists what is missing.
+  // Start selling is never disabled; while something is missing it lists what (ADR 0021: photos are real now).
   await main.getByRole("button", { name: "Start selling" }).click();
   const sell = page.getByRole("dialog", { name: "Before you can sell" });
   await expect(sell.getByRole("listitem").filter({ hasText: "Photos uploaded" })).toContainText(
-    "Coming soon",
+    "To do",
   );
   // Every job has a price list (the studio's default), so that item is done (ADR 0019).
   await expect(sell.getByRole("listitem").filter({ hasText: "Price list chosen" })).toContainText(
@@ -210,13 +212,13 @@ test("job page layout, menu search and studio separation", async ({
   await expect(row("Add the roster")).toContainText("Done");
   await expect(row("Add the roster")).toContainText("1 child");
   await expect(row("Print QR cards")).toContainText("Next");
-  await expect(checklist.getByText("2 of 6 done", { exact: true })).toBeVisible();
+  await expect(checklist.getByText("2 of 7 done", { exact: true })).toBeVisible();
 
   // The Jobs list shows the same progress per row (D143).
   await page.goto("/app/jobs");
   const jobRow = main.getByRole("row").filter({ hasText: jobName });
   await expect(jobRow.getByText("Set up", { exact: true })).toBeVisible();
-  await expect(jobRow.getByText("2 of 6 done", { exact: true })).toBeVisible();
+  await expect(jobRow.getByText("2 of 7 done", { exact: true })).toBeVisible();
   await expect(
     jobRow.getByRole("link", { name: `Next: Print QR cards, ${jobName}`, exact: true }),
   ).toHaveAttribute("href", `/app/jobs/${job.id}/people?print=qr`);

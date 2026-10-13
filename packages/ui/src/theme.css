@@ -86,6 +86,13 @@
   to { transform: none; opacity: 1; }
 }
 
+/* ConfettiBurst (D75): each piece flies to its own --confetti-x/-y and spins, fading at the end. */
+@keyframes daybell-confetti {
+  0% { transform: translate(-50%, 0) rotate(0deg); opacity: 1; }
+  75% { opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--confetti-x)), var(--confetti-y)) rotate(var(--confetti-r)); opacity: 0; }
+}
+
 :root {
   --duration-fast: 120ms;
   --duration-base: 200ms;

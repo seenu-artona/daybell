@@ -62,7 +62,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh min-w-[1280px] bg-canvas text-body-lg text-ink">
-      <AppMenu email={me?.email ?? null} studioName={studio?.name ?? ""} onSignOut={signOut} />
+      <AppMenu
+        email={me?.email ?? null}
+        studioName={studio?.name ?? ""}
+        hasStudio={Boolean(studio)}
+        onSignOut={signOut}
+      />
       <main className="flex min-w-0 flex-1 flex-col">
         {notices.length > 0 ? (
           <div className="flex flex-col gap-3 px-12 pt-6">{notices}</div>

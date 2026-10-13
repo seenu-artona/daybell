@@ -1,0 +1,50 @@
+name: Jobs cron (hourly)
+
+# Closes shops whose closing date has passed and prunes old notifications (ADR 0021; docs/crons.md). Hourly here
+# because Vercel Cron's plan may allow only daily jobs (vercel.json keeps a once-daily run as a safety net; Seenu to
+# confirm the plan). Staging always; production only once Seenu adds PRODUCTION_CRON_SECRET (secret) and
+# PRODUCTION_SITE_URL (variable). The secrets live in GitHub only; the response is counts, never personal data.
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: jobs-cron
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call staging's jobs cron
+        env:
+          CRON_SECRET: ${{ secrets.STAGING_CRON_SECRET }}
+          BYPASS: ${{ secrets.STAGING_VERCEL_PROTECTION_BYPASS }}
+        run: |
+          test -n "$CRON_SECRET"
+          bypass=()
+          if [ -n "$BYPASS" ]; then bypass=(-H "x-vercel-protection-bypass: $BYPASS"); fi
+          curl --fail-with-body --silent --show-error --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" "${bypass[@]}" \
+            https://daybell-git-main-artona-tech-team.vercel.app/api/v1/internal/cron/jobs
+
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call production's jobs cron (once its secret and address are set)
+        env:
+          CRON_SECRET: ${{ secrets.PRODUCTION_CRON_SECRET }}
+          SITE_URL: ${{ vars.PRODUCTION_SITE_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ] || [ -z "$SITE_URL" ]; then
+            echo "::notice::PRODUCTION_CRON_SECRET or PRODUCTION_SITE_URL isn't set; production relies on its daily Vercel cron."
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SITE_URL/api/v1/internal/cron/jobs"

@@ -68,8 +68,9 @@ describe("GET /jobs", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.jobs.map((j: { checklist: unknown }) => j.checklist)).toEqual([
-      { milestone: "setUp", done: 2, total: 6, next: "printQrCards" },
-      { milestone: null, done: 2, total: 6, next: null },
+      { milestone: "setUp", done: 2, total: 7, next: "printQrCards" },
+      // Closed: it sold, so Start selling is ticked too (ADR 0021).
+      { milestone: null, done: 3, total: 7, next: null },
     ]);
     expect(db.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
     expect(db.rpc).toHaveBeenCalledOnce();
@@ -77,6 +78,27 @@ describe("GET /jobs", () => {
       p_studio_id: STUDIO,
       p_job_ids: ["a", "b"],
     });
+  });
+
+  it("lists only the jobs in a state with ?status= (Home's Jobs selling now, ADR 0021)", async () => {
+    const db = fakeDatabase([row("a", "selling", "2030-05-01")], []);
+    scope.mockResolvedValue({
+      supabase: db.supabase,
+      studio: { id: STUDIO, name: "A", slug: "a", region: "ca", role: "staff" },
+      userId: "u",
+    });
+    const { GET } = await import("./route");
+    const res = await GET(new Request("http://localhost/api/v1/jobs?status=selling&limit=5"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(
+      body.jobs.map((j: { id: string; closesAt: string | null }) => [j.id, j.closesAt]),
+    ).toEqual([["a", null]]);
+    expect(db.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
+    expect(db.ops).toContainEqual(["eq", ["status", "selling"]]);
+    expect(db.ops).toContainEqual(["limit", [6]]);
+    const bad = await GET(new Request("http://localhost/api/v1/jobs?status=live"));
+    expect(bad.status).toBe(400);
   });
 
   it("refuses a ?today= more than a day away from the server's UTC date", async () => {

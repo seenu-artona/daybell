@@ -5,8 +5,9 @@
  * list: the group of the next unfinished task (Seenu, answer 2).
  *
  * Built tasks today (Seenu, answers 1 and 3): Set up = Create the job, Add the roster, Print QR cards; Picture day =
- * Picture day (ticks itself once the date has passed); Photos in = Upload photos, Review tagging (step 5; ADR 0018).
- * Selling and Fulfilment tasks arrive with their steps.
+ * Picture day (ticks itself once the date has passed); Photos in = Upload photos, Review tagging (step 5; ADR 0018);
+ * Selling = Start selling (step 8; ADR 0021: ticks itself once the job sells, and stays ticked once it closes).
+ * Fulfilment tasks arrive with their step.
  */
 import {
   daysUntil,
@@ -27,14 +28,15 @@ export const TASK_KEYS = [
   "pictureDay",
   "uploadPhotos",
   "reviewTagging",
+  "startSelling",
 ] as const;
 export type TaskKey = (typeof TASK_KEYS)[number];
 
 /**
  * Where the work happens. Screens map these to their links: the job's Overview, People, People with the print dialog
- * open, Photos, or Photos' Review.
+ * open, Photos, Photos' Review, or the job with its Start selling dialog open (sell).
  */
-export type TaskTarget = "overview" | "people" | "peoplePrint" | "photos" | "photosReview";
+export type TaskTarget = "overview" | "people" | "peoplePrint" | "photos" | "photosReview" | "sell";
 
 /** What the checklist knows about a job. Only data that exists today. */
 export interface ChecklistFacts extends TaggingFacts {
@@ -60,6 +62,8 @@ interface TaskSpec {
 }
 
 const anyone = () => true;
+/** Owners and admins open and close the shop (ADR 0021, call 1). */
+const managers = (role: string) => role === "owner" || role === "admin";
 
 const TASKS: Record<TaskKey, TaskSpec> = {
   // The job exists, so this is always done: it shows where the list starts.
@@ -97,6 +101,13 @@ const TASKS: Record<TaskKey, TaskSpec> = {
     canDo: canEditRoster,
     done: reviewTaggingDone,
   },
+  // The job sells, or sold and closed (ADR 0021, call 5). The server checks everything before it may (call 1).
+  startSelling: {
+    milestone: "selling",
+    target: "sell",
+    canDo: managers,
+    done: (f) => f.status !== "draft",
+  },
 };
 
 /** The tasks of one list, in order. Today every job type shares it; it is per type so the lists can diverge. */
@@ -107,6 +118,7 @@ const STANDARD: readonly TaskKey[] = [
   "pictureDay",
   "uploadPhotos",
   "reviewTagging",
+  "startSelling",
 ];
 
 export const JOB_CHECKLISTS: Record<JobType, readonly TaskKey[]> = Object.fromEntries(
@@ -149,7 +161,8 @@ function milestoneOf(
   if (status === "closed") return null;
   if (status === "selling") return "selling";
   if (next) return next.milestone;
-  // Every built task is done in a draft: the next stage, whose tasks aren't built yet (Seenu, answer 2).
+  // Every built task is done (a draft can't get here while Start selling is built; kept for lists that end earlier):
+  // the next stage, whose tasks aren't built yet (Seenu, answer 2).
   const last = tasks.reduce((at, t) => Math.max(at, MILESTONES.indexOf(t.milestone)), -1);
   return MILESTONES[last + 1] ?? null;
 }

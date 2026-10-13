@@ -13,10 +13,13 @@ import { check, handle, parseBody, parseQuery } from "@/lib/api";
 import { checklistDetail, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
 import {
   assertClientInStudio,
+  assertClosingDate,
   isNumberTaken,
+  JOB_CLOSED,
   JOB_COLUMNS,
   type JobRow,
   jobColumns,
+  jobWriteError,
   NUMBER_TAKEN,
   toJob,
   validJob,
@@ -62,9 +65,10 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
 });
 
 /**
- * PATCH /api/v1/jobs/:id — owners and admins change a job's details. Status changes arrive in step 8. A draft or
- * selling job may switch price list or school delivery (new orders only); a closed job's don't change (Claude's call
- * 4; the database refuses it too).
+ * PATCH /api/v1/jobs/:id — owners and admins change a job's details. The status changes only through start-selling,
+ * close and reopen (ADR 0021). A draft or selling job may switch price list or school delivery (new orders only) and
+ * set or remove its closing date (in the future, at most 400 days away); a closed job's don't change (Claude's call 4;
+ * ADR 0021; the database refuses it too).
  */
 export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const id = await jobId(ctx);
@@ -93,6 +97,9 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
       "This job is closed, so its price list and delivery can't change.",
       { form: PRICE_LIST_CONFLICTS.jobClosed },
     );
+  // A closing date on a closed shop: reopen it first. Removing one (null) is harmless.
+  if (current.status === "closed" && patch.closesAt != null) throw JOB_CLOSED();
+  assertClosingDate(patch.closesAt);
   await assertClientInStudio(supabase, studio.id, patch.clientId);
   await assertPriceListInStudio(supabase, studio.id, patch.priceListId);
   const result = await supabase
@@ -103,6 +110,8 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
     .select(JOB_COLUMNS)
     .maybeSingle();
   if (isNumberTaken(result.error)) throw NUMBER_TAKEN;
+  const named = jobWriteError(result.error, { shopChanged });
+  if (named) throw named;
   // The job closed between the check and the update.
   if (result.error?.code === "P0001") throw priceListError(result.error);
   const row = check(result) as unknown as JobRow | null;

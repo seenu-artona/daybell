@@ -20,6 +20,7 @@ import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { useJob } from "../../job-context";
 import { JobSection } from "../../job-section";
+import { LiveNote } from "../../live-note";
 import { PhotosViews } from "../photos-views";
 import { Albums } from "./albums";
 import { BlankCards } from "./blank-cards";
@@ -385,6 +386,7 @@ export default function ReviewPage() {
               <p className="m-0 text-caption text-muted">{t("selection.confirmFirst")}</p>
             ) : null}
             {failed ? <Banner tone="danger" title={t("loadFailed")} /> : null}
+            <LiveNote />
           </>
         }
       >

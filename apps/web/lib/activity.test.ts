@@ -56,7 +56,9 @@ describe("unnamedSubject", () => {
 describe("JOB_ACTIVITY_TYPES", () => {
   it("is the job's own changes, roster imports and QR card prints, nothing about children, classes or the team", () => {
     expect([...JOB_ACTIVITY_TYPES].sort()).toEqual([
+      "job.closed",
       "job.created",
+      "job.selling",
       "job.updated",
       "qr_cards.printed",
       "roster.imported",
@@ -76,6 +78,9 @@ describe("activityChip", () => {
     expect(activityChip("roster.imported")).toEqual({ tone: "info", icon: "imported" });
     expect(activityChip("qr_cards.printed")).toEqual({ tone: "info", icon: "printed" });
     expect(activityChip("member.joined").icon).toBe("team");
+    // Going live (ADR 0021): the shop opening is green, closing grey.
+    expect(activityChip("job.selling")).toEqual({ tone: "primary", icon: "selling" });
+    expect(activityChip("job.closed")).toEqual({ tone: "neutral", icon: "closed" });
     expect(activityChip("studio.updated").icon).toBe("studio");
   });
 });

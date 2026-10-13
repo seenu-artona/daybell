@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import messages from "@/messages/en-CA.json";
 import enUS from "@/messages/en-US.json";
+import { sellItems } from "../../jobs/[id]/going-live";
 import { SellChecklist } from "../../jobs/[id]/sell-checklist";
 import {
   PayoutsCard,
@@ -120,10 +121,16 @@ describe("SellChecklist: Payouts connected", () => {
   const row = (payoutsConnected: boolean | undefined) => {
     const html = render(
       createElement(SellChecklist, {
-        roster: 0,
-        taggingReviewed: false,
-        hasPriceList: true,
-        payoutsConnected,
+        items: sellItems(
+          {
+            children: 0,
+            hasReadyPhoto: false,
+            taggingReviewed: false,
+            hasPriceList: true,
+            payoutsConnected,
+          },
+          null,
+        ),
       }),
     );
     return /Payouts connected<\/span><span[^>]*>([^<]+)</.exec(html)?.[1];

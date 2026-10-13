@@ -4,6 +4,8 @@ import {
   JOB_STATUSES,
   JOB_TYPES,
   MILESTONES,
+  NOTIFICATION_KINDS,
+  NOTIFICATIONS_SHOWN,
   ONBOARDING_TASKS,
   PAYOUT_ACCOUNT_STATUSES,
   PAYOUT_INTERVALS,
@@ -73,6 +75,9 @@ export const ACTIVITY_TYPES = [
   "client.updated",
   "job.created",
   "job.updated",
+  // Going live (ADR 0021): the shop opened (or reopened) and closed.
+  "job.selling",
+  "job.closed",
   "roster.imported",
   "qr_cards.printed",
 ] as const;
@@ -149,7 +154,10 @@ export const job = z
     id: z.uuid(),
     name: z.string(),
     type: z.enum(JOB_TYPES),
-    status: z.enum(JOB_STATUSES).meta({ description: "New jobs are drafts." }),
+    status: z.enum(JOB_STATUSES).meta({
+      description:
+        "New jobs are drafts; Start selling makes them selling, Close shop closed, Reopen shop selling again (ADR 0021).",
+    }),
     pictureDay: z.iso.date(),
     client: clientRef.nullable(),
     internalNumber: z.string().meta({ description: "Only the studio sees it." }),
@@ -157,6 +165,10 @@ export const job = z
     priceListId: z.uuid().meta({ description: "The price list the job sells from (ADR 0019)." }),
     deliverToSchool: z.boolean().meta({
       description: "Parents may choose free delivery to the school as well as paid home shipping.",
+    }),
+    closesAt: z.iso.datetime({ offset: true }).nullable().meta({
+      description:
+        "When the shop closes by itself (ADR 0021); null for no closing date. Cleared when the shop closes.",
     }),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
@@ -211,6 +223,7 @@ export const jobDetailResponse = z.object({ job: job.extend({ checklist: jobChec
 export type JobDetailResponse = z.infer<typeof jobDetailResponse>;
 export type JobsResponse = z.infer<typeof jobsResponse>;
 export const jobResponse = z.object({ job });
+export type JobResponse = z.infer<typeof jobResponse>;
 export const nextJobNumberResponse = z.object({
   internalNumber: z.string().meta({ description: "The next free JOBnnnnn number." }),
 });
@@ -1058,3 +1071,96 @@ export const PAYOUT_NO_CONTACT_EMAIL = "payouts.noContactEmail";
  * setup (ADR 0020 section 16; security review N1).
  */
 export const PAYOUT_CREATE_CONFLICT = "payouts.createConflict";
+
+// ── Going live and the bell (Phase 1 step 8, ADR 0021) ──────────────────────────────────────────────────────────────
+
+/**
+ * Why a Start selling, Close shop, Reopen shop or closing date request was refused with 409, in the error's
+ * `fields.form`. A notReady refusal also names each missing item as a field (roster, photos, tagging, priceList,
+ * payouts), each with its own message key.
+ */
+export const JOB_CONFLICTS = {
+  /** Something in "Before you can sell" is missing; the fields say what. */
+  notReady: "jobs.notReady",
+  alreadySelling: "jobs.alreadySelling",
+  /** Only a selling shop can close. */
+  notSelling: "jobs.notSelling",
+  /** Only a closed shop can reopen. */
+  notClosed: "jobs.notClosed",
+  /** The shop is closed: reopen it first. */
+  closed: "jobs.closed",
+} as const;
+export type JobConflict = (typeof JOB_CONFLICTS)[keyof typeof JOB_CONFLICTS];
+
+/** The message key of each missing item in a notReady refusal's fields. */
+export const SELL_BLOCKER_FIELDS = {
+  roster: "jobs.sell.roster",
+  photos: "jobs.sell.photos",
+  tagging: "jobs.sell.tagging",
+  priceList: "jobs.sell.priceList",
+  payouts: "jobs.sell.payouts",
+} as const;
+
+export const notificationData = z
+  .object({
+    scheduled: z
+      .boolean()
+      .optional()
+      .meta({ description: "job_closed: closed by its closing date." }),
+    from: z
+      .enum(["draft", "closed"])
+      .optional()
+      .meta({ description: "job_selling: opened from a draft, or reopened." }),
+    failed: z.number().int().optional().meta({ description: "photos_failed: photos that failed." }),
+    leftovers: z
+      .number()
+      .int()
+      .optional()
+      .meta({ description: "tagging_ready: photos in Leftovers." }),
+    flagged: z.number().int().optional().meta({ description: "tagging_ready: photos to check." }),
+  })
+  .meta({ id: "NotificationData", description: "Counts and flags only; never names." });
+
+export const notification = z
+  .object({
+    id: z.uuid(),
+    kind: z.enum(NOTIFICATION_KINDS).meta({
+      description:
+        "job_selling, job_closed (everyone); payouts_active, payouts_restricted (owners and admins); photos_failed, tagging_ready (owners, admins and photographers).",
+    }),
+    createdAt: z.iso.datetime({ offset: true }),
+    readAt: z.iso.datetime({ offset: true }).nullable(),
+    job: z
+      .object({ id: z.uuid(), name: z.string() })
+      .nullable()
+      .meta({ description: "The job it is about, with its current name; null for payouts." }),
+    data: notificationData,
+  })
+  .meta({
+    id: "Notification",
+    description:
+      "One line of the signed-in person's bell (information only, D143). The screens write the words; the database keeps ids and counts.",
+  });
+export type Notification = z.infer<typeof notification>;
+
+export const notificationsResponse = z.object({
+  notifications: z
+    .array(notification)
+    .meta({ description: `The ${NOTIFICATIONS_SHOWN} latest, newest first.` }),
+  unread: z.number().int().meta({ description: "How many of all of them are unread." }),
+});
+export type NotificationsResponse = z.infer<typeof notificationsResponse>;
+
+export const unreadCountResponse = z.object({
+  unread: z
+    .number()
+    .int()
+    .meta({ description: "The signed-in person's unread notifications here." }),
+});
+export type UnreadCountResponse = z.infer<typeof unreadCountResponse>;
+
+export const cronJobsResponse = z.object({
+  closedJobs: z.number().int().meta({ description: "Shops closed by their closing date." }),
+  prunedNotifications: z.number().int().meta({ description: "Old notifications removed." }),
+});
+export type CronJobsResponse = z.infer<typeof cronJobsResponse>;

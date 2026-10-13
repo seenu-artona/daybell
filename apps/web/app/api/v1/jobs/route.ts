@@ -4,10 +4,12 @@ import { check, filterValue, handle, parseBody, parseQuery } from "@/lib/api";
 import { checklistSummary, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
 import {
   assertClientInStudio,
+  assertClosingDate,
   isNumberTaken,
   JOB_COLUMNS,
   type JobRow,
   jobColumns,
+  jobWriteError,
   NUMBER_TAKEN,
   nextJobNumber,
   page,
@@ -18,10 +20,11 @@ import { assertCanManage, studioScope } from "@/lib/studio";
 
 /**
  * GET /api/v1/jobs — the studio's jobs, newest first, in pages (D92, D96), each with its checklist progress (D143; ADR
- * 0017): the page's counts come from one query, never one per job.
+ * 0017): the page's counts come from one query, never one per job. ?status= narrows it to one state (Home's "Jobs
+ * selling now", ADR 0021).
  */
 export const GET = handle(async (request: Request) => {
-  const { limit, cursor, today: todayParam } = parseQuery(request, jobListQuery);
+  const { limit, cursor, today: todayParam, status } = parseQuery(request, jobListQuery);
   const today = checklistToday(todayParam);
   const { supabase, studio } = await studioScope();
   let query = supabase
@@ -31,6 +34,7 @@ export const GET = handle(async (request: Request) => {
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(limit + 1);
+  if (status) query = query.eq("status", status);
   if (cursor) {
     // Keyset pagination: continue after the cursor job (looked up in this studio only).
     const anchor = check(
@@ -72,6 +76,7 @@ export const POST = handle(async (request: Request) => {
   const input = await parseBody(request, jobInput);
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
+  assertClosingDate(input.closesAt);
   await assertClientInStudio(supabase, studio.id, input.clientId);
   await assertPriceListInStudio(supabase, studio.id, input.priceListId);
   for (let attempt = 0; ; attempt++) {
@@ -85,6 +90,8 @@ export const POST = handle(async (request: Request) => {
       if (input.internalNumber || attempt >= 2) throw NUMBER_TAKEN;
       continue;
     }
+    const named = jobWriteError(result.error, { shopChanged: false });
+    if (named) throw named;
     const row = check(result) as unknown as JobRow;
     return NextResponse.json({ job: toJob(row) }, { status: 201 });
   }

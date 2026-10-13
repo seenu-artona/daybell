@@ -2,11 +2,14 @@ import { DATA_REGIONS } from "@daybell/config";
 import {
   ITEM_DESCRIPTION_MAX,
   ITEM_NAME_MAX,
+  JOB_STATUSES,
   JOB_TYPES,
   MAX_BLANK_CARDS,
+  MAX_CLOSING_DAYS,
   MAX_FILES_PER_REQUEST,
   MAX_ITEM_PRICE_CENTS,
   MAX_LINE_QUANTITY,
+  MAX_NOTIFICATIONS_PER_READ,
   MAX_PACKAGE_LINES,
   MAX_PART_URLS_PER_REQUEST,
   MAX_PHOTO_BYTES,
@@ -217,12 +220,19 @@ const jobFields = {
     description:
       "Parents may choose free delivery to the school as well as paid home shipping. Off unless turned on; a closed job's can't change.",
   }),
+  closesAt: z.iso
+    .datetime({ offset: true, error: "validation.closesAt" })
+    .nullable()
+    .optional()
+    .meta({
+      description: `When the shop closes by itself (ADR 0021), an exact moment with its offset; null for no closing date. In the future and at most ${MAX_CLOSING_DAYS} days away. The screens send the end of the chosen day in the setter's own time zone. Checked within the hour (the jobs cron); a closed job's can't be set.`,
+    }),
 };
 
 export const jobInput = z.object(jobFields);
 export type JobInput = z.infer<typeof jobInput>;
 
-/** Change some fields of a job. A job's status is not changed here (step 8). */
+/** Change some fields of a job. A job's status is never changed here: Start selling, Close shop and Reopen shop do it. */
 export const jobPatch = z
   .strictObject(z.object(jobFields).partial().shape, { error: "validation.unknownField" })
   .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
@@ -247,7 +257,13 @@ const todayParam = z.iso.date({ error: "validation.invalid" }).optional().meta({
   description:
     "Today's date in the person's time zone, YYYY-MM-DD; within a day of the server's UTC date. Defaults to the UTC date.",
 });
-export const jobListQuery = listQuery.extend({ today: todayParam });
+export const jobListQuery = listQuery.extend({
+  today: todayParam,
+  status: z
+    .enum(JOB_STATUSES, { error: "validation.invalid" })
+    .optional()
+    .meta({ description: "Only jobs in this state, e.g. selling (Home's Jobs selling now)." }),
+});
 export const studioChecklistQuery = z.object({ today: todayParam });
 
 export const clientListQuery = listQuery.extend({
@@ -940,3 +956,18 @@ export const payoutScheduleInput = z.discriminatedUnion(
   { error: "validation.payoutInterval" },
 );
 export type PayoutScheduleInput = z.infer<typeof payoutScheduleInput>;
+
+// ── Going live (Phase 1 step 8, ADR 0021) ─────────────────────────────────────────────────────────────────────────
+
+/** Mark some of my notifications read. */
+export const markNotificationsReadInput = z.strictObject(
+  {
+    ids: z
+      .array(z.uuid({ error: "validation.invalid" }), { error: "validation.invalid" })
+      .min(1, { error: "validation.invalid" })
+      .max(MAX_NOTIFICATIONS_PER_READ, { error: "validation.invalid" })
+      .meta({ description: `1 to ${MAX_NOTIFICATIONS_PER_READ} of your own notifications' ids.` }),
+  },
+  { error: "validation.unknownField" },
+);
+export type MarkNotificationsReadInput = z.infer<typeof markNotificationsReadInput>;

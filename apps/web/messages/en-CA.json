@@ -81,7 +81,8 @@
     "celebrate": {
       "title": "You're live!",
       "body": "Lincoln Elementary is open. Parents can start ordering now.",
-      "again": "Celebrate again"
+      "again": "Celebrate again",
+      "confetti": "Confetti burst"
     },
     "banners": {
       "tipTitle": "Tip",
@@ -190,7 +191,8 @@
     "itemOrder": "This price list changed. Reload the page and try again.",
     "payoutInterval": "Choose weekly, daily or monthly.",
     "payoutWeekday": "Choose a weekday, Monday to Friday.",
-    "payoutMonthDay": "Choose a day of the month from 1 to 31."
+    "payoutMonthDay": "Choose a day of the month from 1 to 31.",
+    "closesAt": "Choose a day after today, no more than 400 days ahead."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -309,7 +311,9 @@
       "aJob": "a job",
       "job": {
         "created": "{actor} created the job {name}",
-        "updated": "{actor} updated the job {name}"
+        "updated": "{actor} updated the job {name}",
+        "selling": "{actor} opened the shop for {name}",
+        "closed": "{hasActor, select, yes {{actor} closed the shop for {name}} other {The shop for {name} closed}}"
       },
       "aClient": "a client",
       "client": {
@@ -326,6 +330,7 @@
     },
     "nav": {
       "label": "Main",
+      "menu": "Studio menu",
       "home": "Home",
       "jobs": "Jobs",
       "orders": "Orders",
@@ -346,7 +351,24 @@
       "account": "Account",
       "signedInAs": "Signed in as",
       "searchResults": "{count, plural, =0 {No matches} one {# result} other {# results}}",
-      "notificationsNone": "No notifications yet."
+      "notificationsNone": "No notifications yet.",
+      "notificationsUnread": "Notifications, {count, plural, one {# unread} other {# unread}}",
+      "notificationsNew": "{count, plural, one {# new notification} other {# new notifications}}",
+      "notificationsList": "Latest notifications",
+      "notificationsLoading": "Loading…",
+      "notificationsFailed": "We couldn’t load your notifications. Try again in a moment.",
+      "markAllRead": "Mark all as read",
+      "unread": "Unread, ",
+      "unreadMany": "99+",
+      "aJob": "A job",
+      "notificationText": {
+        "job_selling": "{from, select, closed {{job} is selling again} other {{job} is live: parents can order now}}",
+        "job_closed": "{scheduled, select, yes {{job} closed on its closing date} other {{job} is closed}}",
+        "payouts_active": "Payouts are connected: your jobs can start selling",
+        "payouts_restricted": "Stripe needs something from you before payouts can continue",
+        "photos_failed": "{job}: {failed, plural, one {# photo} other {# photos}} couldn’t be processed",
+        "tagging_ready": "{job}: photos are tagged, with {leftovers, number} in Leftovers and {flagged, number} to check"
+      }
     },
     "soon": {
       "title": "{section} is coming soon",
@@ -380,6 +402,7 @@
         "pictureDay": "Picture day",
         "uploadPhotos": "Upload photos",
         "reviewTagging": "Review tagging",
+        "startSelling": "Start selling",
         "reviewFailedPhotos": "Check failed photos"
       },
       "notes": {
@@ -414,6 +437,10 @@
       "dash": "–",
       "jobsSelling": "Jobs selling now",
       "noJobs": "No jobs are selling yet.",
+      "closesOn": "Closes {when}",
+      "noClosingDate": "No closing date",
+      "viewAllJobs": "View all jobs",
+      "jobsSellingFailed": "We couldn’t load the jobs selling now.",
       "recently": "Recently",
       "checking": "Checking…",
       "onboarding": {
@@ -864,7 +891,42 @@
     "job": {
       "moreActions": "More actions",
       "startSelling": "Start selling",
-      "sellIntro": "Selling opens in an upcoming step. Before you can sell, finish these:",
+      "sellIntro": "Before you can sell, finish these:",
+      "readyIntro": "Everything’s ready. Once you start selling, parents can order.",
+      "reopenTitle": "Reopen shop",
+      "reopenIntro": "Before the shop reopens, finish these:",
+      "reopenReady": "Everything’s ready. Once you reopen the shop, parents can order again.",
+      "reopenShop": "Reopen shop",
+      "closeShop": "Close shop",
+      "cancel": "Cancel",
+      "live": "{job} is live. Parents can order now.",
+      "reopened": "{job} is selling again.",
+      "closedNow": "{job} is closed.",
+      "notReady": "Not everything is ready yet. The list shows what’s missing.",
+      "conflicts": {
+        "notReady": "Not everything is ready yet. The list shows what’s missing.",
+        "alreadySelling": "This job is already selling.",
+        "notSelling": "This shop isn’t selling, so it can’t be closed.",
+        "notClosed": "This shop isn’t closed, so it can’t be reopened.",
+        "closed": "This shop is closed. Reopen it first."
+      },
+      "closeDialog": {
+        "title": "Close the shop?",
+        "body": "Parents can’t order until you reopen it. Orders already placed aren’t affected.",
+        "confirm": "Close shop"
+      },
+      "closing": {
+        "menu": "Set closing date",
+        "title": "Closing date",
+        "label": "Last day to order",
+        "hint": "Closes at midnight at the end of this day, {zone}.",
+        "save": "Save closing date",
+        "remove": "Remove closing date",
+        "saved": "Closing date saved.",
+        "removed": "Closing date removed.",
+        "line": "Closes {when}"
+      },
+      "liveNote": "This shop is live: changes show to parents straight away; orders already placed keep what they bought.",
       "close": "Close",
       "closeDetails": "Close details",
       "tabs": {
@@ -887,7 +949,6 @@
         "title": "Before you can sell",
         "done": "Done",
         "todo": "To do",
-        "soon": "Coming soon",
         "checking": "Checking…",
         "items": {
           "roster": "Roster added",
@@ -907,7 +968,6 @@
         "view": "View this price list",
         "readOnly": "Only owners and admins can change the job's price list and delivery.",
         "closed": "This job is closed, so its price list and delivery can't change.",
-        "live": "This job is selling. Changes apply to new orders only.",
         "items": "What parents can buy",
         "loading": "Loading…",
         "delivery": "Delivery",
@@ -1380,6 +1440,7 @@
       "Payouts": "Payouts",
       "Contacts": "Contacts",
       "Search": "Search",
+      "Notifications": "Notifications",
       "Internal": "Internal"
     },
     "access": {

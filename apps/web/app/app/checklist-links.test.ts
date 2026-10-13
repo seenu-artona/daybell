@@ -11,6 +11,7 @@ describe("taskHref", () => {
     expect(taskHref(JOB, "peoplePrint")).toBe(`/app/jobs/${JOB}/people?print=qr`);
     expect(taskHref(JOB, "photos")).toBe(`/app/jobs/${JOB}/photos`);
     expect(taskHref(JOB, "photosReview")).toBe(`/app/jobs/${JOB}/photos/review`);
+    expect(taskHref(JOB, "sell")).toBe(`/app/jobs/${JOB}?sell=1`);
   });
 });
 

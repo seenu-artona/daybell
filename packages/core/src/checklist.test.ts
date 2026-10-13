@@ -81,8 +81,10 @@ describe("jobChecklist", () => {
       ["setUp", ["createJob", "addRoster", "printQrCards"]],
       ["pictureDay", ["pictureDay"]],
       ["photosIn", ["uploadPhotos", "reviewTagging"]],
+      ["selling", ["startSelling"]],
     ]);
-    expect(c.total).toBe(6);
+    // Fulfilment's tasks aren't built yet, so its group is hidden (ADR 0021, call 5).
+    expect(c.total).toBe(7);
     for (const type of JOB_TYPES) {
       const order = jobChecklist(type, facts()).groups.map((g) => MILESTONES.indexOf(g.milestone));
       expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -97,9 +99,10 @@ describe("jobChecklist", () => {
       pictureDay: "todo",
       uploadPhotos: "todo",
       reviewTagging: "todo",
+      startSelling: "todo",
     });
     const c = list();
-    expect([c.done, c.total, c.next?.key, c.milestone]).toEqual([1, 6, "addRoster", "setUp"]);
+    expect([c.done, c.total, c.next?.key, c.milestone]).toEqual([1, 7, "addRoster", "setUp"]);
   });
 
   it("ticks Add the roster and Print QR cards from the roster and the cards", () => {
@@ -163,13 +166,32 @@ describe("jobChecklist", () => {
     expect([early.next?.key, early.milestone]).toEqual(["pictureDay", "pictureDay"]);
   });
 
-  it("shows the next stage once every built task of a draft is done", () => {
+  it("puts a ready draft at Selling, with Start selling next (ADR 0021, call 5)", () => {
     const c = jobChecklist("school", setUpDone({ pictureDay: "2026-10-01", ...reviewed }));
-    expect([c.done, c.total, c.next, c.milestone]).toEqual([6, 6, null, "selling"]);
+    expect([c.done, c.total, c.next?.key, c.milestone]).toEqual([6, 7, "startSelling", "selling"]);
+    expect(states(setUpDone({ pictureDay: "2026-10-01", ...reviewed })).startSelling).toBe("next");
+  });
+
+  it("ticks Start selling once the job sells, and keeps it ticked once it closes", () => {
+    expect(states({ status: "draft" }).startSelling).toBe("todo");
+    expect(states({ status: "selling" }).startSelling).toBe("done");
+    expect(states({ status: "closed" }).startSelling).toBe("done");
+    const selling = jobChecklist(
+      "school",
+      setUpDone({ status: "selling", pictureDay: "2026-10-01", ...reviewed }),
+    );
+    expect([selling.done, selling.total, selling.next, selling.milestone]).toEqual([
+      7,
+      7,
+      null,
+      "selling",
+    ]);
   });
 
   it("follows the status once the job sells or closes", () => {
     expect(list({ status: "selling" }).milestone).toBe("selling");
+    // Selling with earlier tasks left (e.g. reopened after more photos came): still Selling.
+    expect(list({ status: "selling", children: 0 }).milestone).toBe("selling");
     const closed = list({ status: "closed" });
     expect([closed.milestone, closed.next]).toEqual([null, null]);
     // A closed job's tasks keep their real state; none is next.
@@ -209,10 +231,17 @@ describe("canDoTask and taskTarget", () => {
       "overview",
       "photos",
       "photosReview",
+      "sell",
     ]);
     expect(taskTarget("reviewFailedPhotos")).toBe("photos");
     expect(canDoTask("staff", "reviewTagging")).toBe(false);
     expect(canDoTask("photographer", "reviewTagging")).toBe(true);
+  });
+
+  it("lets only owners and admins start selling (ADR 0021, call 1): others see plain text", () => {
+    expect(
+      ["owner", "admin", "photographer", "staff"].map((r) => canDoTask(r, "startSelling")),
+    ).toEqual([true, true, false, false]);
   });
 });
 
@@ -252,8 +281,11 @@ describe("upNextForJob", () => {
       const p = pick(f);
       if (p) expect(["createJob", "pictureDay"]).not.toContain(p.task);
     }
-    // Photos already uploaded and reviewed before picture day: only Picture day is left, so nothing to do.
-    expect(pick(setUpDone(reviewed))).toBeNull();
+    // Photos already uploaded and reviewed before picture day: Picture day has no page, so Start selling is next.
+    expect(pick(setUpDone(reviewed))).toEqual({
+      task: "startSelling",
+      reason: { kind: "nextStep" },
+    });
   });
 
   it("flags failed photos as broken, after dates", () => {
@@ -289,7 +321,12 @@ describe("upNextForJob", () => {
 
   it("falls back to the next step, and picks nothing when nothing is left or the job is closed", () => {
     expect(pick(facts())).toEqual({ task: "addRoster", reason: { kind: "nextStep" } });
-    expect(pick(setUpDone({ pictureDay: "2026-10-01", ...reviewed }))).toBeNull();
+    // A ready draft: Start selling, with target "sell" (the job with its dialog open).
+    const ready = setUpDone({ pictureDay: "2026-10-01", ...reviewed });
+    expect(pick(ready)).toEqual({ task: "startSelling", reason: { kind: "nextStep" } });
+    expect(taskTarget("startSelling")).toBe("sell");
+    // Selling with everything done needs nothing; nor does a closed job.
+    expect(pick({ ...ready, status: "selling" })).toBeNull();
     expect(pick(facts({ status: "closed", pictureDay: "2026-10-01" }))).toBeNull();
   });
 

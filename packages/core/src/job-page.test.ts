@@ -1,5 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { daysUntil, localDay, qrCardsDone, sellChecklist } from "./job-page";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  campaignsMaySend,
+  closingDateAllowed,
+  closingDay,
+  daysUntil,
+  endOfLocalDay,
+  localDay,
+  MAX_CLOSING_DAYS,
+  qrCardsDone,
+  SELL_BLOCKER_DB_KEYS,
+  SELL_CHECKLIST,
+  type SellFacts,
+  sellBlockers,
+  sellBlockersFromDb,
+  sellChecklist,
+} from "./job-page";
+import { JOB_STATUSES } from "./jobs";
 
 describe("qrCardsDone", () => {
   it("is done when every child who may be photographed has a card, and never for an empty roster", () => {
@@ -14,56 +30,123 @@ describe("qrCardsDone", () => {
   });
 });
 
-describe("sellChecklist", () => {
-  const none = {
+describe("sellChecklist and sellBlockers (ADR 0021, call 1, A1, A2)", () => {
+  const none: SellFacts = {
     children: 0,
+    hasReadyPhoto: false,
     taggingReviewed: false,
     hasPriceList: false,
     payoutsConnected: false,
   };
+  const all: SellFacts = {
+    children: 4,
+    hasReadyPhoto: true,
+    taggingReviewed: true,
+    hasPriceList: true,
+    payoutsConnected: true,
+  };
 
-  it("marks the roster, reviewed tagging, the price list and payouts done; photos are coming soon (ADR 0018-0020)", () => {
-    expect(sellChecklist(none).filter((i) => i.done)).toEqual([]);
-    const items = sellChecklist({
-      children: 4,
-      taggingReviewed: true,
-      hasPriceList: true,
-      payoutsConnected: true,
-    });
-    expect(items.filter((i) => i.done).map((i) => i.key)).toEqual([
+  it("lists the five items in order, every one real (no more Coming soon)", () => {
+    expect(sellChecklist(none)).toEqual(SELL_CHECKLIST.map((key) => ({ key, done: false })));
+    expect(sellChecklist(all).every((i) => i.done)).toBe(true);
+    expect(sellChecklist({ ...none, hasReadyPhoto: true }).find((i) => i.key === "photos")).toEqual(
+      {
+        key: "photos",
+        done: true,
+      },
+    );
+  });
+
+  it("blocks on exactly the items not done, for every combination, in the dialog's order", () => {
+    const keys = Object.keys(all) as (keyof SellFacts)[];
+    for (let mask = 0; mask < 1 << keys.length; mask++) {
+      const f = { ...all };
+      keys.forEach((k, i) => {
+        if (mask & (1 << i)) (f as Record<string, unknown>)[k] = k === "children" ? 0 : false;
+      });
+      const blockers = sellBlockers(f);
+      expect(blockers).toEqual(
+        sellChecklist(f)
+          .filter((i) => !i.done)
+          .map((i) => i.key),
+      );
+      expect(blockers.length).toBe(keys.filter((_, i) => mask & (1 << i)).length);
+    }
+    expect(sellBlockers(all)).toEqual([]);
+    expect(sellBlockers(none)).toEqual([...SELL_CHECKLIST]);
+  });
+
+  it("reads the database's blocker keys, ignoring anything it doesn't know", () => {
+    expect(sellBlockersFromDb("payouts,price_list,roster")).toEqual([
       "roster",
-      "tagging",
       "priceList",
       "payouts",
     ]);
-    expect(items.filter((i) => i.soon).map((i) => i.key)).toEqual(["photos"]);
-    expect(items.every((i) => !(i.done && i.soon))).toBe(true);
-    expect(sellChecklist({ ...none, children: 4 }).find((i) => i.key === "tagging")).toEqual({
-      key: "tagging",
-      done: false,
-      soon: false,
-    });
-    expect(sellChecklist(none).find((i) => i.key === "priceList")).toEqual({
-      key: "priceList",
-      done: false,
-      soon: false,
-    });
-    expect(sellChecklist(none).find((i) => i.key === "payouts")).toEqual({
-      key: "payouts",
-      done: false,
-      soon: false,
-    });
+    expect(sellBlockersFromDb("photos, tagging")).toEqual(["photos", "tagging"]);
+    expect(sellBlockersFromDb("priceList,<script>,Maya")).toEqual([]);
+    expect(sellBlockersFromDb("")).toEqual([]);
+    expect(sellBlockersFromDb(null)).toEqual([]);
+    expect(Object.values(SELL_BLOCKER_DB_KEYS)).toEqual([
+      "roster",
+      "photos",
+      "tagging",
+      "price_list",
+      "payouts",
+    ]);
+  });
+});
+
+describe("campaignsMaySend (D47)", () => {
+  it("allows campaigns only while a job is selling, as GotPhoto", () => {
+    expect(JOB_STATUSES.map(campaignsMaySend)).toEqual([false, true, false]);
+  });
+});
+
+describe("closingDateAllowed", () => {
+  const now = new Date("2026-10-12T12:00:00Z");
+  it("takes a moment in the future, at most 400 days away", () => {
+    expect(closingDateAllowed(new Date("2026-10-12T12:00:01Z"), now)).toBe(true);
+    expect(closingDateAllowed(new Date(now.getTime() + MAX_CLOSING_DAYS * 86_400_000), now)).toBe(
+      true,
+    );
+    expect(
+      closingDateAllowed(new Date(now.getTime() + MAX_CLOSING_DAYS * 86_400_000 + 1), now),
+    ).toBe(false);
+    expect(closingDateAllowed(now, now)).toBe(false);
+    expect(closingDateAllowed(new Date("2026-10-01T00:00:00Z"), now)).toBe(false);
+    expect(closingDateAllowed(new Date("nonsense"), now)).toBe(false);
+  });
+});
+
+describe("endOfLocalDay and closingDay (ADR 0021, Q2)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
-  it("treats Payouts connected the same for every studio: real, never coming soon (Seenu, Oct 12)", () => {
-    for (const payoutsConnected of [true, false])
-      expect(sellChecklist({ ...none, payoutsConnected }).find((i) => i.key === "payouts")).toEqual(
-        {
-          key: "payouts",
-          done: payoutsConnected,
-          soon: false,
-        },
-      );
+  it("is the next local midnight, in the setter's own time zone", () => {
+    vi.stubEnv("TZ", "America/Toronto");
+    expect(endOfLocalDay("2026-11-20").toISOString()).toBe("2026-11-21T05:00:00.000Z");
+    vi.stubEnv("TZ", "America/Vancouver");
+    expect(endOfLocalDay("2026-11-20").toISOString()).toBe("2026-11-21T08:00:00.000Z");
+  });
+
+  it("handles daylight saving days and month and year ends", () => {
+    vi.stubEnv("TZ", "America/Toronto");
+    // Clocks go back on Nov 1, 2026: the day after still ends at local midnight (EST, UTC−5).
+    expect(endOfLocalDay("2026-10-31").toISOString()).toBe("2026-11-01T04:00:00.000Z");
+    expect(endOfLocalDay("2026-11-01").toISOString()).toBe("2026-11-02T05:00:00.000Z");
+    // Clocks go forward on Mar 14, 2027.
+    expect(endOfLocalDay("2027-03-14").toISOString()).toBe("2027-03-15T04:00:00.000Z");
+    expect(endOfLocalDay("2026-12-31").toISOString()).toBe("2027-01-01T05:00:00.000Z");
+  });
+
+  it("gives back the chosen day for the date field", () => {
+    for (const tz of ["America/Toronto", "America/Vancouver", "America/Halifax"]) {
+      vi.stubEnv("TZ", tz);
+      for (const day of ["2026-10-31", "2026-11-01", "2027-03-14", "2027-02-28"])
+        expect(closingDay(endOfLocalDay(day))).toBe(day);
+      expect(closingDay(endOfLocalDay("2026-11-20").toISOString())).toBe("2026-11-20");
+    }
   });
 });
 

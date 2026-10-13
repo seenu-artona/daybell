@@ -1,7 +1,10 @@
 /**
- * Shared pieces of the job page (D140, D143; ADR 0014, 0017): calendar days, the five milestones, the Print QR cards
- * rule and the Start selling dialog's list. The job checklist itself is in checklist.ts.
+ * Shared pieces of the job page (D140, D143; ADR 0014, 0017, 0021): calendar days, the five milestones, the Print QR
+ * cards rule, the Start selling dialog's list (which the server checks too) and closing dates. The job checklist itself
+ * is in checklist.ts.
  */
+import type { JobStatus } from "./jobs";
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /**
@@ -47,35 +50,90 @@ export type SellChecklistKey = (typeof SELL_CHECKLIST)[number];
 export interface SellChecklistItem {
   key: SellChecklistKey;
   done: boolean;
-  /** Not built yet: shown muted as "Coming soon", never done. */
-  soon: boolean;
 }
 
-/**
- * "Before you can sell", in the Start selling dialog. "Roster added", "Tagging reviewed" (reviewTaggingDone, ADR
- * 0018: the server refuses selling on it when Start selling is built; plan answer 7), "Price list chosen" (ADR 0019:
- * every job has one, the studio's default unless changed on its Shop tab) and "Payouts connected" (ADR 0020: the
- * studio's payout account is Active, Seenu Q5) are real today, the same for every studio (Seenu, Oct 12).
- */
-export function sellChecklist({
-  children,
-  taggingReviewed,
-  hasPriceList,
-  payoutsConnected,
-}: {
+/** What "Before you can sell" needs to know about a job and its studio. */
+export interface SellFacts {
+  /** Children on the roster. */
   children: number;
+  /** The job has a ready photo outside the bin. */
+  hasReadyPhoto: boolean;
   /** The Review tagging task is done (reviewTaggingDone). */
   taggingReviewed: boolean;
-  /** The job has a price list. */
+  /** The job's price list has at least one item (ADR 0021, A2). */
   hasPriceList: boolean;
   /** The studio's payout account is Active. */
   payoutsConnected: boolean;
-}): SellChecklistItem[] {
-  return SELL_CHECKLIST.map((key) => {
-    if (key === "roster") return { key, done: children > 0, soon: false };
-    if (key === "tagging") return { key, done: taggingReviewed, soon: false };
-    if (key === "priceList") return { key, done: hasPriceList, soon: false };
-    if (key === "payouts") return { key, done: payoutsConnected, soon: false };
-    return { key, done: false, soon: true };
-  });
+}
+
+/**
+ * "Before you can sell", in the Start selling dialog (D138), and what the server checks before a job may sell (ADR
+ * 0021, call 1 and A1): Roster added, Photos uploaded (a ready photo), Tagging reviewed (reviewTaggingDone, ADR 0018),
+ * Price list chosen (a list with at least one item, A2) and Payouts connected (Active, ADR 0020). All five are real and
+ * the same for every studio (Seenu, Oct 12).
+ */
+export function sellChecklist(f: SellFacts): SellChecklistItem[] {
+  const done: Record<SellChecklistKey, boolean> = {
+    roster: f.children > 0,
+    photos: f.hasReadyPhoto,
+    tagging: f.taggingReviewed,
+    priceList: f.hasPriceList,
+    payouts: f.payoutsConnected,
+  };
+  return SELL_CHECKLIST.map((key) => ({ key, done: done[key] }));
+}
+
+/** What still stops a job selling, in the dialog's order; empty when it may. */
+export function sellBlockers(f: SellFacts): SellChecklistKey[] {
+  return sellChecklist(f)
+    .filter((item) => !item.done)
+    .map((item) => item.key);
+}
+
+/** The database's names for the blockers (start_selling's not_ready detail). */
+export const SELL_BLOCKER_DB_KEYS: Record<SellChecklistKey, string> = {
+  roster: "roster",
+  photos: "photos",
+  tagging: "tagging",
+  priceList: "price_list",
+  payouts: "payouts",
+};
+
+/**
+ * The blockers the database named (a comma-separated list of its keys), in the dialog's order. Anything it doesn't know
+ * is ignored, so a refusal can never put unknown words on screen.
+ */
+export function sellBlockersFromDb(detail: string | null | undefined): SellChecklistKey[] {
+  const named = new Set((detail ?? "").split(",").map((k) => k.trim()));
+  return SELL_CHECKLIST.filter((key) => named.has(SELL_BLOCKER_DB_KEYS[key]));
+}
+
+/** D47: campaigns send only while a job is Selling, as GotPhoto. The hook campaigns will use; nothing sends yet. */
+export function campaignsMaySend(status: JobStatus): boolean {
+  return status === "selling";
+}
+
+/** A closing date is at most this many days away (the database's jobs_guard_closes_at checks the same). */
+export const MAX_CLOSING_DAYS = 400;
+
+/** Whether a closing moment may be set now: in the future and at most MAX_CLOSING_DAYS away. */
+export function closingDateAllowed(closesAt: Date, now: Date = new Date()): boolean {
+  const ms = closesAt.getTime() - now.getTime();
+  return Number.isFinite(ms) && ms > 0 && ms <= MAX_CLOSING_DAYS * 86_400_000;
+}
+
+/**
+ * The moment a calendar day (YYYY-MM-DD) ends in the local time zone: the next day's local midnight. A job's closing
+ * date is stored as this moment, in the time zone of whoever set it (ADR 0021, Q2); daylight saving is handled by the
+ * platform's local time.
+ */
+export function endOfLocalDay(day: string): Date {
+  const [y, m, d] = day.split("-").map(Number) as [number, number, number];
+  return new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+}
+
+/** The local calendar day a closing moment ends (the day before its local midnight), for the date field. */
+export function closingDay(closesAt: string | Date): string {
+  const at = new Date(closesAt);
+  return localDay(new Date(at.getTime() - 1));
 }

@@ -5,16 +5,22 @@ import {
   type ClientInput,
   clientInput,
   fieldErrors,
+  fromDatabaseError,
+  JOB_CONFLICTS,
   type Job,
   type JobInput,
   jobInput,
+  SELL_BLOCKER_FIELDS,
 } from "@daybell/api";
+import type { DataRegion } from "@daybell/config";
+import { closingDateAllowed, sellBlockersFromDb } from "@daybell/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
+import { type JobStatusRpc, jobStatusRpc } from "./supabase/service";
 
 /** Columns the API reads; the client is embedded through the composite studio FK (ADR 0008). */
 export const JOB_COLUMNS =
-  "id, name, type, status, picture_day, internal_number, subjects_expected, price_list_id, deliver_to_school, created_at, updated_at, client:clients (id, name, city)";
+  "id, name, type, status, picture_day, internal_number, subjects_expected, price_list_id, deliver_to_school, closes_at, created_at, updated_at, client:clients (id, name, city)";
 export const CLIENT_COLUMNS =
   "id, name, address_line1, address_line2, postal_code, city, region_code, country, contact_first_name, contact_last_name, contact_phone, contact_email, notes, created_at, updated_at";
 
@@ -28,6 +34,7 @@ export interface JobRow {
   subjects_expected: number | null;
   price_list_id: string;
   deliver_to_school: boolean;
+  closes_at: string | null;
   created_at: string;
   updated_at: string;
   client: { id: string; name: string; city: string | null } | null;
@@ -63,6 +70,7 @@ export function toJob(row: JobRow): Job {
     subjectsExpected: row.subjects_expected,
     priceListId: row.price_list_id,
     deliverToSchool: row.deliver_to_school,
+    closesAt: row.closes_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -112,6 +120,7 @@ const JOB_COLUMN_FOR: Record<keyof JobInput, string> = {
   subjectsExpected: "subjects_expected",
   priceListId: "price_list_id",
   deliverToSchool: "deliver_to_school",
+  closesAt: "closes_at",
 };
 
 /** Database columns for the given API fields (only those present), from an already validated input. */
@@ -206,4 +215,105 @@ export function page<T extends { id: string }>(
     items,
     nextCursor: rows.length > limit ? (items[items.length - 1]?.id ?? null) : null,
   };
+}
+
+// ── Going live (ADR 0021) ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** One of the studio's jobs, or not found (another studio's job is simply not found, D96). */
+export async function loadJobRow(
+  supabase: SupabaseClient,
+  studioId: string,
+  id: string,
+): Promise<JobRow> {
+  const row = check(
+    await supabase
+      .from("jobs")
+      .select(JOB_COLUMNS)
+      .eq("studio_id", studioId)
+      .eq("id", id)
+      .maybeSingle(),
+  ) as unknown as JobRow | null;
+  if (!row) throw new ApiError("not_found", "Job not found.");
+  return row;
+}
+
+const CLOSES_AT_INVALID = () =>
+  new ApiError("invalid_input", "Please check the highlighted fields.", {
+    closesAt: "validation.closesAt",
+  });
+
+const conflict = (message: string, form: string, fields: Record<string, string> = {}) =>
+  new ApiError("conflict", message, { form, ...fields });
+
+export const JOB_CLOSED = () =>
+  conflict("This shop is closed. Reopen it first.", JOB_CONFLICTS.closed);
+
+/**
+ * A closing date must be in the future and at most 400 days away (the database checks it again). Null or left out is
+ * always fine.
+ */
+export function assertClosingDate(closesAt: string | null | undefined, now = new Date()): void {
+  if (closesAt == null) return;
+  if (!closingDateAllowed(new Date(closesAt), now)) throw CLOSES_AT_INVALID();
+}
+
+/** A refused job write (insert or PATCH) whose reason the database named. Null when it named nothing we know. */
+export function jobWriteError(
+  error: { code?: string; message?: string } | null,
+  { shopChanged }: { shopChanged: boolean },
+): ApiError | null {
+  if (error?.code !== "P0001") return null;
+  if (error.message === "closes_at_invalid") return CLOSES_AT_INVALID();
+  // The job closed between the check and the write: the price list's own words when that changed.
+  if (error.message === "job_closed" && !shopChanged) return JOB_CLOSED();
+  return null;
+}
+
+/**
+ * The named refusals of start_selling, reopen_job and close_job (their messages carry no values). not_ready names the
+ * blockers in its detail, as database keys; only the ones Daybell knows become fields, so a refusal never puts unknown
+ * words on screen.
+ */
+export function jobStatusError(error: {
+  code?: string;
+  message?: string;
+  details?: string | null;
+}): ApiError {
+  if (error.code === "P0002") return new ApiError("not_found", "Job not found.");
+  if (error.code === "P0001") {
+    switch (error.message) {
+      case "not_ready":
+        return conflict(
+          "This job isn't ready to sell yet.",
+          JOB_CONFLICTS.notReady,
+          Object.fromEntries(
+            sellBlockersFromDb(error.details).map((key) => [key, SELL_BLOCKER_FIELDS[key]]),
+          ),
+        );
+      case "already_selling":
+        return conflict("This job is already selling.", JOB_CONFLICTS.alreadySelling);
+      case "job_not_selling":
+        return conflict("Only a selling shop can be closed.", JOB_CONFLICTS.notSelling);
+      case "job_not_closed":
+        return conflict("Only a closed shop can be reopened.", JOB_CONFLICTS.notClosed);
+      case "job_closed":
+        return JOB_CLOSED();
+    }
+  }
+  return fromDatabaseError(error);
+}
+
+/**
+ * Start selling, Close shop or Reopen shop for the signed-in owner or admin (ADR 0021), as the service role: only from
+ * route handlers, after studioScope(), assertCanManage() and a check that the job is the studio's. The database
+ * function checks the person's role again, locks the job and checks everything, atomically.
+ */
+export async function changeJobStatus(
+  region: DataRegion,
+  fn: JobStatusRpc,
+  actorId: string,
+  jobId: string,
+): Promise<void> {
+  const result = await jobStatusRpc(region, fn, actorId, { p_job_id: jobId });
+  if (result.error) throw jobStatusError(result.error);
 }

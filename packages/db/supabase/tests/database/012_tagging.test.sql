@@ -680,7 +680,8 @@ select ok(not public.photo_parent_visible(pg_temp.q(10)), 'hidden from parents u
 select is((select count(*) from public.job_tagging_reviews where job_id = 'a0000000-0000-4000-8000-000000000002'),
   0::bigint, 'and Review tagging reopens');
 
--- Closed jobs take no tagging changes (security review 9).
+-- Closed jobs take no tagging changes (security review 9). A job closes after selling (step 8's status guard).
+update public.jobs set status = 'selling' where id = 'a0000000-0000-4000-8000-000000000002';
 update public.jobs set status = 'closed' where id = 'a0000000-0000-4000-8000-000000000002';
 select throws_ok($$ select public.move_photos('11111111-1111-4111-8111-111111111111',
   'a0000000-0000-4000-8000-000000000002', array[pg_temp.q(2)], '{"kind":"leftovers"}') $$, 'P0001', 'job_closed',

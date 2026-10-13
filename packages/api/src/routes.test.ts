@@ -42,6 +42,7 @@ describe("API description", () => {
       "query:limit:false",
       "query:cursor:false",
       "query:today:false",
+      "query:status:false",
     ]);
     const clients = doc.paths["/clients"]?.get as { parameters: { name: string }[] };
     expect(clients.parameters.map((p) => p.name)).toContain("q");

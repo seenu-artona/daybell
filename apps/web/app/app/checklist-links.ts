@@ -15,6 +15,9 @@ export function taskHref(jobId: string, target: TaskTarget): string {
       return tabHref(jobId, "photos");
     case "photosReview":
       return reviewHref(jobId);
+    case "sell":
+      // The job opens its Start selling dialog once, then drops the parameter (ADR 0021).
+      return `${tabHref(jobId, "overview")}?sell=1`;
   }
 }
 
