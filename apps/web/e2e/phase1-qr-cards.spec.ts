@@ -1,17 +1,22 @@
+import { readFileSync } from "node:fs";
 import { type APIResponse, expect, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
 // Phase 1 step 3 "QR cards" (D32, D138, D140, D143; Seenu's answers of Oct 11 2026; ADR 0015, 0017): the checklist
 // task that ticks itself, the API's
-// PDF (four cards per page, no card for Do not photograph, blank cards, the same card on every reprint, never cached),
+// PDF (four cards per double-sided sheet: a front page and a back page; no card for Do not photograph, blank cards, the
+// same card on every reprint, never cached),
 // People's Print QR cards dialog, one card from the child panel, the job's activity, and that another studio can't
 // print or count the job's cards. Desktop only (D136). PDFs are checked by their page objects; the cards' text is
 // embedded-font glyphs, so names and codes can't be read from the bytes.
 const run = `${Date.now()}`;
 
 /** Page objects in a PDF ("/Type /Page", not "/Type /Pages"); pdfkit never hides them in object streams. */
+function pagesIn(pdf: Buffer): number {
+  return pdf.toString("latin1").match(/\/Type \/Page(?!s)/g)?.length ?? 0;
+}
 async function pdfPages(res: APIResponse): Promise<number> {
-  return (await res.body()).toString("latin1").match(/\/Type \/Page(?!s)/g)?.length ?? 0;
+  return pagesIn(await res.body());
 }
 
 test("QR cards: print from the API and from People, with the checklist task", async ({
@@ -69,7 +74,8 @@ test("QR cards: print from the API and from People, with the checklist task", as
     `/app/jobs/${job.id}/people?print=qr`,
   );
 
-  // 2. The API: the whole job is 4 cards (never the Do not photograph child) on one page, never cached.
+  // 2. The API: the whole job is 4 cards (never the Do not photograph child) on one sheet (a front page and a back
+  // page), never cached.
   const whole = await page.request.post(cardsPath, { data: {} });
   expect(whole.status()).toBe(200);
   expect(whole.headers()["content-type"]).toBe("application/pdf");
@@ -79,11 +85,11 @@ test("QR cards: print from the API and from People, with the checklist task", as
   );
   expect(whole.headers()["daybell-cards"]).toBe("4");
   expect(whole.headers()["daybell-cards-skipped"]).toBe("0");
-  expect(await pdfPages(whole)).toBe(1);
-  // One blank card makes a fifth card and a second page.
+  expect(await pdfPages(whole)).toBe(2);
+  // One blank card makes a fifth card and a second sheet.
   const withBlank = await page.request.post(cardsPath, { data: { blankCards: 1 } });
   expect(withBlank.headers()["daybell-cards"]).toBe("5");
-  expect(await pdfPages(withBlank)).toBe(2);
+  expect(await pdfPages(withBlank)).toBe(4);
   // Chosen classes and "no class"; one child; refusals.
   const chosen = await page.request.post(cardsPath, { data: { groupIds: [g4b, "none"] } });
   expect(chosen.headers()["daybell-cards"]).toBe("3");
@@ -124,12 +130,21 @@ test("QR cards: print from the API and from People, with the checklist task", as
   await dialog.getByLabel("Choose classes", { exact: true }).check();
   await dialog.getByLabel("5A (2 cards)", { exact: true }).check();
   await dialog.getByLabel("Blank cards", { exact: true }).fill("3");
-  await expect(dialog.getByText("5 cards on 2 pages of US Letter", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("5 cards on 2 sheets of US Letter", { exact: true })).toBeVisible();
+  // How to print them, next to the button and read with it.
+  const duplex = dialog.getByText("Print double-sided, flip on long edge", { exact: true });
+  await expect(duplex).toBeVisible();
+  const check = "Check the name on the back matches the front before handing cards out.";
+  await expect(dialog.getByText(check, { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Download PDF", exact: true }),
+  ).toHaveAccessibleDescription(`Print double-sided, flip on long edge ${check}`);
   const [file] = await Promise.all([
     page.waitForEvent("download"),
     dialog.getByRole("button", { name: "Download PDF", exact: true }).click(),
   ]);
   expect(file.suggestedFilename()).toBe(`qr-cards-${job.internalNumber}.pdf`);
+  expect(pagesIn(readFileSync(await file.path()))).toBe(4);
   await expect(dialog.getByRole("status")).toContainText("Downloaded 5 cards.");
   // Out-of-range blank cards are caught before anything is sent.
   await dialog.getByLabel("Blank cards", { exact: true }).fill("101");
@@ -149,6 +164,8 @@ test("QR cards: print from the API and from People, with the checklist task", as
     maya.getByRole("button", { name: "Print QR card", exact: true }).click(),
   ]);
   expect(one.suggestedFilename()).toBe(`qr-cards-${job.internalNumber}.pdf`);
+  // One card: its front and its back.
+  expect(pagesIn(readFileSync(await one.path()))).toBe(2);
   await expect(main.getByText("Downloaded the QR card.", { exact: true })).toBeVisible();
   await main.getByRole("link", { name: "Zoe Optout", exact: true }).click();
   const zoe = page.getByRole("complementary", { name: "Zoe Optout" });

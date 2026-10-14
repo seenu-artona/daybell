@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useLocalDateTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api, download } from "@/lib/client-api";
 import { useStudio } from "../../me-context";
@@ -37,6 +38,7 @@ export default function OrderPage() {
   const text = useApiText();
   const refusal = useOrderRefusal();
   const format = useFormatter();
+  const local = useLocalDateTime();
   const { me } = useStudio();
   const { id } = useParams<{ id: string }>();
   const [order, setOrder] = useState<StudioOrderDetail | null>(null);
@@ -91,7 +93,8 @@ export default function OrderPage() {
     setStatus(tx("saved"));
   }
 
-  const date = (iso: string) => format.dateTime(new Date(iso), { dateStyle: "medium" });
+  // In the viewer's time zone, not the server's.
+  const date = (iso: string) => local(iso, { dateStyle: "medium" });
   const back = (
     <Link href="/app/orders" className={BACK}>
       <ArrowLeft className="size-4" aria-hidden="true" />

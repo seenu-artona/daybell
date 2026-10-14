@@ -1,6 +1,7 @@
 /**
  * QR cards (Phase 1 step 3; D32, D138; ADR 0015). The card a child takes home: the studio's name, the child's name
- * and class, a QR and the parent access code, four to a US Letter page, sorted by class. The QR holds a random card
+ * and class and a QR on the front, the parent access code on the back, four to a double-sided US Letter sheet, sorted
+ * by class. The QR holds a random card
  * ID, never the access code, so a photo of a card never reveals the code. Pure functions shared by the print dialog
  * (counts) and the server's PDF (selection, order, layout, text fitting).
  */
@@ -94,7 +95,7 @@ export function sortCardChildren<T extends CardPerson>(children: readonly T[]): 
   });
 }
 
-/** Splits cards into pages of `perPage`. */
+/** Splits cards into sheets of `perPage` (each sheet prints as a front page and a back page). */
 export function paginate<T>(items: readonly T[], perPage = CARDS_PER_PAGE): T[][] {
   const pages: T[][] = [];
   for (let i = 0; i < items.length; i += perPage) pages.push(items.slice(i, i + perPage));
@@ -135,12 +136,12 @@ export function printableText(
  * US Letter in PDF points (72 per inch), two by two, cut along the dashed lines. The QR symbol itself (its modules,
  * not counting the light quiet zone around it) is at least 1.75 inches, the size tagging needs at arm's length. Long
  * names shrink to fit, then go on two lines (first, last), then are cut with "…": a card never prints over its
- * neighbour. `at` is each element's top, measured from the card's top edge.
+ * neighbour. `front` and `back` give each element's top, measured from the card's top edge.
  *
- * The card has two panels (Seenu, answer 11 of Oct 12, 2026; ADR 0015, ADR 0018): the front, which is photographed,
- * holds only the child's name, class and QR; the access code, studio name and instructions are on a tab below a dashed
- * "Fold back before picture day" line (at.fold). Folded back, the tab stays attached for parents but is out of shot,
- * so a photo of a card whose QR isn't found never shows its access code.
+ * The card is printed double-sided (Seenu, Oct 13, 2026; ADR 0015, ADR 0018): each sheet is a front page, then a back
+ * page. The front, which is photographed on picture day, holds the studio's name, the child's name and class (or
+ * lines to write them on) and the QR, and never the access code. The back holds the access code, large, the instructions
+ * and the studio's name, so a photo of a card whose QR isn't found never shows its access code.
  */
 export const CARD_LAYOUT = {
   page: { width: 612, height: 792 },
@@ -152,33 +153,64 @@ export const CARD_LAYOUT = {
   qrSymbol: 128,
   /** Light modules around the QR, as the QR standard asks; nothing is printed in them. */
   qrQuietModules: 4,
-  at: {
-    // The front panel: name, class, QR.
-    name: 20,
+  /** The front page: studio, name, class, QR. */
+  front: {
+    studio: 24,
+    name: 44,
     nameBlock: 52,
-    group: 76,
-    qr: 112,
-    // The fold line; below it, the tab that folds back.
-    fold: 264,
-    foldLabel: 268,
-    studio: 284,
-    codeLabel: 300,
-    code: 312,
-    instructions: 344,
+    group: 104,
+    qr: 140,
   },
-  foldLabel: { size: 8 },
+  /**
+   * The back page: studio; whose card it is (display name and class, or "Blank card"), small, so a sheet printed with
+   * the wrong flip is caught before cards go home (security review); access code; instructions.
+   */
+  back: {
+    studio: 96,
+    owner: 124,
+    ownerGroup: 138,
+    codeLabel: 160,
+    code: 176,
+    instructions: 224,
+  },
+  /** The match mark: the card ID's last characters, small, in the bottom-right corner of both sides. */
+  mark: { size: 8, inset: 12, length: 4 },
+  owner: { size: 10 },
+  ownerGroup: { size: 9 },
   studio: { size: 10 },
   name: { max: 22, min: 12, twoLineMin: 11, lineHeight: 1.15 },
   group: { size: 12 },
-  codeLabel: { size: 9 },
-  code: { size: 24 },
-  instructions: { size: 9 },
+  codeLabel: { size: 10 },
+  code: { size: 28 },
+  instructions: { size: 10 },
 } as const;
 
-/** The top-left corner of the i-th card on its page (0..3: left to right, then top to bottom). */
+/**
+ * The match mark printed on both sides of a card (security review): the card code's last four characters. A front and
+ * a back that don't share it are not the same card, which also catches a mixed-up blank card. Card codes are not
+ * secret (ADR 0018) and the mark is never part of the access code.
+ */
+export function cardMatchMark(cardCode: string): string {
+  if (!isCardCode(cardCode)) throw new Error("Not a card code");
+  return cardCode.slice(-CARD_LAYOUT.mark.length);
+}
+
+/** The top-left corner of the i-th card on its front page (0..3: left to right, then top to bottom). */
 export function cardOrigin(index: number): { x: number; y: number } {
   const { columns, card } = CARD_LAYOUT;
   return { x: (index % columns) * card.width, y: Math.floor(index / columns) * card.height };
+}
+
+/**
+ * The top-left corner of the i-th card's back, on the page printed behind its front. Long-edge duplex flips the sheet
+ * left to right, so the columns are mirrored (rows stay): each back lands behind its own front.
+ */
+export function backCardOrigin(index: number): { x: number; y: number } {
+  const { columns, card } = CARD_LAYOUT;
+  return {
+    x: (columns - 1 - (index % columns)) * card.width,
+    y: Math.floor(index / columns) * card.height,
+  };
 }
 
 export type MeasureText = (text: string, size: number) => number;

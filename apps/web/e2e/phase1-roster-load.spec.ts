@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
 // Load test (ADR 0013): a full-size roster import, People drawing all 5,000 children, and the QR card PDF for all of
-// them (ADR 0015: 1,250 pages, inside the route's 60-second limit). Tagged @load: CI runs it on pushes to main, not on
+// them (ADR 0015: 1,250 double-sided sheets, inside the route's 60-second limit). Tagged @load: CI runs it on pushes to main, not on
 // pull requests (agreed with Seenu). Signs up its own studio.
 const run = `${Date.now()}`;
 
@@ -83,7 +83,8 @@ test(
     await expect(main.getByRole("link", { name: /^Load Test \d{4}$/ })).toHaveCount(1);
     await expect(main.getByRole("link", { name: "Load Test 4321", exact: true })).toBeVisible();
 
-    // QR cards for the whole job: 5,000 cards on 1,250 pages, made and built well inside the route's 60 seconds.
+    // QR cards for the whole job: 5,000 cards on 1,250 double-sided sheets (2,500 pages), made and built well inside
+    // the route's 60 seconds.
     const started = Date.now();
     const cards = await page.request.post(`/api/v1/jobs/${bigJob}/qr-cards`, {
       data: {},
@@ -92,7 +93,7 @@ test(
     expect(cards.status()).toBe(200);
     expect(cards.headers()["daybell-cards"]).toBe("5000");
     const pdf = (await cards.body()).toString("latin1");
-    expect(pdf.match(/\/Type \/Page(?!s)/g)?.length).toBe(1250);
+    expect(pdf.match(/\/Type \/Page(?!s)/g)?.length).toBe(2500);
     expect(Date.now() - started).toBeLessThan(45_000);
   },
 );

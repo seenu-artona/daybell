@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { Suspense, useEffect, useState } from "react";
+import { useLocalDateTime } from "@/app/_components/local-time";
 import { isGalleryId, shopApi } from "@/lib/shop-client";
 import { useRefusal } from "../_components/format";
 import { Loading, MessageScreen } from "../_components/message-screen";
@@ -22,6 +23,7 @@ import { shopButton } from "../_components/styles";
 function Orders() {
   const t = useTranslations("shop");
   const format = useFormatter();
+  const local = useLocalDateTime();
   const refusal = useRefusal();
   const router = useRouter();
   const shop = useShop();
@@ -90,7 +92,7 @@ function Orders() {
                   <span className="text-caption text-muted">
                     {order.status === "paid" && order.paidAt
                       ? t("orders.paidOn", {
-                          date: format.dateTime(new Date(order.paidAt), {
+                          date: local(order.paidAt, {
                             month: "long",
                             day: "numeric",
                           }),

@@ -1,7 +1,7 @@
 # 0018 — QR tagging and review
 
 - Status: Proposed, Oct 12, 2026 (accepted when Seenu merges the step 5 PR). Amends 0015 (how a blank card is claimed;
-  the card's child FK is now deferrable; the access code moves to a fold-back tab, answer 11), 0016 (a batch can be a class-photo upload; the worker reads QR cards and
+  the card's child FK is now deferrable; the access code moves to a fold-back tab, answer 11; since Oct 13, 2026 to the back of a double-sided card), 0016 (a batch can be a class-photo upload; the worker reads QR cards and
   decodes to 2048 px; the clean-up tags batches) and 0017 (a new task, new facts, a new Up next reason).
 - Decisions: D32, F16, D142 #7, D143; touches D60, D91, D92, D96, D100, D112, D113, D138, D140, D141, D10. Seenu's
   answers to the step 5 brief (1–8), to the architect's questions (1–10), after the security review (11) and after the
@@ -258,6 +258,39 @@ fold line labelled "Fold back before picture day" (`pdf.qrCards.foldBack`), prin
 stays attached for parents but is out of shot. The fold line's dashes are shorter than the cut lines'. `CARD_LAYOUT`
 (core) places everything (`at.fold`); core and PDF tests check that only the name and class print above the fold and
 that the QR and its quiet zone end above it.
+
+### Amendment (Oct 13, 2026): the access code on the back
+
+Seenu's decision of Oct 13, 2026 replaces the fold-back tab. The PDF is printed **double-sided on US Letter**, four
+cards per sheet (2×2); each sheet is a front page followed by a back page.
+
+- **Front** (photographed): the studio's name, the child's name and class (or "Class ____" for a child without one) and
+  the QR (the random card ID). A blank card's front: the studio's name, lines for the name and class (D138) and the QR. The access code
+  is never on a front page.
+- **Back**: the studio's name, "Access code" and the code itself, large (`CARD_LAYOUT.code`, 28 pt, the widest code
+  still inside the margins), and "Go to {shop link}, enter your code".
+- **Long-edge duplex:** the back page's columns are mirrored (`backCardOrigin` in core: same row, opposite column), so
+  each back lands behind its own front; a lone card's back is on the right of its page. The cut lines are on both
+  sides.
+- The dashed "Fold back before picture day" line, its label and `pdf.qrCards.foldBack` are removed; `CARD_LAYOUT.at`
+  becomes `CARD_LAYOUT.front` and `CARD_LAYOUT.back`.
+- The Print QR cards dialog says "Print double-sided, flip on long edge" (`app.qrCards.duplex`) next to Download PDF,
+  as the button's description, and counts sheets: "5 cards on 2 sheets of US Letter". The child panel's single card
+  is a two-page PDF.
+- Tests: core checks the mirrored back positions and that each side's text stacks inside the card; the PDF tests decode
+  each page's text (through the fonts' ToUnicode maps) and check the code is only ever on a back page, each back sits
+  in the mirrored column, and a blank card's sides. The e2e counts two pages per sheet.
+
+- **A sheet flipped the wrong way** (short edge, or backs pasted by hand) would silently put one child's code behind
+  another child's card (security review). So the back also names whose card it is, small, above the code: the child's
+  display name (first name and last initial, `parentDisplayName`) and class, or "Blank card" (`pdf.qrCards.blankCard`).
+  Both sides carry a **match mark**, the card ID's last four characters (`cardMatchMark`), small in the bottom-right
+  corner, so a mixed-up blank card is caught too. Card codes are not secret, and the mark is not part of the access
+  code. The dialog adds "Check the name on the back matches the front before handing cards out."
+  (`app.qrCards.checkNames`), also part of the button's description. Tests check the back names the same child and
+  carries the same mark as its front, in the mirrored slot, and that the front still never shows the code.
+
+Unchanged: cards are made on demand and never stored, built in the studio's region, and printed by the same roles.
 
 ## Calls made in this step (for review)
 

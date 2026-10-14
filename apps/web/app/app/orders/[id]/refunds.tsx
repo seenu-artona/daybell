@@ -11,8 +11,9 @@ import {
   refundSplit,
 } from "@daybell/core";
 import { Banner, Button, Field, Table, TableCell, TableHead, TableRow } from "@daybell/ui";
-import { useFormatter, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { type FormEvent, useId, useMemo, useRef, useState } from "react";
+import { LocalTime } from "@/app/_components/local-time";
 import { api } from "@/lib/client-api";
 import { CheckboxField, Dialog, SelectField } from "../../dialog";
 import { MoneyField } from "../../products/money-field";
@@ -32,7 +33,6 @@ export function RefundsSection({
 }) {
   const t = useTranslations("app.orders.detail.refunds");
   const td = useTranslations("app.orders.detail.refundDialog");
-  const format = useFormatter();
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const refunds = order.refunds ?? [];
@@ -80,7 +80,7 @@ export function RefundsSection({
             {refunds.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="whitespace-nowrap">
-                  {format.dateTime(new Date(r.createdAt), { dateStyle: "medium" })}
+                  <LocalTime value={r.createdAt} />
                 </TableCell>
                 <TableCell>{t(`kinds.${r.kind}`)}</TableCell>
                 <TableCell>{r.reason ? t(`reasons.${r.reason}`) : t("noReason")}</TableCell>

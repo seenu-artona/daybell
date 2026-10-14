@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  backCardOrigin,
   CARD_CODE_ALPHABET,
   CARD_CODE_LENGTH,
   CARD_LAYOUT,
   type CardPerson,
   cardChildren,
+  cardMatchMark,
   cardOrigin,
   cardQrPayload,
   fitLine,
@@ -150,36 +152,89 @@ describe("pages", () => {
     ]);
   });
 
+  it("mirrors the back page's columns for long-edge duplex, so each back lands behind its own front", () => {
+    const { page, card } = CARD_LAYOUT;
+    expect([0, 1, 2, 3].map(backCardOrigin)).toEqual([
+      { x: 306, y: 0 },
+      { x: 0, y: 0 },
+      { x: 306, y: 396 },
+      { x: 0, y: 396 },
+    ]);
+    // Flipped on the long edge, a back's left edge x lands at page.width - x - card.width: its front's left edge.
+    for (const i of [0, 1, 2, 3]) {
+      const front = cardOrigin(i);
+      const back = backCardOrigin(i);
+      expect(page.width - back.x - card.width).toBe(front.x);
+      expect(back.y).toBe(front.y);
+    }
+  });
+
   it("prints a QR symbol of at least 1.75 inches, whose quiet zone fits inside the card and clear of the text", () => {
-    const { qrSymbol, qrQuietModules, card, padding, at } = CARD_LAYOUT;
+    const { qrSymbol, qrQuietModules, card, padding, front } = CARD_LAYOUT;
     expect(qrSymbol).toBeGreaterThanOrEqual(1.75 * 72);
     // The payload is always QR version 2 (25 modules).
     const quiet = (qrSymbol / 25) * qrQuietModules;
     expect(qrSymbol + 2 * quiet).toBeLessThanOrEqual(card.width - 2 * padding);
-    expect(at.qr - quiet).toBeGreaterThanOrEqual(at.group + CARD_LAYOUT.group.size * 1.25);
-    expect(at.qr + qrSymbol + quiet).toBeLessThanOrEqual(at.fold);
-    expect(at.instructions + CARD_LAYOUT.instructions.size * 2.6).toBeLessThanOrEqual(
+    expect(front.qr - quiet).toBeGreaterThanOrEqual(front.group + CARD_LAYOUT.group.size * 1.25);
+    expect(front.qr + qrSymbol + quiet).toBeLessThanOrEqual(card.height - padding);
+  });
+
+  it("stacks each side's text in order, without overlapping, inside the card", () => {
+    const { front, back, card, padding } = CARD_LAYOUT;
+    const inOrder = (side: readonly (readonly [number, number])[]) => {
+      expect(side[0]?.[0]).toBeGreaterThanOrEqual(padding);
+      for (let i = 1; i < side.length; i++) {
+        const [prevTop, prevSize] = side[i - 1] as readonly [number, number];
+        expect((side[i] as readonly [number, number])[0]).toBeGreaterThanOrEqual(
+          prevTop + prevSize,
+        );
+      }
+    };
+    inOrder([
+      [front.studio, CARD_LAYOUT.studio.size],
+      [front.name, front.nameBlock],
+      [front.group, CARD_LAYOUT.group.size],
+    ]);
+    inOrder([
+      [back.studio, CARD_LAYOUT.studio.size],
+      [back.owner, CARD_LAYOUT.owner.size],
+      [back.ownerGroup, CARD_LAYOUT.ownerGroup.size],
+      [back.codeLabel, CARD_LAYOUT.codeLabel.size],
+      [back.code, CARD_LAYOUT.code.size],
+      [back.instructions, CARD_LAYOUT.instructions.size],
+    ]);
+    expect(back.instructions + CARD_LAYOUT.instructions.size * 2.6).toBeLessThanOrEqual(
       card.height - padding,
     );
   });
 
-  it("keeps the access code off the photographed front: name, class and QR above the fold, the rest below (answer 11)", () => {
-    const { at } = CARD_LAYOUT;
-    expect(at.name + at.nameBlock).toBeLessThanOrEqual(at.group);
-    expect([at.name, at.group, at.qr].every((y) => y < at.fold)).toBe(true);
-    // Everything on the tab starts below the fold line, in order, without overlapping.
-    const tab = [
-      [at.foldLabel, CARD_LAYOUT.foldLabel.size],
-      [at.studio, CARD_LAYOUT.studio.size],
-      [at.codeLabel, CARD_LAYOUT.codeLabel.size],
-      [at.code, CARD_LAYOUT.code.size],
-      [at.instructions, CARD_LAYOUT.instructions.size],
-    ] as const;
-    expect(tab[0][0]).toBeGreaterThan(at.fold);
-    for (let i = 1; i < tab.length; i++) {
-      const [prevTop, prevSize] = tab[i - 1] as readonly [number, number];
-      expect((tab[i] as readonly [number, number])[0]).toBeGreaterThanOrEqual(prevTop + prevSize);
-    }
+  it("keeps the access code off the photographed front (Seenu, Oct 13, 2026)", () => {
+    // The front has no place for the code at all; the back has nothing but the code, its label, the studio and the
+    // instructions.
+    expect(Object.keys(CARD_LAYOUT.front).sort()).toEqual([
+      "group",
+      "name",
+      "nameBlock",
+      "qr",
+      "studio",
+    ]);
+    expect(Object.keys(CARD_LAYOUT.back).sort()).toEqual([
+      "code",
+      "codeLabel",
+      "instructions",
+      "owner",
+      "ownerGroup",
+      "studio",
+    ]);
+  });
+
+  it("marks both sides with the card ID's last four characters, in a corner clear of everything else", () => {
+    expect(cardMatchMark(CODE)).toBe("GHJK");
+    expect(() => cardMatchMark("K7QM-4XPA")).toThrow();
+    const { mark, card, front, back, qrSymbol, qrQuietModules } = CARD_LAYOUT;
+    const markTop = card.height - mark.inset - mark.size;
+    expect(markTop).toBeGreaterThan(front.qr + qrSymbol + (qrSymbol / 25) * qrQuietModules);
+    expect(markTop).toBeGreaterThan(back.instructions + CARD_LAYOUT.instructions.size * 2.6);
   });
 });
 

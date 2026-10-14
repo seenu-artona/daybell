@@ -6,6 +6,7 @@ import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useId, useState } from "react";
+import { useLocalDateTime, viewerTimeZone } from "@/app/_components/local-time";
 import { api } from "@/lib/client-api";
 import { ActivityCard } from "./activity-card";
 import { HomeChecklist } from "./home-checklist";
@@ -33,9 +34,6 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** The browser's own time zone, so "today" is the person's day (D127). */
-const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
 /**
  * Studio Home (D127, D143): numbers like Shopify for owners and admins (today, this week from Monday, this season from
  * August 1: sales after refunds, orders, Daybell's fee and the average order, from the ledger in the region's currency;
@@ -45,6 +43,7 @@ const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
 export default function HomePage() {
   const th = useTranslations("app.home");
   const format = useFormatter();
+  const local = useLocalDateTime();
   const { me, version } = useStudio();
   const studio = me.studio;
   const canManage = studio.role === "owner" || studio.role === "admin";
@@ -58,13 +57,16 @@ export default function HomePage() {
   useEffect(() => {
     if (!seesOrders) return;
     let live = true;
-    void api<SalesResponse>(`/studio/sales?tz=${encodeURIComponent(timeZone())}`).then((res) => {
-      if (!live) return;
-      if (res.ok) {
-        setNumbers(res.data);
-        setFailed(false);
-      } else setFailed(true);
-    });
+    // The browser's own time zone, so "today" is the person's day (D127).
+    void api<SalesResponse>(`/studio/sales?tz=${encodeURIComponent(viewerTimeZone())}`).then(
+      (res) => {
+        if (!live) return;
+        if (res.ok) {
+          setNumbers(res.data);
+          setFailed(false);
+        } else setFailed(true);
+      },
+    );
     return () => {
       live = false;
     };
@@ -145,7 +147,7 @@ export default function HomePage() {
                     ? summary.orders === 0
                       ? th("noData")
                       : th("since", {
-                          date: format.dateTime(new Date(summary.start), { dateStyle: "medium" }),
+                          date: local(summary.start, { dateStyle: "medium" }),
                         })
                     : th("checking")}
               </p>

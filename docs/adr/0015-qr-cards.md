@@ -9,6 +9,13 @@
 > prints on the photographed side. The front holds the name, class and QR only; the studio's name, the access code and
 > the instructions are on a tab below a dashed "Fold back before picture day" line. See ADR 0018, "QR cards: the access
 > code off the photographed side". The description below is the step 3 card.
+>
+> **Forward note (Oct 13, 2026):** the fold-back tab is replaced (Seenu, Oct 13, 2026). The PDF is printed
+> double-sided on US Letter, flipped on the long edge: four cards per sheet, each sheet a front page then a back page.
+> The front holds the studio's name, the child's name and class (a blank card: lines for the name and class) and the QR; the back
+> holds the access code, large, "Go to {shop link}, enter your code" and the studio's name, its columns mirrored so each
+> back lands behind its own front. One card is a two-page PDF. See ADR 0018, "Amendment (Oct 13, 2026): the access code
+> on the back".
 
 ## What a card is
 
@@ -108,7 +115,7 @@ can be printed, the API answers 409.
 - Metadata: the Title comes from the locale files ("QR cards"); Creator and Producer "Daybell"; never names or codes.
   The regular weight is opened once (the document's starting font, reused by name).
 - `serverExternalPackages: ["pdfkit", "fontkit"]` and `outputFileTracingIncludes` for the fonts. The route uses the
-  Node runtime and `maxDuration = 60`. 5,000 cards (1,250 pages) take about 12 s and 270 MB locally; the `@load` e2e
+  Node runtime and `maxDuration = 60`. 5,000 cards (1,250 pages; 2,500 since the double-sided card of Oct 13, 2026) take about 12 s and 270 MB locally; the `@load` e2e
   checks it against the real stack.
 
 **Shop link.** `SHOP_URL` (`@daybell/config`'s `shopUrl()`; brief answer 1). Unset, it falls back to the deployment's

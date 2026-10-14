@@ -2,8 +2,9 @@
 
 import { closingDay, endOfLocalDay, localDay, MAX_CLOSING_DAYS } from "@daybell/core";
 import { Field } from "@daybell/ui";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { useLocalDateTime } from "@/app/_components/local-time";
 
 /**
  * A job's closing date (ADR 0021, Q2): the person picks the last day to order; the shop closes at midnight at the end
@@ -27,9 +28,8 @@ export function useTimeZoneName(): string {
 
 /** A closing moment in the viewer's own local time, e.g. "Nov 21, 2026, 12:00 AM". */
 export function useFormatClosing(): (closesAt: string) => string {
-  const format = useFormatter();
-  return (closesAt) =>
-    format.dateTime(new Date(closesAt), { dateStyle: "medium", timeStyle: "short" });
+  const local = useLocalDateTime();
+  return (closesAt) => local(closesAt, { dateStyle: "medium", timeStyle: "short" });
 }
 
 /** The date field's value for a job's closing moment ("" for none). */

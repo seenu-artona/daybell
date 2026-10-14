@@ -391,6 +391,36 @@ describe("Your orders", () => {
     expect(link?.textContent).toContain("3 downloads");
     expect(link?.textContent).toContain("For Ava P.");
   });
+
+  it("dates each order in the parent's own time zone, not the server's", async () => {
+    // 8:30 PM on Oct 13 in Vancouver is already Oct 14 in UTC (and in the provider's Toronto).
+    const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockImplementation(function (
+      this: Intl.DateTimeFormat,
+    ) {
+      return { ...real.call(this), timeZone: "America/Vancouver" };
+    });
+    api.orders.mockResolvedValue(
+      ok({
+        orders: [
+          {
+            id: ORDER,
+            reference: "7KQ2M9XA",
+            status: "paid",
+            view: "full",
+            paidAt: "2026-10-14T03:30:00.000Z",
+            createdAt: "2026-10-14T03:29:00.000Z",
+            children: [{ id: AVA, state: "open", displayName: "Ava P." }],
+            downloads: 3,
+          },
+        ],
+      }),
+    );
+    await render(<OrdersPage />);
+    const link = container.querySelector(`a[href="/shop/orders/${ORDER}?gallery=${G}"]`);
+    expect(link?.textContent).toContain("Paid October 13");
+    vi.restoreAllMocks();
+  });
 });
 
 describe("the order page after payment (ADR 0024)", () => {

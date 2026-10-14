@@ -14,8 +14,9 @@ import {
   TableHead,
   TableRow,
 } from "@daybell/ui";
-import { useFormatter, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { useLocalDateTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { useStudio } from "../me-context";
@@ -26,7 +27,7 @@ export function TeamCard() {
   const myEmail = me.email;
   const role = me.studio.role;
   const t = useTranslations("app");
-  const format = useFormatter();
+  const local = useLocalDateTime();
   const text = useApiText();
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [invites, setInvites] = useState<PendingInvite[]>([]);
@@ -112,7 +113,7 @@ export function TeamCard() {
                 {i.email}
                 <span className="block text-caption text-muted">
                   {t("team.expires", {
-                    date: format.dateTime(new Date(i.expiresAt), { dateStyle: "medium" }),
+                    date: local(i.expiresAt, { dateStyle: "medium" }),
                   })}
                 </span>
               </TableCell>
