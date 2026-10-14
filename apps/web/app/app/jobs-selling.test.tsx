@@ -61,7 +61,12 @@ describe("JobsSelling", () => {
 });
 
 describe("JobsSelling closing lines (D147)", () => {
-  const day = (offset: number) => localDay(new Date(Date.now() + offset * 86_400_000));
+  // Calendar days, not 24-hour steps, so a daylight-saving change can't skip or repeat one.
+  const day = (offset: number) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    return localDay(date);
+  };
   it("says when the shop closes: amber with words when two days or fewer away, else the last day", async () => {
     api.mockResolvedValue({
       ok: true,
