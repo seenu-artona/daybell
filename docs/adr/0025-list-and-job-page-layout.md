@@ -184,3 +184,27 @@ Calls made in the amendment:
   under it, left out when nothing is waiting, so they never disappear for a studio still in setup.
 - K. The server still sends only the three most urgent jobs (`UP_NEXT_SHOWN`), so with three urgent jobs and three
   order to-dos the fifth row is chosen from those six.
+
+## Amendments (Oct 14, 2026): D147 (amends D144 and D145)
+
+Seenu approved filter chips for the lists (D147); ADR 0026 records them in full. Where they differ from the sections
+above, these win.
+
+1. **No longer UI only.** D147 adds a migration (`20261014000000_list_filters.sql`: saved chips with row-level
+   security, the roster's photo and order columns, Orders by several statuses), API fields and parameters
+   (`GET /jobs?show=&clientId=&q=`, `GET /orders?stage=done`, `GET`/`PUT /me/list-filters`, `RosterChild`) and an event
+   (`list_filters.saved`, page and count only). The roster list now carries order data, so it runs in Montréal for
+   Canadian studios like `/orders`.
+2. **Views become chips.** The pill views on Jobs and Orders, the dash views on Subjects, Photos and a job's Orders, the
+   filter icon and its panel (FilterMenu), Group by and the "sub" view bar are replaced by one row of chips in each list
+   card's toolbar, with "+ Add filter" and the search at its right end. The address keeps one chip as enum words and
+   ids only (D113).
+3. **Title row and tab row.** A list page's green action sits in its title row; a job section's actions sit at the right
+   end of the job's tab row, also when it sticks. Jobs gets pill sections List and Calendar (Calendar is coming soon),
+   so call 6 above no longer holds.
+4. **B1 resolved.** Subjects' Not ordered and No photos chips and its Photos and Ordered columns use the roster's new
+   `photoCount` and `hasPaidOrder`; photographers get neither the column nor the chip.
+5. **Jobs rows.** The D143 progress cell is removed from the Jobs list (Seenu: no per-job progress or sales in lists);
+   columns are Job, Client, Picture day, Status and Shop closes. The checklist stays on the job's Overview and in Home's
+   Up next (D143, D146).
+6. **Clients and Price lists** show the All chip only; Clients keeps its search.
