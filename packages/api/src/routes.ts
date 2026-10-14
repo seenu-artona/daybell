@@ -3,6 +3,7 @@ import { API_ERROR_CODES, type ApiErrorCode, STATUS_FOR } from "./errors";
 import {
   acceptInviteInput,
   activityQuery,
+  bulkOrderStatusInput,
   childInput,
   childPatch,
   claimBlankCardInput,
@@ -22,6 +23,9 @@ import {
   markNotificationsReadInput,
   movePhotosInput,
   orderListQuery,
+  orderStatusInput,
+  orderTrackingInput,
+  orderUndoInput,
   partUrlsInput,
   passwordResetRequestInput,
   passwordUpdateInput,
@@ -33,8 +37,10 @@ import {
   priceListItemPatch,
   priceListPatch,
   qrCardsInput,
+  refundInput,
   rosterImportInput,
   rosterQuery,
+  salesQuery,
   searchInput,
   shopCartLineInput,
   shopCodeInput,
@@ -55,6 +61,7 @@ import {
 } from "./schemas";
 import {
   activityResponse,
+  bulkOrderStatusResponse,
   cardPhotosUndoneResponse,
   checkEmailResponse,
   checkoutStartResponse,
@@ -90,8 +97,10 @@ import {
   priceListsResponse,
   QR_CARD_HEADERS,
   qrCardStatusResponse,
+  refundResponse,
   registerFilesResponse,
   rosterImportResponse,
+  salesResponse,
   searchResponse,
   shopCartResponse,
   shopGalleryResponse,
@@ -128,6 +137,8 @@ export type Access =
   | "owner"
   | "roster-editor"
   | "uploader"
+  /** Owners, admins and staff: orders and their fulfilment (answer 4; Q4). */
+  | "fulfilment"
   /** A parent's shop session: the httpOnly cookie a code opens (ADR 0022). No account. */
   | "parent"
   | "internal";
@@ -166,8 +177,8 @@ export interface RouteSpec {
     status: 200 | 201 | 202 | 204;
     schema?: z.ZodType;
     description: string;
-    /** A file instead of JSON (e.g. the QR card PDF). */
-    contentType?: "application/pdf";
+    /** A file instead of JSON (e.g. the QR card PDF, an order's zip). */
+    contentType?: "application/pdf" | "application/zip";
     /** Response headers worth knowing, by name. */
     headers?: Record<string, string>;
   };
@@ -1403,6 +1414,49 @@ export const ROUTES: RouteSpec[] = [
     ],
   },
   {
+    method: "POST",
+    path: "/shop/orders/{orderId}/cancel",
+    group: "Shop",
+    summary: "Cancel an order",
+    description:
+      "For a full refund, shipping included, while the order isn't printed yet; only from the gallery that paid, and never a downloads-only order (ask the studio instead). Downloads go with it, even one already opened. 409 shop.cannotCancel; 429 shop.cancelLimit (5 an hour).",
+    access: "parent",
+    query: shopGalleryQuery,
+    success: {
+      status: 200,
+      schema: shopOrderResponse,
+      description: "The order, cancelled (or on its way).",
+    },
+    errors: [
+      "invalid_input",
+      "shop_session_required",
+      "not_found",
+      "conflict",
+      "rate_limited",
+      "region_unavailable",
+      "internal",
+    ],
+  },
+  {
+    method: "GET",
+    path: "/shop/orders/{orderId}/download-all",
+    group: "Shop",
+    summary: "Download all of an order's photos",
+    description:
+      "One zip, daybell-<reference>.zip, of every paid download this gallery may have, named as the single downloads are; streamed from the studio's region. 409 shop.downloadPreparing (Retry-After) while a file is made, with no partial zip; at most 10 zips a gallery an hour.",
+    access: "parent",
+    query: shopGalleryQuery,
+    success: { status: 200, description: "The zip.", contentType: "application/zip" },
+    errors: [
+      "invalid_input",
+      "shop_session_required",
+      "not_found",
+      "conflict",
+      "rate_limited",
+      "region_unavailable",
+    ],
+  },
+  {
     method: "GET",
     path: "/shop/orders/{orderId}/downloads/{photoId}",
     group: "Shop",
@@ -1426,23 +1480,160 @@ export const ROUTES: RouteSpec[] = [
     method: "GET",
     path: "/orders",
     group: "Orders",
-    summary: "A job's paid orders",
+    summary: "The studio's paid orders",
     description:
-      "Owners and admins only until fulfilment (step 11; call 15). Each with its tax, Daybell's fee and the rate it used, Stripe's card fee and what reaches the studio (D98).",
-    access: "owner-admin",
+      "Newest first, a page at a time: reference, date, children (first name and last initial), items, total, status, delivery and the refund badge. Filter by job (the job's Orders tab), status, or the start of a reference (never a name). Owners, admins and staff (Q4); photographers can't.",
+    access: "fulfilment",
     query: orderListQuery,
     success: { status: 200, schema: ordersResponse, description: "A page of orders." },
-    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "region_unavailable"],
   },
   {
     method: "GET",
     path: "/orders/{id}",
     group: "Orders",
     summary: "One paid order",
-    description: "Its lines, package contents and, for home delivery, where it ships (call 2).",
-    access: "owner-admin",
+    description:
+      "Its lines (with what was refunded), status and tracking, totals and fees, and for home delivery where it ships (call 2). Owners and admins also get its refunds, what is left to refund and its ledger transactions (Q4).",
+    access: "fulfilment",
     success: { status: 200, schema: orderResponse, description: "The order." },
-    errors: ["not_signed_in", "forbidden", "not_found"],
+    errors: ["not_signed_in", "forbidden", "not_found", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/orders/{id}/status",
+    group: "Orders",
+    summary: "Mark an order Printed, Shipped or Delivered to school",
+    description:
+      "One step at a time: Paid → Printed → Shipped (home delivery, with a carrier and tracking number; a link only for other carriers) or Delivered to school. 409 with orders.statusInvalid, orders.wrongDelivery, orders.trackingRequired, orders.canceled, orders.refunded or orders.refundInFlight (a refund Stripe hasn't accepted yet: a parent's cancel may be on its way).",
+    access: "fulfilment",
+    body: orderStatusInput,
+    success: { status: 200, schema: orderResponse, description: "The order, updated." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "PATCH",
+    path: "/orders/{id}/tracking",
+    group: "Orders",
+    summary: "Correct a shipped order's tracking",
+    access: "fulfilment",
+    body: orderTrackingInput,
+    success: { status: 200, schema: orderResponse, description: "The order, updated." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/orders/{id}/status/undo",
+    group: "Orders",
+    summary: "Take an order's status back one step",
+    description:
+      "Printed → Paid, Shipped → Printed or Delivered → Printed, with a reason from the list. Owners and admins.",
+    access: "owner-admin",
+    body: orderUndoInput,
+    success: { status: 200, schema: orderResponse, description: "The order, updated." },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/orders/{id}/external-refund/checked",
+    group: "Orders",
+    summary: "Mark a refund made outside Daybell checked",
+    description:
+      "A refund made in the Stripe Dashboard flags the order and stops fulfilment. Once an owner or admin has checked it with Stripe and the parent, fulfilment goes on.",
+    access: "owner-admin",
+    success: { status: 200, schema: orderResponse, description: "The order, updated." },
+    errors: ["not_signed_in", "forbidden", "not_found", "conflict", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/orders/status",
+    group: "Orders",
+    summary: "Mark orders printed, or delivered to school",
+    description:
+      "Up to 100 orders, each on its own: one refused doesn't stop the others. Each result says ok, or why.",
+    access: "fulfilment",
+    body: bulkOrderStatusInput,
+    success: { status: 200, schema: bulkOrderStatusResponse, description: "One result per order." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/orders/{id}/refunds",
+    group: "Orders",
+    summary: "Refund an order",
+    description:
+      "By line and quantity (and the shipping left, if asked), or a custom amount of products before tax. Tax is refunded pro rata and Daybell's fee on it returned to the studio; Stripe's card fee isn't returned (answer 1). Send a new requestId per refund: the same one again answers the same refund. 409 orders.feesPending with Retry-After until Stripe's fee is known; orders.overRefund, orders.nothingToRefund, orders.notPaid; orders.refundRefused when Stripe refuses it. Owners and admins (answer 3).",
+    access: "owner-admin",
+    body: refundInput,
+    success: {
+      status: 201,
+      schema: refundResponse,
+      description: "The refund (requested if Stripe couldn't be reached: it is tried again).",
+    },
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+      "internal",
+    ],
+  },
+  {
+    method: "GET",
+    path: "/orders/{id}/print-files",
+    group: "Orders",
+    summary: "Download an order's print files",
+    description:
+      "A zip, daybell-<reference>-print-files.zip: the full-resolution photo of each line left to print, named <reference>-<line>-<size>-x<quantity>.jpg, and a manifest.csv with no names. 409 while a file is being made (Retry-After); at most 10 zips a person an hour; 500 files at most.",
+    access: "fulfilment",
+    success: {
+      status: 200,
+      description: "The zip.",
+      contentType: "application/zip",
+    },
+    errors: [
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "rate_limited",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "GET",
+    path: "/studio/sales",
+    group: "Orders",
+    summary: "Home's numbers",
+    description:
+      "Today, this week and this season: sales after refunds, orders and Daybell's fee, from the ledger, in the region's currency (owners and admins); and To do: orders waiting to print, ship or go to school (owners, admins and staff; staff get To do only).",
+    access: "fulfilment",
+    query: salesQuery,
+    success: { status: 200, schema: salesResponse, description: "The numbers." },
+    errors: ["invalid_input", "not_signed_in", "forbidden", "region_unavailable"],
   },
   {
     method: "GET",
@@ -1519,7 +1710,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Close shops whose closing date has passed",
     description:
-      "Not for integrations. Hourly (GitHub Actions, with GITHUB_CRON_SECRET) and daily (Vercel Cron, with CRON_SECRET), as a bearer token. Closes every selling job whose closing date has passed, in every region's database (job.closed events with no actor), then removes read notifications over 90 days old and any over 180, expired shop sessions (with their bags) and wrong-code and request counts older than a day. In the payout regions it also settles paid orders whose Stripe fee is still unknown after 10 minutes, and expires checkouts that ran out two hours ago after asking Stripe (ADR 0023).",
+      "Not for integrations. Hourly from Vercel Cron, with CRON_SECRET as a bearer token (ADR 0024). Closes every selling job whose closing date has passed, in every region's database (job.closed events with no actor), then removes read notifications over 90 days old and any over 180, expired shop sessions (with their bags) and wrong-code and request counts older than a day, and home delivery addresses and tracking numbers 90 days after shipping (365 days after payment at most). In the payout regions it also settles paid orders whose Stripe fee is still unknown after 10 minutes, expires checkouts that ran out two hours ago after asking Stripe (ADR 0023), retries refunds (and sends back what the studio gave for a refund Stripe then failed), recovers refund shortfalls from later sales and absorbs those owed after 180 days without a settled sale (ADR 0024).",
     access: "internal",
     success: { status: 200, schema: cronJobsResponse, description: "What was done." },
     errors: ["not_signed_in", "internal", "region_unavailable"],
@@ -1530,7 +1721,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Daily photo clean-up",
     description:
-      "Not for integrations. Vercel Cron with CRON_SECRET (staging: GitHub Actions with GITHUB_CRON_SECRET), as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
+      "Not for integrations. Vercel Cron with CRON_SECRET, as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
     access: "internal",
     success: { status: 200, schema: cronPhotosResponse, description: "What was cleaned up." },
     errors: ["not_signed_in", "internal"],

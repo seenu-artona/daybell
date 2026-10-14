@@ -13,9 +13,9 @@ export type JobTabKey = (typeof JOB_TABS)[number]["key"];
 
 /**
  * The tabs that show a coming-soon panel in this step (D138). Photos is real since step 4 (ADR 0016), Shop since step
- * 6 (ADR 0019).
+ * 6 (ADR 0019), Orders since step 11 (ADR 0024).
  */
-export const SOON_TABS = ["messages", "orders", "settings"] as const;
+export const SOON_TABS = ["messages", "settings"] as const;
 export type SoonTab = (typeof SOON_TABS)[number];
 
 export function isSoonTab(segment: string): segment is SoonTab {

@@ -4,6 +4,7 @@ import { isDataRegion, regionDatabase } from "@daybell/config";
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { CheckoutProblem, completeCheckout, expireOrder } from "./checkout/complete";
+import { RefundProblem, syncStripeRefund } from "./orders/refunds";
 import {
   payoutForDatabase,
   regionOfAccount,
@@ -18,7 +19,7 @@ import {
   verifyStripeWebhook,
   webhookSecrets,
 } from "./stripe";
-import { checkoutSystemRpc, payoutSystemRpc } from "./supabase/service";
+import { checkoutSystemRpc, orderSystemRpc, payoutSystemRpc } from "./supabase/service";
 import { readCapped } from "./worker-auth";
 
 /**
@@ -73,6 +74,14 @@ export const HANDLED_THIN_EVENTS = new Set([
   "v2.core.account[configuration.recipient].capability_status_updated",
 ]);
 
+/** The platform's payment events (ADR 0024): refunds Stripe finished or failed, and a dispute opened (a flag only). */
+const PAYMENT_EVENT_TYPES = new Set([
+  "charge.refunded",
+  "refund.updated",
+  "refund.failed",
+  "charge.dispute.created",
+]);
+
 /**
  * The platform's own events (no connected account): parents' checkouts, which live on Daybell's account with
  * destination charges (ADR 0023). They need their own event destination ("Your account", snapshot payload;
@@ -81,9 +90,19 @@ export const HANDLED_THIN_EVENTS = new Set([
 export const HANDLED_PLATFORM_EVENTS = new Set([
   "checkout.session.completed",
   "checkout.session.expired",
+  // Refunds and disputes (ADR 0024), on the same destination (C).
+  ...PAYMENT_EVENT_TYPES,
 ]);
 
 const CHECKOUT_SESSION_ID = /^cs_(test_|live_)?[A-Za-z0-9_]{1,250}$/;
+/** The object each payment event is about: a charge, a refund or a dispute. */
+const PAYMENT_OBJECT_ID: Record<string, RegExp> = {
+  "charge.refunded": /^(ch|py)_[A-Za-z0-9_]{1,250}$/,
+  "refund.updated": /^(re|pyr)_[A-Za-z0-9_]{1,250}$/,
+  "refund.failed": /^(re|pyr)_[A-Za-z0-9_]{1,250}$/,
+  "charge.dispute.created": /^(dp|du)_[A-Za-z0-9_]{1,250}$/,
+};
+const PAYMENT_INTENT_ID = /^pi_[A-Za-z0-9_]{1,250}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{1,250}$/;
@@ -204,7 +223,9 @@ export async function handleStripeWebhook(request: Request): Promise<Response> {
     !event.accountId &&
     HANDLED_PLATFORM_EVENTS.has(verified.event.type)
   )
-    return handleCheckoutEvent(verified.event, provider);
+    return PAYMENT_EVENT_TYPES.has(verified.event.type)
+      ? handlePaymentEvent(verified.event, provider)
+      : handleCheckoutEvent(verified.event, provider);
   if (!event.handled || !event.accountId) {
     console.warn("stripe_webhook_ignored", typeof event.type === "string" ? event.type : "unknown");
     return received();
@@ -409,6 +430,134 @@ async function handleCheckoutEvent(
     }
   }
   const finished = await checkoutSystemRpc(region, "finish_stripe_event", {
+    p_inbox_id: claim.inbox_id,
+    p_lease: claim.lease,
+    p_error_code: failure?.code ?? null,
+    p_permanent: failure?.permanent ?? false,
+  });
+  if (finished.error || (failure && !failure.permanent)) {
+    console.error("stripe_webhook_failed", event.type, failure?.code ?? "finish_failed");
+    throw new ApiError("internal", "Something went wrong on our side.");
+  }
+  if (finished.data !== true) {
+    console.warn("stripe_webhook_lease_lost", event.type);
+    throw new ApiError("conflict", "This event is being processed.");
+  }
+  if (failure) console.error("stripe_webhook_permanent_failure", event.type, failure.code);
+  return received();
+}
+
+/**
+ * A refund finished or failed, a charge refunded, or a dispute opened on a parent's payment (ADR 0024), in order:
+ * 1. the event's ids and time are checked (signature and mode already were);
+ * 2. nothing is asked of Stripe outside the payout regions' function regions (D113);
+ * 3. the payment is found from Stripe, never the payload (the refund or dispute is read again; a charge's payment id is
+ *    the only thing taken from it), and routed by the region Daybell wrote in its metadata; a payment that isn't
+ *    Daybell's is acknowledged and left alone;
+ * 4. the event is recorded once for the order the payment names (record_payment_stripe_event: 404 for an order this
+ *    database doesn't hold, 409 while another delivery holds it, 200 when done; another payment than the order's is a
+ *    permanent event_mismatch, alerted);
+ * 5. the studio in Stripe's metadata must be the order's;
+ * 6. a dispute flags the order (and rings owners' and admins' bell); a refund event takes each of Daybell's refunds on
+ *    the payment as far as it goes and gives it Stripe's status (a failure is mirrored in the ledger and rings the
+ *    bell); a refund made outside Daybell is kept on the order as the problem external_refund, alerted, never retried.
+ * Logs hold fixed names, the event type and codes only.
+ */
+async function handlePaymentEvent(
+  event: Stripe.Event,
+  provider: PaymentsProvider,
+): Promise<Response> {
+  const object = event.data?.object as { id?: unknown; payment_intent?: unknown } | undefined;
+  const objectId = object?.id;
+  if (
+    typeof event.id !== "string" ||
+    !EVENT_ID.test(event.id) ||
+    typeof objectId !== "string" ||
+    !PAYMENT_OBJECT_ID[event.type]?.test(objectId)
+  )
+    throw refused("stripe_webhook_bad_ids");
+  const createdMs = event.created * 1000;
+  if (!Number.isFinite(createdMs) || Math.abs(createdMs - Date.now()) > MAX_EVENT_AGE_MS)
+    throw refused("stripe_webhook_bad_time");
+
+  assertPayoutFunctionRegion();
+  let paymentIntentId: string | null;
+  if (event.type === "charge.dispute.created")
+    paymentIntentId = (await provider.retrieveDispute(objectId)).paymentIntentId;
+  else if (event.type === "charge.refunded")
+    paymentIntentId = typeof object?.payment_intent === "string" ? object.payment_intent : null;
+  else paymentIntentId = (await provider.retrieveRefund(objectId)).paymentIntentId;
+  if (!paymentIntentId || !PAYMENT_INTENT_ID.test(paymentIntentId)) {
+    console.warn("stripe_webhook_not_daybells", event.type);
+    return received();
+  }
+  const payment = await provider.retrievePaymentIntentIds(paymentIntentId);
+  if (!payment.orderId || !UUID.test(payment.orderId)) {
+    console.warn("stripe_webhook_not_daybells", event.type);
+    return received();
+  }
+  const region =
+    isDataRegion(payment.region) && PAYOUT_REGIONS.includes(payment.region) ? payment.region : "ca";
+  if (!regionDatabase(region)) throw new ApiError("not_found", "Unknown order.");
+  assertFunctionRegion(region);
+
+  const recorded = await orderSystemRpc(region, "record_payment_stripe_event", {
+    p_event_id: event.id,
+    p_type: event.type,
+    p_order_id: payment.orderId,
+    p_payment_intent_id: paymentIntentId,
+    p_livemode: provider.livemode,
+    p_created: new Date(createdMs).toISOString(),
+  });
+  if (recorded.error) {
+    console.error("stripe_webhook_inbox_failed", event.type);
+    throw new ApiError("internal", "Something went wrong on our side.");
+  }
+  const claim = recorded.data as Claim;
+  if (!claim) {
+    console.warn("stripe_webhook_unknown_order", event.type);
+    throw new ApiError("not_found", "Unknown order.");
+  }
+  if (claim.mismatch) {
+    console.error("stripe_webhook_permanent_failure", event.type, "event_mismatch");
+    return received();
+  }
+  if (claim.processed) return received();
+  if (!claim.claimed || !claim.lease)
+    throw new ApiError("conflict", "This event is being processed.");
+
+  let failure: Failure = null;
+  if (payment.studioId !== claim.studio_id) {
+    console.error("stripe_webhook_studio_mismatch", event.type);
+    failure = { code: "studio_mismatch", permanent: true };
+  } else {
+    try {
+      if (event.type === "charge.dispute.created") {
+        const flagged = await orderSystemRpc(region, "order_disputed", {
+          p_order_id: payment.orderId,
+        });
+        if (flagged.error) failure = { code: "sync_failed", permanent: false };
+      } else {
+        const refunds =
+          event.type === "charge.refunded"
+            ? payment.refunds
+            : payment.refunds.filter((r) => r.id === objectId);
+        for (const refund of refunds) {
+          const outcome = await syncStripeRefund(region, provider, payment.orderId, refund);
+          if (outcome === "external") failure = { code: "external_refund", permanent: true };
+        }
+      }
+    } catch (err) {
+      failure =
+        err instanceof RefundProblem
+          ? { code: err.code, permanent: true }
+          : {
+              code: err instanceof ApiError ? "stripe_unavailable" : "unexpected_object",
+              permanent: !(err instanceof ApiError),
+            };
+    }
+  }
+  const finished = await orderSystemRpc(region, "finish_stripe_event", {
     p_inbox_id: claim.inbox_id,
     p_lease: claim.lease,
     p_error_code: failure?.code ?? null,

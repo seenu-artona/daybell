@@ -2,7 +2,7 @@
 
 import { SHOP_CONFLICTS, type ShopOrder, type ShopOrderLine } from "@daybell/api";
 import { formatOrderReference } from "@daybell/core";
-import { Download } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -11,6 +11,7 @@ import { isGalleryId, isShopId, shopApi } from "@/lib/shop-client";
 import { money, useContents, useRefusal } from "../../_components/format";
 import { Loading, MessageScreen } from "../../_components/message-screen";
 import { useShop } from "../../_components/shop-context";
+import { ShopDialog } from "../../_components/shop-dialog";
 import { ShopHeader } from "../../_components/shop-header";
 import { ShopTitle } from "../../_components/shop-title";
 import { shopButton, shopLink, shopSecondaryButton } from "../../_components/styles";
@@ -19,11 +20,14 @@ import { shopButton, shopLink, shopSecondaryButton } from "../../_components/sty
 const POLL_MS = [1000, 2000, 4000, 8000, 15000];
 
 /**
- * The order page (ADR 0023 §6): Stripe sends the parent here after paying. While the payment is being confirmed it
- * asks again (the API checks with Stripe itself, at most every 5 seconds), backing off for about 30 seconds, then says
- * so with Try again. Paid: thank you, the reference, the lines by child, totals with tax and the studio's tax numbers
- * (the full view only; call 12), and a 44px "Download photo {n}" button per photo that goes straight to the file. The
- * title never names a child. Words in the locale files (D96).
+ * The order page (ADR 0023 §6, ADR 0024): Stripe sends the parent here after paying. While the payment is being
+ * confirmed it asks again (the API checks with Stripe itself, at most every 5 seconds), backing off for about 30
+ * seconds, then says so with Try again. Paid: thank you, the reference, the order's status (and Refunded or Partly
+ * refunded) with its tracking once shipped (full view), the lines by child, totals with tax and the studio's tax numbers
+ * (the full view only; call 12), a 44px "Download photo {n}" button per photo, Download all (one zip), and, for the
+ * gallery that paid while nothing is printed, Cancel order with a confirm step (answer 2). Once paid, the shop's
+ * galleries are read again once, so the header's bag count is right (the bag lost what was bought). The title never
+ * names a child. Words in the locale files (D96).
  */
 function OrderPage() {
   const t = useTranslations("shop");
@@ -40,8 +44,12 @@ function OrderPage() {
   const [slow, setSlow] = useState(false);
   const [downloadNote, setDownloadNote] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [orderNote, setOrderNote] = useState<string | null>(null);
   const attempt = useRef(0);
+  const refreshed = useRef(false);
   const status = shop.state.status;
+  const refreshShop = shop.refresh;
 
   useEffect(() => {
     if (status === "none" || (status === "ready" && !galleryId)) router.replace("/shop");
@@ -82,6 +90,13 @@ function OrderPage() {
     };
   }, [load]);
 
+  // The bag lost what was bought when the order was paid: the header's count is read again, once (the bag badge).
+  useEffect(() => {
+    if (order?.status !== "paid" || refreshed.current) return;
+    refreshed.current = true;
+    void refreshShop();
+  }, [order?.status, refreshShop]);
+
   const retry = async () => {
     setSlow(false);
     attempt.current = POLL_MS.length - 1;
@@ -110,6 +125,39 @@ function OrderPage() {
     } else {
       setDownloadNote(refusal(result));
     }
+  };
+
+  // One cancel at a time (answer 2): the server refunds everything left, shipping included.
+  const cancelBusy = useRef(false);
+  const cancelOrder = async () => {
+    if (!galleryId || !order || cancelBusy.current) return;
+    cancelBusy.current = true;
+    const result = await shopApi.cancelOrder(galleryId, order.id).finally(() => {
+      cancelBusy.current = false;
+    });
+    setConfirmCancel(false);
+    if (result.ok) {
+      setOrder(result.data.order);
+      setOrderNote(
+        result.data.order.fulfilment === "canceled"
+          ? t("order.canceled")
+          : t("order.cancelProcessing"),
+      );
+    } else setOrderNote(refusal(result));
+  };
+
+  const zipBusy = useRef(false);
+  const downloadAll = async () => {
+    if (!galleryId || !order || zipBusy.current) return;
+    zipBusy.current = true;
+    setDownloadNote(null);
+    const result = await shopApi.downloadAll(galleryId, order.id).finally(() => {
+      zipBusy.current = false;
+    });
+    if (result.ok) setDownloadNote(t("order.downloadAllStarted"));
+    else if (result.form === SHOP_CONFLICTS.downloadPreparing)
+      setDownloadNote(t("refusals.downloadPreparing"));
+    else setDownloadNote(refusal(result));
   };
 
   const title = <ShopTitle>{t("titles.order")}</ShopTitle>;
@@ -161,6 +209,11 @@ function OrderPage() {
             ) : null}
           </div>
           {describe(line) ? <p className="m-0 text-caption text-muted">{describe(line)}</p> : null}
+          {line.refundedQuantity > 0 ? (
+            <p className="m-0 text-caption font-semibold">
+              {t("order.refundedQuantity", { count: line.refundedQuantity })}
+            </p>
+          ) : null}
           {order.status === "paid" && line.downloads.length > 0 ? (
             <ul className="m-0 mt-2 flex list-none flex-wrap gap-2 p-0">
               {line.downloads.map((d) => (
@@ -212,6 +265,35 @@ function OrderPage() {
             {!full ? (
               <p className="m-0 mt-1 text-caption text-muted">{t("order.childView")}</p>
             ) : null}
+            {order.fulfilment ? (
+              <p className="m-0 mt-3 text-body">
+                <span className="font-semibold">{t("order.status")}: </span>
+                {t(`order.fulfilment.${order.fulfilment}`)}
+                {order.refund ? ` · ${t(`order.refundBadges.${order.refund}`)}` : null}
+              </p>
+            ) : null}
+            {order.tracking ? (
+              <div className="mt-2">
+                <p className="m-0 text-body">
+                  <span className="font-semibold">{t("order.tracking")}: </span>
+                  {t("order.trackingLine", {
+                    carrier: t(`order.carriers.${order.tracking.carrier}`),
+                    number: order.tracking.number,
+                  })}
+                </p>
+                {order.tracking.link ? (
+                  <a
+                    href={order.tracking.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={shopLink}
+                  >
+                    {t("order.trackPackage")}
+                    <ExternalLink className="ml-1 size-4" aria-hidden="true" />
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         ) : (
           <MessageScreen>
@@ -220,8 +302,17 @@ function OrderPage() {
         )}
 
         <p role="status" className="m-0 mt-3 min-h-5 text-caption">
+          {orderNote}
+        </p>
+        <p role="status" className="m-0 min-h-5 text-caption">
           {downloadNote}
         </p>
+        {order.status === "paid" && downloadCount(order) > 1 ? (
+          <button type="button" onClick={() => void downloadAll()} className={shopSecondaryButton}>
+            <Download className="mr-2 size-5" aria-hidden="true" />
+            {t("order.downloadAll")}
+          </button>
+        ) : null}
 
         {groups.map((g) => (
           <section key={g.id} aria-labelledby={`order-${g.id}`} className="mt-4">
@@ -262,6 +353,12 @@ function OrderPage() {
                   <dd className="m-0 tabular-nums">{money(order.totals.total)}</dd>
                 </div>
               ) : null}
+              {order.totals.refunded.cents > 0 ? (
+                <div className="flex justify-between">
+                  <dt>{t("order.refunded")}</dt>
+                  <dd className="m-0 tabular-nums">{money(order.totals.refunded)}</dd>
+                </div>
+              ) : null}
             </dl>
             {order.registrations.length > 0 ? (
               <ul className="m-0 mt-3 list-none p-0 text-caption text-muted">
@@ -277,6 +374,45 @@ function OrderPage() {
           </div>
         ) : null}
 
+        {order.canCancel && full && order.totals?.total ? (
+          <section className="mt-6 border-t border-line pt-4">
+            <p className="m-0 text-caption text-muted">{t("order.cancelHelp")}</p>
+            <button
+              type="button"
+              onClick={() => setConfirmCancel(true)}
+              className={`${shopSecondaryButton} mt-2`}
+            >
+              {t("order.cancel")}
+            </button>
+            <ShopDialog
+              open={confirmCancel}
+              onClose={() => setConfirmCancel(false)}
+              title={t("order.cancelTitle")}
+            >
+              <p className="m-0 mt-2 text-body">
+                {t("order.cancelBody", {
+                  amount: money({
+                    cents: order.totals.total.cents - order.totals.refunded.cents,
+                    currency: order.totals.total.currency,
+                  }),
+                })}
+              </p>
+              <div className="mt-4 flex flex-col gap-2">
+                <button type="button" onClick={() => void cancelOrder()} className={shopButton}>
+                  {t("order.cancelConfirm")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancel(false)}
+                  className={shopSecondaryButton}
+                >
+                  {t("order.cancelKeep")}
+                </button>
+              </div>
+            </ShopDialog>
+          </section>
+        ) : null}
+
         <p className="m-0 mt-6 text-caption text-muted">
           {t("checkout.processedBy", { studio: order.studio.name })}
         </p>
@@ -288,6 +424,11 @@ function OrderPage() {
       </main>
     </>
   );
+}
+
+/** How many photos the order's lines unlock (Download all is offered for more than one). */
+function downloadCount(order: ShopOrder): number {
+  return order.lines.reduce((n, l) => n + l.downloads.length, 0);
 }
 
 export default function Page() {

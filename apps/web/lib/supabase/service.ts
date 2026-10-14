@@ -200,7 +200,12 @@ export type ShopRpc =
   | "shop_order"
   | "shop_order_verify"
   | "shop_download_photo"
-  | "shop_download_request";
+  | "shop_download_request"
+  // Orders (ADR 0024): the payer's cancel, and "Download all".
+  | "shop_order_cancel_begin"
+  | "shop_order_download_all"
+  | "shop_zip_take"
+  | "shop_download_all_request";
 
 export function shopRpc(region: DataRegion, fn: ShopRpc, args: Record<string, unknown>) {
   return serviceClient(region).rpc(fn, args);
@@ -226,6 +231,66 @@ export type CheckoutSystemRpc =
 export function checkoutSystemRpc(
   region: DataRegion,
   fn: CheckoutSystemRpc,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, args);
+}
+
+/**
+ * Order writes (ADR 0024): fulfilment (owners, admins and staff; answer 4), undo and refunds (owners and admins;
+ * answer 3), and print files. Browsers never write orders: only route handlers, after studioScope() and the role check;
+ * each function acts for the person and checks their role again.
+ */
+export type OrderWriteRpc =
+  | "mark_order_status"
+  | "mark_orders_status"
+  | "set_order_tracking"
+  | "undo_order_status"
+  | "begin_refund"
+  | "order_print_files"
+  | "order_zip_take"
+  | "order_print_files_to_make"
+  | "check_external_refund";
+
+export function orderWriteRpc(
+  region: DataRegion,
+  fn: OrderWriteRpc,
+  actorId: string,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, { p_actor: actorId, ...args });
+}
+
+/**
+ * Refund and payment work nobody signed in does (ADR 0024): what Stripe says about a refund or a dispute (only after the
+ * webhook's signature is checked, or a refund route's own checks, or the CRON_SECRET-checked cron), shortfalls, and
+ * the address purge. Each names one refund or order, and checks Stripe's answer against Daybell's own copy.
+ */
+export type OrderSystemRpc =
+  | "refund_for_stripe"
+  | "refund_accepted"
+  | "refund_recovered"
+  | "refund_settled"
+  | "refund_failed"
+  | "refund_abandoned"
+  | "refund_share_returned"
+  | "order_external_refund"
+  | "note_refund_failure"
+  | "refunds_to_retry"
+  | "refund_shortfalls_for_sale"
+  | "refund_shortfall_recovered"
+  | "refund_shortfalls_due"
+  | "absorb_refund_shortfalls"
+  | "record_payment_stripe_event"
+  | "refund_by_stripe"
+  | "order_disputed"
+  | "finish_stripe_event"
+  | "note_checkout_failure"
+  | "purge_shipping_addresses";
+
+export function orderSystemRpc(
+  region: DataRegion,
+  fn: OrderSystemRpc,
   args: Record<string, unknown>,
 ) {
   return serviceClient(region).rpc(fn, args);

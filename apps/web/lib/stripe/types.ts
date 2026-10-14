@@ -136,6 +136,76 @@ export interface CheckoutSessionFacts {
   } | null;
 }
 
+// ── Refunds and disputes (Phase 1 step 11, ADR 0024) ────────────────────────────────────────────────────────────
+
+/** A refund's state at Stripe ("other" for anything Daybell doesn't know). */
+export type StripeRefundStatus =
+  | "pending"
+  | "requires_action"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "other";
+
+/** What Daybell reads back from a refund: ids, the amount and Daybell's ids from its metadata. Nothing personal. */
+export interface RefundFacts {
+  id: string;
+  status: StripeRefundStatus;
+  amountCents: number;
+  currency: string;
+  paymentIntentId: string | null;
+  /** Daybell's refund, order and region, from the metadata Daybell set (null on a refund made elsewhere). */
+  refundId: string | null;
+  orderId: string | null;
+  region: string | null;
+  /** Stripe's failure reason (an identifier), when it failed. */
+  failureReason: string | null;
+}
+
+/** A payment's ids and Daybell's (from the metadata set at checkout), with every refund made on it. */
+export interface PaymentIntentIds {
+  id: string;
+  orderId: string | null;
+  studioId: string | null;
+  region: string | null;
+  refunds: RefundFacts[];
+}
+
+/** The refund Daybell asks for: its own amount, no Stripe flags (Q1), its ids in the metadata. */
+export interface RefundRequest {
+  paymentIntentId: string;
+  amountCents: number;
+  refundId: string;
+  orderId: string;
+  region: string;
+  /** Only a parent asking, or a duplicate; never "fraudulent". */
+  reason: "requested_by_customer" | "duplicate" | null;
+}
+
+/**
+ * The studio's share taken back from a transfer: for a refund, or a refund's shortfall from a later sale (Q2). The
+ * driver takes what is needed or what the transfer still holds, whichever is less; an earlier reversal for the same
+ * refund, purpose and sale is found first (code review B1: a retry after the transfer was emptied finds it).
+ */
+export interface ReversalRequest {
+  transferId: string;
+  neededCents: number;
+  refundId: string;
+  purpose: "refund" | "refund_shortfall";
+  /** The sale whose transfer it comes from (a shortfall's), else the refunded order. */
+  orderId: string;
+}
+
+/** What a refund Stripe then failed had taken from the studio, sent back to its account (Q7). */
+export interface ShareReturnRequest {
+  accountId: string;
+  amountCents: number;
+  /** Lowercase, as Stripe writes it. */
+  currency: string;
+  refundId: string;
+  orderId: string;
+}
+
 /** The studio's business address, sent to Stripe as its tax head office (call 3). */
 export interface TaxHeadOffice {
   line1: string;
@@ -196,6 +266,31 @@ export interface PaymentsProvider {
   }): Promise<{ reversalId: string }>;
   /** Sets the account's card statement prefix to "DBL" (call 7). */
   setCardPrefix(accountId: string): Promise<void>;
+
+  // Refunds and disputes (ADR 0024).
+  /**
+   * Refunds the parent (Q1: exact amount, no reverse_transfer or refund_application_fee). Once per Daybell refund,
+   * whatever the retries: one already made is found by its metadata first.
+   */
+  createRefund(input: RefundRequest): Promise<RefundFacts>;
+  retrieveRefund(stripeRefundId: string): Promise<RefundFacts>;
+  /** One of the payment's refunds Daybell made for this refund (by its metadata), or null (security review S1). */
+  findRefund(paymentIntentId: string, refundId: string): Promise<RefundFacts | null>;
+  /** What can still be taken back from a transfer: its amount less what was reversed already. */
+  transferRemaining(transferId: string): Promise<{ remainingCents: number; currency: string }>;
+  /**
+   * Takes the studio's share back from a transfer, once per refund (and sale): an earlier one is found first, then at
+   * most what the transfer still holds is taken. No reversal (null) when the transfer holds nothing.
+   */
+  reverseForRefund(
+    input: ReversalRequest,
+  ): Promise<{ reversalId: string | null; amountCents: number }>;
+  /** Sends a failed refund's share back to the studio's account (Q7), once per refund: an earlier one is found first. */
+  returnRefundShare(input: ShareReturnRequest): Promise<{ transferId: string }>;
+  /** A payment's ids and Daybell's, with its refunds. */
+  retrievePaymentIntentIds(paymentIntentId: string): Promise<PaymentIntentIds>;
+  /** A dispute's payment. */
+  retrieveDispute(disputeId: string): Promise<{ id: string; paymentIntentId: string | null }>;
 
   // Taxes (answer 2; calls 3, 6). In the studio's account.
   setTaxHeadOffice(accountId: string, address: TaxHeadOffice): Promise<void>;

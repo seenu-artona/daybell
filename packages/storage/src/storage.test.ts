@@ -1,6 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import { text } from "node:stream/consumers";
 import { S3Client } from "@aws-sdk/client-s3";
 import { photoKey } from "@daybell/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -116,6 +118,15 @@ describe("local driver", () => {
     expect(await storage.deleteAllVersions(prefix)).toBe(2);
     expect(await storage.head(original)).toBeNull();
   });
+
+  it("streams an object for a zip, and says a missing one is not found (ADR 0024)", async () => {
+    const storage = make();
+    const key = photoKey(ids, "download.jpg");
+    await storage.put(key, new TextEncoder().encode("jpeg bytes"), { contentType: "image/jpeg" });
+    expect(await text(await storage.getStream(key))).toBe("jpeg bytes");
+    await expect(storage.getStream(photoKey(ids, "thumb.webp"))).rejects.toThrow("not_found");
+    await expect(storage.getStream("../x")).rejects.toThrow("invalid_key");
+  });
 });
 
 describe("S3 driver", () => {
@@ -215,6 +226,19 @@ describe("S3 driver", () => {
     send.mockResolvedValueOnce({ Contents: [{ Key: `${original}-other`, Size: 1 }] } as never);
     expect(await storage.head(original)).toBeNull();
     await expect(storage.head("../x")).rejects.toThrow("invalid_key");
+  });
+
+  it("streams an object without reading it all, and says a missing one is not found (ADR 0024)", async () => {
+    const send = vi.spyOn(client, "send");
+    send.mockResolvedValueOnce({
+      Body: Readable.from([Buffer.from("full "), Buffer.from("res")]),
+    } as never);
+    expect(await text(await storage.getStream(original))).toBe("full res");
+    expect(
+      (send.mock.calls[0] as unknown as [{ constructor: { name: string } }])[0].constructor.name,
+    ).toBe("GetObjectCommand");
+    send.mockRejectedValueOnce(Object.assign(new Error("x"), { name: "NoSuchKey" }) as never);
+    await expect(storage.getStream(original)).rejects.toThrow("not_found");
   });
 
   it("says an upload that was completed or aborted is not found", async () => {

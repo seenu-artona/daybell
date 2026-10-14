@@ -103,6 +103,15 @@ const NAMED: Record<string, () => ApiError> = {
   below_minimum: () => conflict("The bag is below the minimum order.", SHOP_CONFLICTS.belowMinimum),
   checkout_limit: () =>
     new RetryLater(600, "Too many checkouts. Wait a few minutes and try again."),
+  // Orders (ADR 0024).
+  cannot_cancel: () => conflict("This order can't be cancelled here.", SHOP_CONFLICTS.cannotCancel),
+  cancel_limit: () =>
+    new RetryLater(3600, "Too many cancellations. Try again later.", {
+      form: SHOP_CONFLICTS.cancelLimit,
+    }),
+  fees_pending: () =>
+    new ConflictLater(30, "This order is still being confirmed. Try again in a moment."),
+  zip_limit: () => new RetryLater(600, "Too many downloads. Wait a few minutes and try again."),
 };
 
 type DbError = { code?: string; message?: string } | null;

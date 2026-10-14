@@ -41,7 +41,11 @@ function makeLocally(region: DataRegion, photoIds: readonly string[]): void {
   });
 }
 
-async function queueDownloads(region: DataRegion, photoIds: readonly string[]): Promise<void> {
+/** Queues the files' making (ids only), or makes them here one at a time with the local driver. */
+export async function queueDownloads(
+  region: DataRegion,
+  photoIds: readonly string[],
+): Promise<void> {
   if (photoIds.length === 0) return;
   if (isLocalDriver(region)) {
     makeLocally(region, photoIds);

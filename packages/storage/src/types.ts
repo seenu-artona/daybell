@@ -1,3 +1,5 @@
+import type { Readable } from "node:stream";
+
 /**
  * Photo storage behind one interface (D53; ADR 0016). S3 in ca-central-1 for Canadian studios now; Cloudflare R2 (also
  * S3-compatible) for US studios later; a local folder for development, CI and end-to-end tests. Keys hold IDs only
@@ -44,6 +46,11 @@ export interface PhotoStorage {
   /** The object's size, or null if it doesn't exist (S3: by listing, so originals needn't be readable). */
   head(key: string): Promise<StoredObject | null>;
   get(key: string): Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * The object as a stream, read as it is sent on (an order's zip, ADR 0024): never all in memory. A missing object
+   * throws StorageError("not_found").
+   */
+  getStream(key: string): Promise<Readable>;
   put(key: string, body: Uint8Array, options: PutOptions): Promise<void>;
   /**
    * A short-lived URL to read an object (previews for the studio's screens), valid for `expiresIn` seconds at most and

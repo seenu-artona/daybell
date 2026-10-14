@@ -62,8 +62,9 @@ select has_table('public', 'notifications', 'notifications exists');
 select ok((select relrowsecurity from pg_class where oid = 'public.notifications'::regclass),
   'with row-level security');
 select is(enum_range(null::public.notification_kind)::text[],
-  array['job_selling', 'job_closed', 'payouts_active', 'payouts_restricted', 'photos_failed', 'tagging_ready'],
-  'six kinds');
+  array['job_selling', 'job_closed', 'payouts_active', 'payouts_restricted', 'photos_failed', 'tagging_ready',
+    'order_paid', 'refund_failed', 'dispute_opened', 'refund_external'],
+  'ten kinds (step 11 adds the order kinds, ADR 0024)');
 select is((select count(*) from unnest(array['insert', 'delete', 'truncate']) p
   where has_table_privilege('authenticated', 'public.notifications', p)
      or has_table_privilege('anon', 'public.notifications', p)), 0::bigint,

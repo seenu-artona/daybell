@@ -1,7 +1,14 @@
 import "server-only";
 import { ApiError, type MeResponse, type StudioRole, type StudioSummary } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
-import { canEditRoster, canManagePayouts, canSeePayouts } from "@daybell/core";
+import {
+  canEditRoster,
+  canFulfil,
+  canManagePayouts,
+  canRefund,
+  canSeeOrders,
+  canSeePayouts,
+} from "@daybell/core";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { check, requireUser } from "./api";
 import { supabaseForSession } from "./supabase/server";
@@ -116,4 +123,15 @@ export function assertCanSeePayouts(studio: StudioSummary): void {
  */
 export function assertCanManagePayouts(studio: StudioSummary): void {
   if (!canManagePayouts(studio.role)) throw new ApiError("forbidden", "The studio owner only.");
+}
+
+/** Orders (ADR 0024; Q4): owners, admins and staff see and fulfil them; photographers don't. The database checks too. */
+export function assertCanSeeOrders(studio: StudioSummary): void {
+  if (!canSeeOrders(studio.role) || !canFulfil(studio.role))
+    throw new ApiError("forbidden", "Owners, admins and staff only.");
+}
+
+/** Refunds and taking a step back (answer 3): owners and admins. The database checks too. */
+export function assertCanRefund(studio: StudioSummary): void {
+  if (!canRefund(studio.role)) throw new ApiError("forbidden", "Owners and admins only.");
 }

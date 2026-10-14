@@ -35,9 +35,14 @@ const aboutJob = (type: string) => JOB_SUBJECT_PREFIXES.some((prefix) => type.st
  */
 export const JOB_ACTIVITY_TYPES: readonly string[] = STORED_ACTIVITY_TYPES.filter(aboutJob);
 
+/** Order events (ADR 0024): their subject is the order, named by its reference. */
+export const aboutOrder = (type: string) => type.startsWith("order.");
+
 /** What a nameless subject is called when its name can't be looked up (e.g. it was deleted): jobs, roster imports
- * and QR card prints point at a job; client events (and legacy organization ones) at a client. */
-export function unnamedSubject(type: ActivityType): "aJob" | "aClient" {
+ * and QR card prints point at a job; client events (and legacy organization ones) at a client; order events at an
+ * order. */
+export function unnamedSubject(type: ActivityType): "aJob" | "aClient" | "anOrder" {
+  if (aboutOrder(type)) return "anOrder";
   return aboutJob(type) ? "aJob" : "aClient";
 }
 
@@ -50,7 +55,11 @@ export type ActivityIcon =
   | "team"
   | "studio"
   | "selling"
-  | "closed";
+  | "closed"
+  | "order"
+  | "printer"
+  | "shipped"
+  | "refunded";
 
 /**
  * The pastel chip at the start of an activity row (D140): new things green, edits amber, imports and QR card prints
@@ -58,6 +67,13 @@ export type ActivityIcon =
  * sentence says what happened.
  */
 export function activityChip(type: ActivityType): { tone: IconChipTone; icon: ActivityIcon } {
+  // Orders (ADR 0024): a new one green, fulfilment blue, refunds and cancels amber.
+  if (type === "order.paid") return { tone: "primary", icon: "order" };
+  if (type === "order.printed") return { tone: "info", icon: "printer" };
+  if (type === "order.shipped" || type === "order.delivered")
+    return { tone: "info", icon: "shipped" };
+  if (type === "order.refunded" || type === "order.canceled")
+    return { tone: "warning", icon: "refunded" };
   if (type === "job.selling") return { tone: "primary", icon: "selling" };
   if (type === "job.closed") return { tone: "neutral", icon: "closed" };
   if (type === "roster.imported") return { tone: "info", icon: "imported" };

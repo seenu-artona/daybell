@@ -1,7 +1,7 @@
 "use client";
 
 import type { Notification, NotificationsResponse, UnreadCountResponse } from "@daybell/api";
-import { NOTIFICATION_POLL_MS, newNotifications } from "@daybell/core";
+import { formatOrderReference, NOTIFICATION_POLL_MS, newNotifications } from "@daybell/core";
 import { cn } from "@daybell/ui";
 import { Bell } from "lucide-react";
 import Link from "next/link";
@@ -145,6 +145,13 @@ function NotificationsPanel({
           leftovers: n.data.leftovers ?? 0,
           flagged: n.data.flagged ?? 0,
         });
+      case "order_paid":
+      case "refund_failed":
+      case "dispute_opened":
+      case "refund_external":
+        return t(`notificationText.${n.kind}`, {
+          order: n.order ? formatOrderReference(n.order.reference) : t("anOrder"),
+        });
       default:
         return t(`notificationText.${n.kind}`);
     }
@@ -195,7 +202,7 @@ function NotificationsPanel({
           className="m-0 flex max-h-96 list-none flex-col overflow-y-auto p-0"
         >
           {list.map((n) => {
-            const href = notificationHref(n.kind, n.job?.id ?? null);
+            const href = notificationHref(n.kind, n.job?.id ?? null, n.order?.id ?? null);
             const fresh = !n.readAt;
             const body = (
               <>

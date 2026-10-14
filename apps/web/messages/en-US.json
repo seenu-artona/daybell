@@ -201,7 +201,20 @@
     "gstHstNumber": "Enter a GST/HST number like 123456789RT0001.",
     "pstNumber": "Enter the PST number as the province gave it.",
     "pstProvince": "PST is registered in British Columbia, Manitoba or Saskatchewan.",
-    "taxKind": "Choose GST/HST or PST."
+    "taxKind": "Choose GST/HST or PST.",
+    "reference": "Enter the start of an order reference, like 7KQ2-M9XA.",
+    "trackingNumber": "Enter the tracking number: 4 to 40 letters, numbers, spaces or dashes.",
+    "trackingUrl": "Enter a link that starts with https://.",
+    "trackingUrlOther": "A tracking link is only for other carriers.",
+    "carrier": "Choose the carrier.",
+    "orderStatus": "Choose what to mark the order.",
+    "undoReason": "Choose why.",
+    "orderIds": "Choose 1 to 100 orders.",
+    "refundReason": "Choose a reason from the list.",
+    "refundLines": "Choose what to refund, each item once.",
+    "refundAmount": "Enter an amount in dollars and cents.",
+    "refundKind": "Choose items or a custom amount.",
+    "timeZone": "Your time zone wasn’t recognized."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -336,6 +349,15 @@
       "jobTitle": "Recent activity",
       "qr_cards": {
         "printed": "{actor} printed QR cards for {name}"
+      },
+      "anOrder": "an order",
+      "order": {
+        "paid": "New order {name}",
+        "printed": "{actor} marked order {name} printed",
+        "shipped": "{actor} shipped order {name}",
+        "delivered": "{actor} marked order {name} delivered to school",
+        "refunded": "{hasActor, select, yes {{actor} refunded order {name}} other {Order {name} was refunded}}",
+        "canceled": "A parent canceled order {name}"
       }
     },
     "nav": {
@@ -377,8 +399,13 @@
         "payouts_active": "Payouts are connected: your jobs can start selling",
         "payouts_restricted": "Stripe needs something from you before payouts can continue",
         "photos_failed": "{job}: {failed, plural, one {# photo} other {# photos}} couldn’t be processed",
-        "tagging_ready": "{job}: photos are tagged, with {leftovers, number} in Leftovers and {flagged, number} to check"
-      }
+        "tagging_ready": "{job}: photos are tagged, with {leftovers, number} in Leftovers and {flagged, number} to check",
+        "order_paid": "New order {order}",
+        "refund_failed": "A refund of order {order} failed: the parent wasn’t refunded",
+        "dispute_opened": "A dispute was opened on order {order}",
+        "refund_external": "Refund made outside Daybell on order {order}: check it before you print or ship"
+      },
+      "anOrder": "an order"
     },
     "soon": {
       "title": "{section} is coming soon",
@@ -436,13 +463,12 @@
       "title": "Home",
       "range": "Date range",
       "ranges": {
+        "today": "Today",
         "week": "This week",
-        "month": "This month",
         "season": "This season"
       },
       "sales": "Sales",
       "orders": "Orders",
-      "familiesOrdered": "Families ordered",
       "averageOrder": "Average order",
       "noData": "No sales yet",
       "dash": "–",
@@ -477,7 +503,18 @@
           "nextStep": "Next step"
         }
       },
-      "checklistTitle": "Your next steps"
+      "checklistTitle": "Your next steps",
+      "daybellFee": "Daybell fee",
+      "since": "Since {date}",
+      "salesFailed": "We couldn’t load your numbers.",
+      "todo": {
+        "title": "To do",
+        "toPrint": "{count, plural, one {# order to print} other {# orders to print}}",
+        "toShip": "{count, plural, one {# order to ship} other {# orders to ship}}",
+        "toDeliver": "{count, plural, one {# order to take to school} other {# orders to take to school}}",
+        "nothing": "No orders are waiting.",
+        "failed": "We couldn’t load your to-do list."
+      }
     },
     "signOutFailed": "We couldn't sign you out. Check your connection and try again.",
     "dialog": {
@@ -989,42 +1026,6 @@
         "toSchoolHelp": "Parents choose free delivery to the school or paid home shipping.",
         "toSchoolOn": "Free delivery to school is on.",
         "toSchoolOff": "Free delivery to school is off."
-      },
-      "orders": {
-        "title": "Orders",
-        "loading": "Loading…",
-        "empty": "No paid orders yet.",
-        "caption": "Paid orders for this job, newest first",
-        "columns": {
-          "order": "Order",
-          "paid": "Paid",
-          "for": "For",
-          "items": "Items",
-          "total": "Total",
-          "tax": "Tax",
-          "daybellFee": "Daybell fee",
-          "cardFee": "Card fee",
-          "paidToYou": "Paid to you"
-        },
-        "fee": "{amount} ({percent}%)",
-        "pending": "Pending",
-        "open": "Open order {reference}",
-        "more": "Show more orders",
-        "note": "Daybell’s fee is a share of products only, never tax or shipping. The card fee is Stripe’s, passed on.",
-        "detailTitle": "Order {reference}",
-        "line": "{quantity, plural, one {{name}} other {# × {name}}}",
-        "forChild": "For {name}",
-        "childRemoved": "Child no longer on the roster",
-        "delivery": "Delivery",
-        "deliveries": {
-          "home": "Home delivery",
-          "school": "Delivery to school",
-          "none": "None (downloads only)"
-        },
-        "shipTo": "Ships to",
-        "cityLine": "{city} {province} {postalCode}",
-        "childName": "{firstName} {lastName}",
-        "noChildren": "—"
       }
     },
     "people": {
@@ -1518,6 +1519,282 @@
         "SK": "Saskatchewan",
         "YT": "Yukon"
       }
+    },
+    "orders": {
+      "title": "Orders",
+      "intro": "Every paid order, newest first.",
+      "jobIntro": "This job’s paid orders, newest first.",
+      "loading": "Loading…",
+      "empty": "No orders yet.",
+      "emptyFiltered": "No orders match.",
+      "failed": "We couldn’t load the orders. Try again in a moment.",
+      "caption": "Paid orders, newest first",
+      "captionJob": "This job’s paid orders, newest first",
+      "columns": {
+        "select": "Select",
+        "order": "Order",
+        "date": "Date",
+        "for": "For",
+        "items": "Items",
+        "total": "Total",
+        "status": "Status",
+        "delivery": "Delivery"
+      },
+      "selectAll": "Select every order shown",
+      "selectOrder": "Select order {reference}",
+      "open": "Order {reference}",
+      "noChildren": "—",
+      "filters": {
+        "label": "Filter orders",
+        "status": "Status",
+        "anyStatus": "Any status",
+        "job": "Job",
+        "anyJob": "Any job",
+        "reference": "Order reference",
+        "referenceHelp": "For example 7KQ2-M9XA",
+        "search": "Search",
+        "clear": "Clear filters",
+        "delivery": "Delivery",
+        "anyDelivery": "Any delivery"
+      },
+      "loadMore": "Show more orders",
+      "statuses": {
+        "paid": "Paid",
+        "printed": "Printed",
+        "shipped": "Shipped",
+        "delivered": "Delivered to school",
+        "complete": "Complete",
+        "canceled": "Canceled"
+      },
+      "refundBadges": {
+        "refunded": "Refunded",
+        "partly_refunded": "Partly refunded"
+      },
+      "disputed": "Disputed",
+      "deliveries": {
+        "home": "Home delivery",
+        "school": "Delivery to school",
+        "none": "Downloads only"
+      },
+      "bulk": {
+        "label": "Selected orders",
+        "selected": "{count, plural, one {# order selected} other {# orders selected}}",
+        "markPrinted": "Mark printed",
+        "markDelivered": "Mark delivered to school",
+        "clear": "Clear selection",
+        "done": "{ok, plural, =0 {No orders changed.} one {# order changed.} other {# orders changed.}}",
+        "refused": "{count, plural, one {# order couldn’t be changed: check its status.} other {# orders couldn’t be changed: check their status.}}"
+      },
+      "conflicts": {
+        "notPaid": "This order isn’t paid.",
+        "refunded": "This order was refunded in full: there’s nothing left to deliver.",
+        "canceled": "This order was canceled.",
+        "refundInFlight": "A refund of this order is being processed. Try again in a moment.",
+        "feesPending": "Stripe is still settling this payment. Try again in a moment.",
+        "wrongDelivery": "That isn’t how this order is delivered.",
+        "trackingRequired": "Add the carrier and the tracking number.",
+        "statusInvalid": "That isn’t this order’s next step. Reload the page to see where it is.",
+        "overRefund": "That’s more than is left to refund.",
+        "nothingToRefund": "Choose something to refund.",
+        "refundRefused": "Stripe refused this refund, so nothing was refunded.",
+        "externalRefund": "A refund was made outside Daybell. An owner or admin must check it before this order is printed or shipped."
+      },
+      "detail": {
+        "title": "Order {reference}",
+        "back": "All orders",
+        "paidOn": "Paid {date}",
+        "loading": "Loading the order…",
+        "notFound": "We couldn’t find this order.",
+        "progress": "Progress",
+        "stepState": "{state, select, done {Done} current {Current step} other {Not yet}}",
+        "steps": {
+          "paid": "Paid",
+          "printed": "Printed",
+          "shipped": "Shipped",
+          "delivered": "Delivered to school",
+          "complete": "Complete: downloads only, nothing to deliver"
+        },
+        "canceledNote": "The parent canceled this order on {date} and was refunded.",
+        "disputedNote": "The parent’s bank opened a dispute on this payment on {date}. Answer it in your Stripe dashboard.",
+        "actions": "Next step",
+        "markPrinted": "Mark printed",
+        "markShipped": "Mark shipped",
+        "markDelivered": "Mark delivered to school",
+        "editTracking": "Change tracking",
+        "undo": "Undo last step",
+        "saved": {
+          "printed": "Marked printed.",
+          "shipped": "Marked shipped.",
+          "delivered": "Marked delivered to school.",
+          "tracking": "Tracking saved.",
+          "undo": "Taken back one step."
+        },
+        "ship": {
+          "title": "Mark shipped",
+          "trackingTitle": "Change tracking",
+          "carrier": "Carrier",
+          "carriers": {
+            "canada_post": "Canada Post",
+            "purolator": "Purolator",
+            "ups": "UPS",
+            "fedex": "FedEx",
+            "other": "Other"
+          },
+          "number": "Tracking number",
+          "url": "Tracking link",
+          "urlHelp": "Other carriers only: a link that starts with https://",
+          "save": "Mark shipped",
+          "saveTracking": "Save tracking",
+          "cancel": "Cancel"
+        },
+        "tracking": "Tracking",
+        "trackingLine": "{carrier}: {number}",
+        "trackingOpen": "Track this package (opens in a new tab)",
+        "undoDialog": {
+          "title": "Undo last step",
+          "body": "{from} goes back to {to}.",
+          "reason": "Why?",
+          "reasons": {
+            "marked_by_mistake": "Marked by mistake",
+            "reprint_needed": "Needs a reprint",
+            "wrong_tracking": "Wrong tracking",
+            "other": "Other"
+          },
+          "confirm": "Undo",
+          "cancel": "Cancel"
+        },
+        "items": "Items",
+        "line": "{quantity, plural, one {{name}} other {# × {name}}}",
+        "refundedQuantity": "{count} refunded",
+        "forChild": "For {name}",
+        "childRemoved": "Child no longer on the roster",
+        "childName": "{firstName} {lastName}",
+        "totals": "Totals and fees",
+        "products": "Products",
+        "shipping": "Shipping",
+        "tax": "Tax",
+        "total": "Total",
+        "refundedTotal": "Refunded",
+        "daybellFee": "Daybell fee",
+        "fee": "{amount} ({percent}%)",
+        "cardFee": "Card fee",
+        "paidToYou": "Paid to you",
+        "pending": "Pending",
+        "feeNote": "Daybell’s fee is a share of products only, never tax or shipping. The card fee is Stripe’s, passed on.",
+        "shipTo": "Ships to",
+        "cityLine": "{city} {province} {postalCode}",
+        "shipToPurged": "The address was removed on {date}, as it is 90 days after shipping.",
+        "printFiles": "Download print files",
+        "printFilesBusy": "Preparing the print files…",
+        "printFilesNote": "Full-resolution photos of what’s left to print, with a list of sizes and quantities.",
+        "printFilesPreparing": "The print files are being prepared. Try again in a minute.",
+        "printFilesUnavailable": "A print file isn’t available right now. Daybell support has been told.",
+        "printFilesStarted": "Your print files are downloading.",
+        "refunds": {
+          "title": "Refunds",
+          "none": "No refunds.",
+          "refund": "Refund",
+          "caption": "Refunds of this order",
+          "columns": {
+            "date": "Date",
+            "what": "What",
+            "reason": "Reason",
+            "amount": "Amount",
+            "status": "Status"
+          },
+          "kinds": {
+            "lines": "Items",
+            "custom": "Custom amount",
+            "cancel": "Parent canceled"
+          },
+          "reasons": {
+            "parent_asked": "The parent asked",
+            "damaged": "Damaged",
+            "wrong_item": "Wrong item",
+            "quality": "Quality",
+            "duplicate": "Duplicate order",
+            "other": "Other"
+          },
+          "noReason": "—",
+          "statuses": {
+            "requested": "Processing",
+            "pending": "Pending at the bank",
+            "succeeded": "Refunded",
+            "failed": "Failed",
+            "canceled": "Not made"
+          },
+          "inFlight": "A refund is being processed.",
+          "feesPending": "Refunds open once Stripe has settled the payment, usually within a minute.",
+          "nothingLeft": "Everything was refunded.",
+          "unrecovered": "{amount} of your share of a refund comes back from your next sale.",
+          "cardFeeNote": "Stripe’s card fee isn’t returned on a refund; Daybell’s fee on what’s refunded is."
+        },
+        "refundDialog": {
+          "title": "Refund order {reference}",
+          "mode": "What to refund",
+          "byItem": "Items",
+          "custom": "A custom amount",
+          "quantity": "Refund how many of {name}",
+          "quantityHelp": "{count, plural, one {# left} other {# left}}",
+          "shipping": "Also refund the shipping ({amount})",
+          "amount": "Amount before tax",
+          "amountHelp": "Up to {max}. Tax is added in proportion.",
+          "reason": "Reason",
+          "noReason": "No reason given",
+          "summary": "Summary",
+          "summaryProducts": "Products",
+          "summaryShipping": "Shipping",
+          "summaryTax": "Tax",
+          "summaryTotal": "The parent gets back",
+          "summaryFee": "Daybell’s fee returned to you",
+          "summaryShare": "Taken from your Stripe balance",
+          "summaryCardFee": "Stripe’s card fee isn’t returned.",
+          "review": "Review refund",
+          "back": "Back",
+          "confirm": "Refund {amount}",
+          "confirmBody": "The parent gets {amount} back on their card. A refund can’t be undone.",
+          "cancel": "Cancel",
+          "done": "Refunded {amount}.",
+          "processing": "The refund of {amount} is being processed.",
+          "chooseSomething": "Choose something to refund.",
+          "tooMuch": "That’s more than is left to refund.",
+          "badAmount": "Enter an amount like 12.50."
+        },
+        "money": {
+          "title": "Money and ledger",
+          "caption": "This order’s ledger transactions",
+          "columns": {
+            "when": "When",
+            "what": "Transaction",
+            "account": "Account",
+            "amount": "Amount"
+          },
+          "kinds": {
+            "order_paid": "Sale",
+            "order_refunded": "Refund",
+            "refund_failed": "Failed refund",
+            "refund_shortfall": "Shortfall absorbed by Daybell"
+          },
+          "accounts": {
+            "parent_payments": "Parent payments",
+            "studio_payable": "Owed to you",
+            "daybell_fees": "Daybell fees",
+            "payment_fees": "Card fees",
+            "tax_payable": "Tax",
+            "refunds": "Refunds",
+            "lab_costs": "Lab costs"
+          },
+          "note": "Each transaction adds up to zero. Positive amounts are money in hand or owed to Daybell; negative ones are owed to you or earned.",
+          "none": "Nothing yet: the sale is written once Stripe says its fee."
+        },
+        "externalRefund": {
+          "title": "A refund was made outside Daybell",
+          "body": "Someone refunded this payment in Stripe on {date}. Daybell’s totals and ledger don’t include it, and your share wasn’t taken back. Check it in Stripe and with the parent before you print or ship.",
+          "check": "Mark as checked",
+          "checked": "Checked on {date}. Printing and shipping can go on.",
+          "saved": "Marked as checked."
+        }
+      }
     }
   },
   "invite": {
@@ -1568,7 +1845,8 @@
       "roster-editor": "Owners, admins and photographers",
       "uploader": "Owners, admins and photographers",
       "internal": "Internal: the image worker, the daily clean-up and Stripe's webhook",
-      "parent": "A parent's shop session (from an access code)"
+      "parent": "A parent's shop session (from an access code)",
+      "fulfilment": "Owners, admins and staff"
     },
     "englishOnly": "Endpoint descriptions are in English, for developers.",
     "query": "Query parameters"
@@ -1623,7 +1901,10 @@
       "alreadyPaid": "This bag has just been paid for.",
       "downloadPreparing": "Your download is being prepared. Try again in a minute.",
       "downloadUnavailable": "This download isn’t available right now. We’ve been alerted. Try again later.",
-      "checkoutNotConfigured": "Payments aren’t set up here."
+      "checkoutNotConfigured": "Payments aren’t set up here.",
+      "cannotCancel": "This order can’t be canceled here. Contact the studio.",
+      "cancelLimit": "Too many cancellations. Try again later, or contact the studio.",
+      "zipTooBig": "There are too many photos for one zip. Download them one at a time."
     },
     "header": {
       "bag": "Bag, {count, plural, =0 {empty} one {# item} other {# items}}",
@@ -1784,7 +2065,42 @@
       "pst": "PST ({province}) {number}",
       "download": "Download photo {n}",
       "downloadStarted": "Photo {n} is downloading.",
-      "allOrders": "All your orders"
+      "allOrders": "All your orders",
+      "status": "Status",
+      "fulfilment": {
+        "paid": "Paid",
+        "printed": "Printed",
+        "shipped": "Shipped",
+        "delivered": "Delivered to school",
+        "complete": "Complete",
+        "canceled": "Canceled"
+      },
+      "refundBadges": {
+        "refunded": "Refunded",
+        "partly_refunded": "Partly refunded"
+      },
+      "tracking": "Tracking",
+      "trackingLine": "{carrier}: {number}",
+      "carriers": {
+        "canada_post": "Canada Post",
+        "purolator": "Purolator",
+        "ups": "UPS",
+        "fedex": "FedEx",
+        "other": "Other"
+      },
+      "trackPackage": "Track your package (opens in a new tab)",
+      "refundedQuantity": "{count} refunded",
+      "refunded": "Refunded",
+      "cancel": "Cancel order",
+      "cancelHelp": "You can cancel for a full refund until the studio prints your order.",
+      "cancelTitle": "Cancel this order?",
+      "cancelBody": "You’ll get {amount} back on your card, shipping included. The downloads from this order will stop working.",
+      "cancelConfirm": "Yes, cancel and refund",
+      "cancelKeep": "Keep my order",
+      "canceled": "Your order was canceled and refunded.",
+      "cancelProcessing": "Your order is being canceled. The refund is on its way.",
+      "downloadAll": "Download all",
+      "downloadAllStarted": "Your photos are downloading as one zip file."
     },
     "devCheckout": {
       "banner": "Test checkout: no real payment is made.",

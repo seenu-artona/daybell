@@ -9,10 +9,14 @@ import {
   isOrderReference,
   MIN_CHARGE_CENTS,
   orderLedger,
+  printFileName,
+  printManifest,
   STATEMENT_DESCRIPTOR_MAX,
   statementSuffix,
   studioReceivesCents,
   unlocksDownloads,
+  zipEntryName,
+  zipFileName,
 } from "./orders";
 
 describe("daybellFeeCents (D59; calls 16)", () => {
@@ -170,5 +174,45 @@ describe("unlocksDownloads (calls 9, 10)", () => {
     expect(unlocksDownloads("print")).toBe(false);
     expect(unlocksDownloads("package", [{ kind: "print" }])).toBe(false);
     expect(unlocksDownloads("package", [{ kind: "print" }, { kind: "digital" }])).toBe(true);
+  });
+});
+
+describe("zips (ADR 0024)", () => {
+  it("are named by the order, never a child", () => {
+    expect(zipFileName("7KQ2M9XA", "downloads")).toBe("daybell-7KQ2M9XA.zip");
+    expect(zipFileName("7KQ2M9XA", "print-files")).toBe("daybell-7KQ2M9XA-print-files.zip");
+    expect(() => zipFileName("Ava Patel", "downloads")).toThrow();
+    expect(zipEntryName("7KQ2M9XA", 3)).toBe("daybell-7KQ2M9XA-3.jpg");
+  });
+
+  it("name print files by line, size and quantity", () => {
+    expect(printFileName("7KQ2M9XA", 2, "5x7", 2)).toBe("7KQ2M9XA-2-5x7-x2.jpg");
+    expect(printFileName("7KQ2M9XA", 1, null, 1)).toBe("7KQ2M9XA-1-package-x1.jpg");
+    expect(printFileName("7KQ2M9XA", 4, "wallets_8", 1)).toBe("7KQ2M9XA-4-wallets_8-x1.jpg");
+    expect(() => printFileName("7KQ2M9XA", 0, "5x7", 1)).toThrow();
+  });
+
+  it("write a CSV manifest that no spreadsheet runs as a formula", () => {
+    const csv = printManifest([
+      {
+        file: "7KQ2M9XA-1-package-x1.jpg",
+        position: 1,
+        item: "Package A",
+        size: null,
+        quantity: 1,
+        contents: "8x10 x1; 5x7 x2",
+      },
+      {
+        file: null,
+        position: 2,
+        item: '=HYPERLINK("x"), "big"',
+        size: "4x6",
+        quantity: 2,
+        contents: "",
+      },
+    ]);
+    expect(csv).toBe(
+      'file,line,item,size,quantity,contents\r\n7KQ2M9XA-1-package-x1.jpg,1,Package A,,1,8x10 x1; 5x7 x2\r\nmissing,2,"\'=HYPERLINK(""x""), ""big""",4x6,2,\r\n',
+    );
   });
 });

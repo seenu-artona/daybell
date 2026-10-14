@@ -21,6 +21,11 @@ describe("notification audience (ADR 0021, call 4)", () => {
       payouts_restricted: ["owner", "admin"],
       photos_failed: ["owner", "admin", "photographer"],
       tagging_ready: ["owner", "admin", "photographer"],
+      // Orders (ADR 0024): who fulfils hears of a new order; who refunds, of a failed refund or a dispute.
+      order_paid: ["owner", "admin", "staff"],
+      refund_failed: ["owner", "admin"],
+      dispute_opened: ["owner", "admin"],
+      refund_external: ["owner", "admin"],
     });
     expect(Object.keys(NOTIFICATION_AUDIENCE)).toEqual([...NOTIFICATION_KINDS]);
     expect(hearsAbout("outsider", "job_selling")).toBe(false);
@@ -34,6 +39,10 @@ describe("notification audience (ADR 0021, call 4)", () => {
       "payouts",
       "jobFailedPhotos",
       "jobReview",
+      "order",
+      "order",
+      "order",
+      "order",
     ]);
   });
 });

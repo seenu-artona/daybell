@@ -177,3 +177,68 @@ export function downloadFileName(reference: string, n: number): string {
 
 /** Stripe's hosted checkout lasts 30 minutes, its shortest (Stripe's documented minimum; ADR 0023). */
 export const CHECKOUT_MINUTES = 30;
+
+// ── Zips (Phase 1 step 11; ADR 0024) ────────────────────────────────────────────────────────────────────────────
+
+/** At most this many files in one zip (Claude's call). */
+export const MAX_ZIP_FILES = 500;
+
+/** A zip's name: the order's reference only, never a child's name. */
+export function zipFileName(reference: string, kind: "downloads" | "print-files"): string {
+  if (!isOrderReference(reference)) throw new Error("A zip is named by its order");
+  return kind === "downloads" ? `daybell-${reference}.zip` : `daybell-${reference}-print-files.zip`;
+}
+
+/** An entry of "Download all": the same name the single download is saved under. */
+export const zipEntryName = downloadFileName;
+
+/**
+ * A print file's name: the reference, the line's position, its size (or "package") and how many to print, e.g.
+ * "7KQ2M9XA-2-5x7-x2.jpg". Never a name.
+ */
+export function printFileName(
+  reference: string,
+  position: number,
+  size: string | null,
+  quantity: number,
+): string {
+  if (
+    !isOrderReference(reference) ||
+    !Number.isInteger(position) ||
+    position < 1 ||
+    !Number.isInteger(quantity) ||
+    quantity < 1
+  )
+    throw new Error("A print file is named by its order, line and quantity");
+  const label = (size ?? "package").replace(/[^A-Za-z0-9_]/g, "");
+  return `${reference}-${position}-${label}-x${quantity}.jpg`;
+}
+
+/** One line of the print files' manifest. */
+export interface PrintManifestRow {
+  file: string | null;
+  position: number;
+  item: string;
+  size: string | null;
+  quantity: number;
+  /** A package's prints, e.g. "8x10 x1; 5x7 x2". */
+  contents: string;
+}
+
+const csvCell = (value: string | number | null): string => {
+  const text = value === null ? "" : String(value);
+  // Spreadsheet formulas are never started by a cell (=, +, -, @), and quotes are doubled.
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+};
+
+/** The manifest.csv in the print files' zip: what to print, with no names. */
+export function printManifest(rows: readonly PrintManifestRow[]): string {
+  const header = ["file", "line", "item", "size", "quantity", "contents"];
+  const lines = rows.map((r) =>
+    [r.file ?? "missing", r.position, r.item, r.size, r.quantity, r.contents]
+      .map(csvCell)
+      .join(","),
+  );
+  return `${[header.join(","), ...lines].join("\r\n")}\r\n`;
+}

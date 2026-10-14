@@ -1,5 +1,6 @@
 import { DATA_REGIONS } from "@daybell/config";
 import {
+  CARRIERS,
   HEAD_OFFICE_PROVINCES,
   ITEM_DESCRIPTION_MAX,
   ITEM_NAME_MAX,
@@ -20,6 +21,8 @@ import {
   MAX_SHIPPING_CENTS,
   normalizePostalCode,
   normalizeTaxNumber,
+  normalizeTrackingNumber,
+  ORDER_FULFILMENTS,
   PAYOUT_WEEKDAY_CHOICES,
   PHOTO_PAGE_SIZE,
   PRICE_ITEM_KINDS,
@@ -27,9 +30,11 @@ import {
   PRINT_SIZES,
   PST_PROVINCES,
   planParts,
+  REFUND_REASONS,
   REVIEW_CHILDREN_PAGE,
   SHOP_MAX_QUANTITY,
   SHOP_SHIPPING_METHODS,
+  STATUS_UNDO_REASONS,
 } from "@daybell/core";
 import { z } from "zod";
 
@@ -1056,13 +1061,197 @@ export type ShopGalleryQuery = z.infer<typeof shopGalleryQuery>;
 
 // ── Checkout and taxes (Phase 1 step 10, ADR 0023) ────────────────────────────────────────────────────────────────
 
-/** A job's paid orders, a page at a time (owners and admins). */
+// ── Orders and refunds (Phase 1 step 11, ADR 0024) ──────────────────────────────────────────────────────────────
+
+/** An order reference as typed: dashes and spaces dropped, upper case, 1 to 8 of Crockford's base32 characters. */
+const referenceSearch = z
+  .string()
+  .transform((v) => v.replace(/[\s-]/g, "").toUpperCase())
+  .pipe(z.string().regex(/^[0-9A-HJKMNP-TV-Z]{1,8}$/, { error: "validation.reference" }));
+
+/**
+ * The studio's paid orders, a page at a time (owners, admins and staff; Q4): optionally one job's, one status's, or
+ * those whose reference starts with `q`. Names are never searched (and never in a URL).
+ */
 export const orderListQuery = listQuery.extend({
   jobId: z
     .uuid({ error: "validation.invalid" })
-    .meta({ description: "The job whose orders to list." }),
+    .optional()
+    .meta({ description: "Only this job's orders (the job's Orders tab)." }),
+  status: z
+    .enum(ORDER_FULFILMENTS, { error: "validation.invalid" })
+    .optional()
+    .meta({ description: "Only orders at this step." }),
+  q: referenceSearch.optional().meta({
+    description: "The start of an order's reference, e.g. 7KQ2 or 7KQ2-M9XA. References only.",
+  }),
+  delivery: z.enum(SHOP_SHIPPING_METHODS, { error: "validation.invalid" }).optional().meta({
+    description:
+      "Only home delivery or delivery to school. With status paid or printed (what is waiting), fully refunded orders are left out.",
+  }),
 });
 export type OrderListQuery = z.infer<typeof orderListQuery>;
+
+const trackingNumber = z
+  .string({ error: "validation.trackingNumber" })
+  .transform((v, ctx) => {
+    const number = normalizeTrackingNumber(v);
+    if (!number) {
+      ctx.addIssue({ code: "custom", message: "validation.trackingNumber" });
+      return z.NEVER;
+    }
+    return number;
+  })
+  .meta({ description: "4 to 40 letters, digits, spaces and dashes." });
+
+const trackingUrl = z
+  .url({ protocol: /^https$/, error: "validation.trackingUrl" })
+  .max(500, { error: "validation.trackingUrl" })
+  .nullable()
+  .default(null)
+  .meta({ description: "Only for other carriers: their own https tracking page." });
+
+const trackingFields = {
+  carrier: z.enum(CARRIERS, { error: "validation.carrier" }),
+  trackingNumber,
+  trackingUrl,
+};
+
+const linkOnlyForOther = (
+  v: { carrier: string; trackingUrl: string | null },
+  ctx: z.RefinementCtx,
+) => {
+  if (v.trackingUrl !== null && v.carrier !== "other")
+    ctx.addIssue({ code: "custom", path: ["trackingUrl"], message: "validation.trackingUrlOther" });
+};
+
+/** Mark one order Printed, Shipped (home: a carrier and tracking number) or Delivered to school (answer 4). */
+export const orderStatusInput = z.discriminatedUnion(
+  "status",
+  [
+    z.strictObject({ status: z.literal("printed") }, { error: "validation.unknownField" }),
+    z
+      .strictObject(
+        { status: z.literal("shipped"), ...trackingFields },
+        { error: "validation.unknownField" },
+      )
+      .superRefine(linkOnlyForOther),
+    z.strictObject({ status: z.literal("delivered") }, { error: "validation.unknownField" }),
+  ],
+  { error: "validation.orderStatus" },
+);
+export type OrderStatusInput = z.infer<typeof orderStatusInput>;
+
+/** Correct a shipped order's tracking. */
+export const orderTrackingInput = z
+  .strictObject(trackingFields, { error: "validation.unknownField" })
+  .superRefine(linkOnlyForOther);
+export type OrderTrackingInput = z.infer<typeof orderTrackingInput>;
+
+/** Take one step back, saying why (owners and admins). */
+export const orderUndoInput = z.strictObject(
+  { reason: z.enum(STATUS_UNDO_REASONS, { error: "validation.undoReason" }) },
+  { error: "validation.unknownField" },
+);
+export type OrderUndoInput = z.infer<typeof orderUndoInput>;
+
+/** Mark printed, or Mark delivered to school, for up to 100 orders. */
+export const bulkOrderStatusInput = z.strictObject(
+  {
+    orderIds: z
+      .array(z.uuid({ error: "validation.invalid" }), { error: "validation.orderIds" })
+      .min(1, { error: "validation.orderIds" })
+      .max(100, { error: "validation.orderIds" })
+      .refine((ids) => new Set(ids).size === ids.length, { error: "validation.orderIds" }),
+    status: z.enum(["printed", "delivered"], { error: "validation.orderStatus" }),
+  },
+  { error: "validation.unknownField" },
+);
+export type BulkOrderStatusInput = z.infer<typeof bulkOrderStatusInput>;
+
+const refundCommon = {
+  requestId: z.uuid({ error: "validation.invalid" }).meta({
+    description:
+      "Made by the client once per refund: sending the same one again is the same refund.",
+  }),
+  shipping: z
+    .boolean({ error: "validation.invalid" })
+    .default(false)
+    .meta({ description: "Also refund all the shipping that is left." }),
+  reason: z
+    .enum(REFUND_REASONS, { error: "validation.refundReason" })
+    .nullable()
+    .default(null)
+    .meta({ description: "From a fixed list; never free text." }),
+};
+
+/**
+ * A refund (owners and admins, answer 3): by line and quantity, or a custom amount of products before tax (Q3); tax is
+ * added pro rata and Daybell's fee on it given back (answer 1). By line with no lines and the shipping is a
+ * shipping-only refund.
+ */
+export const refundInput = z.discriminatedUnion(
+  "kind",
+  [
+    z
+      .strictObject(
+        {
+          kind: z.literal("lines"),
+          lines: z
+            .array(
+              z.strictObject(
+                {
+                  lineId: z.uuid({ error: "validation.invalid" }),
+                  quantity: z
+                    .number({ error: "validation.quantity" })
+                    .int({ error: "validation.quantity" })
+                    .min(1, { error: "validation.quantity" })
+                    .max(99, { error: "validation.quantity" }),
+                },
+                { error: "validation.unknownField" },
+              ),
+              { error: "validation.refundLines" },
+            )
+            .max(100, { error: "validation.refundLines" })
+            .refine((l) => new Set(l.map((x) => x.lineId)).size === l.length, {
+              error: "validation.refundLines",
+            }),
+          ...refundCommon,
+        },
+        { error: "validation.unknownField" },
+      )
+      .superRefine((v, ctx) => {
+        // No lines is a shipping-only refund (code review S5); without the shipping it is nothing.
+        if (v.lines.length === 0 && !v.shipping)
+          ctx.addIssue({ code: "custom", path: ["lines"], message: "validation.refundLines" });
+      }),
+    z.strictObject(
+      {
+        kind: z.literal("custom"),
+        amountCents: z
+          .number({ error: "validation.refundAmount" })
+          .int({ error: "validation.refundAmount" })
+          .min(0, { error: "validation.refundAmount" })
+          .max(1_000_000_000, { error: "validation.refundAmount" })
+          .meta({ description: "Products before tax, in whole cents." }),
+        ...refundCommon,
+      },
+      { error: "validation.unknownField" },
+    ),
+  ],
+  { error: "validation.refundKind" },
+);
+export type RefundInput = z.infer<typeof refundInput>;
+
+/** Home's numbers are counted in the person's own day (D127). */
+export const salesQuery = z.object({
+  tz: z
+    .string({ error: "validation.timeZone" })
+    .regex(/^(UTC|[A-Za-z]+(\/[A-Za-z0-9_+-]+){1,2})$/, { error: "validation.timeZone" })
+    .max(64, { error: "validation.timeZone" })
+    .meta({ description: "An IANA time zone, e.g. America/Toronto." }),
+});
+export type SalesQuery = z.infer<typeof salesQuery>;
 
 const addressLine = (error: string) =>
   z

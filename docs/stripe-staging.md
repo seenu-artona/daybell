@@ -1,4 +1,4 @@
-# Staging payouts and checkout on Stripe (Phase 1 steps 7, 7b, 7c and 10)
+# Staging payouts, checkout and refunds on Stripe (Phase 1 steps 7, 7b, 7c, 10 and 11)
 
 What Seenu sets up once in the Stripe Dashboard, in **test mode** (a sandbox), so staging can connect studios' payout
 accounts with Stripe Connect (ADR 0020; D56, D98, D106, D113). Nothing here goes in the repository. Keys and signing
@@ -83,33 +83,39 @@ harmless (Daybell reads the account from Stripe again either way, and records ea
   - `v2.core.account[configuration.recipient].updated`
   - `v2.core.account[configuration.recipient].capability_status_updated`
 
-**Both destinations:**
-- **Endpoint URL**: `https://<staging domain>/api/v1/webhooks/stripe`. If staging uses Vercel Deployment Protection,
-  add the "Protection Bypass for Automation" query parameter, as for the image worker.
+**Every destination (A, B and C below):**
+- **Endpoint URL**: exactly `https://daybell.vercel.app/api/v1/webhooks/stripe`, with **no query parameter**. Don't add
+  Vercel's "Protection Bypass for Automation" parameter: staging found it empty and Vercel answered 401 (step 11 brief).
+  If a destination already has another address or a `?x-vercel-protection-bypass=…` on it, edit it to this exact URL.
 - After saving, **reveal each signing secret** (`whsec_…`) and copy them straight into Vercel (step 4), comma-separated
   in the one variable.
 
 ## 4. Vercel environment variables
 
-**Vercel › Project › Settings › Environment Variables**. Scope: **Preview, branch `main` only** (staging). Not
-Production, and not every PR preview (Claude's call Q13). PR previews without these variables say payouts aren't set up
-there.
+**Vercel › Project › Settings › Environment Variables**. Scope: **Production** only. Staging is Vercel's Production
+environment: the `main` branch, served at `https://daybell.vercel.app`, where every webhook destination points and
+where Vercel Cron runs. Not Preview: PR previews without these variables say payouts aren't set up there (Claude's call
+Q13).
 
 | Name | Value | Sensitive |
 |---|---|---|
 | `STRIPE_DRIVER` | `stripe` | no |
 | `STRIPE_SECRET_KEY` | the test key from step 2 | **yes** |
-| `STRIPE_WEBHOOK_SECRET` | both signing secrets from step 3, comma-separated (`whsec_A,whsec_B`) | **yes** |
+| `STRIPE_WEBHOOK_SECRET` | the signing secrets from step 3 and section 6, comma-separated (`whsec_A,whsec_B,whsec_C`) | **yes** |
+
 
 Notes:
-- The app refuses a live key (`sk_live_`/`rk_live_`) anywhere but production, and refuses `STRIPE_DRIVER=fake` on
-  Vercel, both at build time and at run time.
+- The app refuses `STRIPE_DRIVER=fake` on Vercel, at build time and at run time. It refuses a live key
+  (`sk_live_`/`rk_live_`) only where `VERCEL_ENV` isn't `production`, and staging **is** Vercel's Production
+  environment, so that guard doesn't separate staging from production: staging would accept a live key. Until a real
+  production project exists, staging uses **test-mode keys only, by process**: never paste a live key here (ADR 0024,
+  launch to-dos).
 - `STRIPE_WEBHOOK_SECRET` takes one to six secrets (three destinations since step 10). To roll one, add the new one
   next to the old (e.g. `A,B,C,B-new`), redeploy, roll it in Stripe, then remove the old one.
 
 ## 5. Redeploy and smoke test
 
-1. Redeploy staging (the `main` branch).
+1. Redeploy staging (the `main` branch, Vercel's Production environment).
 2. Sign in to staging as a **Canadian** studio's owner. Go to **Settings › Payouts** and click **Set up payouts**.
 3. On Stripe's test onboarding, use Stripe's test data. The usual values (check them on Stripe's "Testing Connect"
    page, since they weren't checked from here):
@@ -145,8 +151,9 @@ D98, D104, D106). Steps 1 to 5 must be done first: a studio needs an active payo
    so they don't come through destination A. **Developers › Webhooks › Add destination**:
    - **Events from**: **Your account**.
    - **Payload style**: **snapshot**.
-   - **Events** (exactly these 2): `checkout.session.completed`, `checkout.session.expired`.
-   - **Endpoint URL**: the same `https://<staging domain>/api/v1/webhooks/stripe` (with the bypass parameter if used).
+   - **Events**: `checkout.session.completed`, `checkout.session.expired` (since step 11, also the four refund and
+     dispute events in section 7).
+   - **Endpoint URL**: exactly `https://daybell.vercel.app/api/v1/webhooks/stripe`, no query parameter.
    - Reveal its signing secret and add it to `STRIPE_WEBHOOK_SECRET` in Vercel, after the other two
      (`whsec_A,whsec_B,whsec_C`). Redeploy.
    Daybell reads each session from Stripe again rather than trusting the payload, and a cron backstop (the jobs cron)
@@ -191,13 +198,64 @@ D98, D104, D106). Steps 1 to 5 must be done first: a studio needs an active payo
    here (e.g. whether `statement_descriptor_suffix` works with `on_behalf_of`, Stripe Tax on connected accounts with
    `Stripe-Context`, the tax codes). If staging disagrees with any, tell the developers.
 
+## 7. Refunds and disputes (step 11)
+
+Studios refund from the order page and parents cancel from theirs (ADR 0024; D25). Daybell refunds the parent on the
+platform's payment for the exact amount it computes (no `reverse_transfer`, no `refund_application_fee`), then takes
+the studio's share back from its transfer with one transfer reversal. Stripe's card fee isn't returned. Steps 1 to 6
+must be done first.
+
+1. **Destination C gains four events.** **Developers › Webhooks**, open destination C (Your account, snapshot) and
+   **add** these events, keeping the two checkout events. It then has exactly these 6:
+   - `checkout.session.completed`
+   - `checkout.session.expired`
+   - `charge.refunded`
+   - `refund.updated`
+   - `refund.failed`
+   - `charge.dispute.created`
+
+   The URL stays exactly `https://daybell.vercel.app/api/v1/webhooks/stripe`, with no query parameter. The signing
+   secret doesn't change, so `STRIPE_WEBHOOK_SECRET` stays as it is. Daybell reads each refund, payment and dispute
+   from Stripe again rather than trusting the payload, and the jobs cron retries refunds whose event never arrived.
+2. **The restricted key's new permissions.** If staging uses a restricted key, add:
+
+   | Resource | Access | Why (the calls) |
+   |---|---|---|
+   | **Refunds** | write | `refunds.create`, `refunds.retrieve`, `refunds.list` (a refund an earlier try made is found by its metadata) |
+   | **Disputes** | read | `disputes.retrieve` (to find the payment a dispute is about; Daybell only flags the order) |
+   | **PaymentIntents** | read (write is already granted in section 6) | `paymentIntents.retrieve` (Daybell's ids in the payment's metadata) |
+   | **Transfers** | read and write (write is already granted in section 6) | `transfers.retrieve` (what the transfer still holds), `transfers.listReversals`, `transfers.createReversal`, and `transfers.list` and `transfers.create` (a refund Stripe fails after the studio's share was taken back sends that share back to the studio's account) |
+
+   Check the exact permission names on the restricted-key screen. If unsure, use the test secret key.
+3. **Smoke test** (after the change; Stripe's test cards are on its "Testing" page, check them there):
+   - Pay an order as in section 6 with home delivery and two prints.
+   - As the studio's owner, open **Orders**, then the order: **Refund**, one print, reason "Damaged", **Review refund**,
+     **Refund $…**. The order shows "Partly refunded" and the refund as Refunded; the ledger shows the refund's four
+     lines adding up to zero.
+   - In Stripe: the refund on the payment (metadata `daybell_refund_id`), and a transfer reversal on the transfer with
+     `daybell_purpose: refund`. Destination C's deliveries show 200s for `charge.refunded` and `refund.updated`.
+   - Mark another order Printed, then Shipped with a tracking number: the parent's order page shows the tracking.
+   - As a parent, pay a mixed order and click **Cancel order** before the studio prints it: the order is canceled and
+     refunded in full.
+   - Optional: with a test card whose refund fails (Stripe documents one), the refund shows as Failed and the owner's
+     bell says the parent wasn't refunded; with a test card that opens a dispute, the order is flagged as disputed and
+     the bell says so.
+   - Optional: refund a paid (not yet printed) test order from the Stripe Dashboard instead of Daybell. The order page
+     says a refund was made outside Daybell, the owner's bell rings, and Mark printed is refused until an owner or admin
+     clicks **Mark as checked**.
+
 ## What Daybell keeps
 
 Stripe account and payout ids, flags (details submitted, card payments, payouts), counts of what's due, Stripe's reason
 codes, the schedule, and each payout's amount, currency, status and dates. Since step 10, also each order's Checkout
 Session, PaymentIntent, transfer, fee reversal and balance transaction ids, its amounts, tax and fees, and, for home
 delivery only, the recipient's name and Canadian address (to ship the order). Never bank details or card details, never
-the parent's email (Stripe keeps it for the receipt), and never webhook payloads. (The owner's sign-in email is sent to Stripe as the account's contact email
+the parent's email (Stripe keeps it for the receipt), and never webhook payloads. Since step 11, also each refund's and
+its transfer reversal's ids, amounts, status and Stripe's failure reason code, the date a dispute was opened (a flag
+only), and the carrier and tracking number of a shipped order. A home delivery address is deleted 90 days after the
+order ships (or 90 days after payment when it is canceled or fully refunded, and at the latest 365 days after payment),
+and its tracking number with it. Since the step 11 reviews, also a failed refund's share-return transfer id and amount,
+and when a refund made outside Daybell was found and checked. (The owner's sign-in email is sent to Stripe as the account's contact email
 when it is created; Daybell doesn't copy it anywhere.)
 
 ## If setting up payouts fails

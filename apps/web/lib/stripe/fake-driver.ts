@@ -1,10 +1,12 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { siteUrl } from "@daybell/config";
+import { StripeCallError } from "./errors";
 import {
   type CheckoutSessionFacts,
   type CheckoutSessionParams,
   type PaymentsProvider,
+  type RefundFacts,
   SCHEDULE_SET_KEY,
   type ScheduleRequest,
   type StripeAccountData,
@@ -56,6 +58,36 @@ interface FakeState {
     string,
     { account: string; kind: string; province: string | null; active: boolean }
   >;
+  /** Payments made at the fake checkout, with Daybell's ids (ADR 0024). */
+  payments: Map<
+    string,
+    {
+      total: number;
+      currency: string;
+      orderId: string | null;
+      studioId: string | null;
+      region: string | null;
+    }
+  >;
+  /** Transfers to studios and every reversal of each (the card fee's, refunds' and shortfalls'). */
+  transfers: Map<
+    string,
+    {
+      amount: number;
+      currency: string;
+      reversals: {
+        id: string;
+        amount: number;
+        refundId: string | null;
+        purpose: string;
+        orderId: string | null;
+      }[];
+    }
+  >;
+  refunds: Map<string, RefundFacts>;
+  /** Failed refunds' shares sent back to studios (Q7), by Daybell's refund. */
+  returns: Map<string, { id: string; account: string; amount: number; currency: string }>;
+  disputes: Map<string, string>;
 }
 
 const STATE = Symbol.for("daybell.fakeStripe");
@@ -73,13 +105,40 @@ function state(): FakeState {
     prefixes: new Map(),
     taxHeadOffices: new Set(),
     taxRegistrations: new Map(),
+    payments: new Map(),
+    transfers: new Map(),
+    refunds: new Map(),
+    disputes: new Map(),
+    returns: new Map(),
   };
   return g[STATE];
 }
 
+/** Stripe refusing a request outright (as stripe-driver's failed() would say it): nothing happened. */
+const refusedByStripe = () =>
+  new StripeCallError(
+    "We couldn't reach Stripe. Please try again.",
+    "other",
+    "refused",
+    undefined,
+    "StripeInvalidRequestError",
+  );
+
 const ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 export function fakeId(
-  prefix: "acct" | "po" | "evt" | "cs_test" | "pi" | "ch" | "tr" | "trr" | "txn" | "taxreg",
+  prefix:
+    | "acct"
+    | "po"
+    | "evt"
+    | "cs_test"
+    | "pi"
+    | "ch"
+    | "tr"
+    | "trr"
+    | "txn"
+    | "taxreg"
+    | "re"
+    | "dp",
 ): string {
   return `${prefix}_fake${Array.from(randomBytes(16), (b) => ALPHANUMERIC[b % ALPHANUMERIC.length]).join("")}`;
 }
@@ -261,7 +320,108 @@ export function fakeDriver(): PaymentsProvider {
       if (earlier) return { reversalId: earlier.id };
       const id = fakeId("trr");
       reversals.set(orderId, { id, transferId, amount: amountCents });
+      state().transfers.get(transferId)?.reversals.push({
+        id,
+        amount: amountCents,
+        refundId: null,
+        purpose: "card_fee",
+        orderId,
+      });
       return { reversalId: id };
+    },
+
+    // ── Refunds and disputes (ADR 0024): every refund succeeds at once, like test cards ──────────────────────────
+    async createRefund({ paymentIntentId, amountCents, refundId, orderId, region }) {
+      const s = state();
+      const payment = s.payments.get(paymentIntentId);
+      if (!payment) throw refusedByStripe();
+      const earlier = [...s.refunds.values()].find((r) => r.refundId === refundId);
+      if (earlier) return earlier;
+      const refunded = [...s.refunds.values()]
+        .filter((r) => r.paymentIntentId === paymentIntentId && r.status !== "failed")
+        .reduce((sum, r) => sum + r.amountCents, 0);
+      if (
+        !Number.isSafeInteger(amountCents) ||
+        amountCents < 1 ||
+        refunded + amountCents > payment.total
+      )
+        throw refusedByStripe();
+      const facts: RefundFacts = {
+        id: fakeId("re"),
+        status: "succeeded",
+        amountCents,
+        currency: payment.currency,
+        paymentIntentId,
+        refundId,
+        orderId,
+        region,
+        failureReason: null,
+      };
+      s.refunds.set(facts.id, facts);
+      return facts;
+    },
+    async retrieveRefund(stripeRefundId) {
+      const found = state().refunds.get(stripeRefundId);
+      if (!found) throw new Error("fake_stripe_no_refund");
+      return found;
+    },
+    async findRefund(paymentIntentId, refundId) {
+      return (
+        [...state().refunds.values()].find(
+          (r) => r.paymentIntentId === paymentIntentId && r.refundId === refundId,
+        ) ?? null
+      );
+    },
+    async transferRemaining(transferId) {
+      const transfer = state().transfers.get(transferId);
+      if (!transfer) throw new Error("fake_stripe_no_transfer");
+      const reversed = transfer.reversals.reduce((sum, r) => sum + r.amount, 0);
+      return {
+        remainingCents: Math.max(0, transfer.amount - reversed),
+        currency: transfer.currency,
+      };
+    },
+    async reverseForRefund({ transferId, neededCents, refundId, purpose, orderId }) {
+      const transfer = state().transfers.get(transferId);
+      if (!transfer) throw new Error("fake_stripe_no_transfer");
+      const earlier = transfer.reversals.find(
+        (r) =>
+          r.refundId === refundId &&
+          r.purpose === purpose &&
+          (purpose === "refund" || r.orderId === orderId),
+      );
+      if (earlier) return { reversalId: earlier.id, amountCents: earlier.amount };
+      const reversed = transfer.reversals.reduce((sum, r) => sum + r.amount, 0);
+      const amountCents = Math.min(neededCents, Math.max(0, transfer.amount - reversed));
+      if (amountCents <= 0) return { reversalId: null, amountCents: 0 };
+      const id = fakeId("trr");
+      transfer.reversals.push({ id, amount: amountCents, refundId, purpose, orderId });
+      return { reversalId: id, amountCents };
+    },
+    async returnRefundShare({ accountId, amountCents, currency, refundId }) {
+      const returns = state().returns;
+      const earlier = returns.get(refundId);
+      if (earlier) return { transferId: earlier.id };
+      if (!Number.isSafeInteger(amountCents) || amountCents < 1) throw refusedByStripe();
+      const id = fakeId("tr");
+      returns.set(refundId, { id, account: accountId, amount: amountCents, currency });
+      return { transferId: id };
+    },
+    async retrievePaymentIntentIds(paymentIntentId) {
+      const payment = state().payments.get(paymentIntentId);
+      if (!payment) throw new Error("fake_stripe_no_payment");
+      return {
+        id: paymentIntentId,
+        orderId: payment.orderId,
+        studioId: payment.studioId,
+        region: payment.region,
+        refunds: [...state().refunds.values()].filter((r) => r.paymentIntentId === paymentIntentId),
+      };
+    },
+    async retrieveDispute(disputeId) {
+      const paymentIntentId = state().disputes.get(disputeId);
+      if (!paymentIntentId) throw new Error("fake_stripe_no_dispute");
+      return { id: disputeId, paymentIntentId };
     },
     async setCardPrefix(accountId) {
       account(accountId);
@@ -360,6 +520,16 @@ export function fakePayCheckout(
     email: input.email,
     shipping: c.params.shipping_address_collection ? input.shipping : null,
   };
+  const currency = c.params.line_items?.[0]?.price_data?.currency ?? "cad";
+  state().payments.set(c.paid.paymentIntentId, {
+    total,
+    currency,
+    orderId: metadata(c, "daybell_order_id"),
+    studioId: metadata(c, "daybell_studio_id"),
+    region: metadata(c, "daybell_region"),
+  });
+  // A destination charge transfers the whole total; Daybell's fee comes back as the application fee.
+  state().transfers.set(c.paid.transferId, { amount: total, currency, reversals: [] });
   return c.params.success_url ?? siteUrl();
 }
 
@@ -371,6 +541,43 @@ export function fakeCancelCheckout(sessionId: string): string {
 /** Receipts "Stripe" sent for a payment (tests): a count, never the address. */
 export function fakeReceipts(paymentIntentId: string): number {
   return state().receipts.get(paymentIntentId) ?? 0;
+}
+
+/**
+ * "Stripe" says a refund failed after all (the dev route /api/dev-stripe/refund-fail and tests): its status, and the
+ * payment's id for the event. Null for a refund the fake didn't make.
+ */
+export function fakeFailRefund(stripeRefundId: string): RefundFacts | null {
+  const refund = state().refunds.get(stripeRefundId);
+  if (!refund) return null;
+  refund.status = "failed";
+  refund.failureReason = "expired_or_canceled_card";
+  return refund;
+}
+
+/** A dispute opened on a fake payment (tests). */
+export function fakeOpenDispute(paymentIntentId: string): string {
+  const id = fakeId("dp");
+  state().disputes.set(id, paymentIntentId);
+  return id;
+}
+
+/** A transfer's reversals (tests): the card fee's, refunds' and shortfalls'. */
+export function fakeTransferReversals(transferId: string): {
+  id: string;
+  amount: number;
+  refundId: string | null;
+  purpose: string;
+  orderId: string | null;
+}[] {
+  return state().transfers.get(transferId)?.reversals ?? [];
+}
+
+/** A failed refund's share sent back to the studio (tests; Q7). */
+export function fakeShareReturn(
+  refundId: string,
+): { id: string; account: string; amount: number; currency: string } | null {
+  return state().returns.get(refundId) ?? null;
 }
 
 /** The card fee recovered for an order (tests). */

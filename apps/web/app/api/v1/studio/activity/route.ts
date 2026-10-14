@@ -1,6 +1,8 @@
 import { type ActivityItem, ApiError, activityQuery, type StudioRole } from "@daybell/api";
+import { formatOrderReference } from "@daybell/core";
 import { NextResponse } from "next/server";
 import {
+  aboutOrder,
   activityType,
   JOB_ACTIVITY_TYPES,
   JOB_SUBJECT_PREFIXES,
@@ -13,7 +15,7 @@ import { assertCanManage, studioScope } from "@/lib/studio";
  * GET /api/v1/studio/activity — the latest 50 things that happened in the studio (owners and admins, D96).
  * ?jobId= narrows it to one job of the caller's studio: its own changes, roster imports and QR card prints (D138;
  * ADR 0013, 0015).
- * Names (people, jobs, clients) are resolved when read, never stored in events.
+ * Names (people, jobs, clients) and order references are resolved when read, never stored in events (ADR 0024).
  */
 export const GET = handle(async (request: Request) => {
   const { supabase, studio } = await studioScope();
@@ -57,23 +59,34 @@ export const GET = handle(async (request: Request) => {
     ),
   ];
   // Roster imports and QR card prints point at their job (counts only in the event, D96).
-  const [jobIds, clientIds] = [
+  const [jobIds, clientIds, orderIds] = [
     [...new Set(JOB_SUBJECT_PREFIXES.flatMap((prefix) => subjectsOf(prefix)))],
     [...subjectsOf("client."), ...subjectsOf("organization.")],
+    subjectsOf("order."),
   ];
-  const [jobs, clients] = await Promise.all([
+  const [jobs, clients, orders] = await Promise.all([
     jobIds.length
       ? supabase.from("jobs").select("id, name").eq("studio_id", studio.id).in("id", jobIds)
       : null,
     clientIds.length
       ? supabase.from("clients").select("id, name").eq("studio_id", studio.id).in("id", clientIds)
       : null,
+    orderIds.length
+      ? supabase
+          .from("orders")
+          .select("id, reference")
+          .eq("studio_id", studio.id)
+          .in("id", orderIds)
+      : null,
   ]);
-  const names = new Map<string, string>(
-    [...(jobs ? (check(jobs) ?? []) : []), ...(clients ? (check(clients) ?? []) : [])].map(
-      (r: { id: string; name: string }) => [r.id, r.name],
+  const names = new Map<string, string>([
+    ...[...(jobs ? (check(jobs) ?? []) : []), ...(clients ? (check(clients) ?? []) : [])].map(
+      (r: { id: string; name: string }) => [r.id, r.name] as const,
     ),
-  );
+    ...(orders ? (check(orders) ?? []) : []).map(
+      (r: { id: string; reference: string }) => [r.id, formatOrderReference(r.reference)] as const,
+    ),
+  ]);
 
   const activity: ActivityItem[] = rows
     .filter((e) => activityType(e.type) !== null)
@@ -88,6 +101,7 @@ export const GET = handle(async (request: Request) => {
           e.subject_id && e.type.startsWith("member.") ? (emails.get(e.subject_id) ?? null) : null,
         role: data.to ?? data.role ?? null,
         subjectName: e.subject_id ? (names.get(e.subject_id) ?? null) : null,
+        subjectId: e.subject_id && aboutOrder(e.type) ? e.subject_id : null,
         occurredAt: e.occurred_at,
       };
     });

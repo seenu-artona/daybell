@@ -10,8 +10,12 @@ import { check } from "./api";
  * to read. Ids and counts only; nothing here is ever logged.
  */
 
-/** The job is embedded through the composite studio FK, with its current name (names are never stored here). */
-export const NOTIFICATION_COLUMNS = "id, kind, created_at, read_at, data, job:jobs (id, name)";
+/**
+ * The job is embedded through the composite studio FK, with its current name (names are never stored here); an order
+ * the same way, with its reference (ADR 0024).
+ */
+export const NOTIFICATION_COLUMNS =
+  "id, kind, created_at, read_at, data, job:jobs (id, name), order:orders (id, reference)";
 
 export interface NotificationRow {
   id: string;
@@ -20,6 +24,7 @@ export interface NotificationRow {
   read_at: string | null;
   data: unknown;
   job: { id: string; name: string } | null;
+  order?: { id: string; reference: string } | null;
 }
 
 const KNOWN = new Set<string>(NOTIFICATION_KINDS);
@@ -34,6 +39,7 @@ export function toNotification(row: NotificationRow): Notification | null {
     createdAt: row.created_at,
     readAt: row.read_at,
     job: row.job ? { id: row.job.id, name: row.job.name } : null,
+    order: row.order ? { id: row.order.id, reference: row.order.reference } : null,
     data: data.success ? data.data : {},
   };
 }
