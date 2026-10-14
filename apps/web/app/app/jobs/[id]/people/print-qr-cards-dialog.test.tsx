@@ -58,6 +58,10 @@ describe("PrintQrCardsDialog", () => {
     });
     const text = container.textContent ?? "";
     expect(text).toContain("5 cards on 2 sheets of US Letter");
+    // Blank cards ask for the name and class (D138).
+    expect(text).toContain(
+      "Extra cards with lines for the name and class and their own access code",
+    );
     const button = [...container.querySelectorAll("button")].find(
       (b) => b.textContent?.trim() === "Download PDF",
     );

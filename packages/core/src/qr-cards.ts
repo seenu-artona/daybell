@@ -139,8 +139,8 @@ export function printableText(
  * neighbour. `front` and `back` give each element's top, measured from the card's top edge.
  *
  * The card is printed double-sided (Seenu, Oct 13, 2026; ADR 0015, ADR 0018): each sheet is a front page, then a back
- * page. The front, which is photographed on picture day, holds the studio's name, the child's name and class (or a
- * line for the name) and the QR, and never the access code. The back holds the access code, large, the instructions
+ * page. The front, which is photographed on picture day, holds the studio's name, the child's name and class (or
+ * lines to write them on) and the QR, and never the access code. The back holds the access code, large, the instructions
  * and the studio's name, so a photo of a card whose QR isn't found never shows its access code.
  */
 export const CARD_LAYOUT = {

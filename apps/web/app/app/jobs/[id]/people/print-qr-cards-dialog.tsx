@@ -202,7 +202,7 @@ export function PrintQrCardsDialog({
 
         <Field
           label={t("blankCards")}
-          help={t("blankCardsHelp", { max: MAX_BLANK_CARDS })}
+          help={t("blankCardsHelp", { max: MAX_BLANK_CARDS, group: word })}
           error={fields.blankCards}
           type="number"
           inputMode="numeric"

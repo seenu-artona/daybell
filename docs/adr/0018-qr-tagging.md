@@ -265,7 +265,7 @@ Seenu's decision of Oct 13, 2026 replaces the fold-back tab. The PDF is printed 
 cards per sheet (2×2); each sheet is a front page followed by a back page.
 
 - **Front** (photographed): the studio's name, the child's name and class (or "Class ____" for a child without one) and
-  the QR (the random card ID). A blank card's front: the studio's name, a line for the name and the QR. The access code
+  the QR (the random card ID). A blank card's front: the studio's name, lines for the name and class (D138) and the QR. The access code
   is never on a front page.
 - **Back**: the studio's name, "Access code" and the code itself, large (`CARD_LAYOUT.code`, 28 pt, the widest code
   still inside the margins), and "Go to {shop link}, enter your code".

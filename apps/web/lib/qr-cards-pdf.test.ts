@@ -208,9 +208,9 @@ describe("renderQrCardsPdf", () => {
     expect(code?.x).toBeGreaterThanOrEqual(left);
   });
 
-  it("prints a blank card's studio, name line and QR on the front, and its code on the back", async () => {
+  it("prints a blank card's studio, name and class lines and QR on the front, and its code on the back (D138)", async () => {
     const [front, back] = readPdf((await render([blank(2)])).pdf);
-    expect(front?.runs.map((r) => r.text)).toEqual(["North Peak Photo", "Name"]);
+    expect(front?.runs.map((r) => r.text)).toEqual(["North Peak Photo", "Name", "Class"]);
     expect(front?.rects.length).toBeGreaterThan(20);
     expect(back?.runs.map((r) => r.text)).toEqual([
       "North Peak Photo",

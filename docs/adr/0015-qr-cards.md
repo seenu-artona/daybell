@@ -12,7 +12,7 @@
 >
 > **Forward note (Oct 13, 2026):** the fold-back tab is replaced (Seenu, Oct 13, 2026). The PDF is printed
 > double-sided on US Letter, flipped on the long edge: four cards per sheet, each sheet a front page then a back page.
-> The front holds the studio's name, the child's name and class (a blank card: a line for the name) and the QR; the back
+> The front holds the studio's name, the child's name and class (a blank card: lines for the name and class) and the QR; the back
 > holds the access code, large, "Go to {shop link}, enter your code" and the studio's name, its columns mirrored so each
 > back lands behind its own front. One card is a two-page PDF. See ADR 0018, "Amendment (Oct 13, 2026): the access code
 > on the back".

@@ -28,7 +28,7 @@ import QRCode from "qrcode";
  */
 
 export interface PrintCard {
-  /** null for a blank card: a line for the name instead. */
+  /** null for a blank card: lines for the name and class instead. */
   child: { firstName: string; lastName: string; group: string | null } | null;
   /** What the QR holds: the card ID, never the access code. */
   qrPayload: string;
@@ -216,8 +216,9 @@ function drawFront(
       writeOnLine(doc, x, top + AT.group, width, clean(texts.groupLabel));
     }
   } else {
-    // A blank card: a line for the name.
+    // A blank card: lines for the name and class (D138).
     writeOnLine(doc, x, top + AT.name + 22, width, clean(texts.nameLabel));
+    writeOnLine(doc, x, top + AT.group, width, clean(texts.groupLabel));
   }
 
   drawQr(doc, card.qrPayload, origin.x + (size.width - qrSymbol) / 2, top + AT.qr, qrSymbol, ink);
