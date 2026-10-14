@@ -4,7 +4,7 @@ import Link from "next/link";
 import { type ReactNode, useId } from "react";
 
 /**
- * One of Home's sections in the D144 look (amended Oct 14): a white list card (20px corners, soft shadow) named by its
+ * One of Home's sections in the D145 look (amends D144): a white list card (20px corners, soft shadow) named by its
  * h2, an optional muted line under the title, rows with hairlines between them, and an optional footer.
  */
 export function HomeCard({

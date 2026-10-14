@@ -46,7 +46,7 @@ function CheckCircle({ state }: { state: TaskState }) {
 
 /**
  * "plain": rows inside a padded card (the job's Overview). "rows": full-width list-card rows in the ClickableRow style
- * (Home; D144, amended Oct 14): 16px text, 56px rows, canvas grey on hover with the task underlined and a faint
+ * (Home; D145, amends D144): 16px text, 56px rows, canvas grey on hover with the task underlined and a faint
  * chevron that darkens.
  */
 export type ChecklistLook = "plain" | "rows";

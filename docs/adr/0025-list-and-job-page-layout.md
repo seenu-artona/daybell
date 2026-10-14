@@ -103,9 +103,9 @@ caller's studio and that `q` is an ilike on the name only.
 - Hover-only row actions: nothing appears on hover; a row's main link or button stays the keyboard target.
 - Search text in the address: it may hold a child's or client's name (D113).
 
-## Amendments (Oct 14, 2026)
+## Amendments (Oct 14, 2026): D145 (amends D144)
 
-Seenu tried the D144 UI on staging and asked for these changes (D144, amended Oct 14). UI only: no schema, migration,
+Seenu tried the D144 UI on staging and asked for these changes (D145, amends D144). UI only: no schema, migration,
 API contract, RLS, event or region changes. Where they differ from the sections above, these win.
 
 1. **Tab levels.** The first row of tabs on any page is pills (`MainTabs`, the current one near-black); dash
@@ -141,7 +141,8 @@ Calls made in the amendment:
   back on the filter icon.
 - C. The filter icon is lucide's Funnel; the panel scrolls when a studio has many jobs.
 - D. Jobs rows that wait with no next task (a milestone but no next) show only "5 of 7".
-- E. Home's Up next intro line ("Picked from all your jobs, most urgent first") stays under its card title; only the
-  page's intro is dropped. Recently on Home is now a region named by its heading.
+- E. Home never had a page intro, so nothing was removed there. Up next keeps its own muted line ("Picked from all
+  your jobs, most urgent first") under its card title, as D143 has it. Recently on Home is now a region named by its
+  heading.
 - F. The setup checklist's rows on Home use the new row look (`ChecklistGroups look="rows"`); the job Overview's
   checklist keeps its plain look.

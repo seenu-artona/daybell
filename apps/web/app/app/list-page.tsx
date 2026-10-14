@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 /**
  * A studio list page (D144): full width on the canvas, the title alone, then one view bar (pill views on the left,
- * tools on the right end, no line under it: D144, amended Oct 14) over the list's white card. Settings, an order and a
+ * tools on the right end, no line under it: D145, amends D144) over the list's white card. Settings, an order and a
  * price list keep PageFrame.
  */
 export function ListPage({

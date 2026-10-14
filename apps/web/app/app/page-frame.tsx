@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 /**
  * The padded, centred column for studio pages that aren't lists (Settings, an order, a price list, coming-soon
- * sections). List pages and Home use ListPage instead (D144, amended Oct 14).
+ * sections). List pages and Home use ListPage instead (D145, amends D144).
  */
 export function PageFrame({ children }: { children: ReactNode }) {
   return (

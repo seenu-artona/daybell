@@ -15,7 +15,7 @@ import { useFormatClosing } from "./jobs/closing-date";
 export const JOBS_SELLING_SHOWN = 5;
 
 /**
- * Home's "Jobs selling now" (D127; ADR 0021, call 7) as a list card (D144, amended Oct 14): the studio's selling jobs,
+ * Home's "Jobs selling now" (D127; ADR 0021, call 7) as a list card (D145, amends D144): the studio's selling jobs,
  * newest first, each row a link to the job with its closing date in the viewer's own time, and "View all jobs" in the
  * footer when there are more. Sales numbers come with checkout (step 10).
  */

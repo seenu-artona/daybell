@@ -8,7 +8,7 @@ export interface MainTabsProps extends HTMLAttributes<HTMLElement> {
 }
 
 /**
- * The first row of tabs on any page, as pills on the canvas (D144, amended Oct 14): a job's sections, or a list's
+ * The first row of tabs on any page, as pills on the canvas (D145, amends D144): a job's sections, or a list's
  * views (Jobs, Orders). Separate pages or addresses, so a navigation of links with aria-current, not an ARIA tablist.
  * No container behind the pills. Scrolls sideways when the row is full at 1280px (D136); the padding keeps the focus
  * outline inside the scroll box, and the negative margin keeps the pills where they were.

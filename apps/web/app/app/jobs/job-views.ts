@@ -25,7 +25,7 @@ export function jobsQuery(view: JobView, today: string, cursor: string | null): 
 type Checklist = JobListItem["checklist"];
 
 /**
- * What follows "5 of 7" on a Jobs row's one progress line (D143; D144, amended Oct 14): the next task, "All done" once
+ * What follows "5 of 7" on a Jobs row's one progress line (D143; D145, amends D144): the next task, "All done" once
  * the checklist has no milestone left (a closed job), or nothing while a job waits with no next task. The milestone
  * itself is not shown on the row: the Status pill already says the shop's state.
  */

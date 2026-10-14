@@ -20,8 +20,8 @@ const RANGES = ["today", "week", "season"] as const;
  * Studio Home (D127, D143): numbers like Shopify for owners and admins (today, this week from Monday, this season from
  * August 1: sales after refunds, orders, Daybell's fee and the average order, from the ledger in the region's currency;
  * ADR 0024), To do for everyone who fulfils orders (to print, to ship, to take to school; staff see only this, Q4), then
- * the studio setup checklist or Up next (ADR 0017), the jobs selling now (ADR 0021), and recent activity. In the D144
- * layout (amended Oct 14): the title alone on the canvas, the date range at the right end of the row under it, and
+ * the studio setup checklist or Up next (ADR 0017), the jobs selling now (ADR 0021), and recent activity. In the D145
+ * layout (amends D144): the title alone on the canvas, the date range at the right end of the row under it, and
  * each section a white list card whose rows open like a list's.
  */
 export default function HomePage() {

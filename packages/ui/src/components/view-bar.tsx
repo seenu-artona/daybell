@@ -4,13 +4,13 @@ import { cn } from "../lib/cn";
 
 export interface ViewBarProps extends HTMLAttributes<HTMLDivElement> {
   /**
-   * "main" (default) is a page's first row (D144, amended Oct 14): pill MainTabs on the left, no line under it.
+   * "main" (default) is a page's first row (D145, amends D144): pill MainTabs on the left, no line under it.
    * "sub" is a second level under pill tabs (a job's Subjects, Photos, Orders): dash ViewTabs over a hairline.
    */
   variant?: "main" | "sub";
   /** The left side: MainTabs on a "main" bar, ViewTabs on a "sub" bar. */
   tabs?: ReactNode;
-  /** The right end, in D144 order (amended Oct 14): the filter icon, search, quiet actions, then the one green action. */
+  /** The right end, in D145 order (amends D144): the filter icon, search, quiet actions, then the one green action. */
   actions?: ReactNode;
 }
 
@@ -40,7 +40,7 @@ export interface ViewTabsProps extends HTMLAttributes<HTMLElement> {
 }
 
 /**
- * A list's views as a second level under pill tabs (D144, amended Oct 14: a page's first row of tabs is MainTabs):
+ * A list's views as a second level under pill tabs (D145, amends D144: a page's first row of tabs is MainTabs):
  * links that change the address (?status=…), so a navigation with aria-current, not an ARIA tablist. Scrolls
  * sideways when the row is full at 1280px (D136).
  */

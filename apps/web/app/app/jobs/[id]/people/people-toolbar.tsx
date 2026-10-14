@@ -36,7 +36,7 @@ export function SubjectsViews({ base, view }: { base: string; view: SubjectView 
 }
 
 /**
- * Subjects' tools at the right end of the view bar (D138; D144, amended Oct 14), in order: the filter icon, whose panel
+ * Subjects' tools at the right end of the view bar (D138; D145, amends D144), in order: the filter icon, whose panel
  * holds the class, the grade (only when the roster has grades) and the grouping, with Clear filters; the search; then
  * a quiet Print QR cards just before the green Add subjects menu (Add child, Import roster) for roster editors. The search text, class and grade stay in this browser: they are never sent
  * or put in the address (D113).

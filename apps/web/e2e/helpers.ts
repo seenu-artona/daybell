@@ -182,7 +182,7 @@ export async function studioSellingAva(
   return { context, page, studio, jobId, code: child.accessCode };
 }
 
-/** A list's filter icon (D144, amended Oct 14): named "Filter", or "Filter (2 on)" while filters are set. */
+/** A list's filter icon (D145, amends D144): named "Filter", or "Filter (2 on)" while filters are set. */
 export function filterButton(page: Page) {
   return page.getByRole("main").getByRole("button", { name: /^Filter( \(\d+ on\))?$/ });
 }

@@ -48,7 +48,7 @@ function UpNextRow({ item, role }: { item: UpNextItem; role: string }) {
  * Home's checklist (D143; ADR 0017), in place of "Needs you" (Seenu, answer 6). Owners and admins see "Set up your
  * studio" until it is first complete; after that, and for everyone else, "Up next": the three most urgent tasks across
  * the studio's jobs, each with why it was picked, and a link to the Jobs list for the rest (the card's footer). A list
- * card whose rows open where the work happens (D144, amended Oct 14).
+ * card whose rows open where the work happens (D145, amends D144).
  */
 export function HomeChecklist() {
   const t = useTranslations("app.home");

@@ -237,7 +237,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const filterBox = await filterButton(page).boundingBox();
   expect(filterBox?.width).toBe(44);
   expect(filterBox?.height).toBe(44);
-  // The right end, in order (D144, amended Oct 14): filter, search, Print QR cards, then the green Add subjects.
+  // The right end, in order (D145, amends D144): filter, search, Print QR cards, then the green Add subjects.
   const tools = [
     filterButton(page),
     main.getByRole("button", { name: "Search children" }),

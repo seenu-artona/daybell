@@ -414,7 +414,7 @@ describe("D144 list pieces", () => {
     expect(other.getAttribute("aria-current")).toBeNull();
     expect(other.className).toMatch(/\btext-muted\b/);
     expect(other.className).not.toMatch(/\bfont-bold\b/);
-    // A page's first row (D144, amended Oct 14): with many views (Orders), the row scrolls sideways.
+    // A page's first row (D145, amends D144): with many views (Orders), the row scrolls sideways.
     const nav = screen.getByRole("navigation", { name: "Job sections" });
     expect(nav.querySelector("ul")?.className).toMatch(/\boverflow-x-auto\b/);
     await expectNoA11yViolations(container);

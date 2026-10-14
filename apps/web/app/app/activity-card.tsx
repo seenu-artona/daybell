@@ -122,7 +122,7 @@ export function ActivityCard({
     );
   }
 
-  // Home: a list card with a hairline row per event (D144, amended Oct 14).
+  // Home: a list card with a hairline row per event (D145, amends D144).
   return (
     <HomeCard title={jobId ? t("jobTitle") : t("title")}>
       {items.length === 0 ? (

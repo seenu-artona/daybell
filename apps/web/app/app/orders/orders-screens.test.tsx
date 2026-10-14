@@ -257,7 +257,7 @@ describe("the orders list", () => {
     );
     await render(<OrdersList status="printed" delivery="home" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=home");
-    // The filter icon says a filter is on in its name (D144, amended Oct 14), and opens radio buttons that apply as
+    // The filter icon says a filter is on in its name (D145, amends D144), and opens radio buttons that apply as
     // they change.
     const trigger = filterButton();
     expect(trigger?.getAttribute("aria-label")).toBe("Filter (1 on)");
@@ -333,7 +333,7 @@ describe("the orders list", () => {
     expect(document.activeElement).toBe(filterButton());
   });
 
-  it("puts the filter icon, then the search, at the right end; a job's tab has no Job filter (D144, amended Oct 14)", async () => {
+  it("puts the filter icon, then the search, at the right end; a job's tab has no Job filter (D145, amends D144)", async () => {
     answer();
     await render(<OrdersList />);
     const named = [...container.querySelectorAll("button[aria-label]")].map((b) =>
@@ -640,7 +640,7 @@ describe("Home (Q4)", () => {
     expect(today).toContain("$3.00");
   });
 
-  it("lays Home out like a list page: the title alone, sections as list cards with link rows (D144, amended Oct 14)", async () => {
+  it("lays Home out like a list page: the title alone, sections as list cards with link rows (D145, amends D144)", async () => {
     api.mockResolvedValue(ok(sales));
     await render(<HomePage />, "owner");
     const header = container.querySelector("header");

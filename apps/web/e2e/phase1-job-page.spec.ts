@@ -215,7 +215,7 @@ test("job page layout, menu search and studio separation", async ({
   await expect(row("Print QR cards")).toContainText("Next");
   await expect(checklist.getByText("2 of 7 done", { exact: true })).toBeVisible();
 
-  // The Jobs list shows the same progress per row, on one line with no milestone pill (D143; D144, amended Oct 14).
+  // The Jobs list shows the same progress per row, on one line with no milestone pill (D143; D145, amends D144).
   await page.goto("/app/jobs");
   const jobRow = main.getByRole("row").filter({ hasText: jobName });
   await expect(jobRow.getByText("2 of 7", { exact: true })).toBeVisible();

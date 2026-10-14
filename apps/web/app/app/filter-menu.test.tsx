@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import messages from "@/messages/en-US.json";
 import { FilterMenu, filtersOn } from "./filter-menu";
 
-// D144, amended Oct 14: every filter behind one 44px filter icon. Its name says how many filters are on (words, not
+// D145, amends D144: every filter behind one 44px filter icon. Its name says how many filters are on (words, not
 // the dot alone: D91); its panel has one named radio group per filter that applies as it changes and stays open; Clear
 // filters resets them all, closes the panel and puts focus back on the icon.
 let root: Root;
@@ -80,7 +80,7 @@ describe("filtersOn", () => {
   });
 });
 
-describe("FilterMenu (D144, amended Oct 14)", () => {
+describe("FilterMenu (D145, amends D144)", () => {
   it("is a 44px icon button named Filter, with no dot while nothing is set", () => {
     expect(trigger().getAttribute("aria-label")).toBe("Filter");
     expect(trigger().getAttribute("aria-expanded")).toBe("false");

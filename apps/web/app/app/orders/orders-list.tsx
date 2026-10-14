@@ -76,7 +76,7 @@ export function useOrderView() {
  * `jobId`). One view bar: the status views as links (?status=; pills on the Orders page, dashes under a job's tabs),
  * then the filter icon, whose panel holds Delivery (?delivery=; both stay in the address as enum words, and switching
  * one keeps the other), Job (on the Orders page) and Clear filters, and a reference search (never a name; never in the
- * address, D113). D144, amended Oct 14. Then a table with a caption in a white list card: reference, date, children (first name and last initial), items, total,
+ * address, D113). D145, amends D144. Then a table with a caption in a white list card: reference, date, children (first name and last initial), items, total,
  * the status with its refund and dispute badges (words and icons, never colour alone: D91), delivery; a click on a row
  * opens the order, and its reference stays the link. Viewed as Paid or Printed, fully refunded orders are left out, so
  * Home's To do links list what they count (code review N3). Show more by cursor. Owners, admins and staff select orders
@@ -93,7 +93,7 @@ export function OrdersList({
   jobId?: string;
   /**
    * "main" on the Orders page, where the views are the page's first row of tabs (pills, no line under them); "sub" on
-   * a job's Orders tab, under the job's pill tabs (dashes on a hairline). D144, amended Oct 14.
+   * a job's Orders tab, under the job's pill tabs (dashes on a hairline). D145, amends D144.
    */
   level?: "main" | "sub";
   /** The current view, from the page's address. */
