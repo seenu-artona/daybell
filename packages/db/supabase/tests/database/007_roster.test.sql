@@ -4,7 +4,7 @@
 -- the import RPC, the roster list with duplicate flags, and events without personal data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(93);
+select plan(97);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -397,6 +397,84 @@ select results_eq($$
   select name, child_count from public.list_job_groups((select id from ids where k = 'job')) order by name $$,
   $$ values ('4B', 2::bigint), ('Room 5A', 0::bigint), ('Room 6', 1::bigint) $$,
   'classes are listed with how many children each has');
+
+-- ── D147: photos and orders per child (ADR 0026) ──────────────────────────────────────────────────────────────────
+-- Studio B's job (studio A is deleted at the end, and orders are never deleted): Bianca has three ready photos (one
+-- of them flagged), a binned one and one still processing, and a paid order with a line for her. Quinn has no photos
+-- and only a canceled order. B's photographer and staff join to check who sees the order column.
+reset role;
+select pg_temp.as_server();
+insert into auth.users (id, email) values
+  ('66666666-6666-4666-8666-666666666666', 'photographer-b@example.test'),
+  ('77777777-7777-4777-8777-777777777777', 'staff-b@example.test');
+insert into public.studio_members (studio_id, user_id, role) values
+  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '66666666-6666-4666-8666-666666666666', 'photographer'),
+  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '77777777-7777-4777-8777-777777777777', 'staff');
+insert into public.children (id, studio_id, job_id, first_name, last_name, access_code_hash, access_code_ciphertext)
+values ('b0000000-0000-4000-8000-000000000005', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  'b0000000-0000-4000-8000-000000000002', 'Quinn', 'Zephyr', repeat('e', 64), 'v1.' || repeat('E', 48));
+insert into public.upload_batches (id, studio_id, job_id, created_by) values
+  ('be000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+   'b0000000-0000-4000-8000-000000000002', '22222222-2222-4222-8222-222222222222');
+insert into public.photos (id, studio_id, job_id, batch_id, batch_seq, status, original_filename, byte_size, sha256,
+  width, height, binned_at, binned_by, created_by)
+select ('bf000000-0000-4000-8000-00000000000' || n)::uuid, b.studio_id, b.job_id, b.id, b.seq,
+  (case when n = 5 then 'processing' else 'ready' end)::public.photo_status, 'IMG_' || n || '.JPG', 1,
+  extensions.digest('b' || n, 'sha256'), case when n = 5 then null else 1200 end, case when n = 5 then null else 1500 end,
+  case when n = 4 then now() end, case when n = 4 then '22222222-2222-4222-8222-222222222222'::uuid end,
+  b.created_by
+from generate_series(1, 5) n, public.upload_batches b where b.id = 'be000000-0000-4000-8000-000000000001';
+insert into public.photo_tags (photo_id, studio_id, job_id, place, child_id, flag, source)
+select ('bf000000-0000-4000-8000-00000000000' || n)::uuid, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  'b0000000-0000-4000-8000-000000000002', 'child', 'b0000000-0000-4000-8000-000000000004',
+  (case when n = 2 then 'unreadable_card' end)::public.photo_flag, 'auto'
+from generate_series(1, 5) n;
+insert into public.payout_accounts (id, studio_id, stripe_account_id, country, livemode, status, payout_interval,
+  weekly_anchor, delay_days)
+values ('bd000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'acct_B7', 'US', false,
+  'active', 'weekly', 'friday', 2);
+insert into public.orders (id, studio_id, reference, currency, shipping_method, products_cents, shipping_cents,
+  daybell_fee_bps, daybell_fee_cents, card_fee_recovery, tax_enabled, payout_account_id, stripe_account_id,
+  bag_fingerprint)
+select ('bc000000-0000-4000-8000-00000000000' || n)::uuid, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  case n when 1 then '7KQ2M9XA' else '7KQ2M9XB' end, 'USD', 'home', 2000, 0, 300, 60, 'per_sale', false,
+  'bd000000-0000-4000-8000-000000000001', 'acct_B7', repeat(n::text, 64)
+from generate_series(1, 2) n;
+insert into public.order_lines (studio_id, order_id, position, job_id, child_id, price_list_id, price_list_item_id,
+  kind, name, unit_price_cents, quantity, line_total_cents)
+select 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ('bc000000-0000-4000-8000-00000000000' || n)::uuid, 1,
+  'b0000000-0000-4000-8000-000000000002',
+  (case n when 1 then 'b0000000-0000-4000-8000-000000000004' else 'b0000000-0000-4000-8000-000000000005' end)::uuid,
+  gen_random_uuid(), gen_random_uuid(), 'print', 'Print', 2000, 1, 2000
+from generate_series(1, 2) n;
+update public.orders set status = 'paid', paid_at = now(), tax_cents = 0, total_cents = 2000,
+  payment_intent_id = 'pi_B' || right(id::text, 1)
+where studio_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+update public.orders set fulfilment_status = 'canceled' where id = 'bc000000-0000-4000-8000-000000000002';
+create function pg_temp.roster_columns() returns table (name text, photos int, ordered boolean)
+language sql as $$
+  select c ->> 'first_name', (c ->> 'photo_count')::int, (c ->> 'has_paid_order')::boolean
+  from jsonb_array_elements(public.list_children('b0000000-0000-4000-8000-000000000002') -> 'children') c
+  order by 1 $$;
+grant execute on function pg_temp.roster_columns() to authenticated;
+
+set local role authenticated;
+select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as signed_in;
+select results_eq($$ select * from pg_temp.roster_columns() $$,
+  $$ values ('Bianca', 3, true), ('Quinn', 0, false) $$,
+  'the roster counts each child''s ready photos outside the bin (flagged ones too) and says who has a paid order; '
+  'a canceled order doesn''t count');
+select pg_temp.as_user('77777777-7777-4777-8777-777777777777') as signed_in;
+select results_eq($$ select * from pg_temp.roster_columns() $$,
+  $$ values ('Bianca', 3, true), ('Quinn', 0, false) $$, 'staff see the order column too (they fulfil orders)');
+select pg_temp.as_user('66666666-6666-4666-8666-666666666666') as signed_in;
+select results_eq($$ select * from pg_temp.roster_columns() $$,
+  $$ values ('Bianca', 3, null::boolean), ('Quinn', 0, null::boolean) $$,
+  'photographers get the photo counts but no order data (null), as they read no orders');
+select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;
+select is(public.list_children('b0000000-0000-4000-8000-000000000002'),
+  '{"children":[],"total":0,"duplicates":0}'::jsonb,
+  'another studio''s owner gets none of B''s children, photo counts or orders');
 
 -- ── The draft guard ───────────────────────────────────────────────────────────────────────────────────────────────
 reset role;
