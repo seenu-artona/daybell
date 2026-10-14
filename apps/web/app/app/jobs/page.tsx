@@ -3,7 +3,6 @@
 import type { JobListItem, JobsResponse } from "@daybell/api";
 import { canDoTask, localDay, taskTarget } from "@daybell/core";
 import {
-  Badge,
   Banner,
   Button,
   Card,
@@ -31,7 +30,7 @@ import { Dialog } from "../dialog";
 import { ListPage } from "../list-page";
 import { useStudio } from "../me-context";
 import { JobForm } from "./job-form";
-import { JOB_VIEWS, jobsQuery, jobViewFrom, jobViewHref } from "./job-views";
+import { JOB_VIEWS, jobsQuery, jobViewFrom, jobViewHref, progressEnd } from "./job-views";
 import { StatusBadge, useFormatDay } from "./status-badge";
 
 const LINK =
@@ -40,36 +39,40 @@ const NAME_LINK =
   "inline-flex min-h-11 items-center font-bold text-ink no-underline hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
 
 /**
- * A job's checklist in one cell (D143; ADR 0017): the milestone pill, "3 of 5 done", and the next task as a link to
- * where the work happens (plain text if the person's role can't do it). Closed jobs say "All done".
+ * A job's checklist on one line (D143; D144, amended Oct 14): "5 of 7 · Next: Picture day", the next task a link to
+ * where the work happens (plain text if the person's role can't do it); closed jobs end with "All done". No milestone
+ * pill: the Status pill already says the shop's state. The line never wraps; a long task is cut with an ellipsis on
+ * screen only (the text, and the link's name, stay whole for screen readers).
  */
 function ProgressCell({ job, role }: { job: JobListItem; role: string }) {
   const t = useTranslations("app.checklist");
-  const { milestone, done, total, next } = job.checklist;
-  const nextText = next ? t("nextTask", { task: t(`tasks.${next}`) }) : null;
+  const { done, total } = job.checklist;
+  const end = progressEnd(job.checklist);
   return (
-    <div className="flex flex-col items-start gap-0.5">
-      <span className="flex flex-wrap items-center gap-2">
-        <Badge tone="draft" className="before:hidden">
-          {milestone ? t(`milestones.${milestone}`) : t("allDone")}
-        </Badge>
-        <span className="text-caption whitespace-nowrap text-muted">
-          {t("progress", { done, total })}
+    <div className="flex max-w-80 items-center whitespace-nowrap">
+      <span className="shrink-0 text-muted">{t("progressShort", { done, total })}</span>
+      {end ? (
+        <span aria-hidden="true" className="shrink-0 px-1.5 text-muted">
+          ·
         </span>
-      </span>
-      {next && nextText ? (
-        canDoTask(role, next) ? (
+      ) : null}
+      {end?.kind === "next" ? (
+        canDoTask(role, end.task) ? (
           <Link
-            href={taskHref(job.id, taskTarget(next))}
+            href={taskHref(job.id, taskTarget(end.task))}
             // Many rows say "Next: Print QR cards"; the name says which job (and starts with the visible words).
-            aria-label={t("nextTaskIn", { task: t(`tasks.${next}`), job: job.name })}
-            className={`${LINK} inline-flex min-h-11 items-center text-label text-primary`}
+            aria-label={t("nextTaskIn", { task: t(`tasks.${end.task}`), job: job.name })}
+            className={`${LINK} flex min-h-11 min-w-0 items-center text-primary`}
           >
-            {nextText}
+            <span className="truncate">{t("nextTask", { task: t(`tasks.${end.task}`) })}</span>
           </Link>
         ) : (
-          <span className="text-label">{nextText}</span>
+          <span className="min-w-0 truncate">
+            {t("nextTask", { task: t(`tasks.${end.task}`) })}
+          </span>
         )
+      ) : end?.kind === "allDone" ? (
+        <span className="min-w-0 truncate">{t("allDone")}</span>
       ) : null}
     </div>
   );

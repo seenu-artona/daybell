@@ -146,9 +146,10 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(first).toContainText(client);
   await expect(first).toContainText("JOB00001");
   await expect(first).toContainText("Draft");
-  // Each row shows its checklist (D143): the milestone, progress and the next task, linked to where it's done.
-  await expect(first.getByText("Set up", { exact: true })).toBeVisible();
-  await expect(first.getByText("1 of 7 done", { exact: true })).toBeVisible();
+  // Each row shows its checklist on one line (D143; D144, amended Oct 14): progress and the next task, linked to
+  // where it's done. No milestone pill: the Status pill says the shop's state.
+  await expect(first.getByText("1 of 7", { exact: true })).toBeVisible();
+  await expect(first.getByText("Set up", { exact: true })).toHaveCount(0);
   await expect(
     first.getByRole("link", { name: `Next: Add the roster, ${job} (edited)`, exact: true }),
   ).toHaveAttribute("href", /^\/app\/jobs\/[0-9a-f-]{36}\/people$/);
