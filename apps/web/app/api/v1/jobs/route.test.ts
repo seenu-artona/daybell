@@ -101,6 +101,55 @@ describe("GET /jobs", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("filters by the Jobs chips and search within the caller's studio only (D147, D96)", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const signIn = () => {
+      const db = fakeDatabase([], []);
+      scope.mockResolvedValue({
+        supabase: db.supabase,
+        studio: { id: STUDIO, name: "A", slug: "a", region: "ca", role: "photographer" },
+        userId: "u",
+      });
+      return db;
+    };
+    const { GET } = await import("./route");
+    const get = (query: string) => GET(new Request(`http://localhost/api/v1/jobs?${query}`));
+
+    let db = signIn();
+    expect((await get(`show=closingThisWeek&today=${today}`)).status).toBe(200);
+    expect(db.ops[0]).toEqual(["select", [expect.any(String)]]);
+    expect(db.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
+    expect(db.ops).toContainEqual(["eq", ["status", "selling"]]);
+    expect(db.ops.find(([op]) => op === "gt")?.[1][0]).toBe("closes_at");
+    expect(db.ops.find(([op]) => op === "lte")?.[1][0]).toBe("closes_at");
+
+    db = signIn();
+    expect((await get(`show=pictureDayThisMonth&today=${today}`)).status).toBe(200);
+    expect(db.ops).toContainEqual(["gte", ["picture_day", `${today.slice(0, 7)}-01`]]);
+    expect(db.ops.find(([op]) => op === "lt")?.[1][0]).toBe("picture_day");
+    expect(db.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
+
+    db = signIn();
+    const client = "c0000000-0000-4000-8000-000000000001";
+    expect((await get(`clientId=${client}`)).status).toBe(200);
+    expect(db.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
+    expect(db.ops).toContainEqual(["eq", ["client_id", client]]);
+
+    db = signIn();
+    expect((await get(`q=${encodeURIComponent(' Lin"c,oln 50% ')}`)).status).toBe(200);
+    expect(db.ops).toContainEqual(["eq", ["studio_id", STUDIO]]);
+    // The name or the number, as one quoted pattern: commas and quotes stay literal, wildcards are escaped.
+    expect(db.ops).toContainEqual([
+      "or",
+      ['name.ilike."%Lin\\"c,oln 50\\\\%%",internal_number.ilike."%Lin\\"c,oln 50\\\\%%"'],
+    ]);
+
+    signIn();
+    expect((await get("clientId=Lincoln")).status).toBe(400);
+    expect((await get("show=noOrdersYet")).status).toBe(400);
+    expect((await get(`q=${"x".repeat(121)}`)).status).toBe(400);
+  });
+
   it("refuses a ?today= more than a day away from the server's UTC date", async () => {
     const db = fakeDatabase([], []);
     scope.mockResolvedValue({

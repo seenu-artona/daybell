@@ -174,3 +174,20 @@ export function closingDay(closesAt: string | Date, timeZone?: string): string {
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
+
+/** A shop closing this many days ahead or fewer is "closing soon" (D147): the Jobs list shows it in amber with words. */
+export const CLOSES_SOON_DAYS = 2;
+
+/**
+ * Whole days from `today` (YYYY-MM-DD, the viewer's day) to the closing moment's local day (the last day to order):
+ * 0 when the shop closes at the end of today. Null when that is more than CLOSES_SOON_DAYS away or already past, so
+ * only shops closing soon get the warning (D147).
+ */
+export function closesSoon(
+  closesAt: string | Date,
+  today: string,
+  timeZone?: string,
+): number | null {
+  const days = daysUntil(closingDay(closesAt, timeZone), today);
+  return days >= 0 && days <= CLOSES_SOON_DAYS ? days : null;
+}

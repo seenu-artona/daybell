@@ -80,6 +80,20 @@ describe("filters", () => {
     expect(applyFilters(rows, [])).toHaveLength(4);
   });
 
+  it("Not ordered and No photos use the roster's order and photo columns (D147)", () => {
+    const listed = [
+      person({ hasPaidOrder: true, photoCount: 3 }),
+      person({ hasPaidOrder: false, photoCount: 0 }),
+      person({ hasPaidOrder: null, photoCount: 2 }),
+      person({}),
+    ];
+    const at = (list: PersonRow[]) => list.map((r) => listed.indexOf(r));
+    expect(at(applyFilters(listed, [{ kind: "notOrdered" }]))).toEqual([1]);
+    // Unknown (a photographer's null, or a list without the column) never counts as "no photos" or "not ordered".
+    expect(at(applyFilters(listed, [{ kind: "noPhotos" }]))).toEqual([1]);
+    expect(at(applyFilters(listed, [{ kind: "notOrdered" }, { kind: "noPhotos" }]))).toEqual([1]);
+  });
+
   it("different kinds combine with AND", () => {
     const both: PeopleFilter[] = [{ kind: "group", id: G4B.id }, { kind: "duplicates" }];
     expect(ids(applyFilters(rows, both))).toEqual([1]);

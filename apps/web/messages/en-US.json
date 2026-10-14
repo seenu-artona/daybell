@@ -214,7 +214,8 @@
     "refundLines": "Choose what to refund, each item once.",
     "refundAmount": "Enter an amount in dollars and cents.",
     "refundKind": "Choose items or a custom amount.",
-    "timeZone": "Your time zone wasn’t recognized."
+    "timeZone": "Your time zone wasn’t recognized.",
+    "filterChips": "Those filters can't be saved. Reload the page and try again."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",

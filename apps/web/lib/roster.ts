@@ -49,6 +49,10 @@ export interface ChildRow {
   access_code_ciphertext: string;
   /** From list_children; computed separately elsewhere. */
   duplicate?: boolean;
+  /** From list_children (D147): ready photos tagged to the child, outside the bin. */
+  photo_count?: number;
+  /** From list_children (D147): null for people who don't see orders. */
+  has_paid_order?: boolean | null;
   created_at: string;
   updated_at: string;
 }

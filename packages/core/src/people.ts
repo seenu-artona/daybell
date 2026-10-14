@@ -18,6 +18,10 @@ export interface PersonRow {
   doNotPhotograph: boolean;
   doNotPublish: boolean;
   duplicate: boolean;
+  /** Ready photos tagged to the child, outside the bin (D147); left out where the list doesn't have it. */
+  photoCount?: number;
+  /** Whether a paid order has a line for the child; null for people who don't see orders (D147). */
+  hasPaidOrder?: boolean | null;
 }
 
 /** Lower case, accents removed, runs of whitespace as one space. */
@@ -55,7 +59,9 @@ export type PeopleFilter =
   | { kind: "grade"; value: string }
   | { kind: "doNotPhotograph" }
   | { kind: "doNotPublish" }
-  | { kind: "duplicates" };
+  | { kind: "duplicates" }
+  | { kind: "notOrdered" }
+  | { kind: "noPhotos" };
 export type PeopleFilterKind = PeopleFilter["kind"];
 
 /** The two class filters exclude each other: a child is either in a class or in none. */
@@ -93,6 +99,11 @@ function passes(row: PersonRow, filter: PeopleFilter): boolean {
       return row.doNotPublish;
     case "duplicates":
       return row.duplicate;
+    // Only children known to have no paid order: unknown (null, not shown to this person) never matches.
+    case "notOrdered":
+      return row.hasPaidOrder === false;
+    case "noPhotos":
+      return row.photoCount === 0;
   }
 }
 

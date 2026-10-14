@@ -1,8 +1,10 @@
-import { childInput, rosterQuery } from "@daybell/api";
+import { childInput, type RosterChild, rosterQuery } from "@daybell/api";
+import { canSeeOrders } from "@daybell/core";
 import { NextResponse } from "next/server";
 import { accessCodeCryptoKeys, newAccessCode } from "@/lib/access-codes";
 import { check, handle, parseBody, parseQuery } from "@/lib/api";
 import { page } from "@/lib/jobs";
+import { assertFunctionRegion } from "@/lib/region-guard";
 import {
   addChildWithRetries,
   assertGroupInJob,
@@ -18,16 +20,22 @@ import {
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
 import { codeWriteRpc } from "@/lib/supabase/service";
 
+export const runtime = "nodejs";
+// The roster carries order data since D147: Canadian studios' rosters are read in Montréal (D113), like their orders.
+export const preferredRegion = "yul1";
+
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/v1/jobs/:id/children — the roster, by last and first name, in pages. Read through the list_children RPC so
- * names never appear in a URL; the cursor and filter are IDs (D96).
+ * names never appear in a URL; the cursor and filter are IDs (D96). Each child has their photo count and, for people
+ * who see orders, whether a paid order has a line for them (D147; null for photographers, here and in the database).
  */
 export const GET = handle(async (request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
   const { limit, cursor, groupId } = parseQuery(request, rosterQuery);
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
   await loadRosterJob(supabase, studio.id, jobId);
   const list = check(
     await supabase.rpc("list_children", {
@@ -40,7 +48,14 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
   ) as { children: ChildRow[]; total: number; duplicates: number };
   const { items, nextCursor } = page(list.children, limit);
   const keys = await accessCodeCryptoKeys();
-  const children = await Promise.all(items.map((row) => toChild(row, keys)));
+  const seesOrders = canSeeOrders(studio.role);
+  const children: RosterChild[] = await Promise.all(
+    items.map(async (row) => ({
+      ...(await toChild(row, keys)),
+      photoCount: row.photo_count ?? 0,
+      hasPaidOrder: seesOrders ? (row.has_paid_order ?? null) : null,
+    })),
+  );
   return NextResponse.json({
     children,
     nextCursor,

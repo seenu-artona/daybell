@@ -1,7 +1,8 @@
 import { type JobsResponse, jobInput, jobListQuery } from "@daybell/api";
 import { NextResponse } from "next/server";
-import { check, filterValue, handle, parseBody, parseQuery } from "@/lib/api";
+import { check, filterValue, handle, likePattern, parseBody, parseQuery } from "@/lib/api";
 import { checklistSummary, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
+import { closingWeekEnd, monthRange } from "@/lib/job-list-filters";
 import {
   assertClientInStudio,
   assertClosingDate,
@@ -21,10 +22,21 @@ import { assertCanManage, studioScope } from "@/lib/studio";
 /**
  * GET /api/v1/jobs — the studio's jobs, newest first, in pages (D92, D96), each with its checklist progress (D143; ADR
  * 0017): the page's counts come from one query, never one per job. ?status= narrows it to one state (Home's "Jobs
- * selling now", ADR 0021).
+ * selling now", ADR 0021). The Jobs list's chips and search (D147, ADR 0026) are plain filters on the same query, all
+ * within the studio: ?show=closingThisWeek (selling, closing from now to the end of today + 6),
+ * ?show=pictureDayThisMonth (today's calendar month), ?clientId= (one of the studio's clients) and ?q= (the name or
+ * internal number contains it). Keyset paging is unchanged.
  */
 export const GET = handle(async (request: Request) => {
-  const { limit, cursor, today: todayParam, status } = parseQuery(request, jobListQuery);
+  const {
+    limit,
+    cursor,
+    today: todayParam,
+    status,
+    show,
+    clientId,
+    q,
+  } = parseQuery(request, jobListQuery);
   const today = checklistToday(todayParam);
   const { supabase, studio } = await studioScope();
   let query = supabase
@@ -35,6 +47,21 @@ export const GET = handle(async (request: Request) => {
     .order("id", { ascending: false })
     .limit(limit + 1);
   if (status) query = query.eq("status", status);
+  if (show === "closingThisWeek")
+    query = query
+      .eq("status", "selling")
+      .gt("closes_at", new Date().toISOString())
+      .lte("closes_at", closingWeekEnd(today));
+  if (show === "pictureDayThisMonth") {
+    const month = monthRange(today);
+    query = query.gte("picture_day", month.from).lt("picture_day", month.before);
+  }
+  // Another studio's client id simply matches nothing: the studio filter above still applies.
+  if (clientId) query = query.eq("client_id", clientId);
+  if (q) {
+    const pattern = filterValue(likePattern(q));
+    query = query.or(`name.ilike.${pattern},internal_number.ilike.${pattern}`);
+  }
   if (cursor) {
     // Keyset pagination: continue after the cursor job (looked up in this studio only).
     const anchor = check(
