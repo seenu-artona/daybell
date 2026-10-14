@@ -287,11 +287,10 @@ export default function ReviewPage() {
     <ReviewContext.Provider value={context}>
       <JobSection
         title={t("title")}
-        subline={subline}
-        toolbar={
+        views={<PhotosViews jobId={job.id} current="review" />}
+        tools={
           canEdit && s ? (
             <Button
-              variant="white"
               shape="pill"
               disabled={!s.canMarkReviewed || busy}
               aria-describedby="review-state"
@@ -304,7 +303,7 @@ export default function ReviewPage() {
         }
         below={
           <>
-            <PhotosViews jobId={job.id} current="review" />
+            {subline ? <p className="m-0 text-body text-muted">{subline}</p> : null}
             {s ? (
               <p id="review-state" className="m-0 text-sm text-muted">
                 {s.done && s.reviewedAt

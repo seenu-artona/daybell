@@ -2,18 +2,14 @@
 
 import { type Child, QR_CARD_HEADERS } from "@daybell/api";
 import {
-  addFilter,
   applyFilters,
   gradeOptions,
   groupLabel,
   groupPeople,
   matchesSearch,
-  type PeopleFilter,
   ROSTER_VIEW_MAX,
 } from "@daybell/core";
-import { Banner, Button } from "@daybell/ui";
-import { Check, Plus, QrCode, Upload } from "lucide-react";
-import Link from "next/link";
+import { Banner } from "@daybell/ui";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -29,9 +25,10 @@ import { RemoveChildDialog } from "../remove-child-dialog";
 import { tabHref } from "../tabs";
 import { ChildPanel } from "./child-panel";
 import { PeopleList, rowLinkId } from "./people-list";
-import { FilterChips, type GroupBy, PeopleToolbar } from "./people-toolbar";
+import { type GroupBy, SubjectsTools, SubjectsViews } from "./people-toolbar";
 import { PrintQrCardsDialog } from "./print-qr-cards-dialog";
 import { useRoster } from "./use-roster";
+import { type ClassChoice, subjectFilters, subjectsHref, subjectView } from "./views";
 
 export default function PeoplePageRoute() {
   // useSearchParams (the selected child) needs a Suspense boundary.
@@ -43,10 +40,11 @@ export default function PeoplePageRoute() {
 }
 
 /**
- * A job's People (D137, D138, D140; Phase 1 step 2's roster moved here): "N children" with a green subline, search,
- * filters and grouping over the whole roster, a flat list with a Class column in a white card (Group: Class brings
- * the class headings back), and the selected child in the floating panel (?child=<id>, an id only). Add and edit
- * keep the existing child form dialog (D133); Import stays its own page.
+ * A job's Subjects (D137, D138, D144; the People route, Phase 1 step 2's roster): one view bar (the views All,
+ * Possible duplicates, Do not photograph and Do not publish in ?show=; quiet class, grade and grouping menus, Print QR
+ * cards, the search and the green Add subjects menu), then a flat list with a Class column in a white list card, its
+ * footer counting the roster (Group: Class brings the class headings back), and the selected child in the floating
+ * panel (?child=<id>, an id only). Add and edit keep the existing child form dialog (D133); Import stays its own page.
  */
 function PeoplePage() {
   const t = useTranslations("app.people");
@@ -59,7 +57,8 @@ function PeoplePage() {
   const base = tabHref(job.id, "people");
   const roster = useRoster(job.id);
   const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<PeopleFilter[]>([]);
+  const [classChoice, setClassChoice] = useState<ClassChoice>({ kind: "all" });
+  const [grade, setGrade] = useState("");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [status, setStatus] = useState("");
@@ -71,31 +70,37 @@ function PeoplePage() {
   const [panelFocus, setPanelFocus] = useState<string | null>(null);
   const opener = useRef<string | null>(null);
 
-  const selectedId = useSearchParams().get("child");
+  const params = useSearchParams();
+  const selectedId = params.get("child");
+  const view = subjectView(params.get("show"));
   const selected = roster.rows?.find((c) => c.id === selectedId) ?? null;
-  const childHref = (childId: string) => `${base}?child=${childId}`;
+  const childHref = (childId: string) => subjectsHref(base, view, childId);
+  // The list's own address: the view stays, the open child goes.
+  const here = subjectsHref(base, view);
 
-  // ?imported=a.b (numbers only), ?show=duplicates and ?print=qr arrive once from Import and Overview; then the URL
-  // is cleaned.
+  // ?imported=a.b (numbers only) and ?print=qr arrive once from Import and Overview; then the URL is cleaned. The view
+  // (?show=) stays: it is the list's state (D144).
   // biome-ignore lint/correctness/useExhaustiveDependencies: read once on open.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const imported = params.get("imported")?.match(/^(\d+)\.(\d+)$/);
-    const show = params.get("show");
     const print = params.get("print");
     if (imported)
       setStatus(tr("imported", { added: Number(imported[1]), updated: Number(imported[2]) }));
-    if (show === "duplicates") setFilters((f) => addFilter(f, { kind: "duplicates" }));
     if (print === "qr" && canEdit) setPrinting(true);
-    if (imported || show || print) router.replace(base, { scroll: false });
+    if (imported || print) router.replace(here, { scroll: false });
   }, []);
 
   // A child that isn't on this roster (removed, or another job's id) is dropped from the URL quietly.
   useEffect(() => {
     if (selectedId && roster.rows && !roster.loadingMore && !selected)
-      router.replace(base, { scroll: false });
-  }, [selectedId, selected, roster.rows, roster.loadingMore, router, base]);
+      router.replace(here, { scroll: false });
+  }, [selectedId, selected, roster.rows, roster.loadingMore, router, here]);
 
+  const filters = useMemo(
+    () => subjectFilters({ view, classChoice, grade }),
+    [view, classChoice, grade],
+  );
   const searching = query.trim() !== "" || filters.length > 0;
   const visible = useMemo(
     () => applyFilters(roster.rows ?? [], filters).filter((c) => matchesSearch(c, query)),
@@ -147,81 +152,53 @@ function PeoplePage() {
 
   function closePanel() {
     const back = opener.current ?? selectedId;
-    router.replace(base, { scroll: false });
+    router.replace(here, { scroll: false });
     setPanelFocus(null);
     if (back) setTimeout(() => document.getElementById(rowLinkId(back))?.focus(), 0);
   }
 
   const empty = roster.rows !== null && roster.total === 0;
+  const hasRows = roster.rows !== null && !empty;
   const duplicates = summary?.duplicates ?? 0;
-  const showingDuplicates = filters.some((f) => f.kind === "duplicates");
-
-  const classes = roster.groups.length;
-  const subline =
-    duplicates > 0 ? (
-      t("subline", { groups: classes, group: word, count: duplicates })
-    ) : (
-      <>
-        {t("sublineNoDuplicates", { groups: classes, group: word })}
-        <Check className="size-4" aria-hidden="true" />
-      </>
-    );
+  const footer = t("footer", {
+    count: roster.total,
+    groups: roster.groups.length,
+    group: word,
+    duplicates,
+  });
 
   return (
     <JobSection
-      title={roster.rows && !empty ? t("heading", { count: roster.total }) : null}
-      subline={roster.rows && !empty ? subline : null}
-      toolbar={
-        <>
-          {empty || !roster.rows ? null : (
-            <PeopleToolbar
-              query={query}
-              onQuery={setQuery}
-              filters={filters}
-              onFilters={setFilters}
-              groupBy={groupBy}
-              onGroupBy={setGroupBy}
-              groups={roster.groups}
-              grades={grades}
-              word={word}
-            />
-          )}
-          {canEdit ? (
-            <>
-              {empty || !roster.rows ? null : (
-                <Button variant="white" shape="pill" onClick={() => setPrinting(true)}>
-                  <QrCode aria-hidden="true" />
-                  {tq("button")}
-                </Button>
-              )}
-              <Button asChild variant="white" shape="pill">
-                <Link href={`/app/jobs/${job.id}/import`}>
-                  <Upload aria-hidden="true" />
-                  {tr("import")}
-                </Link>
-              </Button>
-              <Button variant="white" shape="pill" onClick={() => setEditing("new")}>
-                <Plus aria-hidden="true" />
-                {tr("add")}
-              </Button>
-            </>
-          ) : null}
-        </>
+      title={hasRows ? t("heading", { count: roster.total }) : null}
+      views={hasRows ? <SubjectsViews base={base} view={view} /> : null}
+      tools={
+        <SubjectsTools
+          hasRows={hasRows}
+          query={query}
+          onQuery={setQuery}
+          classChoice={classChoice}
+          onClassChoice={setClassChoice}
+          grade={grade}
+          onGrade={setGrade}
+          groupBy={groupBy}
+          onGroupBy={setGroupBy}
+          groups={roster.groups}
+          grades={grades}
+          word={word}
+          canEdit={canEdit}
+          importHref={`/app/jobs/${job.id}/import`}
+          onPrint={() => setPrinting(true)}
+          onAdd={() => setEditing("new")}
+        />
       }
       below={
         <>
-          <FilterChips
-            filters={filters}
-            onFilters={setFilters}
-            groups={roster.groups}
-            word={word}
-          />
           {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3); while empty it
           takes no room (the negative margin cancels the column gap). */}
           <p role="status" className="m-0 text-sm text-muted empty:-mb-4">
             {status}
           </p>
-          {duplicates > 0 && !showingDuplicates && !empty ? (
+          {duplicates > 0 && view !== "duplicates" && !empty ? (
             <Banner
               tone="warning"
               className="py-1"
@@ -232,7 +209,7 @@ function PeoplePage() {
                   <span aria-hidden="true">·</span>
                   <button
                     type="button"
-                    onClick={() => setFilters((f) => addFilter(f, { kind: "duplicates" }))}
+                    onClick={() => router.push(subjectsHref(base, "duplicates"), { scroll: false })}
                     className="min-h-11 font-bold underline focus-visible:outline-2 focus-visible:outline-primary"
                   >
                     {t("showThem")}
@@ -268,7 +245,7 @@ function PeoplePage() {
       {!roster.rows && !roster.failed ? <p className="m-0 text-muted">{tr("loading")}</p> : null}
 
       {empty ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl bg-surface px-6 py-16 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-list bg-surface px-6 py-16 text-center shadow-card">
           <h2 className="m-0 text-h3">{tr("emptyTitle")}</h2>
           <p className="m-0 max-w-120 text-muted">{tr("emptyBody", { group: word })}</p>
           {canEdit ? null : <p className="m-0 text-caption text-muted">{tr("emptyReadOnly")}</p>}
@@ -296,6 +273,7 @@ function PeoplePage() {
             onRename={canEdit ? setRenaming : null}
             word={word}
             busy={roster.loadingMore}
+            footer={footer}
           />
           {visible.length === 0 && searching ? (
             <p className="m-0 text-muted">{t("noMatches")}</p>
@@ -321,7 +299,7 @@ function PeoplePage() {
             }}
             onRemoved={() => {
               setEditing(null);
-              router.replace(base, { scroll: false });
+              router.replace(here, { scroll: false });
               changed(tr("removed"));
             }}
           />
@@ -366,7 +344,7 @@ function PeoplePage() {
           onClose={() => setRemoving(null)}
           onRemoved={() => {
             setRemoving(null);
-            router.replace(base, { scroll: false });
+            router.replace(here, { scroll: false });
             changed(tr("removed"));
           }}
         />

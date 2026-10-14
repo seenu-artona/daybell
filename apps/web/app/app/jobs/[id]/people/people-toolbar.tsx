@@ -1,214 +1,173 @@
 "use client";
 
 import type { Group } from "@daybell/api";
-import {
-  addFilter,
-  type GroupLabel,
-  type PeopleFilter,
-  type PeopleFilterKind,
-  removeFilter,
-} from "@daybell/core";
-import { iconButtonVariants } from "@daybell/ui";
-import { ListFilter, Rows3, Search, X } from "lucide-react";
+import type { GroupLabel } from "@daybell/core";
+import { Button, buttonVariants, SearchToggle, ViewTab, ViewTabs } from "@daybell/ui";
+import { ChevronDown, Plus, QrCode, Upload } from "lucide-react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useId } from "react";
-import { CheckboxField, SelectField } from "../../../dialog";
-import { Popover } from "../../../popover";
+import { MENU_ROW, Popover } from "../../../popover";
+import { QuietMenu } from "../../../quiet-menu";
+import {
+  type ClassChoice,
+  classChoiceFrom,
+  classChoiceValue,
+  SUBJECT_VIEWS,
+  type SubjectView,
+  subjectsHref,
+} from "./views";
 
 export type GroupBy = "group" | "none";
 
-/** A round tool with a dot when it is in use; the dot is decorative (the chips and the label say so in words). */
-const ACTIVE_DOT =
-  "relative after:absolute after:top-2 after:right-2 after:size-2 after:rounded-full after:bg-primary after:content-['']";
-
-const FLAG_FILTERS = ["doNotPhotograph", "doNotPublish", "duplicates", "noGroup"] as const;
+/** Subjects' views (D144): links to ?show=, the current one marked with aria-current. */
+export function SubjectsViews({ base, view }: { base: string; view: SubjectView }) {
+  const t = useTranslations("app.people");
+  return (
+    <ViewTabs label={t("views.label")}>
+      {SUBJECT_VIEWS.map((v) => (
+        <ViewTab key={v} asChild current={v === view}>
+          <Link href={subjectsHref(base, v)} scroll={false}>
+            {v === "all" ? t("views.all") : t(`flags.${v}`)}
+          </Link>
+        </ViewTab>
+      ))}
+    </ViewTabs>
+  );
+}
 
 /**
- * People's tools (D138, D140): a visible search box and two round 44px icon buttons, Filter and Group (named
- * "Group: None" or "Group: Class"). Filters are native controls in popovers. The search text and filters stay in
- * this browser: they are never sent or put in the URL.
+ * Subjects' tools at the right end of the view bar (D138, D144), in order: quiet menus for the class, the grade (only
+ * when the roster has grades) and grouping; a quiet Print QR cards; the search; and the green Add subjects menu (Add
+ * child, Import roster) for roster editors. The search text, class and grade stay in this browser: they are never sent
+ * or put in the address (D113).
  */
-export function PeopleToolbar({
+export function SubjectsTools({
+  hasRows,
   query,
   onQuery,
-  filters,
-  onFilters,
+  classChoice,
+  onClassChoice,
+  grade,
+  onGrade,
   groupBy,
   onGroupBy,
   groups,
   grades,
   word,
+  canEdit,
+  importHref,
+  onPrint,
+  onAdd,
 }: {
+  /** False while the roster loads or is empty: only Add subjects shows. */
+  hasRows: boolean;
   query: string;
   onQuery: (query: string) => void;
-  filters: PeopleFilter[];
-  onFilters: (filters: PeopleFilter[]) => void;
+  classChoice: ClassChoice;
+  onClassChoice: (choice: ClassChoice) => void;
+  grade: string;
+  onGrade: (grade: string) => void;
   groupBy: GroupBy;
   onGroupBy: (groupBy: GroupBy) => void;
   groups: Group[];
   grades: string[];
   word: GroupLabel;
+  canEdit: boolean;
+  importHref: string;
+  onPrint: () => void;
+  onAdd: () => void;
 }) {
   const t = useTranslations("app.people");
   const tr = useTranslations("app.roster");
-  const id = useId();
-  const has = (kind: PeopleFilterKind) => filters.some((f) => f.kind === kind);
-  const groupFilter = filters.find((f) => f.kind === "group");
-  const gradeFilter = filters.find((f) => f.kind === "grade");
-  const toggle = (kind: (typeof FLAG_FILTERS)[number], on: boolean) =>
-    onFilters(on ? addFilter(filters, { kind }) : removeFilter(filters, kind));
+  const tq = useTranslations("app.qrCards");
+  const noGroup = tr("noGroup", { group: word });
+  const className =
+    classChoice.kind === "all"
+      ? t("all")
+      : classChoice.kind === "none"
+        ? noGroup
+        : (groups.find((g) => g.id === classChoice.id)?.name ?? t("all"));
 
   return (
     <>
-      <label className="flex h-11 w-60 items-center gap-2 rounded-full bg-surface px-4 text-muted focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary">
-        <Search className="size-4 shrink-0" aria-hidden="true" />
-        <span className="sr-only">{t("searchLabel")}</span>
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          placeholder={t("searchLabel")}
-          autoComplete="off"
-          spellCheck={false}
-          className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
-        />
-      </label>
-
-      <Popover
-        label={t("filter")}
-        trigger={<ListFilter aria-hidden="true" />}
-        triggerClassName={`${iconButtonVariants()} ${filters.length > 0 ? ACTIVE_DOT : ""}`}
-        panelClassName="flex w-72 flex-col gap-3 p-4"
-      >
-        {() => (
-          <>
-            <SelectField
-              label={tr("filter", { group: word })}
-              value={groupFilter?.kind === "group" ? groupFilter.id : ""}
-              onChange={(value) =>
-                onFilters(
-                  value
-                    ? addFilter(filters, { kind: "group", id: value })
-                    : removeFilter(filters, "group"),
-                )
-              }
+      {hasRows ? (
+        <>
+          <QuietMenu
+            label={t("classMenu", { group: word, value: className })}
+            legend={tr("filter", { group: word })}
+            value={classChoiceValue(classChoice)}
+            onChange={(v) => onClassChoice(classChoiceFrom(v))}
+            options={[
+              { value: "", label: t("all") },
+              ...groups.map((g) => ({ value: g.id, label: g.name })),
+              { value: "none", label: noGroup },
+            ]}
+          />
+          {grades.length > 0 ? (
+            <QuietMenu
+              label={t("gradeMenu", { value: grade || t("all") })}
+              legend={t("grade")}
+              value={grade}
+              onChange={onGrade}
               options={[
-                { value: "", label: t("anyGroup", { group: word }) },
-                ...groups.map((g) => ({ value: g.id, label: g.name })),
-              ]}
-            />
-            <SelectField
-              label={t("grade")}
-              value={gradeFilter?.kind === "grade" ? gradeFilter.value : ""}
-              onChange={(value) =>
-                onFilters(
-                  value
-                    ? addFilter(filters, { kind: "grade", value })
-                    : removeFilter(filters, "grade"),
-                )
-              }
-              options={[
-                { value: "", label: t("anyGrade") },
+                { value: "", label: t("all") },
                 ...grades.map((g) => ({ value: g, label: g })),
               ]}
             />
-            <fieldset className="m-0 flex flex-col border-0 p-0">
-              <legend className="mb-1 p-0 text-label text-ink">{t("show")}</legend>
-              {FLAG_FILTERS.map((kind) => (
-                <CheckboxField
-                  key={kind}
-                  label={kind === "noGroup" ? tr("noGroup", { group: word }) : t(`flags.${kind}`)}
-                  checked={has(kind)}
-                  onChange={(on) => toggle(kind, on)}
-                />
-              ))}
-            </fieldset>
-          </>
-        )}
-      </Popover>
-
-      <Popover
-        label={t("groupBy", {
-          by: groupBy === "group" ? tr("filter", { group: word }) : t("groupNone"),
-        })}
-        trigger={<Rows3 aria-hidden="true" />}
-        triggerClassName={`${iconButtonVariants()} ${groupBy === "group" ? ACTIVE_DOT : ""}`}
-        panelClassName="w-56 p-3"
-      >
-        {() => (
-          <fieldset className="m-0 flex flex-col border-0 p-0">
-            <legend className="mb-1 p-0 text-label text-ink">{t("groupByLegend")}</legend>
-            {(["group", "none"] as const).map((value) => (
-              <label
-                key={value}
-                className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-ink"
+          ) : null}
+          <QuietMenu
+            label={t("groupBy", {
+              by: groupBy === "group" ? tr("filter", { group: word }) : t("groupNone"),
+            })}
+            legend={t("groupByLegend")}
+            value={groupBy}
+            onChange={(v) => onGroupBy(v as GroupBy)}
+            options={[
+              { value: "group", label: tr("filter", { group: word }) },
+              { value: "none", label: t("groupNone") },
+            ]}
+          />
+          {canEdit ? (
+            <Button variant="quiet" shape="pill" onClick={onPrint}>
+              <QrCode aria-hidden="true" />
+              {tq("button")}
+            </Button>
+          ) : null}
+          <SearchToggle label={t("searchLabel")} value={query} onChange={onQuery} />
+        </>
+      ) : null}
+      {canEdit ? (
+        <Popover
+          trigger={
+            <>
+              <span>{t("addSubjects")}</span>
+              <ChevronDown aria-hidden="true" />
+            </>
+          }
+          triggerClassName={`${buttonVariants({ shape: "pill" })} hover:bg-primary-hover [&_svg]:size-4`}
+          panelClassName="w-60"
+        >
+          {(close) => (
+            <>
+              <button
+                type="button"
+                className={MENU_ROW}
+                onClick={() => {
+                  close();
+                  onAdd();
+                }}
               >
-                <input
-                  type="radio"
-                  name={`${id}-group-by`}
-                  checked={groupBy === value}
-                  // Stays open: arrow keys move between radios and change the choice as they go.
-                  onChange={() => onGroupBy(value)}
-                  className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                />
-                {value === "group" ? tr("filter", { group: word }) : t("groupNone")}
-              </label>
-            ))}
-          </fieldset>
-        )}
-      </Popover>
+                <Plus aria-hidden="true" />
+                {tr("add")}
+              </button>
+              <Link href={importHref} className={MENU_ROW} onClick={close}>
+                <Upload aria-hidden="true" />
+                {tr("import")}
+              </Link>
+            </>
+          )}
+        </Popover>
+      ) : null}
     </>
-  );
-}
-
-/** The active filters as removable chips, under People's heading row. */
-export function FilterChips({
-  filters,
-  onFilters,
-  groups,
-  word,
-}: {
-  filters: PeopleFilter[];
-  onFilters: (filters: PeopleFilter[]) => void;
-  groups: Group[];
-  word: GroupLabel;
-}) {
-  const t = useTranslations("app.people");
-  const tr = useTranslations("app.roster");
-  if (filters.length === 0) return null;
-  const label = (f: PeopleFilter): string => {
-    switch (f.kind) {
-      case "group":
-        return t("chips.group", {
-          group: word,
-          name: groups.find((g) => g.id === f.id)?.name ?? "",
-        });
-      case "grade":
-        return t("chips.grade", { grade: f.value });
-      case "noGroup":
-        return tr("noGroup", { group: word });
-      default:
-        return t(`flags.${f.kind}`);
-    }
-  };
-  return (
-    <ul
-      aria-label={t("activeFilters")}
-      className="m-0 flex list-none flex-wrap items-center gap-2 p-0"
-    >
-      {filters.map((f) => (
-        <li key={f.kind}>
-          <button
-            type="button"
-            aria-label={t("removeFilter", { filter: label(f) })}
-            onClick={() => onFilters(removeFilter(filters, f.kind))}
-            className="flex h-11 items-center gap-1.5 rounded-full bg-primary-soft px-4 text-label font-semibold text-primary-hover hover:bg-primary-soft/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          >
-            {label(f)}
-            <X className="size-3.5" aria-hidden="true" />
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }

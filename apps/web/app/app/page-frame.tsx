@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 /**
- * The padded, centred column for studio pages that don't use the D137 layout yet (Home, Jobs, Contacts, Settings,
- * coming-soon sections). A page that moves to the D137 layout drops it.
+ * The padded, centred column for studio pages that aren't lists (Home, Settings, an order, a price list, coming-soon
+ * sections). List pages use ListPage instead (D144).
  */
 export function PageFrame({ children }: { children: ReactNode }) {
   return (

@@ -367,7 +367,7 @@
       "jobs": "Jobs",
       "orders": "Orders",
       "products": "Products",
-      "contacts": "Contacts",
+      "contacts": "Clients",
       "marketing": "Marketing",
       "money": "Money",
       "reports": "Reports",
@@ -522,16 +522,19 @@
     },
     "jobs": {
       "title": "Jobs",
-      "intro": "Schools, teams and sessions you photograph.",
+      "views": {
+        "label": "Job views",
+        "all": "All"
+      },
       "new": "New job",
       "loading": "Loading jobs…",
       "emptyTitle": "No jobs yet",
       "emptyBody": "A job is a school, team or session you photograph. Parents order their photos from it.",
       "emptyCta": "Create your first job",
       "emptyReadOnly": "Owners and admins create jobs.",
+      "emptyView": "No jobs in this view.",
       "columns": {
         "name": "Job",
-        "number": "Job number",
         "client": "Client",
         "pictureDay": "Picture day",
         "subjects": "Subjects",
@@ -582,27 +585,18 @@
       }
     },
     "contacts": {
-      "title": "Contacts",
-      "tabsLabel": "Contact types",
-      "tabs": {
-        "parents": "Parents",
-        "children": "Children",
-        "clients": "Clients"
-      },
-      "soon": "Soon",
+      "title": "Clients",
       "clients": {
-        "intro": "Schools, daycares, teams and families you photograph for.",
-        "add": "Add client",
+        "add": "New client",
+        "searchLabel": "Search clients",
         "loading": "Loading clients…",
         "empty": "No clients yet. Add your first one to use it in jobs.",
+        "noMatches": "No clients match.",
         "columns": {
           "name": "Name",
           "contact": "Contact person",
-          "city": "City",
-          "actions": "Actions"
+          "city": "City"
         },
-        "edit": "Edit",
-        "editLabel": "Edit {name}",
         "loadMore": "Show more"
       },
       "form": {
@@ -852,7 +846,7 @@
       },
       "importPage": {
         "title": "Import roster",
-        "back": "Back to People",
+        "back": "Back to Subjects",
         "stepsLabel": "Import steps",
         "steps": {
           "file": "Choose file",
@@ -981,13 +975,12 @@
       "tabs": {
         "label": "Job sections",
         "overview": "Overview",
-        "people": "People",
+        "people": "Subjects",
         "photos": "Photos",
         "shop": "Shop",
         "messages": "Messages",
         "orders": "Orders",
-        "settings": "Settings",
-        "peopleCount": "{count, plural, one {# child} other {# children}}"
+        "settings": "Settings"
       },
       "hero": {
         "countdown": "{days, plural, =0 {Picture day is today} =1 {Picture day is tomorrow} other {Picture day in # days}}",
@@ -1030,14 +1023,17 @@
     },
     "people": {
       "searchLabel": "Search children",
+      "addSubjects": "Add subjects",
       "heading": "{count, plural, one {# child} other {# children}}",
-      "subline": "{groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · {count, plural, one {# possible duplicate} other {# possible duplicates}}",
-      "sublineNoDuplicates": "{groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · no duplicates",
-      "filter": "Filter",
-      "anyGroup": "{group, select, class {Any class} team {Any team} other {Any group}}",
+      "footer": "{count, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · {duplicates, plural, =0 {no duplicates} one {# possible duplicate} other {# possible duplicates}}",
+      "views": {
+        "label": "Subject views",
+        "all": "All"
+      },
+      "all": "All",
+      "classMenu": "{group, select, class {Class} team {Team} other {Group}}: {value}",
       "grade": "Grade",
-      "anyGrade": "Any grade",
-      "show": "Only show",
+      "gradeMenu": "Grade: {value}",
       "flags": {
         "doNotPhotograph": "Do not photograph",
         "doNotPublish": "Do not publish",
@@ -1046,12 +1042,6 @@
       "groupBy": "Group: {by}",
       "groupByLegend": "Group by",
       "groupNone": "None",
-      "activeFilters": "Active filters",
-      "removeFilter": "Remove filter: {filter}",
-      "chips": {
-        "group": "{group, select, class {Class} team {Team} other {Group}} {name}",
-        "grade": "Grade {grade}"
-      },
       "duplicatesNotice": "{count, plural, one {# possible duplicate} other {# possible duplicates}}",
       "showThem": "Show them",
       "rename": "Rename",
@@ -1159,7 +1149,7 @@
           "legend": "What are these photos?",
           "individual": "Individual photos (read QR cards)",
           "classPhoto": "Class photo for a class",
-          "noClasses": "Add classes in People to upload class photos.",
+          "noClasses": "Add classes in Subjects to upload class photos.",
           "class": "Class",
           "chooseClass": "Choose a class"
         }
@@ -1190,7 +1180,7 @@
       },
       "views": {
         "label": "Photos views",
-        "all": "All photos",
+        "all": "All",
         "review": "Review"
       },
       "review": {
@@ -1524,8 +1514,10 @@
     },
     "orders": {
       "title": "Orders",
-      "intro": "Every paid order, newest first.",
-      "jobIntro": "This job’s paid orders, newest first.",
+      "views": {
+        "label": "Order views",
+        "all": "All"
+      },
       "loading": "Loading…",
       "empty": "No orders yet.",
       "emptyFiltered": "No orders match.",
@@ -1547,17 +1539,19 @@
       "open": "Order {reference}",
       "noChildren": "—",
       "filters": {
-        "label": "Filter orders",
-        "status": "Status",
-        "anyStatus": "Any status",
         "job": "Job",
-        "anyJob": "Any job",
-        "reference": "Order reference",
+        "any": "Any",
+        "jobMenu": "Job: {value}",
+        "searchLabel": "Search orders",
         "referenceHelp": "For example 7KQ2-M9XA",
-        "search": "Search",
         "clear": "Clear filters",
         "delivery": "Delivery",
-        "anyDelivery": "Any delivery"
+        "deliveryMenu": "Delivery: {value}",
+        "deliveryShort": {
+          "home": "Home",
+          "school": "School",
+          "none": "Downloads only"
+        }
       },
       "loadMore": "Show more orders",
       "statuses": {

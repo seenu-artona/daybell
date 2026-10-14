@@ -12,8 +12,9 @@ import { StudioContext } from "../me-context";
 // ones kept selected; photographers get no checkboxes. The refund dialog sums what was asked with the database's rule,
 // refuses more than is left, confirms with the amount and sends one request with its id however often it is tapped.
 // Home gives staff the To do list and never the money (Q4).
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), push, refresh: vi.fn(), prefetch: vi.fn() }),
   useParams: () => ({}),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/app/orders",
@@ -249,9 +250,61 @@ describe("the orders list", () => {
     api.mockImplementation(async (path: string) =>
       path.startsWith("/jobs") ? ok({ jobs: [] }) : ok({ orders: [], nextCursor: null }),
     );
-    await render(<OrdersList initialStatus="printed" initialDelivery="home" />);
+    await render(<OrdersList status="printed" initialDelivery="home" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=home");
-    expect((field("Delivery") as HTMLSelectElement).value).toBe("home");
+    // A quiet menu whose visible words are its name (WCAG 2.5.3), opening radio buttons that apply as they change.
+    const trigger = button("Delivery: Home");
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => trigger?.click());
+    expect(trigger?.getAttribute("aria-expanded")).toBe("true");
+    expect((field("Home") as HTMLInputElement).checked).toBe(true);
+    await act(async () => (field("School") as HTMLInputElement).click());
+    await wait(20);
+    expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=school");
+    expect(button("Delivery: School")?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("shows the status views as links to ?status=, the current one marked (D144)", async () => {
+    answer();
+    await render(<OrdersList status="paid" />);
+    const views = container.querySelector('nav[aria-label="Order views"]');
+    const links = [...(views?.querySelectorAll("a") ?? [])];
+    expect(links.map((a) => a.textContent)).toEqual([
+      "All",
+      ...Object.values(messages.app.orders.statuses),
+    ]);
+    expect(links[0]?.getAttribute("href")).toBe("/app/orders");
+    const paid = links.find((a) => a.textContent === messages.app.orders.statuses.paid);
+    expect(paid?.getAttribute("href")).toBe("/app/orders?status=paid");
+    expect(paid?.getAttribute("aria-current")).toBe("page");
+    expect(links.filter((a) => a.getAttribute("aria-current")).length).toBe(1);
+  });
+
+  it("opens an order from a click on its row, but not from its checkbox", async () => {
+    answer();
+    await render(<OrdersList />);
+    const row = container.querySelector("tbody tr") as HTMLTableRowElement;
+    await act(async () => (row.querySelectorAll("td")[2] as HTMLElement).click());
+    expect(push).toHaveBeenCalledWith(`/app/orders/${O1}`);
+    push.mockClear();
+    await act(async () => (field("Select order 7KQ2-M9XA") as HTMLInputElement).click());
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("searches by reference only on Enter, from a search button that opens a box", async () => {
+    answer();
+    await render(<OrdersList />);
+    const opener = container.querySelector('button[aria-label="Search orders"]') as HTMLElement;
+    await act(async () => opener.click());
+    const box = container.querySelector('input[type="search"]') as HTMLInputElement;
+    expect(box.getAttribute("aria-label")).toBe("Search orders");
+    expect(box.maxLength).toBe(12);
+    await type(box, "7KQ2");
+    expect(api.mock.calls.map((c) => c[0])).not.toContain("/orders?q=7KQ2");
+    await act(async () => box.form?.requestSubmit());
+    await wait(20);
+    expect(api.mock.calls.map((c) => c[0])).toContain("/orders?q=7KQ2");
+    expect(button("Clear filters")).toBeDefined();
   });
 
   it("gives photographers no checkboxes", async () => {

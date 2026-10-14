@@ -26,3 +26,9 @@ html:has([data-docked-cta]) {
 html:has([data-shop-header]) {
   scroll-padding-top: 4.5rem;
 }
+
+/* The job page's sticky header and tabs (D144): keep a focused control clear of them when scrolling it into view
+   (WCAG 2.4.11). */
+html:has([data-sticky-header]) {
+  scroll-padding-top: 88px;
+}

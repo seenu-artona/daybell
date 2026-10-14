@@ -2,7 +2,7 @@
 
 import type { Job, PriceListResponse, StudioPayoutsResponse } from "@daybell/api";
 import { payoutsConnected, type SellChecklistKey } from "@daybell/core";
-import { Button, ConfettiBurst, IconButton, iconButtonVariants } from "@daybell/ui";
+import { Button, ConfettiBurst, IconButton, iconButtonVariants, PageHeader } from "@daybell/ui";
 import { ArrowLeft, CalendarClock, Ellipsis, Pencil } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -36,9 +36,9 @@ import { SellChecklist } from "./sell-checklist";
 type Open = "edit" | "sell" | "closeShop" | "closingDate" | null;
 
 /**
- * The job's title row (D137, D140), on the canvas with no white block: a round back button, the job's name and its shop
- * state (Draft, Selling or Closed; not clickable) with its details under the name, then a round More (⋯) and the page's
- * one pill for owners and admins (ADR 0021): "Start selling" on a draft (the "Before you can sell" dialog; the server
+ * The job's title row (D137, D144), on the canvas with no white block: a round back button, the job's name and its shop
+ * state (Draft, Selling or Closed; not clickable) with its details under the name, then the shop's white pill and a
+ * round More (⋯) for owners and admins (ADR 0021): "Start selling" on a draft (the "Before you can sell" dialog; the server
  * checks everything again), "Close shop" while selling (after a confirm), "Reopen shop" once closed (the same checks).
  * Going live bursts confetti (D75; none with reduced motion) and is announced in words. Photographers and staff see the
  * state only.
@@ -205,91 +205,93 @@ export function JobHeader() {
   const ready = readyToSell(items);
   const reopening = action === "reopen";
 
+  const shopButton =
+    action === "start" ? (
+      <Button variant="white" shape="pill" onClick={openSelling}>
+        {t("startSelling")}
+      </Button>
+    ) : action === "close" ? (
+      <Button
+        variant="white"
+        shape="pill"
+        onClick={() => {
+          setDialogStatus("");
+          setOpen("closeShop");
+        }}
+      >
+        {t("closeShop")}
+      </Button>
+    ) : (
+      <Button variant="white" shape="pill" onClick={openSelling}>
+        {t("reopenShop")}
+      </Button>
+    );
+
   return (
-    <header className="flex items-center gap-3">
-      <IconButton asChild label={tj("detail.back")}>
-        <Link href="/app/jobs">
-          <ArrowLeft aria-hidden="true" />
-        </Link>
-      </IconButton>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <h1
-            ref={heading}
-            tabIndex={-1}
-            className="m-0 text-h2 break-words focus-visible:outline-2 focus-visible:outline-primary"
-          >
-            {job.name}
-          </h1>
-          <StatusBadge status={job.status} />
-        </div>
-        <p className="m-0 text-label text-muted">{details.join(" · ")}</p>
+    <>
+      <PageHeader
+        variant="record"
+        title={job.name}
+        headingRef={heading}
+        back={
+          <IconButton asChild label={tj("detail.back")}>
+            <Link href="/app/jobs">
+              <ArrowLeft aria-hidden="true" />
+            </Link>
+          </IconButton>
+        }
+        status={<StatusBadge status={job.status} />}
+        details={details.join(" · ")}
+        actions={
+          canManage ? (
+            <>
+              {shopButton}
+              <Popover
+                label={t("moreActions")}
+                trigger={<Ellipsis aria-hidden="true" />}
+                triggerClassName={iconButtonVariants()}
+                panelClassName="w-60"
+              >
+                {(close) => (
+                  <>
+                    <button
+                      type="button"
+                      className={MENU_ROW}
+                      onClick={() => {
+                        close();
+                        setAnnouncement("");
+                        setOpen("edit");
+                      }}
+                    >
+                      <Pencil aria-hidden="true" />
+                      {tj("detail.edit")}
+                    </button>
+                    {job.status === "closed" ? null : (
+                      <button
+                        type="button"
+                        className={MENU_ROW}
+                        onClick={() => {
+                          close();
+                          setAnnouncement("");
+                          setOpen("closingDate");
+                        }}
+                      >
+                        <CalendarClock aria-hidden="true" />
+                        {t("closing.menu")}
+                      </button>
+                    )}
+                  </>
+                )}
+              </Popover>
+            </>
+          ) : null
+        }
+      >
         {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
         <p role="status" className="m-0 min-h-5 text-caption text-muted">
           {announcement}
         </p>
-      </div>
-      {canManage ? (
-        <div className="flex shrink-0 items-center gap-2">
-          <Popover
-            label={t("moreActions")}
-            trigger={<Ellipsis aria-hidden="true" />}
-            triggerClassName={iconButtonVariants()}
-            panelClassName="w-60"
-          >
-            {(close) => (
-              <>
-                <button
-                  type="button"
-                  className={MENU_ROW}
-                  onClick={() => {
-                    close();
-                    setAnnouncement("");
-                    setOpen("edit");
-                  }}
-                >
-                  <Pencil aria-hidden="true" />
-                  {tj("detail.edit")}
-                </button>
-                {job.status === "closed" ? null : (
-                  <button
-                    type="button"
-                    className={MENU_ROW}
-                    onClick={() => {
-                      close();
-                      setAnnouncement("");
-                      setOpen("closingDate");
-                    }}
-                  >
-                    <CalendarClock aria-hidden="true" />
-                    {t("closing.menu")}
-                  </button>
-                )}
-              </>
-            )}
-          </Popover>
-          {action === "start" ? (
-            <Button shape="pill" onClick={openSelling}>
-              {t("startSelling")}
-            </Button>
-          ) : action === "close" ? (
-            <Button
-              shape="pill"
-              variant="secondary"
-              onClick={() => {
-                setDialogStatus("");
-                setOpen("closeShop");
-              }}
-            >
-              {t("closeShop")}
-            </Button>
-          ) : (
-            <Button shape="pill" onClick={openSelling}>
-              {t("reopenShop")}
-            </Button>
-          )}
-        </div>
-      ) : null}
+      </PageHeader>
 
       <Dialog open={open === "edit"} onClose={closeDialog} title={tj("form.editTitle")}>
         <JobForm
@@ -367,7 +369,7 @@ export function JobHeader() {
       </Dialog>
 
       {confetti ? <ConfettiBurst onDone={() => setConfetti(false)} /> : null}
-    </header>
+    </>
   );
 }
 

@@ -34,9 +34,9 @@ const CONFLICT_KEYS = Object.fromEntries(
 ) as Record<string, keyof typeof PHOTO_CONFLICTS>;
 
 /**
- * A job's Photos (D39, D60, D140; Phase 1 step 4, ADR 0016): "N photos" with a green subline (uploads, processing,
- * duplicates skipped), white pills Upload photos and Bin (n), the upload sheet, then the photos as thumbnails in
- * tagging order, 200 at a time. A photo opens in the floating panel (?photo=<id>). Owners, admins and photographers
+ * A job's Photos (D39, D60, D140, D144; Phase 1 step 4, ADR 0016): the view bar (All and Review; a quiet Bin (n) and the
+ * green Upload photos), the upload sheet, a muted line with the counts (photos, uploads, processing, duplicates
+ * skipped), then the photos as thumbnails in tagging order, 200 at a time. A photo opens in the floating panel (?photo=<id>). Owners, admins and photographers
  * upload, bin and restore; staff look. Closed jobs take no photos.
  */
 function PhotosPage() {
@@ -144,24 +144,23 @@ function PhotosPage() {
   return (
     <JobSection
       title={title}
-      subline={subline}
-      toolbar={
+      views={bin ? null : <PhotosViews jobId={job.id} current="all" />}
+      tools={
         bin ? (
-          <Button variant="white" shape="pill" onClick={() => showBin(false)}>
+          <Button variant="quiet" shape="pill" onClick={() => showBin(false)}>
             <ArrowLeft aria-hidden="true" />
             {t("backToPhotos")}
           </Button>
         ) : (
           <>
             {counts ? (
-              <Button variant="white" shape="pill" onClick={() => showBin(true)}>
+              <Button variant="quiet" shape="pill" onClick={() => showBin(true)}>
                 <Trash2 aria-hidden="true" />
                 {t("bin", { count: counts.binned })}
               </Button>
             ) : null}
             {canUpload ? (
               <Button
-                variant="white"
                 shape="pill"
                 aria-expanded={sheetOpen}
                 onClick={() => setSheetOpen((o) => !o)}
@@ -175,7 +174,6 @@ function PhotosPage() {
       }
       below={
         <>
-          {bin ? null : <PhotosViews jobId={job.id} current="all" />}
           {closed && !bin ? <Banner tone="info" title={t("closed")} /> : null}
           {bin ? null : <LiveNote />}
           {bin ? <p className="m-0 text-sm text-muted">{t("binNote")}</p> : null}
@@ -221,6 +219,11 @@ function PhotosPage() {
             </div>
           ) : null}
           {photos.failed ? <Banner tone="danger" title={t("loadFailed")} /> : null}
+          {title ? (
+            <p className="m-0 text-body text-muted">
+              {[title, subline].filter(Boolean).join(" · ")}
+            </p>
+          ) : null}
         </>
       }
       panel={

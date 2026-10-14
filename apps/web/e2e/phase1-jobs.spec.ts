@@ -42,12 +42,11 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   // Look inside the page's main area (the menu has its own links and search).
   const main = page.getByRole("main");
 
-  // 1. Contacts opens on Clients. Add a client; Quebec is refused (D131).
+  // 1. Contacts opens on Clients (labelled Clients, D144). Add a client with New client; Quebec is refused (D131).
   await page.goto("/app/contacts");
   await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
-  // The tab reads "Children" followed by a "Soon" badge.
-  await expect(main.getByText(/^Children/)).toBeVisible();
-  await main.getByRole("button", { name: "Add client", exact: true }).click();
+  await expect(main.getByRole("heading", { name: "Clients", level: 1 })).toBeVisible();
+  await main.getByRole("button", { name: "New client", exact: true }).click();
   const addClient = page.getByRole("dialog", { name: "Add client" });
   await fillClient(addClient, client, "QC");
   await expect(addClient.getByLabel("Country")).toHaveValue("CA");
@@ -92,7 +91,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
       .getByRole("listitem")
       .filter({ hasText: "Add the roster" }),
   ).toContainText("Next");
-  // One green button: Start selling (owners and admins, while a draft).
+  // The shop's one pill: Start selling (owners and admins, while a draft), white since D144.
   await expect(main.getByRole("button", { name: "Start selling" })).toBeVisible();
 
   // Editing uses the same form, from More actions.

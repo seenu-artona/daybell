@@ -46,13 +46,13 @@ interface CheckedRow {
 
 const PAGE = 100;
 /** The import is a full page in the job's main area: one white sheet card on the canvas (D140). */
-const PAGE_FRAME = "flex flex-col gap-6 rounded-xl bg-surface px-7 pt-4 pb-10";
+const PAGE_FRAME = "flex flex-col gap-6 rounded-list bg-surface px-7 pt-4 pb-10 shadow-card";
 
 /**
  * Import a roster from CSV or Excel (Phase 1 step 2, D23, F13; ADR 0011). The file is read in this browser and never
  * uploaded or stored (D113): choose a file, confirm the guessed columns, check the rows (a dry run on the server
  * plans adds, updates by student ID and duplicates), then import them all in one go. A full page inside the job's
- * frame, part of People (D138); the job comes from the job layout.
+ * frame, part of Subjects (D138, D144); the job comes from the job layout.
  */
 export default function ImportRosterPage() {
   const t = useTranslations("app.roster.importPage");

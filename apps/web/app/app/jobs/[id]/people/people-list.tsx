@@ -2,23 +2,34 @@
 
 import type { Child } from "@daybell/api";
 import type { GroupLabel, PeopleSection } from "@daybell/core";
-import { Badge, IconChip, Table, TableCell, TableHead, TableRow } from "@daybell/ui";
+import {
+  Badge,
+  ClickableRow,
+  IconChip,
+  ListCard,
+  RowChevron,
+  RowChevronHead,
+  Table,
+  TableCell,
+  TableHead,
+  TableRow,
+} from "@daybell/ui";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
 import { avatarTone, childInitials } from "./avatar";
 
-const COLUMNS = 5;
+const COLUMNS = 6;
 
 /** The DOM id of a child's name link, so focus can return to it when the panel closes. */
 export const rowLinkId = (childId: string) => `child-link-${childId}`;
 
 /**
- * People's list (D140): one table in a white sheet card, 60px hairline rows, each with an initials avatar
- * (decorative) and a Class column. Flat by default; with Group: Class, each class gets a heading row that collapses.
- * Each row opens the child in the floating panel: the name is a real link (the keyboard target, ?child=<id>), and
- * a click anywhere on the row does the same.
+ * Subjects' list (D140, D144): one table in a white list card, 60px hairline rows, each with an initials avatar
+ * (decorative), a Class column and a faint chevron; the card's footer counts the roster. Flat by default; with Group:
+ * Class, each class gets a heading row that collapses. Each row opens the child in the floating panel: the name is a
+ * real link (the keyboard target, ?child=<id>), and a click anywhere else on the row does the same.
  */
 export function PeopleList({
   sections,
@@ -32,6 +43,7 @@ export function PeopleList({
   onRename,
   word,
   busy,
+  footer,
 }: {
   sections: PeopleSection<Child>[];
   grouped: boolean;
@@ -47,6 +59,8 @@ export function PeopleList({
   onRename: ((group: { id: string; name: string }) => void) | null;
   word: GroupLabel;
   busy: boolean;
+  /** The card's footer: the roster's counts. */
+  footer: string;
 }) {
   const t = useTranslations("app.people");
   const tr = useTranslations("app.roster");
@@ -54,25 +68,16 @@ export function PeopleList({
   const noGroup = tr("noGroup", { group: word });
 
   return (
-    <div className="overflow-hidden rounded-xl bg-surface px-3">
-      <Table variant="flat" aria-busy={busy}>
+    <ListCard footer={footer}>
+      <Table variant="list" aria-busy={busy}>
         <thead>
           <TableRow>
-            <TableHead className="h-13 py-0 pl-4 text-label font-medium">
-              {tr("columns.name")}
-            </TableHead>
-            <TableHead className="h-13 py-0 text-label font-medium">
-              {tr("columns.group", { group: word })}
-            </TableHead>
-            <TableHead className="h-13 py-0 text-label font-medium">
-              {tr("columns.studentId")}
-            </TableHead>
-            <TableHead className="h-13 py-0 text-label font-medium">
-              {tr("columns.grade")}
-            </TableHead>
-            <TableHead className="h-13 py-0 pr-4 text-right text-label font-medium">
-              {tr("columns.accessCode")}
-            </TableHead>
+            <TableHead className="h-13 py-0">{tr("columns.name")}</TableHead>
+            <TableHead className="h-13 py-0">{tr("columns.group", { group: word })}</TableHead>
+            <TableHead className="h-13 py-0">{tr("columns.studentId")}</TableHead>
+            <TableHead className="h-13 py-0">{tr("columns.grade")}</TableHead>
+            <TableHead className="h-13 py-0 text-right">{tr("columns.accessCode")}</TableHead>
+            <RowChevronHead />
           </TableRow>
         </thead>
         {sections.map((section) => {
@@ -120,15 +125,12 @@ export function PeopleList({
                 ? section.rows.map((child) => {
                     const selected = child.id === selectedId;
                     return (
-                      <TableRow
+                      <ClickableRow
                         key={child.id}
-                        onClick={(e) => {
-                          // The name link handles its own clicks.
-                          if (!(e.target as HTMLElement).closest("a, button")) onOpen(child.id);
-                        }}
-                        className={`h-15 cursor-pointer text-body-lg ${selected ? "bg-primary-soft [tbody_&]:hover:bg-primary-soft" : ""}`}
+                        onActivate={() => onOpen(child.id)}
+                        className={`h-15 ${selected ? "bg-primary-soft [tbody_&]:hover:bg-primary-soft" : ""}`}
                       >
-                        <TableCell className="py-0 pl-4">
+                        <TableCell className="py-0">
                           <span className="flex items-center gap-3">
                             <IconChip shape="round" tone={avatarTone(child.id)}>
                               {childInitials(child.firstName, child.lastName)}
@@ -140,7 +142,7 @@ export function PeopleList({
                               scroll={false}
                               aria-current={selected ? "true" : undefined}
                               onClick={() => onLinkOpen(child.id)}
-                              className="inline-flex min-h-11 min-w-11 items-center font-bold text-ink no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                              className="inline-flex min-h-11 min-w-11 items-center font-bold text-ink no-underline hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary"
                             >
                               {child.firstName} {child.lastName}
                             </Link>
@@ -164,15 +166,16 @@ export function PeopleList({
                         <TableCell className="py-0 text-muted">{child.studentId ?? ""}</TableCell>
                         <TableCell className="py-0">{child.grade ?? ""}</TableCell>
                         {child.accessCode ? (
-                          <TableCell className="py-0 pr-4 text-right font-mono font-bold tracking-wider whitespace-nowrap">
+                          <TableCell className="py-0 text-right font-mono font-bold tracking-wider whitespace-nowrap">
                             {child.accessCode}
                           </TableCell>
                         ) : (
-                          <TableCell className="py-0 pr-4 text-right text-muted">
+                          <TableCell className="py-0 text-right text-muted">
                             {tr("codeUnavailable")}
                           </TableCell>
                         )}
-                      </TableRow>
+                        <RowChevron className="py-0" />
+                      </ClickableRow>
                     );
                   })
                 : null}
@@ -180,6 +183,6 @@ export function PeopleList({
           );
         })}
       </Table>
-    </div>
+    </ListCard>
   );
 }

@@ -7,8 +7,9 @@ import { type ReactNode, useEffect, useId, useRef } from "react";
 
 /**
  * The D140 floating panel: the selected item, in a 400px white card that floats over the right side of the section's
- * table, as tall as its content (never taller than the window; it scrolls inside). JobSection places it; it stays
- * in view while the table scrolls. Not modal: a non-modal `aside` named by its heading, and the table stays usable.
+ * table, as tall as its content (never taller than the window under the sticky tab row; it scrolls inside).
+ * JobSection places it; it stays in view, under the job's sticky tab row (D144), while the table scrolls. Not
+ * modal: a non-modal `aside` named by its heading, and the table stays usable.
  * When `focusKey` changes (the person opened a new item), focus moves to the heading; × or Escape (with focus inside
  * the panel) closes it, and the page returns focus to the opener.
  */
@@ -48,7 +49,7 @@ export function FloatingPanel({
           onClose();
         }
       }}
-      className="pointer-events-auto sticky top-4 flex max-h-[calc(100dvh-2rem)] w-full flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-lg"
+      className="pointer-events-auto sticky top-[88px] flex max-h-[calc(100dvh-104px)] w-full flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-lg"
     >
       <div className="flex items-center gap-3">
         {lead}
