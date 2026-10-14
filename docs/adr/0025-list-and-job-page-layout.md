@@ -196,7 +196,7 @@ above, these win.
    (`list_filters.saved`, page and count only). The roster list now carries order data, so it runs in Montréal for
    Canadian studios like `/orders`.
 2. **Views become chips.** The pill views on Jobs and Orders, the dash views on Subjects, Photos and a job's Orders, the
-   filter icon and its panel (FilterMenu), Group by and the "sub" view bar are replaced by one row of chips in each list
+   filter icon and its panel (FilterMenu), Group by and the view bar (ViewBar, retired) are replaced by one row of chips in each list
    card's toolbar, with "+ Add filter" and the search at its right end. The address keeps one chip as enum words and
    ids only (D113).
 3. **Title row and tab row.** A list page's green action sits in its title row; a job section's actions sit at the right
@@ -208,3 +208,5 @@ above, these win.
    columns are Job, Client, Picture day, Status and Shop closes. The checklist stays on the job's Overview and in Home's
    Up next (D143, D146).
 6. **Clients and Price lists** show the All chip only; Clients keeps its search.
+7. **Class rename** moves from Group by's headings to a "Classes N ›" row under the Subjects list and its panel.
+8. **Home's Selling now** says "Closes in N days" in amber with words when the shop closes in two days or fewer.

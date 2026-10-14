@@ -15,7 +15,8 @@
 These override the architect's plan where they differ.
 
 1. No sales, orders or "% ordered" per job in any list: no per-job sales query, no new index. Jobs' columns are Job,
-   Client, Picture day, Status, Shop closes. Home's Selling now (D146) is unchanged.
+   Client, Picture day, Status, Shop closes. Home's Selling now (D146) shows no sales either (its closing line:
+   answer 7).
 2. Jobs' "+ Add filter" offers Shop closes this week, Picture day this month and Client… (no "No orders yet"). They
    are plain query filters on `GET /jobs`, with a search.
 3. Subjects has no Group by: one flat list, the class is a chip.
@@ -26,6 +27,11 @@ These override the architect's plan where they differ.
    Shop closes says "Closed"; no View shop button; a grade chip lives in the browser only (never saved, never in the
    address); saving chips writes `list_filters.saved` with the page and the count only; Jobs' Calendar is a "coming
    soon" panel.
+6. Class rename (after review): a "Classes N ›" row under the Subjects list, in the job-details row style, opens the
+   job's classes in the floating panel, each with Rename (the existing class form in rename mode); roster editors only.
+7. Home's Selling now (after review): amber "Closes in N days" when the last day to order is two days or fewer away,
+   else "Closes Oct 24" (the closing day, not the midnight moment), or "No closing date", with the Jobs list's
+   `closingDay` and `closesSoon`.
 
 ## What changed
 
@@ -59,8 +65,16 @@ remove button.
 under it (`/app/jobs/calendar` is coming soon). A job's page: the section's actions sit at the right end of the tab
 row (Subjects: Print QR cards in white, Add subjects in green; Photos: Bin and Upload photos; Review: Mark reviewed),
 rendered there by a portal (`JobTabActions`) so they stay in the sticky row, after the tabs in reading and tab order.
-`JobSection` has no view bar. The dash `ViewTabs` and the "sub" `ViewBar` are retired; `ListCard` gains `toolbar` and
-`toolbarEnd`; `SearchToggle` gains `onCard` (a canvas-grey box on white).
+`JobSection` has no view bar. The dash `ViewTabs` and `ViewBar` are retired (nothing uses them); `ListCard` gains
+`toolbar` and `toolbarEnd`; `SearchToggle` gains `onCard` (a canvas-grey box on white).
+
+**Saved chips in the browser.** `useListFilters` reads the person's chips once. If that fails, the chips stay
+unknown: the built-in chips work, but nothing can be added, removed or dropped, the "+ Add filter" choices that would
+be saved are hidden, and a notice offers Try again, so a list built from a failed load is never saved over the real
+one. Changes show at once; saves go one at a time and the newest list wins (changes made while one is in flight go
+next as one list; answers for an earlier page, job or load are dropped); if the newest list can't be saved, the chips
+go back to the last list the server accepted. A chip whose name is still loading shows "…", and its remove button names
+its kind ("Remove filter: Client").
 
 **Jobs.** Columns Job (name and number), Client, Picture day, Status, Shop closes: a draft "Not selling yet", a closed
 job "Closed", a selling one its last day to order or "No closing date"; two days or fewer away it is amber and says
@@ -70,6 +84,7 @@ Overview and Home's Up next keep the checklist, and `GET /jobs` still returns it
 **Subjects.** A flat list with Photos (ready photos tagged to the child, outside the bin) and Ordered ("Ordered" or
 "Not yet", hidden for people who don't see orders) columns. Core's `applyFilters` gains Not ordered and No photos; an
 unknown order state (null) never matches Not ordered. A class or grade that leaves the roster stops filtering.
+Roster editors rename classes from the "Classes N ›" row under the list (answer 6).
 
 ## Data (migration `20261014000000_list_filters.sql`, new)
 
@@ -82,12 +97,15 @@ unknown order state (null) never matches Not ordered. A class or grade that leav
 - `save_list_filters(studio, page, job, chips jsonb)`: SECURITY DEFINER, `search_path=''`. Checks membership, the job
   in the studio for a job's tab (and none for a studio list), at most 8, each chip an object with a well-formed key and
   a uuid or null as value (checked before any cast, so no value reaches an error message or the database log), no
-  duplicates. Replaces the caller's rows for that page and job and writes one `list_filters.saved` event: the job as
+  duplicates, each key one the page takes (with an id exactly where the key names a record), and every id the
+  studio's own client or job, or a class of this job (the API checks the same first; this is the backstop for direct
+  calls). Replaces the caller's rows for that page and job and writes one `list_filters.saved` event: the job as
   subject for a job's tab, data `{page, count}` only. Refusals are fixed words (`list_filters_*`). Authenticated only.
   The activity log doesn't show the event (not an activity type).
 - `list_children` recreated with `photo_count` and `has_paid_order` per child: a paid order, neither canceled nor
   refunded in full, with a line for the child in this job; null unless the caller is an owner, admin or staff of the
-  job's studio. Still SECURITY INVOKER.
+  job's studio. It reads only the orders with a line for a child on the current page. An order refunded only in part
+  still counts as ordered, even when the part given back was this child's line. Still SECURITY INVOKER.
 - `studio_orders` recreated taking `p_statuses order_fulfilment[]` in place of `p_status`; fully refunded orders are
   still left out of Paid and Printed.
 
@@ -100,7 +118,9 @@ unknown order state (null) never matches Not ordered. A class or grade that leav
 - `GET /orders` gains `stage=done` (shipped, delivered or complete; never with `status`).
 - `GET /jobs/:id/children` returns `RosterChild` (a `Child` with `photoCount` and `hasPaidOrder`); the route also nulls
   `hasPaidOrder` for roles that don't see orders and, carrying order data now, runs in Montréal for Canadian studios
-  like `/orders` (`preferredRegion`, `assertFunctionRegion`).
+  like `/orders` (`preferredRegion`, `assertFunctionRegion`). `preferredRegion` is per route file, so the same file's
+  `POST` (add a child) runs in Montréal too; that is where Canadian roster writes belong anyway (access codes, D113),
+  and only `GET` asserts the region.
 - `GET /me/list-filters?page=&jobId=` (the caller's chips, filtered by studio and person) and `PUT /me/list-filters`
   (`{page, jobId?, chips}`; each key one of the list's, an id exactly where the key names a record; every client, job
   or class id checked to be the studio's own, a class the job's; 204). Refusals are `validation.filterChips` and never
@@ -121,7 +141,8 @@ unknown order state (null) never matches Not ordered. A class or grade that leav
    and failed ones don't.
 5. **A chip added from "+ Add filter" is opened at once.**
 6. **Names by id.** A client's or job's chip asks `GET /clients/:id` or `GET /jobs/:id` once per page view; one that
-   answers "not found" is dropped from the saved list (and saved). Classes come from the loaded roster.
+   answers "not found" is dropped from the saved list (and saved). Classes come from the loaded roster. Until a name
+   is known the chip shows "…".
 7. **Two small changes to shared pieces**: the combobox's "Add new" option is optional (a filter has none), and the
    popover checks focus on the next tick before closing on blur, so a panel can swap its content (the menu's second
    step) without closing.
@@ -136,7 +157,4 @@ unknown order state (null) never matches Not ordered. A class or grade that leav
 
 ## Open questions
 
-- Subjects had one way to rename a class: the Rename button on its Group by heading. With Group by gone (answer 3)
-  there is none on the screen (the API still allows it). Where should Rename class live?
-- Home's Selling now shows "Closes {date}" or "No closing date" as D146 built it; the amber "Closes in N days" the plan
-  mentions isn't there, so nothing was changed. Add it, using core's `closesSoon`?
+None: class rename and Home's Selling now were answered on Oct 14 (answers 6 and 7).
