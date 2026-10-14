@@ -612,7 +612,6 @@
       "emptyFiltered": "No jobs match."
     },
     "contacts": {
-      "title": "Clients",
       "clients": {
         "add": "New client",
         "searchLabel": "Search clients",
@@ -620,12 +619,17 @@
         "empty": "No clients yet. Add your first one to use it in jobs.",
         "noMatches": "No clients match.",
         "columns": {
-          "name": "Name",
-          "contact": "Contact person",
-          "city": "City"
+          "name": "Client",
+          "mainContact": "Main contact",
+          "jobs": "Jobs",
+          "latestJob": "Latest job"
         },
         "loadMore": "Show more",
-        "chipsLabel": "Show clients"
+        "chipsLabel": "Show clients",
+        "mainContact": "{name} · {role}",
+        "noContact": "No contact yet",
+        "noJobs": "No jobs yet",
+        "footer": "{count, plural, one {# client} other {# clients}}"
       },
       "form": {
         "addTitle": "Add client",
@@ -667,6 +671,100 @@
           "regionPlaceholder": "e.g. ON"
         }
       }
+    },
+    "peoplePage": {
+      "title": "People",
+      "sectionsLabel": "People sections",
+      "sections": {
+        "clients": "Clients",
+        "contacts": "Contacts",
+        "families": "Families",
+        "subjects": "Subjects"
+      },
+      "about": {
+        "clients": "Schools, preschools and teams you photograph",
+        "contacts": "The people you work with at each client",
+        "families": "Parents who signed in to a shop, and their children across years",
+        "subjects": "Every child across all your jobs"
+      }
+    },
+    "contactsList": {
+      "add": "New contact",
+      "chipsLabel": "Show contacts",
+      "chips": {
+        "main": "Main contacts",
+        "clientMenu": "Client…",
+        "client": "Client",
+        "clientPlaceholder": "Search clients…",
+        "clientList": "Clients"
+      },
+      "searchLabel": "Search contacts",
+      "loading": "Loading contacts…",
+      "empty": "No contacts yet. Add one, or give a client a contact person.",
+      "noMatches": "No contacts match.",
+      "columns": {
+        "name": "Name",
+        "role": "Role",
+        "client": "Client",
+        "email": "Email"
+      },
+      "main": "Main",
+      "footer": "{count, plural, one {# contact} other {# contacts}}",
+      "loadMore": "Show more",
+      "form": {
+        "addTitle": "Add contact",
+        "editTitle": "Edit contact",
+        "viewTitle": "Contact",
+        "client": "Client",
+        "clientPlaceholder": "Search clients…",
+        "clientOptions": "Clients",
+        "firstName": "First name",
+        "lastName": "Last name",
+        "role": "Role",
+        "rolePlaceholder": "e.g. Office manager",
+        "email": "Email",
+        "phone": "Phone",
+        "main": "Main contact for this client",
+        "mainHelp": "Their name, phone and email become the client's contact person.",
+        "save": "Save changes",
+        "saving": "Saving…",
+        "add": "Add contact",
+        "cancel": "Cancel",
+        "close": "Close",
+        "readOnlyNote": "Owners and admins change contacts."
+      }
+    },
+    "subjectsList": {
+      "chipsLabel": "Show subjects",
+      "chips": {
+        "ordered": "Ordered",
+        "notOrdered": "Not ordered",
+        "jobMenu": "Job…",
+        "job": "Job",
+        "jobPlaceholder": "Search jobs…",
+        "jobList": "Jobs",
+        "clientMenu": "Client…",
+        "client": "Client",
+        "clientPlaceholder": "Search clients…",
+        "clientList": "Clients"
+      },
+      "searchLabel": "Search subjects",
+      "loading": "Loading subjects…",
+      "empty": "No subjects yet. Children show here once they're on a job's roster.",
+      "noMatches": "No subjects match.",
+      "columns": {
+        "name": "Name",
+        "class": "Class",
+        "job": "Job",
+        "ordered": "Ordered"
+      },
+      "ordered": {
+        "yes": "Ordered",
+        "no": "Not ordered"
+      },
+      "noClass": "No class",
+      "footer": "{count, plural, one {# subject} other {# subjects}} across {jobs, plural, one {# job} other {# jobs}}",
+      "loadMore": "Show more"
     },
     "products": {
       "title": "Price lists",

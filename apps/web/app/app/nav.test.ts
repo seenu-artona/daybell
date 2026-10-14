@@ -41,6 +41,12 @@ describe("sectionForPath", () => {
       expect(keys).not.toContain(gone);
   });
 
+  it("highlights People on each of its sections (D150, ADR 0028)", () => {
+    for (const section of ["", "/clients", "/contacts", "/families", "/subjects"])
+      expect(sectionForPath(`/app/people${section}`)).toBe("people");
+    expect(sectionForPath("/app/peoplex")).toBeNull();
+  });
+
   it("highlights Shop on the shop preview, which lives under it (D150)", () => {
     expect(sectionForPath("/app/shop")).toBe("shop");
     expect(sectionForPath("/app/shop/preview")).toBe("shop");
