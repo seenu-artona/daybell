@@ -25,7 +25,7 @@ vi.mock("next/navigation", () => ({
 }));
 const { api, saved } = vi.hoisted(() => ({
   api: vi.fn(),
-  saved: { chips: [] as { key: string; value: string | null }[], putOk: true },
+  saved: { chips: [] as { key: string; value: string | null }[], putOk: true, getOk: true },
 }));
 // The person's saved chips (D147) answer from `saved` whatever else a test fakes.
 vi.mock("@/lib/client-api", async (original) => ({
@@ -37,7 +37,9 @@ vi.mock("@/lib/client-api", async (original) => ({
         return saved.putOk
           ? { ok: true, status: 204, data: undefined }
           : { ok: false, status: 500, code: "internal", message: "", fields: {} };
-      return { ok: true, status: 200, data: { chips: saved.chips } };
+      return saved.getOk
+        ? { ok: true, status: 200, data: { chips: saved.chips } }
+        : { ok: false, status: 500, code: "internal", message: "", fields: {} };
     }
     return api(path, init);
   },
@@ -195,6 +197,7 @@ afterEach(async () => {
   address.path = "/app/orders";
   saved.chips = [];
   saved.putOk = true;
+  saved.getOk = true;
 });
 
 describe("the orders list", () => {
@@ -393,6 +396,21 @@ describe("the orders list", () => {
     expect(push).toHaveBeenCalledWith("/app/orders", { scroll: false });
     expect(chipLinks().map((a) => a.textContent)).toContain("Delivery: School");
     expect(container.textContent).toContain(messages.app.chips.saveFailed);
+  });
+
+  it("offers nothing to add until the saved chips have loaded, and says so with Try again when they can't be", async () => {
+    answer();
+    saved.getOk = false;
+    await render(<OrdersList />);
+    // The built-in chips still work; there is no "+ Add filter" to build a list from a failed load.
+    expect(chipLinks().map((a) => a.textContent)).toContain("To print");
+    expect(button("Add filter")).toBeUndefined();
+    expect(container.textContent).toContain(messages.app.chips.loadFailed);
+    saved.getOk = true;
+    await act(async () => button(messages.app.chips.retry)?.click());
+    await wait(20);
+    expect(button("Add filter")).toBeDefined();
+    expect(container.textContent).not.toContain(messages.app.chips.loadFailed);
   });
 
   it("a job's tab has its own chips, without Job…, saved for that job only", async () => {

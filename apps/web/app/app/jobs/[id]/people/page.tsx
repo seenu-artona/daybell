@@ -18,6 +18,7 @@ import { download } from "@/lib/client-api";
 import { qrCardProblem } from "@/lib/qr-card-messages";
 import { Dialog } from "../../../dialog";
 import { ChipRow } from "../../../filter-chips/chip-row";
+import { SavedChipsNotice } from "../../../filter-chips/saved-chips-notice";
 import { useStudio } from "../../../me-context";
 import { ChildForm } from "../child-form";
 import { useJob } from "../job-context";
@@ -56,7 +57,6 @@ function PeoplePage() {
   const tr = useTranslations("app.roster");
   const tq = useTranslations("app.qrCards");
   const text = useApiText();
-  const tc = useTranslations("app.chips");
   const router = useRouter();
   const { me } = useStudio();
   const seesOrders = canSeeOrders(me.studio.role);
@@ -186,7 +186,7 @@ function PeoplePage() {
           <p role="status" className="m-0 text-sm text-muted empty:-mb-4">
             {status}
           </p>
-          {chips.saveFailed ? <Banner tone="danger" title={tc("saveFailed")} /> : null}
+          <SavedChipsNotice filters={chips.saved} />
           {duplicates > 0 && !(chip.kind === "show" && chip.show === "duplicates") && !empty ? (
             <Banner
               tone="warning"

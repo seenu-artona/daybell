@@ -15,13 +15,19 @@ export function sameChip(a: ListFilterChip, b: ListFilterChip): boolean {
 }
 
 export interface ListFilters {
-  /** The person's saved chips, in order; null while loading, [] if they couldn't be loaded (the built-in chips work). */
+  /**
+   * The person's saved chips, in order; null while they load, or if they couldn't be loaded (then nothing can be added
+   * or removed, so a list built from a failed load is never saved over the real one).
+   */
   chips: ListFilterChip[] | null;
+  /** Loading failed: the page says so and offers `retry`. */
+  loadFailed: boolean;
+  retry: () => void;
   /** Eight chips already: the menu offers no more. */
   full: boolean;
   /** Saving the last change failed and it was undone; the page says so. */
   saveFailed: boolean;
-  /** Adds a chip at the end, shown at once and saved; undone if it can't be saved. */
+  /** Adds a chip at the end, shown at once and saved; false if it couldn't be (not loaded, full, already there, failed). */
   add: (chip: ListFilterChip) => Promise<boolean>;
   /** Removes a chip, at once and saved; put back if it can't be saved. */
   remove: (chip: ListFilterChip) => Promise<boolean>;
@@ -30,91 +36,138 @@ export interface ListFilters {
 }
 
 /**
- * The chips a person added to one list (D147, ADR 0026): read once from GET /me/list-filters, and the whole list saved
- * with PUT on every change. Changes show at once (optimistic) and are undone if the save fails, unless a newer change
- * has replaced them meanwhile. Keys and ids only: the page looks up each chip's name by id.
+ * The chips a person added to one list (D147, ADR 0026): read from GET /me/list-filters, and the whole list saved with
+ * PUT on every change. Changes show at once (optimistic). Saves go one at a time and the newest list wins: while one is
+ * in flight, later changes wait and only the latest is sent next. If the latest list can't be saved, the chips go back
+ * to the last list the server accepted. Keys and ids only: the page looks up each chip's name by id.
  */
 export function useListFilters(page: ListPage, jobId?: string): ListFilters {
   const [chips, setChips] = useState<ListFilterChip[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
-  const current = useRef<ListFilterChip[] | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // What the server last accepted, what the person wants now, and whether a save is in flight.
+  const confirmed = useRef<ListFilterChip[] | null>(null);
+  const desired = useRef<ListFilterChip[] | null>(null);
+  const saving = useRef<Promise<boolean> | null>(null);
+  const savingToken = useRef<object | null>(null);
+  // Answers for an earlier page, job or load are dropped.
+  const epoch = useRef(0);
 
   const show = useCallback((next: ListFilterChip[] | null) => {
-    current.current = next;
+    desired.current = next;
     setChips(next);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` loads again on Retry.
   useEffect(() => {
-    let live = true;
+    const mine = ++epoch.current;
+    confirmed.current = null;
+    saving.current = null;
+    savingToken.current = null;
     show(null);
+    setLoadFailed(false);
     const query = new URLSearchParams({ page });
     if (jobId) query.set("jobId", jobId);
     void api<ListFiltersResponse>(`/me/list-filters?${query}`).then((res) => {
-      if (live) show(res.ok ? res.data.chips : []);
+      if (mine !== epoch.current) return;
+      if (res.ok) {
+        confirmed.current = res.data.chips;
+        show(res.data.chips);
+      } else setLoadFailed(true);
     });
-    return () => {
-      live = false;
-    };
+  }, [page, jobId, show, attempt]);
+
+  /** Sends the newest list, then again while it changed meanwhile; true if the newest list was saved. */
+  const flush = useCallback((): Promise<boolean> => {
+    if (saving.current) return saving.current;
+    const mine = epoch.current;
+    const token = {};
+    savingToken.current = token;
+    const run = (async () => {
+      let ok = true;
+      for (;;) {
+        const sent = desired.current;
+        if (!sent || sent === confirmed.current) break;
+        const res = await api("/me/list-filters", {
+          method: "PUT",
+          body: {
+            page,
+            ...(jobId ? { jobId } : {}),
+            chips: sent.map((c) => (c.value ? { key: c.key, value: c.value } : { key: c.key })),
+          },
+        });
+        if (mine !== epoch.current) return false;
+        if (res.ok) {
+          confirmed.current = sent;
+          ok = true;
+          continue;
+        }
+        ok = false;
+        // Only the newest list is put back; a newer change is sent next and carries the whole list anyway.
+        if (desired.current === sent) {
+          show(confirmed.current);
+          break;
+        }
+      }
+      // Cleared in the same step as the last check of the newest list, so a change right after starts a new save.
+      if (savingToken.current === token) {
+        saving.current = null;
+        savingToken.current = null;
+      }
+      setSaveFailed(!ok);
+      return ok;
+    })();
+    if (savingToken.current === token) saving.current = run;
+    return run;
   }, [page, jobId, show]);
 
-  const save = useCallback(
-    async (next: ListFilterChip[], before: ListFilterChip[]): Promise<boolean> => {
+  const change = useCallback(
+    (next: ListFilterChip[]): Promise<boolean> => {
       show(next);
-      const res = await api(`/me/list-filters`, {
-        method: "PUT",
-        body: {
-          page,
-          ...(jobId ? { jobId } : {}),
-          chips: next.map((c) => (c.value ? { key: c.key, value: c.value } : { key: c.key })),
-        },
-      });
-      if (res.ok) {
-        setSaveFailed(false);
-        return true;
-      }
-      // Undo, unless a newer change has replaced this one already.
-      if (current.current === next) show(before);
-      setSaveFailed(true);
-      return false;
+      // With a save in flight, its loop sends this newest list next.
+      return flush();
     },
-    [page, jobId, show],
+    [show, flush],
   );
 
   const add = useCallback(
     async (chip: ListFilterChip) => {
-      const before = current.current;
-      if (!before || before.length >= MAX_LIST_FILTERS || before.some((c) => sameChip(c, chip)))
+      const now = desired.current;
+      if (!now || now.length >= MAX_LIST_FILTERS || now.some((c) => sameChip(c, chip)))
         return false;
-      return save([...before, chip], before);
+      return change([...now, chip]);
     },
-    [save],
+    [change],
   );
 
   const remove = useCallback(
     async (chip: ListFilterChip) => {
-      const before = current.current;
-      if (!before) return false;
-      return save(
-        before.filter((c) => !sameChip(c, chip)),
-        before,
-      );
+      const now = desired.current;
+      if (!now) return false;
+      return change(now.filter((c) => !sameChip(c, chip)));
     },
-    [save],
+    [change],
   );
 
   const forget = useCallback(
     (gone: readonly ListFilterChip[]) => {
-      const before = current.current;
-      if (!before) return;
-      const next = before.filter((c) => !gone.some((g) => sameChip(c, g)));
-      // Nothing to put back if this fails: the records are gone either way.
-      if (next.length !== before.length) void save(next, next);
+      const now = desired.current;
+      if (!now || !confirmed.current) return;
+      const keep = (c: ListFilterChip) => !gone.some((g) => sameChip(c, g));
+      const next = now.filter(keep);
+      if (next.length === now.length) return;
+      // The records are gone either way: if saving fails, they are not put back.
+      confirmed.current = confirmed.current.filter(keep);
+      void change(next);
     },
-    [save],
+    [change],
   );
 
   return {
     chips,
+    loadFailed,
+    retry: () => setAttempt((n) => n + 1),
     full: (chips?.length ?? 0) >= MAX_LIST_FILTERS,
     saveFailed,
     add,

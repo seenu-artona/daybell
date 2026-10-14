@@ -27,6 +27,7 @@ import { createLoadGuard } from "@/lib/load-guard";
 import { Dialog } from "../dialog";
 import type { AddFilterChoice } from "../filter-chips/add-filter-menu";
 import { type ChipItem, ChipRow } from "../filter-chips/chip-row";
+import { SavedChipsNotice } from "../filter-chips/saved-chips-notice";
 import { useListFilters } from "../filter-chips/use-list-filters";
 import { clientName, recordKey, useRecordNames } from "../filter-chips/use-record-names";
 import { ListPage } from "../list-page";
@@ -158,7 +159,7 @@ function JobsPage() {
       case "show":
         return t(`chips.${c.show}`);
       case "client":
-        return names.get(recordKey("client", c.id)) ?? tc("unnamed");
+        return names.get(recordKey("client", c.id)) ?? tc("loadingName");
     }
   };
   const item = (c: JobChip, remove?: ListFilterChip): ChipItem => ({
@@ -172,6 +173,10 @@ function JobsPage() {
             void saved.remove(remove);
             if (sameJobChip(c, chip)) router.push(jobChipHref(ALL_JOBS), { scroll: false });
           },
+          // Until the client's name is known, the button says what kind of chip it removes.
+          ...(c.kind === "client" && !names.get(recordKey("client", c.id))
+            ? { removeLabel: tc("remove", { name: t("chips.client") }) }
+            : {}),
         }
       : {}),
   });
@@ -192,40 +197,42 @@ function JobsPage() {
     router.push(jobChipHref(c), { scroll: false });
   };
   const has = (key: string) => added.some((a) => a.saved.key === key);
-  const choices: AddFilterChoice[] = saved.full
-    ? []
-    : [
-        ...(["closingThisWeek", "pictureDayThisMonth"] as const)
-          .filter((show) => !has(show))
-          .map(
-            (show): AddFilterChoice => ({
-              kind: "plain",
-              id: show,
-              label: t(`chips.${show}`),
-              onPick: () => addChip({ key: show, value: null }, { kind: "show", show }),
-            }),
-          ),
-        {
-          kind: "search",
-          id: "client",
-          label: t("chips.clientMenu"),
-          fieldLabel: t("chips.client"),
-          placeholder: t("chips.clientPlaceholder"),
-          listLabel: t("chips.clientList"),
-          search: async (q) => {
-            const res = await api<ClientsResponse>(
-              `/clients?limit=20${q ? `&q=${encodeURIComponent(q)}` : ""}`,
-            );
-            return res.ok
-              ? res.data.clients
-                  .filter((c) => !added.some((a) => a.saved.value === c.id))
-                  .map((c) => ({ id: c.id, name: c.name, detail: c.city }))
-              : null;
+  // Nothing can be added until the saved chips have loaded (a list built from a failed load is never saved).
+  const choices: AddFilterChoice[] =
+    saved.chips === null || saved.full
+      ? []
+      : [
+          ...(["closingThisWeek", "pictureDayThisMonth"] as const)
+            .filter((show) => !has(show))
+            .map(
+              (show): AddFilterChoice => ({
+                kind: "plain",
+                id: show,
+                label: t(`chips.${show}`),
+                onPick: () => addChip({ key: show, value: null }, { kind: "show", show }),
+              }),
+            ),
+          {
+            kind: "search",
+            id: "client",
+            label: t("chips.clientMenu"),
+            fieldLabel: t("chips.client"),
+            placeholder: t("chips.clientPlaceholder"),
+            listLabel: t("chips.clientList"),
+            search: async (q) => {
+              const res = await api<ClientsResponse>(
+                `/clients?limit=20${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+              );
+              return res.ok
+                ? res.data.clients
+                    .filter((c) => !added.some((a) => a.saved.value === c.id))
+                    .map((c) => ({ id: c.id, name: c.name, detail: c.city }))
+                : null;
+            },
+            onPick: (option) =>
+              addChip({ key: "client", value: option.id }, { kind: "client", id: option.id }),
           },
-          onPick: (option) =>
-            addChip({ key: "client", value: option.id }, { kind: "client", id: option.id }),
-        },
-      ];
+        ];
 
   // With no jobs at all, the empty card has its own "Create your first job".
   const noJobsYet = chip.kind === "all" && search === "" && jobs !== null && jobs.length === 0;
@@ -243,7 +250,7 @@ function JobsPage() {
       }
       sections={<JobsSections current="list" />}
     >
-      {saved.saveFailed ? <Banner tone="danger" title={tc("saveFailed")} /> : null}
+      <SavedChipsNotice filters={saved} />
       {error ? <Banner tone="danger" title={error} /> : null}
 
       {noJobsYet ? (

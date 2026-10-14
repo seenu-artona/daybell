@@ -1826,9 +1826,11 @@
       "showOnly": "Show only",
       "back": "Back",
       "remove": "Remove filter: {name}",
-      "unnamed": "Filter",
       "saveFailed": "We couldn’t save your filters. Try again in a moment.",
-      "all": "All"
+      "all": "All",
+      "loadFailed": "We couldn’t load your saved filters.",
+      "retry": "Try again",
+      "loadingName": "…"
     }
   },
   "invite": {

@@ -18,6 +18,8 @@ export interface ChipItem {
   onSelect?: () => void;
   /** Added chips only: removes the chip (and, if it was selected, goes back to All). */
   onRemove?: () => void;
+  /** The remove button's name when the label isn't the chip's name yet (still loading): e.g. "Remove filter: Client". */
+  removeLabel?: string;
 }
 
 const CHIP_TARGET = "[data-chip-target]";
@@ -73,7 +75,7 @@ export function ChipRow({
             {...(item.onRemove
               ? {
                   remove: {
-                    label: t("remove", { name: item.label }),
+                    label: item.removeLabel ?? t("remove", { name: item.label }),
                     onRemove: () => {
                       refocus.current = true;
                       item.onRemove?.();

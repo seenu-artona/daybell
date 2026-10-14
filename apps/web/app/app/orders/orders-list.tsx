@@ -31,6 +31,7 @@ import { api } from "@/lib/client-api";
 import { createLoadGuard } from "@/lib/load-guard";
 import type { AddFilterChoice } from "../filter-chips/add-filter-menu";
 import { type ChipItem, ChipRow } from "../filter-chips/chip-row";
+import { SavedChipsNotice } from "../filter-chips/saved-chips-notice";
 import { useListFilters } from "../filter-chips/use-list-filters";
 import { jobName, recordKey, useRecordNames } from "../filter-chips/use-record-names";
 import { useStudio } from "../me-context";
@@ -157,7 +158,7 @@ export function OrdersList({ jobId }: { jobId?: string }) {
       case "all":
         return tc("all");
       case "job":
-        return names.get(recordKey("job", c.id)) ?? tc("unnamed");
+        return names.get(recordKey("job", c.id)) ?? tc("loadingName");
       default:
         return t(`chips.${c.kind}`);
     }
@@ -174,6 +175,10 @@ export function OrdersList({ jobId }: { jobId?: string }) {
             if (sameOrderChip(c, chip))
               router.push(orderChipHref(pathname, ALL_ORDERS), { scroll: false });
           },
+          // Until the job's name is known, the button says what kind of chip it removes.
+          ...(c.kind === "job" && !names.get(recordKey("job", c.id))
+            ? { removeLabel: tc("remove", { name: t("chips.job") }) }
+            : {}),
         }
       : {}),
   });
@@ -192,45 +197,47 @@ export function OrdersList({ jobId }: { jobId?: string }) {
     void saved.add(saving);
     router.push(orderChipHref(pathname, c), { scroll: false });
   };
-  const choices: AddFilterChoice[] = saved.full
-    ? []
-    : [
-        ...(["deliveryHome", "deliverySchool"] as const)
-          .filter((key) => !added.some((a) => a.saved.key === key))
-          .map(
-            (key): AddFilterChoice => ({
-              kind: "plain",
-              id: key,
-              label: t(`chips.${key}`),
-              onPick: () => addChip({ key, value: null }, { kind: key }),
-            }),
-          ),
-        // The job chip is the Orders page's only: a job's Orders tab is that job's already.
-        ...(withJob
-          ? [
-              {
-                kind: "search",
-                id: "job",
-                label: t("chips.jobMenu"),
-                fieldLabel: t("chips.job"),
-                placeholder: t("chips.jobPlaceholder"),
-                listLabel: t("chips.jobList"),
-                search: async (typed: string) => {
-                  const res = await api<JobsResponse>(
-                    `/jobs?limit=20${typed ? `&q=${encodeURIComponent(typed)}` : ""}`,
-                  );
-                  return res.ok
-                    ? res.data.jobs
-                        .filter((j) => !added.some((a) => a.saved.value === j.id))
-                        .map((j) => ({ id: j.id, name: j.name, detail: j.internalNumber }))
-                    : null;
-                },
-                onPick: (option: { id: string }) =>
-                  addChip({ key: "job", value: option.id }, { kind: "job", id: option.id }),
-              } satisfies AddFilterChoice,
-            ]
-          : []),
-      ];
+  // Nothing can be added until the saved chips have loaded (a list built from a failed load is never saved).
+  const choices: AddFilterChoice[] =
+    saved.chips === null || saved.full
+      ? []
+      : [
+          ...(["deliveryHome", "deliverySchool"] as const)
+            .filter((key) => !added.some((a) => a.saved.key === key))
+            .map(
+              (key): AddFilterChoice => ({
+                kind: "plain",
+                id: key,
+                label: t(`chips.${key}`),
+                onPick: () => addChip({ key, value: null }, { kind: key }),
+              }),
+            ),
+          // The job chip is the Orders page's only: a job's Orders tab is that job's already.
+          ...(withJob
+            ? [
+                {
+                  kind: "search",
+                  id: "job",
+                  label: t("chips.jobMenu"),
+                  fieldLabel: t("chips.job"),
+                  placeholder: t("chips.jobPlaceholder"),
+                  listLabel: t("chips.jobList"),
+                  search: async (typed: string) => {
+                    const res = await api<JobsResponse>(
+                      `/jobs?limit=20${typed ? `&q=${encodeURIComponent(typed)}` : ""}`,
+                    );
+                    return res.ok
+                      ? res.data.jobs
+                          .filter((j) => !added.some((a) => a.saved.value === j.id))
+                          .map((j) => ({ id: j.id, name: j.name, detail: j.internalNumber }))
+                      : null;
+                  },
+                  onPick: (option: { id: string }) =>
+                    addChip({ key: "job", value: option.id }, { kind: "job", id: option.id }),
+                } satisfies AddFilterChoice,
+              ]
+            : []),
+        ];
 
   function toggle(id: string, on: boolean) {
     setSelected((s) => {
@@ -272,7 +279,7 @@ export function OrdersList({ jobId }: { jobId?: string }) {
       <p role="status" aria-live="polite" className="m-0 empty:sr-only">
         {message}
       </p>
-      {saved.saveFailed ? <Banner tone="danger" title={tc("saveFailed")} /> : null}
+      <SavedChipsNotice filters={saved} />
       {problem ? <Banner tone="danger" title={problem} /> : null}
 
       <ListCard

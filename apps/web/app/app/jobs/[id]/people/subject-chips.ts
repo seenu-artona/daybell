@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import type { AddFilterChoice } from "../../../filter-chips/add-filter-menu";
 import type { ChipItem } from "../../../filter-chips/chip-row";
-import { useListFilters } from "../../../filter-chips/use-list-filters";
+import { type ListFilters, useListFilters } from "../../../filter-chips/use-list-filters";
 import {
   ALL_SUBJECTS,
   BUILT_IN_SHOWS,
@@ -51,7 +51,8 @@ export function useSubjectChips({
   childId: string | null;
   items: ChipItem[];
   choices: AddFilterChoice[];
-  saveFailed: boolean;
+  /** The saved chips' state, for SavedChipsNotice. */
+  saved: ListFilters;
 } {
   const t = useTranslations("app.people");
   const tr = useTranslations("app.roster");
@@ -95,7 +96,7 @@ export function useSubjectChips({
       case "all":
         return tc("all");
       case "class":
-        return groups.find((g) => g.id === c.id)?.name ?? tc("unnamed");
+        return groups.find((g) => g.id === c.id)?.name ?? tc("loadingName");
       case "grade":
         return t("chips.gradeChip", { grade: c.grade });
       case "show":
@@ -118,6 +119,10 @@ export function useSubjectChips({
             if (sameSubjectChip(c, chip))
               router.push(subjectsHref(base, ALL_SUBJECTS, childId), { scroll: false });
           },
+          // Until the roster's classes are loaded, the button says what kind of chip it removes.
+          ...(c.kind === "class" && !groups.some((g) => g.id === c.id)
+            ? { removeLabel: tc("remove", { name: tr("columns.group", { group: word }) }) }
+            : {}),
         }
       : {}),
   });
@@ -157,28 +162,30 @@ export function useSubjectChips({
   };
   const has = (key: string, value: string | null = null) =>
     added.some((a) => a.saved.key === key && a.saved.value === value);
-  const savedChoices: AddFilterChoice[] = saved.full
-    ? []
-    : [
-        ...groups
-          .filter((g) => !has("class", g.id))
-          .map(
-            (g): AddFilterChoice => ({
+  // Nothing can be saved until the saved chips have loaded; a grade (browser only) can be added meanwhile.
+  const savedChoices: AddFilterChoice[] =
+    saved.chips === null || saved.full
+      ? []
+      : [
+          ...groups
+            .filter((g) => !has("class", g.id))
+            .map(
+              (g): AddFilterChoice => ({
+                kind: "plain",
+                id: `class:${g.id}`,
+                label: g.name,
+                onPick: () => addSaved({ key: "class", value: g.id }, { kind: "class", id: g.id }),
+              }),
+            ),
+          ...SAVED_SHOWS.filter((show) => !has(show)).map(
+            (show): AddFilterChoice => ({
               kind: "plain",
-              id: `class:${g.id}`,
-              label: g.name,
-              onPick: () => addSaved({ key: "class", value: g.id }, { kind: "class", id: g.id }),
+              id: show,
+              label: label({ kind: "show", show }),
+              onPick: () => addSaved({ key: show, value: null }, { kind: "show", show }),
             }),
           ),
-        ...SAVED_SHOWS.filter((show) => !has(show)).map(
-          (show): AddFilterChoice => ({
-            kind: "plain",
-            id: show,
-            label: label({ kind: "show", show }),
-            onPick: () => addSaved({ key: show, value: null }, { kind: "show", show }),
-          }),
-        ),
-      ];
+        ];
   const gradesLeft = grades.filter((g) => !gradeChips.includes(g));
   const gradeChoice: AddFilterChoice[] =
     gradesLeft.length > 0
@@ -204,5 +211,5 @@ export function useSubjectChips({
   const flags = savedChoices.filter((c) => c.id === "doNotPhotograph" || c.id === "doNotPublish");
   const choices = [...savedChoices.filter((c) => !flags.includes(c)), ...gradeChoice, ...flags];
 
-  return { chip, childId, items, choices, saveFailed: saved.saveFailed };
+  return { chip, childId, items, choices, saved };
 }

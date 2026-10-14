@@ -122,6 +122,90 @@ describe("useListFilters", () => {
     });
   });
 
+  it("a failed load leaves the chips unknown: nothing is added, removed or saved until Retry loads them", async () => {
+    api.mockImplementation(async () => ({
+      ok: false,
+      status: 500,
+      code: "internal",
+      message: "",
+      fields: {},
+    }));
+    await render(<Probe />);
+    expect(latest.chips).toBeNull();
+    expect(latest.loadFailed).toBe(true);
+    await act(async () => {
+      expect(await latest.add({ key: "closingThisWeek", value: null })).toBe(false);
+      expect(await latest.remove({ key: "client", value: CLIENT })).toBe(false);
+      latest.forget([{ key: "client", value: CLIENT }]);
+    });
+    expect(puts()).toHaveLength(0);
+    answer([{ key: "client", value: CLIENT }]);
+    await act(async () => latest.retry());
+    await wait();
+    expect(latest.loadFailed).toBe(false);
+    expect(latest.chips).toEqual([{ key: "client", value: CLIENT }]);
+  });
+
+  /** PUTs that answer only when the test says so, in order. */
+  function heldPuts(chips: unknown[]) {
+    const held: ((ok: boolean) => void)[] = [];
+    api.mockImplementation((_path: string, init?: { method?: string }) =>
+      init?.method === "PUT"
+        ? new Promise((resolve) =>
+            held.push((ok) =>
+              resolve(
+                ok
+                  ? { ok: true, status: 204, data: undefined }
+                  : { ok: false, status: 500, code: "internal", message: "", fields: {} },
+              ),
+            ),
+          )
+        : Promise.resolve({ ok: true, status: 200, data: { chips } }),
+    );
+    return held;
+  }
+  const bodies = () => puts().map((c) => (c[1] as { body: { chips: unknown[] } }).body.chips);
+
+  it("saves one list at a time; changes made meanwhile go next as one list, the newest", async () => {
+    const held = heldPuts([]);
+    await render(<Probe />);
+    let first: Promise<boolean> = Promise.resolve(false);
+    await act(async () => {
+      first = latest.add({ key: "closingThisWeek", value: null });
+      void latest.add({ key: "client", value: CLIENT });
+      void latest.remove({ key: "closingThisWeek", value: null });
+    });
+    // One request in flight, the screen already shows the newest list.
+    expect(puts()).toHaveLength(1);
+    expect(latest.chips).toEqual([{ key: "client", value: CLIENT }]);
+    await act(async () => held[0]?.(true));
+    await wait();
+    expect(puts()).toHaveLength(2);
+    expect(bodies()[1]).toEqual([{ key: "client", value: CLIENT }]);
+    await act(async () => held[1]?.(true));
+    expect(await first).toBe(true);
+    expect(latest.chips).toEqual([{ key: "client", value: CLIENT }]);
+    expect(latest.saveFailed).toBe(false);
+  });
+
+  it("puts back the last list the server accepted when the newest can't be saved", async () => {
+    const held = heldPuts([]);
+    await render(<Probe />);
+    await act(async () => {
+      void latest.add({ key: "closingThisWeek", value: null });
+    });
+    await act(async () => held[0]?.(true));
+    await wait();
+    await act(async () => {
+      void latest.add({ key: "client", value: CLIENT });
+    });
+    expect(latest.chips).toHaveLength(2);
+    await act(async () => held[1]?.(false));
+    await wait();
+    expect(latest.chips).toEqual([{ key: "closingThisWeek", value: null }]);
+    expect(latest.saveFailed).toBe(true);
+  });
+
   it("offers no more than eight", async () => {
     answer(
       Array.from({ length: 8 }, (_, i) => ({ key: "client", value: `${CLIENT.slice(0, -1)}${i}` })),

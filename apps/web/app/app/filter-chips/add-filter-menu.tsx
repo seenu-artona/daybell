@@ -114,7 +114,11 @@ function MenuPanel({
       <p id={headingId} className="m-0 px-3 pt-1 pb-1.5 text-label text-muted">
         {t("showOnly")}
       </p>
-      <ul aria-labelledby={headingId} className="m-0 flex list-none flex-col p-0">
+      {/* A job with many classes: the list scrolls inside the panel rather than running off the window. */}
+      <ul
+        aria-labelledby={headingId}
+        className="m-0 flex max-h-[min(60vh,28rem)] list-none flex-col overflow-y-auto p-0"
+      >
         {choices.map((choice) => (
           <li key={choice.id}>
             <button
