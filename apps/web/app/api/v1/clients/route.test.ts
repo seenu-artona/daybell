@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // GET /clients?q= (D96 studio separation, CLAUDE.md rule 4): the list is scoped to the caller's studio (studio_id from
 // studioScope), and ?q= narrows it by name only (ilike on "name", nothing else). Studio B searching for a name only
@@ -132,11 +132,11 @@ function fakeDatabase() {
   return { supabase: { from, rpc }, calls };
 }
 
-async function list(studioId: string, query: string) {
+async function list(studioId: string, query: string, region = "ca") {
   const db = fakeDatabase();
   scope.mockResolvedValue({
     supabase: db.supabase,
-    studio: { id: studioId, name: "S", slug: "s", region: "ca", role: "staff" },
+    studio: { id: studioId, name: "S", slug: "s", region, role: "staff" },
     userId: "u",
   });
   const { GET } = await import("./route");
@@ -222,5 +222,45 @@ describe("GET /clients: People › Clients' columns (D150)", () => {
       { p_studio_id: B, p_client_ids: ["c0000000-0000-4000-8000-00000000000b"] },
     ]);
     expect(JSON.stringify(body)).not.toContain("Dana");
+  });
+});
+
+describe("GET /clients: a page after a client that is gone", () => {
+  it("has no clients and no next page, but still counts the studio's clients", async () => {
+    const { res, body, calls } = await list(A, "?cursor=c0000000-0000-4000-8000-0000000000ff");
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ clients: [], nextCursor: null, total: 1 });
+    // The count is the caller's studio's.
+    expect(calls).toContainEqual(["select", "id", { count: "exact", head: true }]);
+    expect(calls.filter((c) => c[0] === "eq" && c[1] === "studio_id" && c[2] !== A)).toEqual([]);
+  });
+});
+
+describe("clients in Montréal (D113; ADR 0028, call 8)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("pins /clients to Montréal and refuses a Canadian studio's clients elsewhere, before any query", async () => {
+    expect((await import("./route")).preferredRegion).toBe("yul1");
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    const { res, calls } = await list(A, "");
+    expect(res.status).toBe(422);
+    expect(calls).toEqual([]);
+    const { POST } = await import("./route");
+    const added = await POST(
+      new Request("http://localhost/api/v1/clients", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "New School", country: "CA" }),
+      }),
+    );
+    expect(added.status).toBe(422);
+  });
+
+  it("runs in Montréal", async () => {
+    vi.stubEnv("VERCEL_REGION", "yul1");
+    const { res } = await list(A, "");
+    expect(res.status).toBe(200);
   });
 });

@@ -14,6 +14,11 @@ export const badgeVariants = cva(
         danger: "bg-danger-soft text-danger",
         /** A neutral note that isn't a job status, e.g. a studio's default price list. */
         info: "bg-info-soft text-info",
+        /**
+         * A positive note on a record that isn't a job status, on primary-soft: a client's main contact, a subject who
+         * has ordered. The same colours as Selling, under a name of its own so a status and a note don't share one.
+         */
+        primary: "bg-primary-soft text-primary-hover",
       },
     },
     defaultVariants: { tone: "draft" },

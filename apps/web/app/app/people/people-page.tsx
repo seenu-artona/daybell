@@ -1,6 +1,6 @@
 "use client";
 
-import { type PeoplePage as PeopleSection, peopleSections } from "@daybell/core";
+import { type PeopleSection, peopleSections } from "@daybell/core";
 import { MainTab, MainTabs } from "@daybell/ui";
 import Link from "next/link";
 import { useTranslations } from "next-intl";

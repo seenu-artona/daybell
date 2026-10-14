@@ -49,8 +49,8 @@ const PAIR = "grid gap-5 sm:grid-cols-2";
 /**
  * Add or edit a client's contact (People › Contacts, D150; ADR 0028), laid out by the D133 form rules: the client (a
  * new contact only: a contact never moves to another client), first | last name, role, email | phone, and "Main
- * contact for this client", whose name, phone and email become the client's contact person. Read-only for people who
- * aren't owners or admins.
+ * contact for this client", whose name, phone and email become the client's contact person. The main contact's box
+ * can't be unticked: making someone else main is how it changes. Read-only for people who aren't owners or admins.
  */
 export function ContactForm({
   contact,
@@ -75,6 +75,8 @@ export function ContactForm({
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const optional = (label: string) => ta("optionalLabel", { label });
+  // The client's main contact stays main until someone else is made main (the API refuses an untick too).
+  const isMain = contact?.isMain === true;
 
   const input = (key: TextKey) => ({
     name: key,
@@ -133,8 +135,18 @@ export function ContactForm({
         />
       )}
       <div className={PAIR}>
-        <Field label={optional(t("firstName"))} autoComplete="off" {...input("firstName")} />
-        <Field label={optional(t("lastName"))} autoComplete="off" {...input("lastName")} />
+        <Field
+          label={optional(t("firstName"))}
+          maxLength={60}
+          autoComplete="off"
+          {...input("firstName")}
+        />
+        <Field
+          label={optional(t("lastName"))}
+          maxLength={60}
+          autoComplete="off"
+          {...input("lastName")}
+        />
       </div>
       <Field
         label={optional(t("role"))}
@@ -144,7 +156,13 @@ export function ContactForm({
         {...input("role")}
       />
       <div className={PAIR}>
-        <Field label={optional(t("email"))} type="email" autoComplete="off" {...input("email")} />
+        <Field
+          label={optional(t("email"))}
+          type="email"
+          maxLength={254}
+          autoComplete="off"
+          {...input("email")}
+        />
         <Field
           label={optional(t("phone"))}
           type="tel"
@@ -157,9 +175,9 @@ export function ContactForm({
         label={t("main")}
         checked={draft.isMain}
         onChange={(isMain) => setDraft({ ...draft, isMain })}
-        help={t("mainHelp")}
+        help={isMain ? t("mainLocked") : t("mainHelp")}
         error={text.field(errors.isMain)}
-        disabled={readOnly}
+        disabled={readOnly || isMain}
       />
       {readOnly ? <p className="m-0 text-caption text-muted">{t("readOnlyNote")}</p> : null}
 

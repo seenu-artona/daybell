@@ -9,6 +9,7 @@ import type {
 } from "@daybell/api";
 import { canSeeOrders } from "@daybell/core";
 import {
+  Badge,
   Banner,
   Button,
   ClickableRow,
@@ -330,9 +331,9 @@ function SubjectsPage() {
                   {seesOrders ? (
                     <TableCell>
                       {s.hasPaidOrder === null ? null : s.hasPaidOrder ? (
-                        t("ordered.yes")
+                        <Badge tone="primary">{t("ordered.yes")}</Badge>
                       ) : (
-                        <span className="text-muted">{t("ordered.no")}</span>
+                        <Badge tone="draft">{t("ordered.no")}</Badge>
                       )}
                     </TableCell>
                   ) : null}

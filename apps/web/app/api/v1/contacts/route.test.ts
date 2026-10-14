@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // People › Contacts (D150, ADR 0028; D96 leak test): every list, search, add and change is scoped to the caller's
 // studio (studio_id from studioScope, never from the request); another studio's client or contact is simply not found;
@@ -127,11 +127,11 @@ function fakeDatabase() {
   return { supabase: { from, rpc }, calls, data };
 }
 
-function signIn(studioId: string, role = "owner") {
+function signIn(studioId: string, role = "owner", region = "ca") {
   const db = fakeDatabase();
   scope.mockResolvedValue({
     supabase: db.supabase,
-    studio: { id: studioId, name: "S", slug: "s", region: "ca", role },
+    studio: { id: studioId, name: "S", slug: "s", region, role },
     userId: "u",
   });
   return db;
@@ -285,10 +285,10 @@ describe("PATCH /contacts/:id (leak test)", () => {
 
   it("changes the caller's studio's contact, scoped by studio", async () => {
     const db = signIn(A);
-    const res = await patch(DANA, { role: "Office manager", isMain: false });
+    const res = await patch(DANA, { role: "Office manager", isMain: true });
     expect(res.status).toBe(200);
-    expect((await res.json()).contact).toMatchObject({ role: "Office manager", isMain: false });
-    expect(db.calls).toContainEqual(["update", { role: "Office manager", is_main: false }]);
+    expect((await res.json()).contact).toMatchObject({ role: "Office manager", isMain: true });
+    expect(db.calls).toContainEqual(["update", { role: "Office manager", is_main: true }]);
     expect(db.calls.filter((c) => c[0] === "eq" && c[1] === "studio_id")).toEqual([
       ["eq", "studio_id", A],
       ["eq", "studio_id", A],
@@ -315,10 +315,70 @@ describe("PATCH /contacts/:id (leak test)", () => {
     expect(moved.status).toBe(400);
   });
 
+  it("refuses unticking the main contact: someone else is made main instead", async () => {
+    const db = signIn(A);
+    const res = await patch(DANA, { role: "Office manager", isMain: false });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.fields).toEqual({ isMain: "validation.mainContactStays" });
+    expect(db.calls.filter((c) => c[0] === "update")).toEqual([]);
+    expect(db.data.client_contacts?.find((r) => r.id === DANA)?.is_main).toBe(true);
+  });
+
+  it("lets an ordinary contact stay ordinary", async () => {
+    const db = signIn(A);
+    const contacts = db.data.client_contacts ?? [];
+    for (const r of contacts) if (r.id === DANA) r.is_main = false;
+    const res = await patch(DANA, { isMain: false });
+    expect(res.status).toBe(200);
+    expect(db.calls).toContainEqual(["update", { is_main: false }]);
+  });
+
   it("is for owners and admins only", async () => {
     const db = signIn(A, "staff");
     const res = await patch(DANA, { role: "X" });
     expect(res.status).toBe(403);
     expect(db.calls.filter((c) => c[0] === "update")).toEqual([]);
+  });
+});
+
+describe("contacts in Montréal (D113; ADR 0028, call 8)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("pins every contacts route to Montréal", async () => {
+    for (const route of [
+      await import("./route"),
+      await import("./search/route"),
+      await import("./[id]/route"),
+    ])
+      expect(route.preferredRegion).toBe("yul1");
+  });
+
+  it("refuses a Canadian studio's contacts outside Montréal, before reading or writing anything", async () => {
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    const db = signIn(A, "owner", "ca");
+    const { GET, POST } = await import("./route");
+    const { POST: SEARCH } = await import("./search/route");
+    const { PATCH } = await import("./[id]/route");
+    const responses = [
+      await GET(new Request("http://localhost/api/v1/contacts")),
+      await SEARCH(json("http://localhost/api/v1/contacts/search", "POST", { q: "dana" })),
+      await POST(
+        json("http://localhost/api/v1/contacts", "POST", { clientId: CLIENT_A, firstName: "X" }),
+      ),
+      await PATCH(json(`http://localhost/api/v1/contacts/${DANA}`, "PATCH", { role: "X" }), {
+        params: Promise.resolve({ id: DANA }),
+      }),
+    ];
+    expect(responses.map((r) => r.status)).toEqual([422, 422, 422, 422]);
+    expect(db.calls).toEqual([]);
+  });
+
+  it("runs in Montréal", async () => {
+    vi.stubEnv("VERCEL_REGION", "yul1");
+    signIn(A, "owner", "ca");
+    const { GET } = await import("./route");
+    expect((await GET(new Request("http://localhost/api/v1/contacts"))).status).toBe(200);
   });
 });

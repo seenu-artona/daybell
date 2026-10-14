@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOpenApi } from "./routes";
+import { buildOpenApi, ROUTES } from "./routes";
 import {
   contactInput,
   contactListQuery,
@@ -147,5 +147,26 @@ describe("API description of People", () => {
     expect(doc.paths["/subjects/search"]).not.toHaveProperty("get");
     for (const name of ["Contact", "Subject", "ClientListItem"])
       expect(doc.components.schemas).toHaveProperty(name);
+  });
+
+  it("names only the errors the People routes give, Montréal's included (ADR 0028, call 8)", () => {
+    const errors = (path: string, method: string) =>
+      ROUTES.find((r) => r.path === path && r.method === method)?.errors ?? [];
+    // Listing and searching find no single record, so they are never not_found.
+    for (const path of ["/contacts", "/contacts/search"]) {
+      const method = path === "/contacts" ? "GET" : "POST";
+      expect(errors(path, method)).not.toContain("not_found");
+    }
+    for (const [path, method] of [
+      ["/contacts", "GET"],
+      ["/contacts", "POST"],
+      ["/contacts/search", "POST"],
+      ["/contacts/{id}", "PATCH"],
+      ["/clients", "GET"],
+      ["/clients", "POST"],
+      ["/subjects", "GET"],
+      ["/subjects/search", "POST"],
+    ] as const)
+      expect(errors(path, method), `${method} ${path}`).toContain("region_unavailable");
   });
 });

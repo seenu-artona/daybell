@@ -6,7 +6,7 @@
 -- People lists' saved chips take only their own keys and the studio's own records.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(71);
+select plan(89);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -74,6 +74,16 @@ select ok(has_function_privilege('authenticated', 'public.list_studio_children(u
   'the People lists are for signed-in people only');
 select is((select prosecdef from pg_proc where oid = 'public.list_studio_children(uuid, text, text, uuid, uuid, uuid, integer)'::regprocedure),
   false, 'list_studio_children is SECURITY INVOKER: row-level security decides what it reads');
+select is((select prosecdef from pg_proc where oid = 'public.list_client_contacts(uuid, text, boolean, uuid, uuid, integer)'::regprocedure),
+  false, 'list_client_contacts is SECURITY INVOKER');
+select is((select prosecdef from pg_proc where oid = 'public.client_list_details(uuid, uuid[])'::regprocedure),
+  false, 'client_list_details is SECURITY INVOKER');
+select is((select prosecdef from pg_proc where oid = 'app.ordered_children(uuid, uuid[])'::regprocedure),
+  false, 'app.ordered_children is SECURITY INVOKER: only people who read orders get an answer');
+select is((select prosecdef from pg_proc where oid = 'app.client_contact_take_main()'::regprocedure),
+  false, 'app.client_contact_take_main is SECURITY INVOKER: the step-down is the caller''s own update');
+select ok(not has_function_privilege('authenticated', 'app.mirror_main_contact(uuid, uuid)', 'execute'),
+  'signed-in people can''t call the client mirror themselves');
 select is((select count(*) from public.client_contacts where client_id = 'cb000000-0000-4000-8000-000000000002'
   and is_main and first_name = 'Bertha'), 1::bigint, 'a client added with a contact person gets them as its main contact');
 
@@ -326,6 +336,9 @@ select is(pg_temp.paid(public.list_studio_children('aaaaaaaa-aaaa-4aaa-8aaa-aaaa
   'Noah=false,Mia=false,Ava=true', 'Ava has ordered; Noah and Mia haven''t (D148)');
 select is(pg_temp.paid(public.list_children('a0000000-0000-4000-8000-000000000001'), 'children'),
   'Noah=false,Ava=true', 'the job''s roster says the same, from the same rule');
+select is((select array_agg(o.child_id) from app.ordered_children('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    array['c0000000-0000-4000-8000-000000000001'::uuid, 'c0000000-0000-4000-8000-000000000002'::uuid]) o),
+  array['c0000000-0000-4000-8000-000000000001'::uuid], 'the shared rule, asked by the owner, answers Ava');
 select is(pg_temp.names(public.list_studio_children('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, 'ordered')),
   array['Ava'], 'the Ordered chip');
 select is(pg_temp.names(public.list_studio_children('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, 'notOrdered')),
@@ -358,6 +371,9 @@ select throws_ok($$ select public.list_studio_children('aaaaaaaa-aaaa-4aaa-8aaa-
   '42501', null, 'and can''t filter by it');
 select is(pg_temp.paid(public.list_children('a0000000-0000-4000-8000-000000000001'), 'children'),
   'Noah=null,Ava=null', 'nor on the job''s roster');
+select is((select count(*) from app.ordered_children('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    array['c0000000-0000-4000-8000-000000000001'::uuid, 'c0000000-0000-4000-8000-000000000002'::uuid])), 0::bigint,
+  'nor from the shared rule itself: photographers read no orders, so it answers nobody');
 
 -- ── Studio B ──────────────────────────────────────────────────────────────────────────────────────────────────────
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as signed_in;
@@ -382,6 +398,56 @@ select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaa
 select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'people_subjects', null,
   '[{"key": "job", "value": "b0000000-0000-4000-8000-000000000001"}]') $$, '22023', 'list_filters_record',
   'another studio''s job is refused');
+
+-- ── The lists' inputs are bounded ─────────────────────────────────────────────────────────────────────────────────
+select lives_ok($$ select public.list_client_contacts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', repeat('a', 120)) $$,
+  'a contacts search of 120 characters is read');
+select throws_ok($$ select public.list_client_contacts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', repeat('a', 121)) $$,
+  '22023', 'list_client_contacts_q', 'a longer one is refused');
+select lives_ok($$ select public.client_list_details('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  array(select gen_random_uuid() from generate_series(1, 101))) $$,
+  'the clients list''s details take a page of 101 clients');
+select throws_ok($$ select public.client_list_details('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  array(select gen_random_uuid() from generate_series(1, 102))) $$,
+  '22023', 'client_list_details_ids', 'and refuse more');
+
+-- ── Making a contact main needs the right to write contacts ───────────────────────────────────────────────────────
+select pg_temp.as_user('33333333-3333-4333-8333-333333333333') as signed_in;
+select throws_ok($$
+  insert into public.client_contacts (studio_id, client_id, first_name, is_main)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select id from ids where k = 'lincoln'), 'Usurper', true) $$,
+  '42501', null, 'a photographer can''t add a main contact');
+select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;
+select throws_ok($$
+  insert into public.client_contacts (studio_id, client_id, first_name, is_main)
+  values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'cb000000-0000-4000-8000-000000000002', 'Usurper', true) $$,
+  '42501', null, 'studio A''s owner can''t add a main contact to studio B''s client');
+reset role;
+select results_eq($$ select c.contact_first_name, k.first_name, k.is_main from public.clients c
+  join public.client_contacts k on k.studio_id = c.studio_id and k.client_id = c.id
+  where c.id = (select id from ids where k = 'lincoln') and k.is_main $$,
+  $$ values ('Pat'::text, 'Pat'::text, true) $$, 'Lincoln''s main contact is still Pat, on the client too');
+select results_eq($$ select c.contact_first_name, k.first_name, k.is_main from public.clients c
+  join public.client_contacts k on k.studio_id = c.studio_id and k.client_id = c.id
+  where c.id = 'cb000000-0000-4000-8000-000000000002' $$,
+  $$ values ('Bertha'::text, 'Bertha'::text, true) $$, 'and studio B''s client still has only Bertha, as main');
+
+-- ── A contact added as main takes over ────────────────────────────────────────────────────────────────────────────
+set local role authenticated;
+select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;
+select lives_ok($$
+  insert into public.client_contacts (studio_id, client_id, first_name, last_name, role, email, is_main)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select id from ids where k = 'lincoln'), 'Yan', 'Lee', 'Secretary',
+          'yan.lee@lincoln.example', true) $$,
+  'the owner adds a contact as main');
+select results_eq($$ select first_name, is_main from public.client_contacts
+  where client_id = (select id from ids where k = 'lincoln') order by first_name $$,
+  $$ values ('Ann'::text, false), ('Pat'::text, false), ('Yan'::text, true) $$,
+  'they take over from Pat, who stays as an ordinary contact');
+select results_eq($$ select contact_first_name, contact_last_name, contact_phone, contact_email from public.clients
+  where id = (select id from ids where k = 'lincoln') $$,
+  $$ values ('Yan'::text, 'Lee'::text, null::text, 'yan.lee@lincoln.example'::text) $$,
+  'and the client''s contact fields become theirs');
 
 select * from finish();
 rollback;

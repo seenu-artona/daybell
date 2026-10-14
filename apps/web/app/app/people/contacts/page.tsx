@@ -268,7 +268,11 @@ function ContactsPage() {
         ) : null}
         {contacts && contacts.length === 0 ? (
           <p className="m-0 px-6 py-10 text-center text-muted">
-            {chip.kind === "all" && search === "" ? t("empty") : t("noMatches")}
+            {chip.kind !== "all" || search !== ""
+              ? t("noMatches")
+              : canManage
+                ? t("emptyManage")
+                : t("empty")}
           </p>
         ) : null}
         {contacts && contacts.length > 0 ? (
@@ -295,7 +299,7 @@ function ContactsPage() {
                       >
                         {contactName(c)}
                       </button>
-                      {c.isMain ? <Badge tone="selling">{t("main")}</Badge> : null}
+                      {c.isMain ? <Badge tone="primary">{t("main")}</Badge> : null}
                     </span>
                   </TableCell>
                   <TableCell>{c.role ?? ""}</TableCell>

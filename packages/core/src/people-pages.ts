@@ -7,13 +7,13 @@ import { canSeeOrders } from "./fulfilment";
 
 /** People's sections, in order: Clients, Contacts, Families, Subjects. */
 export const PEOPLE_SECTIONS = ["clients", "contacts", "families", "subjects"] as const;
-export type PeoplePage = (typeof PEOPLE_SECTIONS)[number];
+export type PeopleSection = (typeof PEOPLE_SECTIONS)[number];
 
 /**
  * The sections a role sees. Families holds parents' orders (it waits for parent accounts), so only people who see
  * order data get it (Seenu's answer 2); photographers don't.
  */
-export function peopleSections(role: string): readonly PeoplePage[] {
+export function peopleSections(role: string): readonly PeopleSection[] {
   return PEOPLE_SECTIONS.filter((s) => s !== "families" || canSeeOrders(role));
 }
 

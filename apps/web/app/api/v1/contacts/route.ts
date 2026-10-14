@@ -9,7 +9,13 @@ import {
   listContacts,
   toContact,
 } from "@/lib/people";
+import { assertFunctionRegion } from "@/lib/region-guard";
 import { assertCanManage, studioScope } from "@/lib/studio";
+
+export const runtime = "nodejs";
+// Contacts are people's names, emails and phones: Canadian studios' are read and written in Montréal (D113), like
+// /subjects and /orders (ADR 0028, call 8).
+export const preferredRegion = "yul1";
 
 /**
  * GET /api/v1/contacts?show=main&clientId=&cursor=&limit= — the studio's contacts (People › Contacts, D150): by client,
@@ -18,6 +24,7 @@ import { assertCanManage, studioScope } from "@/lib/studio";
 export const GET = handle(async (request: Request) => {
   const query = parseQuery(request, contactListQuery);
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
   return NextResponse.json(await listContacts(supabase, studio.id, query));
 });
 
@@ -28,6 +35,7 @@ export const GET = handle(async (request: Request) => {
 export const POST = handle(async (request: Request) => {
   // Who and what role first: nobody else gets as far as reading the body (S4).
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
   assertCanManage(studio);
   const input = await parseBody(request, contactInput);
   await assertClientInStudio(supabase, studio.id, input.clientId);

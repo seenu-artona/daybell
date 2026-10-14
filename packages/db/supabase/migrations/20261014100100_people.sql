@@ -75,8 +75,11 @@ grant update (first_name, last_name, role, email, phone, is_main) on public.clie
 -- pg_trigger_depth() tells the two directions apart: a copy made by one side's trigger (depth 2) is not copied back.
 
 -- Before a contact becomes main, the client's current main one steps down (so the unique index never refuses it).
+-- SECURITY INVOKER: the step-down is the caller's own update, so row-level security and the column grants apply to
+-- it; someone who can't edit the studio's contacts steps nobody down (and their own write is refused anyway). The
+-- client-side sync (on_client_contact_columns) runs it as that function's owner, as before.
 create function app.client_contact_take_main() returns trigger
-language plpgsql security definer
+language plpgsql security invoker
 set search_path = ''
 as $$
 begin
@@ -239,45 +242,54 @@ create function public.list_client_contacts(
   p_studio_id uuid, p_q text default null, p_main_only boolean default false, p_client_id uuid default null,
   p_after uuid default null, p_limit int default 50
 ) returns jsonb
-language sql stable
+language plpgsql stable
 set search_path = ''
 as $$
-  with base as (
-    select k.id, k.client_id, c.name as client_name, k.first_name, k.last_name, k.role, k.email, k.phone, k.is_main,
-      k.created_at, k.updated_at,
-      lower(c.name) as s1, not k.is_main as s2, lower(coalesce(k.last_name, '')) as s3,
-      lower(coalesce(k.first_name, '')) as s4
-    from public.client_contacts k
-    join public.clients c on c.studio_id = k.studio_id and c.id = k.client_id
-    where k.studio_id = p_studio_id
-      and (not coalesce(p_main_only, false) or k.is_main)
-      and (p_client_id is null or k.client_id = p_client_id)
-      and (nullif(btrim(p_q), '') is null
-           or position(lower(btrim(p_q)) in lower(concat_ws(' ', k.first_name, k.last_name, k.email))) > 0)
-  ),
-  anchor as (
-    select lower(c.name) as s1, k.client_id, not k.is_main as s2, lower(coalesce(k.last_name, '')) as s3,
-      lower(coalesce(k.first_name, '')) as s4, k.id
-    from public.client_contacts k
-    join public.clients c on c.studio_id = k.studio_id and c.id = k.client_id
-    where k.studio_id = p_studio_id and k.id = p_after
-  ),
-  page as (
-    select b.* from base b
-    where p_after is null
-       or (b.s1, b.client_id, b.s2, b.s3, b.s4, b.id) > (select a.s1, a.client_id, a.s2, a.s3, a.s4, a.id from anchor a)
-    order by b.s1, b.client_id, b.s2, b.s3, b.s4, b.id
-    limit greatest(least(coalesce(p_limit, 50), 101), 1)
-  )
-  select jsonb_build_object(
-    'contacts', coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'id', p.id, 'client_id', p.client_id, 'client_name', p.client_name, 'first_name', p.first_name,
-        'last_name', p.last_name, 'role', p.role, 'email', p.email, 'phone', p.phone, 'is_main', p.is_main,
-        'created_at', p.created_at, 'updated_at', p.updated_at)
-        order by p.s1, p.client_id, p.s2, p.s3, p.s4, p.id)
-      from page p), '[]'::jsonb),
-    'total', (select count(*) from base));
+begin
+  -- The API sends at most 120 characters; anything longer is refused before it is searched.
+  if char_length(p_q) > 120 then
+    raise exception 'list_client_contacts_q' using errcode = '22023';
+  end if;
+  return (
+    with base as (
+      select k.id, k.client_id, c.name as client_name, k.first_name, k.last_name, k.role, k.email, k.phone, k.is_main,
+        k.created_at, k.updated_at,
+        lower(c.name) as s1, not k.is_main as s2, lower(coalesce(k.last_name, '')) as s3,
+        lower(coalesce(k.first_name, '')) as s4
+      from public.client_contacts k
+      join public.clients c on c.studio_id = k.studio_id and c.id = k.client_id
+      where k.studio_id = p_studio_id
+        and (not coalesce(p_main_only, false) or k.is_main)
+        and (p_client_id is null or k.client_id = p_client_id)
+        and (nullif(btrim(p_q), '') is null
+             or position(lower(btrim(p_q)) in lower(concat_ws(' ', k.first_name, k.last_name, k.email))) > 0)
+    ),
+    anchor as (
+      select lower(c.name) as s1, k.client_id, not k.is_main as s2, lower(coalesce(k.last_name, '')) as s3,
+        lower(coalesce(k.first_name, '')) as s4, k.id
+      from public.client_contacts k
+      join public.clients c on c.studio_id = k.studio_id and c.id = k.client_id
+      where k.studio_id = p_studio_id and k.id = p_after
+    ),
+    page as (
+      select b.* from base b
+      where p_after is null
+         or (b.s1, b.client_id, b.s2, b.s3, b.s4, b.id)
+            > (select a.s1, a.client_id, a.s2, a.s3, a.s4, a.id from anchor a)
+      order by b.s1, b.client_id, b.s2, b.s3, b.s4, b.id
+      limit greatest(least(coalesce(p_limit, 50), 101), 1)
+    )
+    select jsonb_build_object(
+      'contacts', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'id', p.id, 'client_id', p.client_id, 'client_name', p.client_name, 'first_name', p.first_name,
+          'last_name', p.last_name, 'role', p.role, 'email', p.email, 'phone', p.phone, 'is_main', p.is_main,
+          'created_at', p.created_at, 'updated_at', p.updated_at)
+          order by p.s1, p.client_id, p.s2, p.s3, p.s4, p.id)
+        from page p), '[]'::jsonb),
+      'total', (select count(*) from base))
+  );
+end;
 $$;
 revoke all on function public.list_client_contacts(uuid, text, boolean, uuid, uuid, int) from public, anon;
 grant execute on function public.list_client_contacts(uuid, text, boolean, uuid, uuid, int) to authenticated;
@@ -286,21 +298,30 @@ grant execute on function public.list_client_contacts(uuid, text, boolean, uuid,
 -- People › Clients' columns for a page of clients: the main contact (name and role), how many jobs, and the latest job
 -- by picture day. No money (Seenu's answer 1). SECURITY INVOKER.
 create function public.client_list_details(p_studio_id uuid, p_client_ids uuid[]) returns jsonb
-language sql stable
+language plpgsql stable
 set search_path = ''
 as $$
-  select coalesce(jsonb_agg(jsonb_build_object(
-    'client_id', c.id,
-    'job_count', (select count(*) from public.jobs j where j.studio_id = c.studio_id and j.client_id = c.id),
-    'latest_job', (select jsonb_build_object('id', j.id, 'name', j.name, 'picture_day', j.picture_day)
-                   from public.jobs j where j.studio_id = c.studio_id and j.client_id = c.id
-                   order by j.picture_day desc, j.created_at desc, j.id desc limit 1),
-    'main_contact', (select jsonb_build_object('id', k.id, 'first_name', k.first_name, 'last_name', k.last_name,
-                       'role', k.role, 'email', k.email)
-                     from public.client_contacts k
-                     where k.studio_id = c.studio_id and k.client_id = c.id and k.is_main))), '[]'::jsonb)
-  from public.clients c
-  where c.studio_id = p_studio_id and c.id = any (p_client_ids);
+begin
+  -- A page of clients is at most 101 (the API asks for 100 at most); a longer list is refused.
+  if cardinality(p_client_ids) > 101 then
+    raise exception 'client_list_details_ids' using errcode = '22023';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'client_id', c.id,
+      'job_count', (select count(*) from public.jobs j
+                    where j.studio_id = c.studio_id and j.client_id = c.id),
+      'latest_job', (select jsonb_build_object('id', j.id, 'name', j.name, 'picture_day', j.picture_day)
+                     from public.jobs j where j.studio_id = c.studio_id and j.client_id = c.id
+                     order by j.picture_day desc, j.created_at desc, j.id desc limit 1),
+      'main_contact', (select jsonb_build_object('id', k.id, 'first_name', k.first_name, 'last_name', k.last_name,
+                         'role', k.role, 'email', k.email)
+                       from public.client_contacts k
+                       where k.studio_id = c.studio_id and k.client_id = c.id and k.is_main))), '[]'::jsonb)
+    from public.clients c
+    where c.studio_id = p_studio_id and c.id = any (p_client_ids)
+  );
+end;
 $$;
 revoke all on function public.client_list_details(uuid, uuid[]) from public, anon;
 grant execute on function public.client_list_details(uuid, uuid[]) to authenticated;

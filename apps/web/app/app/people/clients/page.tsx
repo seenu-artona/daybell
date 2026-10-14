@@ -45,9 +45,9 @@ const JOB_LINK =
  * People › Clients (D144, D150; ADR 0028), at /app/people/clients. Clients are added here ahead of time, or from the job
  * form. The green New client in the title row; the list card's toolbar has the All chip only (Seenu's answer 1: no
  * client types) and the search (GET /clients?q=, by name; never in the address, D113). Columns: the client, its main
- * contact (name · role), how many jobs it has and its latest job by picture day (a link to the job). No money. A
- * click on a row, or its name, opens the client in the dialog: editable for owners and admins, read-only for everyone
- * else. ?client=<id> (from the menu search, D138 Q2) opens that client the same way. Only an id goes in the URL.
+ * contact (the name, then "· role" muted), how many jobs it has (right-aligned) and its latest job by picture day (a
+ * link to the job). No money. A click on a row, or its name, opens the client in the dialog: editable for owners and
+ * admins, read-only for everyone else. ?client=<id> (from the menu search, D138 Q2) opens that client the same way. Only an id goes in the URL.
  */
 export default function ClientsPageRoute() {
   // useSearchParams needs a Suspense boundary; the page loads its data in the browser anyway.
@@ -210,7 +210,7 @@ function ClientsPage() {
               <TableRow>
                 <TableHead>{t("clients.columns.name")}</TableHead>
                 <TableHead>{t("clients.columns.mainContact")}</TableHead>
-                <TableHead>{t("clients.columns.jobs")}</TableHead>
+                <TableHead numeric>{t("clients.columns.jobs")}</TableHead>
                 <TableHead>{t("clients.columns.latestJob")}</TableHead>
                 <RowChevronHead />
               </TableRow>
@@ -230,19 +230,22 @@ function ClientsPage() {
                   </TableCell>
                   <TableCell>
                     {c.mainContact ? (
-                      c.mainContact.role ? (
-                        t("clients.mainContact", {
-                          name: contactName(c.mainContact),
-                          role: c.mainContact.role,
-                        })
-                      ) : (
-                        contactName(c.mainContact)
-                      )
+                      <>
+                        <span>{contactName(c.mainContact)}</span>
+                        {c.mainContact.role ? (
+                          <>
+                            {" "}
+                            <span className="text-muted">
+                              {t("clients.mainContactRole", { role: c.mainContact.role })}
+                            </span>
+                          </>
+                        ) : null}
+                      </>
                     ) : (
                       <span className="text-muted">{t("clients.noContact")}</span>
                     )}
                   </TableCell>
-                  <TableCell className="tabular-nums">{c.jobCount}</TableCell>
+                  <TableCell numeric>{c.jobCount}</TableCell>
                   <TableCell>
                     {c.latestJob ? (
                       <Link href={`/app/jobs/${c.latestJob.id}`} className={JOB_LINK}>

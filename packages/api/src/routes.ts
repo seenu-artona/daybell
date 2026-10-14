@@ -1095,7 +1095,7 @@ export const ROUTES: RouteSpec[] = [
     access: "signed-in",
     query: clientListQuery,
     success: { status: 200, schema: clientsResponse, description: "A page of clients." },
-    errors: ["invalid_input", "not_signed_in", "not_found"],
+    errors: ["invalid_input", "not_signed_in", "not_found", "region_unavailable"],
   },
   {
     method: "POST",
@@ -1106,7 +1106,7 @@ export const ROUTES: RouteSpec[] = [
     access: "owner-admin",
     body: clientInput,
     success: { status: 201, schema: clientResponse, description: "Client added." },
-    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found"],
+    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "region_unavailable"],
   },
   {
     method: "GET",
@@ -1139,7 +1139,7 @@ export const ROUTES: RouteSpec[] = [
     access: "signed-in",
     query: contactListQuery,
     success: { status: 200, schema: contactsResponse, description: "A page of contacts." },
-    errors: ["invalid_input", "not_signed_in", "not_found"],
+    errors: ["invalid_input", "not_signed_in", "region_unavailable"],
   },
   {
     method: "POST",
@@ -1151,7 +1151,7 @@ export const ROUTES: RouteSpec[] = [
     access: "signed-in",
     body: contactSearchInput,
     success: { status: 200, schema: contactsResponse, description: "A page of contacts." },
-    errors: ["invalid_input", "not_signed_in", "not_found"],
+    errors: ["invalid_input", "not_signed_in", "region_unavailable"],
   },
   {
     method: "POST",
@@ -1163,7 +1163,14 @@ export const ROUTES: RouteSpec[] = [
     access: "owner-admin",
     body: contactInput,
     success: { status: 201, schema: contactResponse, description: "Contact added." },
-    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "conflict"],
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
   },
   {
     method: "PATCH",
@@ -1171,11 +1178,18 @@ export const ROUTES: RouteSpec[] = [
     group: "Contacts",
     summary: "Change a contact",
     description:
-      "Send only the fields to change; null clears one, but a contact keeps a name, an email or a phone. The client can't change. isMain true makes it the client's main contact.",
+      "Send only the fields to change; null clears one, but a contact keeps a name, an email or a phone. The client can't change. isMain true makes it the client's main contact; isMain false on the main contact is refused (make someone else main instead).",
     access: "owner-admin",
     body: contactPatch,
     success: { status: 200, schema: contactResponse, description: "The changed contact." },
-    errors: ["invalid_input", "not_signed_in", "forbidden", "not_found", "conflict"],
+    errors: [
+      "invalid_input",
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+    ],
   },
   {
     method: "GET",

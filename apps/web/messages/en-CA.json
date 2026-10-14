@@ -216,7 +216,8 @@
     "refundKind": "Choose items or a custom amount.",
     "timeZone": "Your time zone wasn’t recognized.",
     "filterChips": "Those filters can't be saved. Reload the page and try again.",
-    "contactEmpty": "Enter a name, an email or a phone number."
+    "contactEmpty": "Enter a name, an email or a phone number.",
+    "mainContactStays": "To change the main contact, make someone else main."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -626,7 +627,7 @@
         },
         "loadMore": "Show more",
         "chipsLabel": "Show clients",
-        "mainContact": "{name} · {role}",
+        "mainContactRole": "· {role}",
         "noContact": "No contact yet",
         "noJobs": "No jobs yet",
         "footer": "{count, plural, one {# client} other {# clients}}"
@@ -684,8 +685,8 @@
       "about": {
         "clients": "Schools, preschools and teams you photograph",
         "contacts": "The people you work with at each client",
-        "families": "Parents who signed in to a shop, and their children across years",
-        "subjects": "Every child across all your jobs"
+        "families": "Parents who signed in to a shop, and everyone they order for, across years",
+        "subjects": "Everyone across all your jobs"
       }
     },
     "contactsList": {
@@ -700,7 +701,8 @@
       },
       "searchLabel": "Search contacts",
       "loading": "Loading contacts…",
-      "empty": "No contacts yet. Add one, or give a client a contact person.",
+      "empty": "No contacts yet.",
+      "emptyManage": "No contacts yet. Add one, or give a client a contact person.",
       "noMatches": "No contacts match.",
       "columns": {
         "name": "Name",
@@ -726,6 +728,7 @@
         "phone": "Phone",
         "main": "Main contact for this client",
         "mainHelp": "Their name, phone and email become the client's contact person.",
+        "mainLocked": "To change the main contact, make someone else main.",
         "save": "Save changes",
         "saving": "Saving…",
         "add": "Add contact",
@@ -750,7 +753,7 @@
       },
       "searchLabel": "Search subjects",
       "loading": "Loading subjects…",
-      "empty": "No subjects yet. Children show here once they're on a job's roster.",
+      "empty": "No subjects yet. People show here once they're on a job's roster.",
       "noMatches": "No subjects match.",
       "columns": {
         "name": "Name",

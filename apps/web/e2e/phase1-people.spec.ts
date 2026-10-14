@@ -3,11 +3,13 @@ import { buy, joinAs, studioSellingAva } from "./helpers";
 
 // People (D150; Seenu's answers 1-6 of Oct 14, 2026; ADR 0028) on the desktop app with STRIPE_DRIVER=fake. A studio
 // sells one job with Ava Patel, whose parent buys a print (D148: she has ordered); a second job, for a client with a
-// contact person, has Ben Ortiz, who hasn't. The owner walks the four tabs: Clients (main contact, jobs, latest job),
-// Contacts (the client's contact is its main one; a new contact made main takes over, on the client too), Families
-// (coming soon) and Subjects (both children across the two jobs, Ordered and Not ordered chips, the search kept out of
-// the address, a row opening the child on their job). A photographer sees no Families tab and no order data.
-// Locators are scoped to main, a region or a dialog, and exact.
+// contact person, has Ben Ortiz, who hasn't. The owner walks the four tabs: Clients (main contact, jobs, latest job;
+// the All chip only), Contacts (the client's contact is its main one; a new contact made main takes over, on the client
+// and its row in Clients too; the main contact's box is locked; another made main from the Edit dialog swaps back; a
+// client chip from "+ Add filter" is saved, kept after a reload and removed), Families (coming soon) and Subjects (both
+// subjects across the two jobs, Ordered and Not ordered chips, a job chip saved, kept and removed, the search kept out
+// of the address, a row opening the subject on their job). A photographer sees no Families tab, no order data and the
+// contact dialog read-only. Locators are scoped to main, a region or a dialog, and exact.
 
 const run = `${Date.now()}`;
 
@@ -93,6 +95,10 @@ test("People: clients, contacts made main, families coming soon, subjects across
     "href",
     `/app/jobs/${job2}`,
   );
+  // Clients has the All chip only (answer 1): nothing to add.
+  const clientChips = main.getByRole("navigation", { name: "Show clients", exact: true });
+  await expect(clientChips.getByRole("link")).toHaveText(["All"]);
+  await expect(main.getByRole("button", { name: "Add filter", exact: true })).toHaveCount(0);
 
   // 4. Families waits for parent accounts.
   await tabs.getByRole("link", { name: "Families", exact: true }).click();
@@ -117,7 +123,7 @@ test("People: clients, contacts made main, families coming soon, subjects across
   // A new contact, made main: they take over from Dana, here and on the client.
   await main.getByRole("button", { name: "New contact", exact: true }).click();
   const add = page.getByRole("dialog", { name: "Add contact" });
-  await add.getByRole("combobox", { name: "Client", exact: true }).fill(clientName.slice(0, 12));
+  await add.getByRole("combobox", { name: "Client", exact: true }).fill("Lincoln");
   await add
     .getByRole("listbox", { name: "Clients", exact: true })
     .getByRole("option", { name: new RegExp(clientName) })
@@ -138,6 +144,15 @@ test("People: clients, contacts made main, families coming soon, subjects across
   const client = (await (await page.request.get(`/api/v1/clients/${clientId}`)).json()).client;
   expect([client.contactFirstName, client.contactLastName]).toEqual(["Mark", "Ellis"]);
 
+  // Clients' row shows the new main contact, with their role.
+  await tabs.getByRole("link", { name: "Clients", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/people\/clients$/);
+  await expect(
+    clientRow.getByRole("cell", { name: "Mark Ellis · Principal", exact: true }),
+  ).toBeVisible();
+  await tabs.getByRole("link", { name: "Contacts", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/people\/contacts$/);
+
   // The Main contacts chip, in the address as a word.
   const contactChips = main.getByRole("navigation", { name: "Show contacts", exact: true });
   await contactChips.getByRole("link", { name: "Main contacts", exact: true }).click();
@@ -145,17 +160,58 @@ test("People: clients, contacts made main, families coming soon, subjects across
   await expect(row("Mark Ellis")).toBeVisible();
   await expect(row("Dana Ruiz")).toHaveCount(0);
 
-  // Dana opens in the dialog, editable for the owner.
+  // + Add filter › Client… adds the client as a chip of the owner's own: it opens at once (?client=<id>, an id only),
+  // stays after a reload, and its own remove button takes it away (back to All).
   await contactChips.getByRole("link", { name: "All", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/people\/contacts$/);
+  await main.getByRole("button", { name: "Add filter", exact: true }).click();
+  await main.getByRole("button", { name: "Client…", exact: true }).click();
+  await main.getByRole("combobox", { name: "Client", exact: true }).fill("Lincoln");
+  await main
+    .getByRole("listbox", { name: "Clients", exact: true })
+    .getByRole("option", { name: clientName })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/app/people/contacts\\?client=${clientId}$`));
+  await expect(contactChips.getByRole("link", { name: clientName, exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(row("Mark Ellis")).toBeVisible();
+  await page.reload();
+  await expect(contactChips.getByRole("link", { name: clientName, exact: true })).toBeVisible();
+  await expect(row("Dana Ruiz")).toBeVisible();
+  await main.getByRole("button", { name: `Remove filter: ${clientName}`, exact: true }).click();
+  await expect(contactChips.getByRole("link", { name: clientName, exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/app\/people\/contacts$/);
+
+  // The main contact's box is locked: the main contact changes by making someone else main.
+  await row("Mark Ellis").getByRole("button", { name: "Mark Ellis", exact: true }).click();
+  const markDialog = page.getByRole("dialog", { name: "Edit contact" });
+  const markMain = markDialog.getByLabel("Main contact for this client", { exact: true });
+  await expect(markMain).toBeChecked();
+  await expect(markMain).toBeDisabled();
+  await expect(
+    markDialog.getByText("To change the main contact, make someone else main.", { exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(markDialog).toBeHidden();
+
+  // Dana opens in the Edit dialog and is made main again (PATCH): she and Mark swap, on the client too.
   await row("Dana Ruiz").getByRole("button", { name: "Dana Ruiz", exact: true }).click();
   const edit = page.getByRole("dialog", { name: "Edit contact" });
   await expect(edit.getByLabel("First name (optional)", { exact: true })).toHaveValue("Dana");
-  await page.keyboard.press("Escape");
+  await edit.getByLabel("Main contact for this client", { exact: true }).check();
+  await edit.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(edit).toBeHidden();
+  await expect(row("Dana Ruiz").getByText("Main", { exact: true })).toBeVisible();
+  await expect(row("Mark Ellis").getByText("Main", { exact: true })).toHaveCount(0);
+  const swapped = (await (await page.request.get(`/api/v1/clients/${clientId}`)).json()).client;
+  expect([swapped.contactFirstName, swapped.contactLastName]).toEqual(["Dana", "Ruiz"]);
 
   // 6. Subjects: both children, across the two jobs, with Ordered for the owner.
   await tabs.getByRole("link", { name: "Subjects", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/people\/subjects$/);
-  await expect(main.getByText("Every child across all your jobs", { exact: true })).toBeVisible();
+  await expect(main.getByText("Everyone across all your jobs", { exact: true })).toBeVisible();
   await expect(main.getByText("2 subjects across 2 jobs", { exact: true })).toBeVisible();
   for (const name of ["Name", "Class", "Job", "Ordered"])
     await expect(main.getByRole("columnheader", { name, exact: true })).toBeVisible();
@@ -186,8 +242,33 @@ test("People: clients, contacts made main, families coming soon, subjects across
   await expect(subject("Ben Ortiz")).toBeVisible();
   await expect(subject("Ava Patel")).toHaveCount(0);
 
-  // The search finds a name without putting it in the address (D113).
+  // + Add filter › Job… adds the job as a chip of the owner's own (?job=<id>): kept after a reload, then removed.
   await subjectChips.getByRole("link", { name: "All", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/people\/subjects$/);
+  await main.getByRole("button", { name: "Add filter", exact: true }).click();
+  await main.getByRole("button", { name: "Job…", exact: true }).click();
+  await main.getByRole("combobox", { name: "Job", exact: true }).fill("Spring");
+  await main
+    .getByRole("listbox", { name: "Jobs", exact: true })
+    .getByRole("option", { name: jobName })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/app/people/subjects\\?job=${job2}$`));
+  await expect(subjectChips.getByRole("link", { name: jobName, exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(subject("Ben Ortiz")).toBeVisible();
+  await expect(subject("Ava Patel")).toHaveCount(0);
+  await page.reload();
+  await expect(subjectChips.getByRole("link", { name: jobName, exact: true })).toBeVisible();
+  await expect(subject("Ben Ortiz")).toBeVisible();
+  await expect(subject("Ava Patel")).toHaveCount(0);
+  await main.getByRole("button", { name: `Remove filter: ${jobName}`, exact: true }).click();
+  await expect(subjectChips.getByRole("link", { name: jobName, exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/app\/people\/subjects$/);
+  await expect(subject("Ava Patel")).toBeVisible();
+
+  // The search finds a name without putting it in the address (D113).
   await main.getByRole("button", { name: "Search subjects", exact: true }).click();
   await main.getByRole("searchbox", { name: "Search subjects", exact: true }).fill("ben");
   await expect(subject("Ava Patel")).toHaveCount(0);
@@ -198,7 +279,8 @@ test("People: clients, contacts made main, families coming soon, subjects across
   await subject("Ben Ortiz").getByRole("link", { name: "Ben Ortiz", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job2}/people\\?child=[0-9a-f-]{36}$`));
 
-  // 7. A photographer: no Families tab, no Ordered column or chips; Families' address takes them to Clients.
+  // 7. A photographer: no Families tab, no Ordered column or chips, the contact dialog read-only; Families' address
+  // takes them to Clients.
   const photographer = await joinAs(
     page,
     browser,
@@ -222,6 +304,23 @@ test("People: clients, contacts made main, families coming soon, subjects across
   }[];
   expect(subjects.map((s) => s.hasPaidOrder)).toEqual([null, null]);
   expect((await photographer.request.get("/api/v1/subjects?show=ordered")).status()).toBe(403);
+  await photographer.goto("/app/people/contacts");
+  await expect(photoMain.getByRole("button", { name: "New contact", exact: true })).toHaveCount(0);
+  await photoMain
+    .getByRole("row")
+    .filter({ hasText: clientName })
+    .getByRole("button", { name: "Dana Ruiz", exact: true })
+    .click();
+  const view = photographer.getByRole("dialog", { name: "Contact", exact: true });
+  await expect(view.getByLabel("First name (optional)", { exact: true })).toHaveValue("Dana");
+  await expect(view.getByLabel("First name (optional)", { exact: true })).toHaveAttribute(
+    "readonly",
+    "",
+  );
+  await expect(view.getByLabel("Main contact for this client", { exact: true })).toBeDisabled();
+  await expect(view.getByText("Owners and admins change contacts.", { exact: true })).toBeVisible();
+  await expect(view.getByRole("button", { name: "Save changes", exact: true })).toHaveCount(0);
+  await photographer.keyboard.press("Escape");
   await photographer.goto("/app/people/families");
   await expect(photographer).toHaveURL(/\/app\/people\/clients$/);
   await photographer.context().close();

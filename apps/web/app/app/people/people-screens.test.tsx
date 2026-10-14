@@ -8,10 +8,12 @@ import messages from "@/messages/en-US.json";
 import { StudioContext } from "../me-context";
 
 // People (D150; Seenu's answers 1-5; ADR 0028) with the API faked: the pill tabs (Families only for people who see
-// order data) with the section's line; Clients' columns (main contact · role, jobs, latest job as a link, no money);
-// Contacts' "Main" badge in words, its chips and footer; Subjects' rows linking to the child on their job, the Ordered
-// column and chips only for people who see orders, and the "n subjects across m jobs" footer; search text in a POST
-// body, never a URL (D113).
+// order data) with the section's line; Clients' columns (main contact, then its role muted; jobs right-aligned; latest
+// job as a link; no money); Contacts' "Main" badge in words, its chips, footer and empty state by role; the contact
+// form (a client for a new one, blanks sent as null, no client in a change, read-only for staff and photographers,
+// errors on their own field, the main contact's box locked); Subjects' rows linking to the subject on their job, the
+// Ordered pills and chips only for people who see orders, and the "n subjects across m jobs" footer; search text in a
+// POST body, never a URL (D113).
 const { push, replace, address } = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock("@/lib/client-api", async (original) => ({
 }));
 
 const { PeoplePage } = await import("./people-page");
+const { ContactForm } = await import("./contact-form");
 const { default: ClientsPage } = await import("./clients/page");
 const { default: ContactsPage } = await import("./contacts/page");
 const { default: SubjectsPage } = await import("./subjects/page");
@@ -156,6 +159,12 @@ beforeEach(() => {
   push.mockReset();
   replace.mockReset();
   address.search = "";
+  HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+    this.open = false;
+  };
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -210,9 +219,17 @@ describe("People › Clients (answer 1)", () => {
     await render(<ClientsPage />);
     expect(headers()).toEqual(["Client", "Main contact", "Jobs", "Latest job"]);
     const row = container.querySelector("tbody tr");
-    expect(row?.textContent).toContain("Dana Ruiz · Office");
+    const cells = [...(row?.querySelectorAll("td") ?? [])];
+    // The name, then the role in a muted span of its own.
+    const contactParts = [...(cells[1]?.querySelectorAll("span") ?? [])];
+    expect(contactParts.map((p) => p.textContent)).toEqual(["Dana Ruiz", "· Office"]);
+    expect(contactParts[1]?.className).toMatch(/\btext-muted\b/);
+    expect(cells[1]?.textContent).toBe("Dana Ruiz · Office");
+    // Jobs: the count, right-aligned under a right-aligned header.
+    expect(cells[2]?.textContent).toBe("3");
+    expect(cells[2]?.className).toMatch(/\btext-right\b/);
+    expect(container.querySelectorAll("th")[2]?.className).toMatch(/\btext-right\b/);
     expect(row?.querySelector(`a[href="/app/jobs/${JOB1}"]`)?.textContent).toBe("Fall 2026");
-    expect(row?.textContent).toContain("3");
     expect(chips("Show clients").map((a) => a.textContent)).toEqual(["All"]);
     expect(
       [...container.querySelectorAll("button")].some((b) => b.textContent === "New client"),
@@ -229,7 +246,10 @@ describe("People › Contacts (answer 3)", () => {
     expect(headers()).toEqual(["Name", "Role", "Client", "Email"]);
     const rows = [...container.querySelectorAll("tbody tr")];
     expect(rows[0]?.textContent).toContain("Dana Ruiz");
-    expect(rows[0]?.textContent).toContain("Main");
+    const badge = [...(rows[0]?.querySelectorAll("span") ?? [])].find(
+      (el) => el.textContent === "Main",
+    );
+    expect(badge?.className).toMatch(/\bbg-primary-soft\b/);
     expect(rows[1]?.textContent).not.toContain("Main");
     expect(chips("Show contacts").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["All", "/app/people/contacts"],
@@ -252,6 +272,183 @@ describe("People › Contacts (answer 3)", () => {
   });
 });
 
+describe("People › Contacts' empty state", () => {
+  const empty = () => {
+    api.mockImplementation(async (path: string) => {
+      if (path.startsWith("/me/list-filters")) return ok({ chips: [] });
+      return ok({ contacts: [], nextCursor: null, total: 0 });
+    });
+  };
+
+  it("tells owners and admins how to add one", async () => {
+    empty();
+    await render(<ContactsPage />, "admin");
+    expect(container.textContent).toContain(messages.app.contactsList.emptyManage);
+  });
+
+  it("just says there are none to staff and photographers", async () => {
+    for (const role of ["staff", "photographer"] as const) {
+      empty();
+      await render(<ContactsPage />, role);
+      expect(container.textContent).toContain(messages.app.contactsList.empty);
+      expect(container.textContent).not.toContain(messages.app.contactsList.emptyManage);
+    }
+  });
+});
+
+describe("The contact form", () => {
+  const MARK = "e0000000-0000-4000-8000-000000000002";
+  const form = () => container.querySelector("form") as HTMLFormElement;
+  const field = (label: string) =>
+    [...container.querySelectorAll("label")].find((l) => l.textContent === label)?.control as
+      | HTMLInputElement
+      | undefined;
+  const type = async (input: HTMLInputElement | undefined, value: string) =>
+    act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, value);
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  const submit = async () => {
+    await act(async () => form().requestSubmit());
+    await wait(10);
+  };
+  const noteOf = (input: Element | null | undefined) =>
+    document.getElementById(input?.getAttribute("aria-describedby") ?? "")?.textContent;
+  const saved = (body?: Contact) =>
+    api.mockImplementation(async (path: string) => {
+      if (path.startsWith("/clients")) return ok({ clients: [client], nextCursor: null, total: 1 });
+      return ok({ contact: body ?? contact(MARK, "Mark", false) });
+    });
+  const sent = (path: string) => api.mock.calls.find((c) => c[0] === path)?.[1];
+
+  it("asks for a client for a new contact, and sends nothing without one", async () => {
+    saved();
+    await render(<ContactForm contact={null} onCancel={() => {}} onSaved={() => {}} />);
+    await type(field("First name (optional)"), "Mark");
+    await submit();
+    const combobox = container.querySelector('[role="combobox"]');
+    expect(combobox?.getAttribute("aria-invalid")).toBe("true");
+    expect(noteOf(combobox)).toBe(messages.validation.client);
+    expect(api.mock.calls.some((c) => c[0] === "/contacts")).toBe(false);
+  });
+
+  it("adds a contact to the chosen client, sending blank fields as null", async () => {
+    saved();
+    const onSaved = vi.fn();
+    await render(<ContactForm contact={null} onCancel={() => {}} onSaved={onSaved} />);
+    const combobox = container.querySelector('[role="combobox"]') as HTMLInputElement;
+    await act(async () => combobox.click());
+    await wait(250);
+    const option = container.querySelector('[role="option"]') as HTMLElement;
+    expect(option.textContent).toContain("Lincoln SD");
+    await act(async () => option.click());
+    await type(field("First name (optional)"), "Mark");
+    await type(field("Last name (optional)"), "   ");
+    await submit();
+    expect(sent("/contacts")).toEqual({
+      method: "POST",
+      body: {
+        clientId: CLIENT,
+        firstName: "Mark",
+        lastName: null,
+        role: null,
+        email: null,
+        phone: null,
+        isMain: false,
+      },
+    });
+    expect(onSaved).toHaveBeenCalled();
+  });
+
+  it("changes a contact with a PATCH that never names a client", async () => {
+    saved();
+    await render(
+      <ContactForm contact={contact(MARK, "Mark", false)} onCancel={() => {}} onSaved={() => {}} />,
+    );
+    await type(field("Last name (optional)"), "");
+    await submit();
+    const request = sent(`/contacts/${MARK}`) as { method: string; body: Record<string, unknown> };
+    expect(request.method).toBe("PATCH");
+    expect(request.body).not.toHaveProperty("clientId");
+    expect(request.body).toMatchObject({ firstName: "Mark", lastName: null, phone: null });
+  });
+
+  it("shows the API's errors on their own fields", async () => {
+    api.mockResolvedValue({
+      ok: false,
+      status: 400,
+      code: "invalid_input",
+      message: "",
+      fields: { firstName: "validation.contactEmpty", clientId: "validation.client" },
+    });
+    await render(<ContactForm contact={null} onCancel={() => {}} onSaved={() => {}} />);
+    // A client is chosen so the form gets as far as the API.
+    api.mockImplementationOnce(async () => ok({ clients: [client], nextCursor: null, total: 1 }));
+    const combobox = container.querySelector('[role="combobox"]') as HTMLInputElement;
+    await act(async () => combobox.click());
+    await wait(250);
+    await act(async () => (container.querySelector('[role="option"]') as HTMLElement).click());
+    await submit();
+    expect(noteOf(field("First name (optional)"))).toBe(messages.validation.contactEmpty);
+    expect(field("First name (optional)")?.getAttribute("aria-invalid")).toBe("true");
+    expect(noteOf(combobox)).toBe(messages.validation.client);
+    expect(field("Last name (optional)")?.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("locks the main contact's box: someone else is made main instead", async () => {
+    await render(
+      <ContactForm
+        contact={contact("e0000000-0000-4000-8000-000000000001", "Dana", true)}
+        onCancel={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+    const box = field("Main contact for this client");
+    expect(box?.checked).toBe(true);
+    expect(box?.disabled).toBe(true);
+    expect(noteOf(box)).toBe(messages.app.contactsList.form.mainLocked);
+    await render(
+      <ContactForm contact={contact(MARK, "Mark", false)} onCancel={() => {}} onSaved={() => {}} />,
+    );
+    expect(field("Main contact for this client")?.disabled).toBe(false);
+    expect(noteOf(field("Main contact for this client"))).toBe(
+      messages.app.contactsList.form.mainHelp,
+    );
+  });
+
+  it("limits the names to 60 characters and the email to 254", async () => {
+    await render(<ContactForm contact={null} onCancel={() => {}} onSaved={() => {}} />);
+    expect(field("First name (optional)")?.maxLength).toBe(60);
+    expect(field("Last name (optional)")?.maxLength).toBe(60);
+    expect(field("Email (optional)")?.maxLength).toBe(254);
+  });
+
+  it("opens read-only for staff and photographers, from the Contacts list", async () => {
+    for (const role of ["staff", "photographer"] as const) {
+      answer(role);
+      await render(<ContactsPage />, role);
+      const name = [...container.querySelectorAll("tbody button")].find(
+        (b) => b.textContent === "Mark Ruiz",
+      ) as HTMLButtonElement;
+      await act(async () => name.click());
+      const dialog = container.querySelector("dialog[open]");
+      expect(dialog?.querySelector("h2")?.textContent).toBe(
+        messages.app.contactsList.form.viewTitle,
+      );
+      const inputs = [...(dialog?.querySelectorAll("input:not([type=checkbox])") ?? [])];
+      expect(inputs.length).toBeGreaterThan(0);
+      expect(inputs.every((i) => (i as HTMLInputElement).readOnly)).toBe(true);
+      const box = dialog?.querySelector<HTMLInputElement>("input[type=checkbox]");
+      expect(box?.disabled).toBe(true);
+      expect(
+        [...(dialog?.querySelectorAll("button") ?? [])].map((b) => b.textContent),
+      ).not.toContain(messages.app.contactsList.form.save);
+      expect(dialog?.textContent).toContain(messages.app.contactsList.form.readOnlyNote);
+    }
+  });
+});
+
 describe("People › Subjects (answer 4)", () => {
   it("lists children across jobs, linked to the child on their job, with Ordered for people who see orders", async () => {
     answer();
@@ -267,8 +464,14 @@ describe("People › Subjects (answer 4)", () => {
       "Lincoln Fall 2026",
     );
     expect(maya?.textContent).toContain("Grade 3");
-    expect(maya?.textContent).toContain("Ordered");
-    expect(container.querySelectorAll("tbody tr")[1]?.textContent).toContain("Not ordered");
+    // Ordered and Not ordered are pills with their words (D91): primary-soft and grey.
+    const pill = (row: Element | null | undefined) =>
+      row?.querySelectorAll("td")[3]?.firstElementChild;
+    expect(pill(maya)?.textContent).toBe("Ordered");
+    expect(pill(maya)?.className).toMatch(/\bbg-primary-soft\b/);
+    const leo = container.querySelectorAll("tbody tr")[1];
+    expect(pill(leo)?.textContent).toBe("Not ordered");
+    expect(pill(leo)?.className).toMatch(/\bbg-subtle\b/);
     expect(chips("Show subjects").map((a) => a.textContent)).toEqual([
       "All",
       "Ordered",
