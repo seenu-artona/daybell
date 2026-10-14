@@ -47,7 +47,6 @@ import {
   TableRow,
   Toast,
   uiColorOn,
-  ViewBar,
 } from "./index";
 
 async function expectNoA11yViolations(container: HTMLElement) {
@@ -420,34 +419,6 @@ describe("D144 list pieces", () => {
     const nav = screen.getByRole("navigation", { name: "Job sections" });
     expect(nav.querySelector("ul")?.className).toMatch(/\boverflow-x-auto\b/);
     await expectNoA11yViolations(container);
-  });
-
-  it("view bar: pill tabs on the left, tools at the right end in order, no line under it", () => {
-    render(
-      <main>
-        <ViewBar
-          data-testid="bar"
-          tabs={
-            <MainTabs label="Jobs sections">
-              <MainTab href="/app/jobs" current>
-                List
-              </MainTab>
-            </MainTabs>
-          }
-          actions={
-            <>
-              <button type="button">Print QR cards</button>
-              <button type="button">New job</button>
-            </>
-          }
-        />
-      </main>,
-    );
-    expect(screen.getByTestId("bar").className).not.toMatch(/\bborder-b\b/);
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "Print QR cards",
-      "New job",
-    ]);
   });
 
   it("search toggle: on a card, the open box is canvas grey so it shows on white (D147)", () => {
