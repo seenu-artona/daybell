@@ -58,7 +58,8 @@ export interface ClickableRowProps extends HTMLAttributes<HTMLTableRowElement> {
  * A list row that opens its item on a click anywhere (D144). The row's main link or button stays the keyboard and
  * screen-reader target (the row itself is not focusable); give it `group-hover:underline` so the hover shows where
  * the click goes. Clicks that start on a link, button or form control, or that end a text selection, are ignored.
- * Nothing extra appears on hover; the background turns canvas grey.
+ * Ctrl- or Cmd-click opens the row's main link (its first link) in a new tab, as it would on the link itself; a row
+ * without a link ignores it. Nothing extra appears on hover; the background turns canvas grey.
  */
 export function ClickableRow({ onActivate, onClick, className, ...props }: ClickableRowProps) {
   function click(event: MouseEvent<HTMLTableRowElement>) {
@@ -67,6 +68,11 @@ export function ClickableRow({ onActivate, onClick, className, ...props }: Click
     const target = event.target as Element | null;
     if (target?.closest(OWN_CLICKS)) return;
     if (typeof window !== "undefined" && (window.getSelection()?.toString() ?? "") !== "") return;
+    if (event.ctrlKey || event.metaKey) {
+      const link = event.currentTarget.querySelector<HTMLAnchorElement>("a[href]");
+      if (link) window.open(link.href, "_blank", "noopener");
+      return;
+    }
     onActivate();
   }
   return (

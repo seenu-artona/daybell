@@ -60,7 +60,6 @@ export function SearchToggle({
         type="button"
         aria-label={label}
         aria-expanded={false}
-        aria-controls={inputId}
         onClick={() => {
           focusOnOpen.current = true;
           setOpened(true);

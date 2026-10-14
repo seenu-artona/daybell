@@ -461,13 +461,21 @@ describe("D144 list pieces", () => {
     const { container } = render(<Search />);
     const button = screen.getByRole("button", { name: "Search children" });
     expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(button.getAttribute("aria-controls")).toBeTruthy();
+    // No aria-controls while the box doesn't exist: it would point at nothing.
+    expect(button.hasAttribute("aria-controls")).toBe(false);
     expect(button.className).toMatch(/\bsize-11\b/);
     fireEvent.click(button);
     const box = screen.getByRole("searchbox", { name: "Search children" });
     expect(document.activeElement).toBe(box);
-    expect(box.id).toBe(button.getAttribute("aria-controls"));
     await expectNoA11yViolations(container);
+  });
+
+  it("search toggle: leaving an empty box closes it without taking focus back", () => {
+    render(<Search />);
+    fireEvent.click(screen.getByRole("button", { name: "Search children" }));
+    fireEvent.blur(screen.getByRole("searchbox"));
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.getByRole("button", { name: "Search children" })).toBeDefined();
   });
 
   it("search toggle: Escape on an empty box closes it and returns focus to the button", () => {
@@ -539,6 +547,21 @@ describe("D144 list pieces", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Lincoln" }));
     fireEvent.click(screen.getByRole("button", { name: "Make default" }));
     expect(onActivate).toHaveBeenCalledTimes(1);
+    // A click that ends a text selection is the selection's, not the row's.
+    const selection = vi.spyOn(window, "getSelection").mockReturnValue({
+      toString: () => "Linc",
+    } as Selection);
+    fireEvent.click(screen.getByRole("cell", { name: "Lincoln" }));
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    selection.mockRestore();
+    // Ctrl- or Cmd-click opens the row's main link in a new tab, like the link itself would.
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    fireEvent.click(screen.getByRole("cell", { name: "Lincoln" }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("cell", { name: "Lincoln" }), { metaKey: true });
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenCalledWith(expect.stringMatching(/\/jobs\/1$/), "_blank", "noopener");
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    open.mockRestore();
     const chevron = row.lastElementChild as HTMLElement;
     expect(chevron.getAttribute("aria-hidden")).toBe("true");
     expect(chevron.className).toMatch(/\btext-line-strong\b/);
