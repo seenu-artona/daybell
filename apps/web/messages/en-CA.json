@@ -416,6 +416,7 @@
       "title": "Checklist",
       "progress": "{done} of {total} done",
       "progressShort": "{done} of {total}",
+      "separator": "·",
       "next": "Next",
       "nextTask": "Next: {task}",
       "nextTaskIn": "Next: {task}, {job}",
