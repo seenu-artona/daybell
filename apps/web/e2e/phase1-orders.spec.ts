@@ -1,5 +1,5 @@
-import { type APIRequestContext, expect, test } from "@playwright/test";
-import { studioSellingAva } from "./helpers";
+import { expect, test } from "@playwright/test";
+import { buy, studioSellingAva } from "./helpers";
 
 // Phase 1 step 11 "Orders and refunds" (D25, D59, D127, D96; Seenu's answers 1–4, Q1–Q4; ADR 0024), the studio's side
 // on the desktop app with STRIPE_DRIVER=fake. A parent (through the API; the phone spec uses the screens) pays two
@@ -12,55 +12,6 @@ import { studioSellingAva } from "./helpers";
 
 const run = `${Date.now()}`;
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const formatted = (reference: string) => `${reference.slice(0, 4)}-${reference.slice(4)}`;
-
-/** A parent's paid order through the shop's API and the fake hosted checkout: its id and formatted reference. */
-async function buy(
-  shop: APIRequestContext,
-  q: string,
-  lines: { childId: string; itemId: string; photoId: string }[],
-  method: "home" | "school",
-  tag: string,
-) {
-  for (const line of lines)
-    expect((await shop.post(`/api/v1/shop/cart/lines?${q}`, { data: line })).status()).toBe(201);
-  expect((await shop.put(`/api/v1/shop/cart/shipping?${q}`, { data: { method } })).status()).toBe(
-    200,
-  );
-  const started = await shop.post(`/api/v1/shop/checkout?${q}`);
-  expect(started.status()).toBe(201);
-  const session = new URL(((await started.json()) as { url: string }).url).searchParams.get(
-    "session",
-  );
-  const paid = await shop.post("/api/dev-stripe/checkout", {
-    data: {
-      action: "pay",
-      session,
-      email: `parent-${tag}@example.test`,
-      shipping:
-        method === "home"
-          ? {
-              name: "Priya Patel",
-              line1: "12 Maple Lane",
-              line2: null,
-              city: "Toronto",
-              state: "ON",
-              postalCode: "M5V 2T6",
-              country: "CA",
-            }
-          : null,
-    },
-  });
-  expect(paid.status()).toBe(200);
-  const orderId = /\/shop\/orders\/([0-9a-f-]{36})/.exec(
-    ((await paid.json()) as { redirect: string }).redirect,
-  )?.[1] as string;
-  const order = (await (await shop.get(`/api/v1/shop/orders/${orderId}?${q}`)).json()) as {
-    order: { reference: string };
-  };
-  return { orderId, reference: formatted(order.order.reference) };
-}
-
 test("orders: printed then shipped with tracking, bulk delivered to school, a partial refund, the ledger, Home, bell and activity", async ({
   browser,
 }, info) => {
