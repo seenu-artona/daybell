@@ -317,15 +317,13 @@ function JobsPage() {
               <tbody>
                 {jobs.map((job) => (
                   <ClickableRow key={job.id} onActivate={() => router.push(`/app/jobs/${job.id}`)}>
-                    <TableCell>
-                      <span className="flex flex-col items-start">
-                        <Link href={`/app/jobs/${job.id}`} className={NAME_LINK}>
-                          {job.name}
-                        </Link>
-                        {job.internalNumber ? (
-                          <span className="-mt-2 text-body text-muted">{job.internalNumber}</span>
-                        ) : null}
-                      </span>
+                    {/* One line per job, as in the approved F_Jobs (D147; Seenu, Oct 14): no job number under the
+                        name, and the 44px name link sets the row's height (D91). The number stays searchable and is
+                        on the job's own page. */}
+                    <TableCell className="py-1">
+                      <Link href={`/app/jobs/${job.id}`} className={NAME_LINK}>
+                        {job.name}
+                      </Link>
                     </TableCell>
                     <TableCell>{job.client?.name ?? t("none")}</TableCell>
                     <TableCell className="whitespace-nowrap">{formatDay(job.pictureDay)}</TableCell>
