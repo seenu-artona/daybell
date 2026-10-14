@@ -414,13 +414,29 @@ describe("D144 list pieces", () => {
     expect(other.getAttribute("aria-current")).toBeNull();
     expect(other.className).toMatch(/\btext-muted\b/);
     expect(other.className).not.toMatch(/\bfont-bold\b/);
+    // A page's first row (D144, amended Oct 14): with many views (Orders), the row scrolls sideways.
+    const nav = screen.getByRole("navigation", { name: "Job sections" });
+    expect(nav.querySelector("ul")?.className).toMatch(/\boverflow-x-auto\b/);
     await expectNoA11yViolations(container);
+  });
+
+  it("view bar: a page's first row has no line under it; a second level under pill tabs does", () => {
+    render(
+      <main>
+        <ViewBar data-testid="main" actions={<button type="button">New job</button>} />
+        <ViewBar data-testid="sub" variant="sub" actions={<button type="button">Upload</button>} />
+      </main>,
+    );
+    expect(screen.getByTestId("main").className).not.toMatch(/\bborder-b\b/);
+    expect(screen.getByTestId("sub").className).toMatch(/\bborder-b\b/);
+    expect(screen.getByTestId("sub").className).toMatch(/\bborder-line-canvas\b/);
   });
 
   it("view tabs: aria-current, bold, and a dash hidden from screen readers; the bar puts actions on the right in order", async () => {
     const { container } = render(
       <main>
         <ViewBar
+          variant="sub"
           tabs={
             <ViewTabs label="Order views">
               <ViewTab href="?status=" current>

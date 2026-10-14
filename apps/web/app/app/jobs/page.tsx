@@ -9,14 +9,14 @@ import {
   Card,
   ClickableRow,
   ListCard,
+  MainTab,
+  MainTabs,
   RowChevron,
   RowChevronHead,
   Table,
   TableCell,
   TableHead,
   TableRow,
-  ViewTab,
-  ViewTabs,
 } from "@daybell/ui";
 import { Camera, Plus } from "lucide-react";
 import Link from "next/link";
@@ -142,15 +142,15 @@ function JobsPage() {
     <ListPage
       title={t("title")}
       views={
-        <ViewTabs label={t("views.label")}>
+        <MainTabs label={t("views.label")}>
           {JOB_VIEWS.map((v) => (
-            <ViewTab key={v || "all"} asChild current={view === v}>
+            <MainTab key={v || "all"} asChild current={view === v}>
               <Link href={jobViewHref(v)} scroll={false}>
                 {v ? t(`statuses.${v}`) : t("views.all")}
               </Link>
-            </ViewTab>
+            </MainTab>
           ))}
-        </ViewTabs>
+        </MainTabs>
       }
       actions={
         canManage && !noJobsYet ? (

@@ -19,6 +19,8 @@ import {
   Button,
   ClickableRow,
   ListCard,
+  MainTab,
+  MainTabs,
   RowChevron,
   RowChevronHead,
   SearchToggle,
@@ -83,11 +85,17 @@ export function useOrderView() {
  */
 export function OrdersList({
   jobId,
+  level = "main",
   status = "",
   delivery = "",
   viewHref,
 }: {
   jobId?: string;
+  /**
+   * "main" on the Orders page, where the views are the page's first row of tabs (pills, no line under them); "sub" on
+   * a job's Orders tab, under the job's pill tabs (dashes on a hairline). D144, amended Oct 14.
+   */
+  level?: "main" | "sub";
   /** The current view, from the page's address. */
   status?: OrderFulfilment | "";
   /** The delivery filter, from the page's address. */
@@ -213,20 +221,22 @@ export function OrdersList({
     );
   }
   const jobName = jobs.find((j) => j.id === filters.jobId)?.name;
+  const [Tabs, Tab] = level === "main" ? [MainTabs, MainTab] : [ViewTabs, ViewTab];
 
   return (
     <div ref={root} className="flex flex-col gap-4" aria-busy={working || undefined}>
       <ViewBar
+        variant={level}
         tabs={
-          <ViewTabs label={t("views.label")}>
+          <Tabs label={t("views.label")}>
             {VIEWS.map((view) => (
-              <ViewTab key={view || "all"} asChild current={status === view}>
+              <Tab key={view || "all"} asChild current={status === view}>
                 <Link href={hrefFor(view, delivery)} scroll={false}>
                   {view ? t(`statuses.${view}`) : t("views.all")}
                 </Link>
-              </ViewTab>
+              </Tab>
             ))}
-          </ViewTabs>
+          </Tabs>
         }
         actions={
           <>
