@@ -161,3 +161,8 @@ Roster editors rename classes from the "Classes N ›" row under the list (answe
 ## Open questions
 
 None: class rename and Home's Selling now were answered on Oct 14 (answers 6 and 7).
+
+## Amendment (Oct 14, 2026, Seenu; PR #39)
+
+The Jobs list shows the job's name only, one line per row: the job number no longer sits under it (here and in
+0025's layout). The number stays searchable and is on the job's own page.

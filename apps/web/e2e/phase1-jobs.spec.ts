@@ -142,17 +142,17 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
     main.getByRole("heading", { name: `Westview Spring ${tag}`, level: 1 }),
   ).toBeVisible();
 
-  // The Jobs list shows both as drafts with their numbers.
+  // The Jobs list shows both as drafts, one line each: no job number under the name (D147; Seenu, Oct 14).
   await page.goto("/app/jobs");
   const first = main.getByRole("row").filter({ hasText: `${job} (edited)` });
   await expect(first).toContainText(client);
-  await expect(first).toContainText("JOB00001");
+  await expect(first).not.toContainText("JOB00001");
   await expect(first).toContainText("Draft");
   // Columns (D147): job, client, picture day, status, and when the shop closes ("Not selling yet" for a draft).
   await expect(first).toContainText("Not selling yet");
   for (const name of ["Job", "Client", "Picture day", "Status", "Shop closes"])
     await expect(main.getByRole("columnheader", { name, exact: true })).toBeVisible();
-  await expect(main.getByRole("row").filter({ hasText: newClient })).toContainText("JOB00002");
+  await expect(main.getByRole("row").filter({ hasText: newClient })).toBeVisible();
 
   // Chips (D147): All, Draft, Selling and Closed are links, one selected (aria-current) at a time.
   const chips = main.getByRole("navigation", { name: "Show jobs", exact: true });
