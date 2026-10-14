@@ -93,7 +93,15 @@ function ClientsPage() {
   function close() {
     const back = editing !== null && editing !== "new" ? editing.id : null;
     setEditing(null);
-    if (back) setTimeout(() => document.getElementById(nameId(back))?.focus(), 0);
+    // A client opened from menu search may not be on the loaded page; fall back to the page heading.
+    if (back)
+      setTimeout(() => {
+        const name = document.getElementById(nameId(back));
+        if (name) return name.focus();
+        const heading = document.querySelector<HTMLElement>("main h1, h1");
+        heading?.setAttribute("tabindex", "-1");
+        heading?.focus();
+      }, 0);
   }
 
   // A new search starts from the first page.

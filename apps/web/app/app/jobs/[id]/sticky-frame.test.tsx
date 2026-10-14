@@ -39,6 +39,9 @@ beforeEach(async () => {
           <header data-stuck-header={stuck ? "yes" : "no"}>
             <h1>Lincoln Elementary</h1>
             <button type="button">More actions</button>
+            <dialog open>
+              <button type="button">Start selling</button>
+            </dialog>
           </header>
         )}
         tabs={<nav aria-label="Job sections" />}
@@ -103,5 +106,11 @@ describe("StickyFrame (D144)", () => {
     reduce = true;
     more().focus();
     expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "start", behavior: "instant" });
+  });
+
+  it("does not scroll when focus goes into a dialog opened from the header", async () => {
+    await stick(true);
+    (container.querySelector("dialog button") as HTMLButtonElement).focus();
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });

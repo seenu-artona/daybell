@@ -80,8 +80,9 @@ export function StickyFrame({
       >
         <div
           data-sticky-header-top=""
-          onFocusCapture={() => {
-            if (stuck)
+          onFocusCapture={(event) => {
+            // A dialog opened from the header (Start selling, Edit) is not the header coming back into view.
+            if (stuck && !(event.target as Element).closest("dialog"))
               sentinel.current?.scrollIntoView({
                 block: "start",
                 behavior: reducedMotion() ? "instant" : "smooth",
