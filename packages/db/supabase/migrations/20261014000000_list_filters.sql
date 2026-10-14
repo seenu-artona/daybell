@@ -140,9 +140,10 @@ grant execute on function public.save_list_filters(uuid, public.list_page, uuid,
 -- ── Roster list: photos and orders per child ──────────────────────────────────────────────────────────────────────
 -- As in 20261011070000, plus for each child: photo_count, the photos tagged to them that are ready and not in the bin
 -- (flagged ones count: they are the child's, waiting for a check at review); and has_paid_order, whether a paid order
--- that is neither canceled nor refunded in full has a line for them in this job (an order refunded only in part
--- still counts, even if the part given back was this child's line). has_paid_order is null for anyone who doesn't
--- see orders (photographers: Q4 of ADR 0024), so Subjects hides its Ordered column and Not ordered chip.
+-- that is neither canceled nor refunded in full has a line of the child's own in this job that wasn't given back in
+-- full (Seenu, Oct 14: a sibling's refunded lines don't matter; part of a line given back still counts). It is null
+-- for anyone who doesn't see orders (photographers: Q4 of ADR 0024), so Subjects hides its Ordered column and Not
+-- ordered chip.
 -- Still SECURITY INVOKER: row-level security decides what is read.
 drop function public.list_children(uuid, uuid, uuid, int, boolean);
 create function public.list_children(
@@ -192,7 +193,7 @@ as $$
       and p.status = 'ready' and p.binned_at is null
     group by t.child_id
   ),
-  -- Only the orders with a line for a child on this page, in this job (the roster loads 500 at a time).
+  -- Only the orders with a line for a child on this page (at most p_limit children, 1,001 at most), in this job.
   paid_orders as (
     select distinct o.id
     from public.order_lines ol
@@ -202,16 +203,20 @@ as $$
       and ol.child_id in (select id from page)
       and o.status = 'paid' and o.fulfilment_status <> 'canceled'
   ),
+  -- Each order's refund state once: whether it was refunded in full, and how many of each line were given back.
   live_orders as (
-    select po.id from paid_orders po
-    where not coalesce((app.studio_order_refund_state(po.id) ->> 'fully_refunded')::boolean, false)
+    select po.id, app.studio_order_refund_state(po.id) as refund_state from paid_orders po
   ),
+  -- A child is ordered if one of their own lines in this job is in a live order and not given back in full (Seenu,
+  -- Oct 14): a refund of a sibling's lines doesn't touch this child; a refund of all of this child's lines does.
   ordered as (
     select distinct ol.child_id
     from public.order_lines ol
     join live_orders lo on lo.id = ol.order_id
     where ol.studio_id = (select studio_id from job) and ol.job_id = p_job_id
       and ol.child_id in (select id from page)
+      and not coalesce((lo.refund_state ->> 'fully_refunded')::boolean, false)
+      and ol.quantity > coalesce((lo.refund_state -> 'lines' ->> ol.id::text)::int, 0)
   )
   select jsonb_build_object(
     'children', coalesce((

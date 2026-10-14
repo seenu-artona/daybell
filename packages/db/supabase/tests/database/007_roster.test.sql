@@ -4,7 +4,7 @@
 -- the import RPC, the roster list with duplicate flags, and events without personal data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(99);
+select plan(101);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -475,6 +475,46 @@ insert into public.order_refunds (studio_id, order_id, request_id, kind, reason,
   tax_cents, amount_cents, daybell_fee_cents, currency)
 values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'bc000000-0000-4000-8000-000000000004', gen_random_uuid(), 'custom',
   'other', 2000, 0, 0, 2000, 60, 'USD');
+-- Seenu, Oct 14: a child is ordered only if one of their own lines isn't given back in full. Rae and Sol share a paid
+-- order and Sol's line is refunded (Rae still ordered, Sol not); Tao's one line of two prints has one given back
+-- (still ordered).
+insert into public.children (id, studio_id, job_id, first_name, last_name, access_code_hash, access_code_ciphertext)
+select ('b0000000-0000-4000-8000-00000000001' || n)::uuid, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  'b0000000-0000-4000-8000-000000000002', name, 'Zephyr', repeat(n::text, 64), 'v1.' || repeat('E', 48)
+from (values (7, 'Rae'), (8, 'Sol'), (9, 'Tao')) c (n, name);
+insert into public.orders (id, studio_id, reference, currency, shipping_method, products_cents, shipping_cents,
+  daybell_fee_bps, daybell_fee_cents, card_fee_recovery, tax_enabled, payout_account_id, stripe_account_id,
+  bag_fingerprint)
+values
+  ('bc000000-0000-4000-8000-000000000005', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '7KQ2M9XE', 'USD', 'home', 4000, 0,
+   300, 120, 'per_sale', false, 'bd000000-0000-4000-8000-000000000001', 'acct_B7', repeat('5', 64)),
+  ('bc000000-0000-4000-8000-000000000006', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '7KQ2M9XF', 'USD', 'home', 2000, 0,
+   300, 60, 'per_sale', false, 'bd000000-0000-4000-8000-000000000001', 'acct_B7', repeat('6', 64));
+insert into public.order_lines (id, studio_id, order_id, position, job_id, child_id, price_list_id, price_list_item_id,
+  kind, name, unit_price_cents, quantity, line_total_cents)
+values
+  ('be100000-0000-4000-8000-000000000007', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'bc000000-0000-4000-8000-000000000005',
+   1, 'b0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000017', gen_random_uuid(),
+   gen_random_uuid(), 'print', 'Print', 2000, 1, 2000),
+  ('be100000-0000-4000-8000-000000000008', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'bc000000-0000-4000-8000-000000000005',
+   2, 'b0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000018', gen_random_uuid(),
+   gen_random_uuid(), 'print', 'Print', 2000, 1, 2000),
+  ('be100000-0000-4000-8000-000000000009', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'bc000000-0000-4000-8000-000000000006',
+   1, 'b0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000019', gen_random_uuid(),
+   gen_random_uuid(), 'print', 'Print', 1000, 2, 2000);
+update public.orders set status = 'paid', paid_at = now(), tax_cents = 0, total_cents = products_cents,
+  payment_intent_id = 'pi_B' || right(id::text, 1)
+where id in ('bc000000-0000-4000-8000-000000000005', 'bc000000-0000-4000-8000-000000000006');
+insert into public.order_refunds (id, studio_id, order_id, request_id, kind, reason, products_cents, shipping_cents,
+  tax_cents, amount_cents, daybell_fee_cents, currency)
+values
+  ('bf100000-0000-4000-8000-000000000008', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'bc000000-0000-4000-8000-000000000005',
+   gen_random_uuid(), 'lines', 'other', 2000, 0, 0, 2000, 60, 'USD'),
+  ('bf100000-0000-4000-8000-000000000009', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'bc000000-0000-4000-8000-000000000006',
+   gen_random_uuid(), 'lines', 'other', 1000, 0, 0, 1000, 30, 'USD');
+insert into public.order_refund_lines (refund_id, studio_id, order_line_id, quantity, products_cents) values
+  ('bf100000-0000-4000-8000-000000000008', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'be100000-0000-4000-8000-000000000008', 1, 2000),
+  ('bf100000-0000-4000-8000-000000000009', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'be100000-0000-4000-8000-000000000009', 1, 1000);
 create function pg_temp.roster_columns() returns table (name text, photos int, ordered boolean)
 language sql as $$
   select c ->> 'first_name', (c ->> 'photo_count')::int, (c ->> 'has_paid_order')::boolean
@@ -485,7 +525,7 @@ grant execute on function pg_temp.roster_columns() to authenticated;
 set local role authenticated;
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as signed_in;
 select results_eq($$ select * from pg_temp.roster_columns() $$,
-  $$ values ('Bianca', 3, true), ('Quinn', 0, false) $$,
+  $$ values ('Bianca', 3, true), ('Quinn', 0, false), ('Rae', 0, true), ('Sol', 0, false), ('Tao', 0, true) $$,
   'the roster counts each child''s ready photos outside the bin (flagged ones too) and says who has a paid order; '
   'a canceled order doesn''t count');
 select ok((select count(*) from public.order_lines where child_id = 'b0000000-0000-4000-8000-000000000005'
@@ -495,12 +535,18 @@ select ok((select count(*) from public.order_lines where child_id = 'b0000000-00
 select ok(coalesce((app.studio_order_refund_state('bc000000-0000-4000-8000-000000000004') ->> 'fully_refunded')::boolean, false)
   and not (select o from pg_temp.roster_columns() r (n, p, o) where n = 'Quinn'),
   'nor does a paid order in this job that was refunded in full');
+select ok((select o from pg_temp.roster_columns() r (n, p, o) where n = 'Rae')
+  and not (select o from pg_temp.roster_columns() r (n, p, o) where n = 'Sol'),
+  'Seenu, Oct 14: in a two-child order, the child whose lines were refunded is not ordered, the sibling still is');
+select ok((select o from pg_temp.roster_columns() r (n, p, o) where n = 'Tao'),
+  'a line with only part of its quantity given back still counts as ordered');
 select pg_temp.as_user('77777777-7777-4777-8777-777777777777') as signed_in;
 select results_eq($$ select * from pg_temp.roster_columns() $$,
-  $$ values ('Bianca', 3, true), ('Quinn', 0, false) $$, 'staff see the order column too (they fulfil orders)');
+  $$ values ('Bianca', 3, true), ('Quinn', 0, false), ('Rae', 0, true), ('Sol', 0, false), ('Tao', 0, true) $$, 'staff see the order column too (they fulfil orders)');
 select pg_temp.as_user('66666666-6666-4666-8666-666666666666') as signed_in;
 select results_eq($$ select * from pg_temp.roster_columns() $$,
-  $$ values ('Bianca', 3, null::boolean), ('Quinn', 0, null::boolean) $$,
+  $$ values ('Bianca', 3, null::boolean), ('Quinn', 0, null::boolean), ('Rae', 0, null::boolean),
+            ('Sol', 0, null::boolean), ('Tao', 0, null::boolean) $$,
   'photographers get the photo counts but no order data (null), as they read no orders');
 select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as signed_in;
 select is(public.list_children('b0000000-0000-4000-8000-000000000002'),

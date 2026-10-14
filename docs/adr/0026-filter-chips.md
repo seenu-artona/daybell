@@ -32,6 +32,8 @@ These override the architect's plan where they differ.
 7. Home's Selling now (after review): amber "Closes in N days" when the last day to order is two days or fewer away,
    else "Closes Oct 24" (the closing day, not the midnight moment), or "No closing date", with the Jobs list's
    `closingDay` and `closesSoon`.
+8. "Ordered" (after review): a child counts as ordered only if at least one of that child's own paid order lines is
+   not fully refunded; a refund of another child's lines doesn't affect them.
 
 ## What changed
 
@@ -103,9 +105,10 @@ Roster editors rename classes from the "Classes N ›" row under the list (answe
   subject for a job's tab, data `{page, count}` only. Refusals are fixed words (`list_filters_*`). Authenticated only.
   The activity log doesn't show the event (not an activity type).
 - `list_children` recreated with `photo_count` and `has_paid_order` per child: a paid order, neither canceled nor
-  refunded in full, with a line for the child in this job; null unless the caller is an owner, admin or staff of the
-  job's studio. It reads only the orders with a line for a child on the current page. An order refunded only in part
-  still counts as ordered, even when the part given back was this child's line. Still SECURITY INVOKER.
+  refunded in full, with a line of the child's own in this job that wasn't given back in full (Seenu, Oct 14: a
+  refund of a sibling's lines doesn't affect this child; a refund of all of this child's lines makes them not
+  ordered; part of a line's quantity given back still counts); null unless the caller is an owner, admin or staff of
+  the job's studio. It reads only the orders with a line for a child on the current page. Still SECURITY INVOKER.
 - `studio_orders` recreated taking `p_statuses order_fulfilment[]` in place of `p_status`; fully refunded orders are
   still left out of Paid and Printed.
 
