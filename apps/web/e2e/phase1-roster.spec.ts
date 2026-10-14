@@ -1,14 +1,15 @@
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { filterButton, setFilter, signUpOwner } from "./helpers";
+import { signUpOwner } from "./helpers";
 
 // Phase 1 step 2 "Roster" (D23; ADR 0011), in the job's People section since step 2b (D137, D138; ADR 0013),
 // restyled in step 2c (D140; ADR 0014) and relabelled Subjects with one view bar (D144; ADR 0025): an owner adds a
 // child by hand (adding a class from the combobox's last option), opens and edits them in the floating panel, imports
-// a CSV (an update by student ID, duplicates flagged, a bad row left out) and an Excel file, searches, switches views,
-// narrows by class and grade and groups the list (flat with a Class column by default),
-// renames a class from its heading, removes children from the panel and from the form, and the API refuses what it
-// should. Desktop only (D136). The 5,000-row import is in phase1-roster-load.
+// a CSV (an update by student ID, duplicates flagged, a bad row left out) and an Excel file, searches, and uses the
+// chips (D147): Possible duplicates, a class added from "+ Add filter" (saved, kept after a reload, removed with its own
+// button), a grade (this browser only), No photos and Not ordered, with Photos and Ordered columns; renames a class from
+// the Classes row's panel; then removes children from the panel and from the form, and the API refuses what it should.
+// Desktop only (D136). The 5,000-row import is in phase1-roster-load.
 // Adding and importing write codes through the server-only path (the app's SUPABASE_SECRET_KEY_CA, which CI takes
 // from the local Supabase stack).
 // The CI database is Canadian (D122), so every access code starts with a symbol from the Canadian set.
@@ -49,17 +50,8 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   });
   const main = page.getByRole("main");
   const row = (name: string) => main.getByRole("row").filter({ hasText: name });
-  // Columns: name, class, student ID, grade, access code.
+  // Columns: name, class, student ID, grade, access code, photos, ordered (D147).
   const classOf = (name: string) => row(name).getByRole("cell").nth(1);
-  // A class heading's toggle is named "<class> <n> child(ren)", e.g. "4B 1 child".
-  const toggleName = (group: string) => new RegExp(`^${group} \\d`);
-  const heading = (group: string) => main.getByRole("button", { name: toggleName(group) });
-  // A filter's `has` locator is matched inside each <tbody>, so it must not start from `main` (no main inside a
-  // tbody); it starts from the page.
-  const group = (name: string) =>
-    main
-      .getByRole("rowgroup")
-      .filter({ has: page.getByRole("button", { name: toggleName(name) }) });
 
   // 1. A school job, created through the API; its People section starts empty.
   const created = await page.request.post("/api/v1/jobs", {
@@ -233,22 +225,36 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const rowBox = await row("Olivia Brown").boundingBox();
   expect(Math.round(rowBox?.height ?? 0)).toBeGreaterThanOrEqual(60);
   expect(rowBox?.height ?? 0).toBeLessThan(62);
-  await expect(filterButton(page)).toHaveAccessibleName("Filter");
-  const filterBox = await filterButton(page).boundingBox();
-  expect(filterBox?.width).toBe(44);
-  expect(filterBox?.height).toBe(44);
-  // The right end, in order (D145, amends D144): filter, search, Print QR cards, then the green Add subjects.
-  const tools = [
-    filterButton(page),
-    main.getByRole("button", { name: "Search children" }),
-    main.getByRole("button", { name: "Print QR cards", exact: true }),
-    main.getByRole("button", { name: "Add subjects", exact: true }),
-  ];
-  const lefts = await Promise.all(tools.map(async (tool) => (await tool.boundingBox())?.x ?? 0));
-  expect([...lefts].sort((a, b) => a - b)).toEqual(lefts);
+  // The section's actions sit at the right end of the job's tab row (D147): the white Print QR cards, then the green
+  // Add subjects. The chips and the 44px search are in the list card's toolbar.
+  const tabRow = await main
+    .getByRole("navigation", { name: "Job sections", exact: true })
+    .boundingBox();
+  const printBox = await main
+    .getByRole("button", { name: "Print QR cards", exact: true })
+    .boundingBox();
+  const addBox = await main
+    .getByRole("button", { name: "Add subjects", exact: true })
+    .boundingBox();
+  const middle = (box: { y: number; height: number } | null) =>
+    (box?.y ?? 0) + (box?.height ?? 0) / 2;
+  expect(Math.abs(middle(printBox) - middle(tabRow))).toBeLessThan(4);
+  expect(printBox?.x ?? 0).toBeLessThan(addBox?.x ?? 0);
+  const chips = main.getByRole("navigation", { name: "Show subjects", exact: true });
+  await expect(chips.getByRole("link", { name: "All", exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  const allBox = await chips.getByRole("link", { name: "All", exact: true }).boundingBox();
+  expect(allBox?.height).toBeGreaterThanOrEqual(44);
   const searchBox = await main.getByRole("button", { name: "Search children" }).boundingBox();
   expect(searchBox?.width).toBe(44);
   expect(searchBox?.height).toBe(44);
+  // Photos and Ordered columns: nobody has photos or orders yet.
+  await expect(main.getByRole("columnheader", { name: "Photos", exact: true })).toBeVisible();
+  await expect(
+    row("Olivia Brown").getByRole("cell", { name: "Not yet", exact: true }),
+  ).toBeVisible();
   await expect(classOf("Sophia Wilson")).toHaveText("Room 5");
   expect(jobLoads).toBeLessThanOrEqual(2);
 
@@ -269,59 +275,108 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(main.getByRole("button", { name: "Search children" })).toBeFocused();
   expect(page.url()).not.toContain("olivia");
 
-  // The duplicates notice switches to the Possible duplicates view.
-  const views = main.getByRole("navigation", { name: "Subject views" });
+  // The duplicates notice switches to the Possible duplicates chip.
   await main.getByRole("button", { name: "Show them" }).click();
   await expect(page).toHaveURL(/\?show=duplicates$/);
-  await expect(views.getByRole("link", { name: "Possible duplicates" })).toHaveAttribute(
+  await expect(chips.getByRole("link", { name: "Possible duplicates" })).toHaveAttribute(
     "aria-current",
-    "page",
+    "true",
   );
   await expect(main.getByRole("link", { name: "Ava Patel", exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
-  await views.getByRole("link", { name: "All", exact: true }).click();
+  await chips.getByRole("link", { name: "All", exact: true }).click();
   await expect(page).toHaveURL(people);
 
-  await setFilter(page, "Class", "Room 5");
-  await setFilter(page, "Grade", "5");
-  // The icon says so in words (and a dot), never colour alone (D91).
-  await expect(filterButton(page)).toHaveAccessibleName("Filter (2 on)");
-  // Nobody in Room 5 is opted out: AND gives no rows.
-  await views.getByRole("link", { name: "Do not photograph", exact: true }).click();
-  await expect(main.getByText("No children match.", { exact: true })).toBeVisible();
-  await views.getByRole("link", { name: "All", exact: true }).click();
-  await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toBeVisible();
-  await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
-  // "No class" replaces the class.
-  await setFilter(page, "Class", "No class");
-  await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
-  // Clear filters, inside the panel, sets them all back and puts focus on the icon.
-  await filterButton(page).click();
-  await main.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await expect(filterButton(page)).toHaveAccessibleName("Filter");
-  await expect(filterButton(page)).toBeFocused();
+  // No photos and Not ordered: nobody has either yet, so everyone shows.
+  await chips.getByRole("link", { name: "No photos", exact: true }).click();
+  await expect(page).toHaveURL(/\?show=noPhotos$/);
+  await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
+  await chips.getByRole("link", { name: "Not ordered", exact: true }).click();
+  await expect(page).toHaveURL(/\?show=notOrdered$/);
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
 
-  // The list is flat by default (no class headings); Group by: Class brings the headings back, and they collapse.
-  await expect(heading("4C")).toHaveCount(0);
-  await setFilter(page, "Group by", "Class");
-  await expect(heading("4C")).toHaveAttribute("aria-expanded", "true");
-  await heading("4C").click();
-  await expect(heading("4C")).toHaveAttribute("aria-expanded", "false");
+  // + Add filter: "Show only" lists each class, No class, Grade… and the two flags. A class becomes a chip of the
+  // person's own for this job: in the address as its id only (?class=<id>, D113), kept after a reload.
+  const addFilter = main.getByRole("button", { name: "Add filter", exact: true });
+  await addFilter.click();
+  await expect(main.getByText("Show only", { exact: true })).toBeVisible();
+  for (const choice of [
+    "4C",
+    "Room 5",
+    "No class",
+    "Grade…",
+    "Do not photograph",
+    "Do not publish",
+  ])
+    await expect(main.getByRole("button", { name: choice, exact: true })).toBeVisible();
+  await main.getByRole("button", { name: "Room 5", exact: true }).click();
+  await expect(page).toHaveURL(/\?class=[0-9a-f-]{36}$/);
+  await expect(addFilter).toBeFocused();
+  await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
-  await heading("4C").click();
-  // And back to one flat list.
-  await setFilter(page, "Group by", "None");
-  await expect(heading("4C")).toHaveCount(0);
-  await setFilter(page, "Group by", "Class");
+  await page.reload();
+  await expect(chips.getByRole("link", { name: "Room 5", exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
 
-  // 7. Rename a class from its heading.
-  await main.getByRole("button", { name: "Rename class 4C" }).click();
+  // A grade is a chip in this browser only: never in the address, never saved.
+  await addFilter.click();
+  await main.getByRole("button", { name: "Grade…", exact: true }).click();
+  const gradeField = main.getByRole("combobox", { name: "Grade", exact: true });
+  await expect(gradeField).toBeFocused();
+  await gradeField.press("ArrowDown");
+  await main
+    .getByRole("listbox", { name: "Grades" })
+    .getByRole("option", { name: "4", exact: true })
+    .click();
+  await expect(chips.getByRole("button", { name: "Grade 4", exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(page).toHaveURL(people);
+  await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
+  // One chip at a time (D147): Do not photograph replaces the grade, and lists the children opted out (Ava Patel, from
+  // the CSV's "Photo Opt Out"), not those in grade 4 or Room 5.
+  await addFilter.click();
+  await main.getByRole("button", { name: "Do not photograph", exact: true }).click();
+  await expect(page).toHaveURL(/\?show=doNotPhotograph$/);
+  await expect(chips.getByRole("button", { name: "Grade 4", exact: true })).not.toHaveAttribute(
+    "aria-current",
+  );
+  await expect(main.getByRole("link", { name: "Ava Patel", exact: true })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
+
+  // An added chip's own remove button takes it away (back to All when it was selected); built-in chips have none.
+  await main.getByRole("button", { name: "Remove filter: Do not photograph", exact: true }).click();
+  await expect(page).toHaveURL(people);
+  await main.getByRole("button", { name: "Remove filter: Room 5", exact: true }).click();
+  await expect(chips.getByRole("link", { name: "Room 5", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "Remove filter: All" })).toHaveCount(0);
+  await page.reload();
+  await expect(chips.getByRole("link", { name: "Room 5", exact: true })).toHaveCount(0);
+  await expect(chips.getByRole("button", { name: "Grade 4", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
+
+  // 7. Rename a class from the Classes row under the list (D147: Group by is gone): it opens the job's classes in the
+  // panel, each with Rename; focus comes back to the class's Rename button.
+  const classesRow = main.getByRole("button", { name: /^Classes \d+$/ });
+  await classesRow.click();
+  await expect(classesRow).toHaveAttribute("aria-expanded", "true");
+  const classesPanel = page.getByRole("complementary", { name: "This job's classes" });
+  await classesPanel.getByRole("button", { name: "Rename class 4C", exact: true }).click();
   const rename = page.getByRole("dialog", { name: "Rename class" });
   await rename.getByLabel("Name", { exact: true }).fill("Room 4C");
   await rename.getByRole("button", { name: "Save changes" }).click();
   await expect(rename).toBeHidden();
-  await expect(group("Room 4C")).toContainText("Olivia Brown");
+  await expect(
+    classesPanel.getByRole("button", { name: "Rename class Room 4C", exact: true }),
+  ).toBeFocused();
+  await expect(classOf("Olivia Brown")).toHaveText("Room 4C");
+  await page.keyboard.press("Escape");
+  await expect(classesRow).toBeFocused();
 
   // 8. Remove children while the job is a draft: one from the panel's ⋯ menu, one from the child form.
   await row("Noah Garcia").getByRole("cell").nth(1).click();

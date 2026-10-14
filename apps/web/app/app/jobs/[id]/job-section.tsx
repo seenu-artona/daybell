@@ -1,27 +1,20 @@
-import { ViewBar } from "@daybell/ui";
 import type { ReactNode } from "react";
 
 /**
- * One job section in the D144 layout, under the job's tabs: a heading for screen readers (h2, visually hidden), one
- * second-level view bar (the section's dash views on the left, over a hairline, as the job's pill tabs are the first
- * level; its tools on the right, e.g. the filter icon, search and one green action), then the content in white cards. A FloatingPanel passed as `panel` floats over the right side of the content, 400px
- * wide.
+ * One job section under the job's tabs (D144; D147): a heading for screen readers (h2, visually hidden), notices, then
+ * the content in white cards. The section's actions sit at the right end of the tab row (JobTabActions) and its filter
+ * chips in its list card's toolbar, so there is no view bar of its own. A FloatingPanel passed as `panel` floats over
+ * the right side of the content, 400px wide.
  */
 export function JobSection({
   title,
-  views,
-  tools,
   below,
   panel,
   children,
 }: {
   /** The section's heading (h2), read by screen readers, e.g. "6 children". */
   title?: ReactNode;
-  /** The view bar's left side: ViewTabs (dashes, under the job's pill tabs). */
-  views?: ReactNode;
-  /** The view bar's right end, in D144 order. */
-  tools?: ReactNode;
-  /** Under the view bar, above the content: notices and selection bars. */
+  /** Above the content: notices and selection bars. */
   below?: ReactNode;
   panel?: ReactNode;
   children: ReactNode;
@@ -29,7 +22,6 @@ export function JobSection({
   return (
     <div className="flex flex-col gap-4">
       {title ? <h2 className="sr-only">{title}</h2> : null}
-      {views || tools ? <ViewBar variant="sub" tabs={views} actions={tools} /> : null}
       {below}
       <div className="relative">
         {children}

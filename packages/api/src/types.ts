@@ -308,8 +308,26 @@ export const child = z
   });
 export type Child = z.infer<typeof child>;
 
+/**
+ * A child as the roster list has them (D147): with their photo count and whether a paid order has a line for them.
+ * Only the list carries these; one child's own endpoints don't.
+ */
+export const rosterChild = child
+  .extend({
+    photoCount: z.number().int().meta({
+      description:
+        "Ready photos tagged to the child, outside the bin; flagged ones count (they wait for a check).",
+    }),
+    hasPaidOrder: z.boolean().nullable().meta({
+      description:
+        "A paid order that is neither canceled nor refunded in full has a line for the child in this job. Null for people who don't see orders (photographers).",
+    }),
+  })
+  .meta({ id: "RosterChild", description: "A child in the roster list, with photos and orders." });
+export type RosterChild = z.infer<typeof rosterChild>;
+
 export const childrenResponse = z.object({
-  children: z.array(child),
+  children: z.array(rosterChild),
   nextCursor,
   total: z.number().int().meta({ description: "Children matching the filter." }),
   duplicates: z.number().int().meta({ description: "Of those, how many are flagged duplicates." }),
@@ -1930,3 +1948,24 @@ export const TAX_CONFLICTS = {
   alreadyRegistered: "taxes.alreadyRegistered",
 } as const;
 export type TaxConflict = (typeof TAX_CONFLICTS)[keyof typeof TAX_CONFLICTS];
+
+// ── Saved filter chips (D147, ADR 0026) ───────────────────────────────────────────────────────────────────────────
+export const listFilterChip = z
+  .object({
+    key: z
+      .string()
+      .meta({ description: "One of the list's chip keys, e.g. closingThisWeek or client." }),
+    value: z.uuid().nullable().meta({
+      description:
+        "The record the chip names (a client, job or class), for the keys that take one.",
+    }),
+  })
+  .meta({
+    id: "ListFilterChip",
+    description: "A chip a person added to a list. Ids only: its name is looked up when shown.",
+  });
+export type ListFilterChip = z.infer<typeof listFilterChip>;
+export const listFiltersResponse = z.object({
+  chips: z.array(listFilterChip).meta({ description: "In the order shown; at most 8." }),
+});
+export type ListFiltersResponse = z.infer<typeof listFiltersResponse>;

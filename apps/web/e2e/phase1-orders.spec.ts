@@ -7,7 +7,8 @@ import { studioSellingAva } from "./helpers";
 // marks A printed then shipped with tracking, B printed and delivered to school with the bulk bar, and refunds part of
 // A (its download). Item 8: the sale on Home, the bell, the ledger's refund lines and the activity. No tax is set, so a
 // $33.00 download refunds $33.00; Daybell's 3% of it ($0.99) goes back to the studio, which gives back $32.01.
-// Locators are scoped to main, a region or a dialog, and exact.
+// The list's chips (D147): Home's link opens To take to school, To ship and Done narrow it, and a Delivery: Home chip
+// added from "+ Add filter" is saved and kept after a reload. Locators are scoped to main, a region or a dialog, and exact.
 
 const run = `${Date.now()}`;
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -120,9 +121,41 @@ test("orders: printed then shipped with tracking, bulk delivered to school, a pa
   await bar.getByRole("button", { name: "Mark printed", exact: true }).click();
   await expect(announced).toBeVisible();
   await expect(rowB.getByText("Printed", { exact: true })).toBeVisible();
+
+  // The chips (D147): one at a time, in the address. Home's Up next link for school orders opens To take to school;
+  // To ship is printed home orders (none yet: A isn't printed).
+  const chips = main.getByRole("navigation", { name: "Show orders", exact: true });
+  await page.goto("/app/orders?status=printed&delivery=school");
+  await expect(chips.getByRole("link", { name: "To take to school", exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(rowB).toBeVisible();
+  await expect(rowA).toHaveCount(0);
+  await chips.getByRole("link", { name: "To ship", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/orders\?status=printed&delivery=home$/);
+  await expect(main.getByText("No orders match.", { exact: true })).toBeVisible();
+  await chips.getByRole("link", { name: "All", exact: true }).click();
   await rowB.getByRole("checkbox", { name: `Select order ${b.reference}`, exact: true }).check();
   await bar.getByRole("button", { name: "Mark delivered to school", exact: true }).click();
   await expect(rowB.getByText("Delivered to school", { exact: true })).toBeVisible();
+  // Done is shipped, delivered to school or complete (?status=done).
+  await chips.getByRole("link", { name: "Done", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/orders\?status=done$/);
+  await expect(rowB).toBeVisible();
+  await expect(rowA).toHaveCount(0);
+  // + Add filter › Delivery: Home is saved as the person's own chip and opens at once.
+  await main.getByRole("button", { name: "Add filter", exact: true }).click();
+  await main.getByRole("button", { name: "Delivery: Home", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/orders\?delivery=home$/);
+  await expect(rowA).toBeVisible();
+  await expect(rowB).toHaveCount(0);
+  await page.reload();
+  await expect(chips.getByRole("link", { name: "Delivery: Home", exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await chips.getByRole("link", { name: "All", exact: true }).click();
 
   // 4. A: printed, then shipped with a UPS tracking number.
   await rowA.getByRole("link", { name: a.reference, exact: true }).click();
@@ -181,21 +214,22 @@ test("orders: printed then shipped with tracking, bulk delivered to school, a pa
   await expect(ledger.getByRole("cell", { name: "$32.01", exact: true })).toBeVisible();
   await expect(ledger.getByRole("cell", { name: "$0.99", exact: true })).toBeVisible();
 
-  // 7. Home: today's two orders; nothing left to do; the activity.
+  // 7. Home: today's two orders; no orders left in Up next (D146). Home has no activity any more (D146), so the
+  // activity is read from the API.
   await page.goto("/app");
   const today = main.getByRole("region", { name: "Today", exact: true });
   await expect(today.getByText("Orders", { exact: true })).toBeVisible();
   await expect(today.getByText("2", { exact: true })).toBeVisible();
-  await expect(
-    main
-      .getByRole("region", { name: "To do", exact: true })
-      .getByText("No orders are waiting.", { exact: true }),
-  ).toBeVisible();
-  await expect(main.getByText(new RegExp(`shipped order ${literal(a.reference)}$`))).toBeVisible();
-  await expect(main.getByText(new RegExp(`refunded order ${literal(a.reference)}$`))).toBeVisible();
-  await expect(
-    main.getByText(new RegExp(`marked order ${literal(b.reference)} delivered to school$`)),
-  ).toBeVisible();
+  const upNext = main.getByRole("region", { name: "Up next", exact: true });
+  await expect(upNext.getByRole("link", { name: /^(Print|Ship|Take) \d+ orders?/ })).toHaveCount(0);
+  const activity = (await (await page.request.get("/api/v1/studio/activity")).json()) as {
+    activity: { type: string; subjectName: string | null }[];
+  };
+  const did = (type: string, ref: string) =>
+    activity.activity.some((x) => x.type === type && x.subjectName === ref);
+  expect(did("order.shipped", a.reference)).toBe(true);
+  expect(did("order.refunded", a.reference)).toBe(true);
+  expect(did("order.delivered", b.reference)).toBe(true);
 
   // 8. The bell: a new order rings it, and the row opens the order.
   const menu = page.getByRole("complementary", { name: "Studio menu", exact: true });

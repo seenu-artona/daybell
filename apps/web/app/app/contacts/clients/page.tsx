@@ -5,6 +5,8 @@ import {
   Banner,
   Button,
   ClickableRow,
+  FilterChip,
+  FilterChips,
   ListCard,
   RowChevron,
   RowChevronHead,
@@ -15,6 +17,7 @@ import {
   TableRow,
 } from "@daybell/ui";
 import { Plus } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -37,7 +40,8 @@ const NAME_BUTTON =
 
 /**
  * Clients (D144; the menu's Clients, at /app/contacts/clients). Clients are added here ahead of time, or from the job
- * form. One view bar: the search (GET /clients?q=, by name; never in the address, D113) and the green New client. A
+ * form. The green New client in the title row; the list card's toolbar has the All chip (D147: Clients has no other
+ * chips yet) and the search (GET /clients?q=, by name; never in the address, D113). A
  * click on a row, or its name, opens the client in the dialog: editable for owners and admins, read-only for everyone
  * else. ?client=<id> (from the menu search, D138 Q2) opens that client the same way. Only an id goes in the URL.
  */
@@ -52,6 +56,7 @@ export default function ClientsPageRoute() {
 
 function ClientsPage() {
   const t = useTranslations("app.contacts");
+  const tc = useTranslations("app.chips");
   const text = useApiText();
   const { me } = useStudio();
   const canManage = me.studio.role === "owner" || me.studio.role === "admin";
@@ -138,44 +143,56 @@ function ClientsPage() {
   return (
     <ListPage
       title={t("title")}
-      actions={
-        <>
-          <SearchToggle label={t("clients.searchLabel")} value={typed} onChange={setTyped} />
-          {canManage ? (
-            <Button shape="pill" onClick={() => setEditing("new")}>
-              <Plus aria-hidden="true" />
-              {t("clients.add")}
-            </Button>
-          ) : null}
-        </>
+      action={
+        canManage ? (
+          <Button shape="pill" onClick={() => setEditing("new")}>
+            <Plus aria-hidden="true" />
+            {t("clients.add")}
+          </Button>
+        ) : null
       }
     >
       {openProblem ? <Banner tone="danger" title={openProblem} /> : null}
       {listProblem ? <Banner tone="danger" title={listProblem} /> : null}
-      {!clients && !listProblem ? <p className="m-0 text-muted">{t("clients.loading")}</p> : null}
-      {clients && clients.length === 0 ? (
-        <p className="m-0 rounded-list bg-surface px-6 py-10 text-center text-muted shadow-card">
-          {q ? t("clients.noMatches") : t("clients.empty")}
-        </p>
-      ) : null}
 
-      {clients && clients.length > 0 ? (
-        <ListCard
-          footer={
-            nextCursor ? (
-              <Button
-                variant="quiet"
-                shape="pill"
-                onClick={() => {
-                  // While a new search waits to be sent, the list on screen is about to change: no next page of it.
-                  if (typed.trim() === q) void load(nextCursor);
-                }}
-              >
-                {t("clients.loadMore")}
-              </Button>
-            ) : null
-          }
-        >
+      <ListCard
+        toolbar={
+          <FilterChips label={t("clients.chipsLabel")}>
+            <FilterChip asChild selected>
+              <Link href="/app/contacts/clients" scroll={false}>
+                {tc("all")}
+              </Link>
+            </FilterChip>
+          </FilterChips>
+        }
+        toolbarEnd={
+          <SearchToggle label={t("clients.searchLabel")} value={typed} onChange={setTyped} onCard />
+        }
+        footer={
+          clients && clients.length > 0 && nextCursor ? (
+            <Button
+              variant="quiet"
+              shape="pill"
+              onClick={() => {
+                // While a new search waits to be sent, the list on screen is about to change: no next page of it.
+                if (typed.trim() === q) void load(nextCursor);
+              }}
+            >
+              {t("clients.loadMore")}
+            </Button>
+          ) : null
+        }
+      >
+        {!clients && !listProblem ? (
+          <p className="m-0 px-6 py-10 text-center text-muted">{t("clients.loading")}</p>
+        ) : null}
+        {clients && clients.length === 0 ? (
+          <p className="m-0 px-6 py-10 text-center text-muted">
+            {q ? t("clients.noMatches") : t("clients.empty")}
+          </p>
+        ) : null}
+
+        {clients && clients.length > 0 ? (
           <Table variant="list">
             <thead>
               <TableRow>
@@ -207,8 +224,8 @@ function ClientsPage() {
               ))}
             </tbody>
           </Table>
-        </ListCard>
-      ) : null}
+        ) : null}
+      </ListCard>
 
       <Dialog
         open={editing !== null}

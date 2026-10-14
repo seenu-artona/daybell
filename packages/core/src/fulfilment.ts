@@ -20,6 +20,13 @@ export const ORDER_FULFILMENTS = [
 ] as const;
 export type OrderFulfilment = (typeof ORDER_FULFILMENTS)[number];
 
+/** Orders with nothing left to do (D147, Orders' "Done" chip): shipped, delivered to school, or complete. */
+export const ORDER_DONE_STATUSES = [
+  "shipped",
+  "delivered",
+  "complete",
+] as const satisfies readonly OrderFulfilment[];
+
 /** The carriers a studio ships with (Claude's call): "other" takes a link to its own tracking page. */
 export const CARRIERS = ["canada_post", "purolator", "ups", "fedex", "other"] as const;
 export type Carrier = (typeof CARRIERS)[number];

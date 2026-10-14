@@ -181,25 +181,3 @@ export async function studioSellingAva(
   expect((await page.request.post(`/api/v1/jobs/${jobId}/start-selling`)).status()).toBe(200);
   return { context, page, studio, jobId, code: child.accessCode };
 }
-
-/** A list's filter icon (D145, amends D144): named "Filter", or "Filter (2 on)" while filters are set. */
-export function filterButton(page: Page) {
-  return page.getByRole("main").getByRole("button", { name: /^Filter( \(\d+ on\))?$/ });
-}
-
-/**
- * Sets one filter from the filter icon's panel: opens it, checks the choice in the named group of radio buttons and
- * closes it with Escape (focus goes back to the icon).
- */
-export async function setFilter(page: Page, group: string, choice: string) {
-  const button = filterButton(page);
-  if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
-  const panel = page.locator(`[id="${await button.getAttribute("aria-controls")}"]`);
-  await panel
-    .getByRole("group", { name: group, exact: true })
-    .getByRole("radio", { name: choice, exact: true })
-    .check();
-  await page.keyboard.press("Escape");
-  await expect(button).toHaveAttribute("aria-expanded", "false");
-  await expect(button).toBeFocused();
-}

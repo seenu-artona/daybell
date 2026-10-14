@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   campaignsMaySend,
+  closesSoon,
   closingDateAllowed,
   closingDay,
   daysUntil,
@@ -152,6 +153,20 @@ describe("endOfLocalDay and closingDay (ADR 0021, Q2)", () => {
   it("uses the runtime's own zone when none is given", () => {
     for (const day of ["2026-10-31", "2026-11-20", "2027-03-14"])
       expect(closingDay(endOfLocalDay(day))).toBe(day);
+  });
+});
+
+describe("closesSoon (D147)", () => {
+  // Closing moments are the end of the chosen day in the setter's zone (endOfLocalDay).
+  const closing = (day: string) => endOfLocalDay(day, "America/Toronto").toISOString();
+  it("counts the days to the last day to order, up to two", () => {
+    expect(closesSoon(closing("2026-10-14"), "2026-10-14", "America/Toronto")).toBe(0);
+    expect(closesSoon(closing("2026-10-15"), "2026-10-14", "America/Toronto")).toBe(1);
+    expect(closesSoon(closing("2026-10-16"), "2026-10-14", "America/Toronto")).toBe(2);
+  });
+  it("says nothing further away or once passed", () => {
+    expect(closesSoon(closing("2026-10-17"), "2026-10-14", "America/Toronto")).toBeNull();
+    expect(closesSoon(closing("2026-10-13"), "2026-10-14", "America/Toronto")).toBeNull();
   });
 });
 

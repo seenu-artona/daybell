@@ -169,9 +169,9 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
       .getByText("Done", { exact: true }),
   ).toBeVisible();
 
-  // 4. Home's Jobs selling now links to it.
+  // 4. Home's Selling now links to it (D146).
   await page.goto("/app");
-  const selling = main.getByRole("region", { name: "Jobs selling now", exact: true });
+  const selling = main.getByRole("region", { name: "Selling now", exact: true });
   await expect(
     selling.getByRole("link", { name: new RegExp(`^${literal(jobName)}\\s*No closing date$`) }),
   ).toHaveAttribute("href", `/app/jobs/${jobId}`);

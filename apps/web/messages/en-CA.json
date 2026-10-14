@@ -214,7 +214,8 @@
     "refundLines": "Choose what to refund, each item once.",
     "refundAmount": "Enter an amount in dollars and cents.",
     "refundKind": "Choose items or a custom amount.",
-    "timeZone": "Your time zone wasn’t recognized."
+    "timeZone": "Your time zone wasn’t recognized.",
+    "filterChips": "Those filters can't be saved. Reload the page and try again."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -462,7 +463,11 @@
       }
     },
     "home": {
-      "title": "Home",
+      "greeting": {
+        "morning": "Good morning",
+        "afternoon": "Good afternoon",
+        "evening": "Good evening"
+      },
       "range": "Date range",
       "ranges": {
         "today": "Today",
@@ -474,13 +479,12 @@
       "averageOrder": "Average order",
       "noData": "No sales yet",
       "dash": "–",
-      "jobsSelling": "Jobs selling now",
+      "sellingNow": "Selling now",
+      "allJobs": "All jobs",
       "noJobs": "No jobs are selling yet.",
       "closesOn": "Closes {when}",
       "noClosingDate": "No closing date",
-      "viewAllJobs": "View all jobs",
       "jobsSellingFailed": "We couldn’t load the jobs selling now.",
-      "recently": "Recently",
       "checking": "Checking…",
       "onboarding": {
         "title": "Set up your studio",
@@ -495,7 +499,7 @@
         "title": "Up next",
         "intro": "Picked from all your jobs, most urgent first",
         "empty": "Nothing needs you right now.",
-        "row": "{job} · {reason}",
+        "row": "{task} · {job}",
         "more": "{count, plural, one {# more job in Jobs} other {# more jobs in Jobs}}",
         "reasons": {
           "photosOverdue": "{days, plural, one {Picture day was # day ago, no photos yet} other {Picture day was # days ago, no photos yet}}",
@@ -503,20 +507,24 @@
           "brokenPhotos": "{count, plural, one {# photo failed} other {# photos failed}}",
           "taggingProblems": "{leftovers, number} in Leftovers, {flagged, number} to check",
           "nextStep": "Next step"
-        }
+        },
+        "orders": {
+          "toPrint": "{count, plural, one {Print # order} other {Print # orders}}",
+          "toShip": "{count, plural, one {Ship # order} other {Ship # orders}}",
+          "toDeliver": "{count, plural, one {Take # order to school} other {Take # orders to school}}"
+        },
+        "ordersWhy": {
+          "toPrint": "Paid and waiting to be printed",
+          "toShip": "Printed, waiting to be shipped",
+          "toDeliver": "Printed, waiting to go to school"
+        },
+        "ordersFailed": "We couldn’t load the orders waiting."
       },
       "checklistTitle": "Your next steps",
       "daybellFee": "Daybell fee",
       "since": "Since {date}",
       "salesFailed": "We couldn’t load your numbers.",
-      "todo": {
-        "title": "To do",
-        "toPrint": "{count, plural, one {# order to print} other {# orders to print}}",
-        "toShip": "{count, plural, one {# order to ship} other {# orders to ship}}",
-        "toDeliver": "{count, plural, one {# order to take to school} other {# orders to take to school}}",
-        "nothing": "No orders are waiting.",
-        "failed": "We couldn’t load your to-do list."
-      }
+      "closesIn": "{days, plural, =0 {Closes today} one {Closes in # day} other {Closes in # days}}"
     },
     "signOutFailed": "We couldn't sign you out. Check your connection and try again.",
     "dialog": {
@@ -524,10 +532,6 @@
     },
     "jobs": {
       "title": "Jobs",
-      "views": {
-        "label": "Job views",
-        "all": "All"
-      },
       "new": "New job",
       "loading": "Loading jobs…",
       "emptyTitle": "No jobs yet",
@@ -539,9 +543,8 @@
         "name": "Job",
         "client": "Client",
         "pictureDay": "Picture day",
-        "subjects": "Subjects",
         "status": "Status",
-        "progress": "Progress"
+        "shopCloses": "Shop closes"
       },
       "none": "–",
       "loadMore": "Show more",
@@ -584,7 +587,29 @@
         "edit": "Edit job",
         "saved": "Saved.",
         "notFound": "We couldn't find that job."
-      }
+      },
+      "sections": {
+        "label": "Jobs pages",
+        "list": "List",
+        "calendar": "Calendar"
+      },
+      "chips": {
+        "label": "Show jobs",
+        "closingThisWeek": "Shop closes this week",
+        "pictureDayThisMonth": "Picture day this month",
+        "clientMenu": "Client…",
+        "client": "Client",
+        "clientPlaceholder": "Search clients…",
+        "clientList": "Clients"
+      },
+      "shopCloses": {
+        "notSelling": "Not selling yet",
+        "closed": "Closed",
+        "none": "No closing date",
+        "soon": "{date} · {days, plural, =0 {today} one {in # day} other {in # days}}"
+      },
+      "searchLabel": "Search jobs",
+      "emptyFiltered": "No jobs match."
     },
     "contacts": {
       "title": "Clients",
@@ -599,7 +624,8 @@
           "contact": "Contact person",
           "city": "City"
         },
-        "loadMore": "Show more"
+        "loadMore": "Show more",
+        "chipsLabel": "Show clients"
       },
       "form": {
         "addTitle": "Add client",
@@ -773,7 +799,8 @@
         "digital": "Digital download"
       },
       "currency": "Amount in {currency}",
-      "symbol": "$"
+      "symbol": "$",
+      "chipsLabel": "Show price lists"
     },
     "optionalLabel": "{label} (optional)",
     "roster": {
@@ -785,7 +812,6 @@
       "emptyBody": "Import the {group, select, class {class} team {team} other {group}} list from a CSV or Excel file, or add children one by one. Each child gets an access code for their parents.",
       "emptyReadOnly": "Owners, admins and photographers manage the roster.",
       "loadFailed": "The roster couldn't be loaded. Reload the page to try again.",
-      "filter": "{group, select, class {Class} team {Team} other {Group}}",
       "noGroup": "{group, select, class {No class} team {No team} other {No group}}",
       "columns": {
         "name": "Name",
@@ -837,13 +863,13 @@
       },
       "groupForm": {
         "addTitle": "{group, select, class {Add class} team {Add team} other {Add group}}",
-        "renameTitle": "{group, select, class {Rename class} team {Rename team} other {Rename group}}",
         "name": "Name",
         "namePlaceholder": "{group, select, class {e.g. Room 4B · Ms. Lee} team {e.g. U10 Tigers} other {e.g. Morning session}}",
         "create": "{group, select, class {Add class} team {Add team} other {Add group}}",
         "save": "Save changes",
         "cancel": "Cancel",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "renameTitle": "{group, select, class {Rename class} team {Rename team} other {Rename group}}"
       },
       "importPage": {
         "title": "Import roster",
@@ -930,11 +956,6 @@
       "jobMeta": "{number} · {status}",
       "loading": "Searching…",
       "empty": "No jobs or clients match."
-    },
-    "filters": {
-      "label": "Filter",
-      "labelOn": "Filter ({count} on)",
-      "clear": "Clear filters"
     },
     "job": {
       "moreActions": "More actions",
@@ -1033,22 +1054,13 @@
       "heading": "{count, plural, one {# child} other {# children}}",
       "footer": "{count, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · {duplicates, plural, =0 {no duplicates} one {# possible duplicate} other {# possible duplicates}}",
       "footerCounting": "{count, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
-      "views": {
-        "label": "Subject views"
-      },
-      "all": "All",
-      "grade": "Grade",
       "flags": {
         "doNotPhotograph": "Do not photograph",
         "doNotPublish": "Do not publish",
         "duplicates": "Possible duplicates"
       },
-      "groupByLegend": "Group by",
-      "groupNone": "None",
       "duplicatesNotice": "{count, plural, one {# possible duplicate} other {# possible duplicates}}",
       "showThem": "Show them",
-      "rename": "Rename",
-      "renameLabel": "{group, select, class {Rename class} team {Rename team} other {Rename group}} {name}",
       "duplicateBadge": "Duplicate?",
       "noMatches": "No children match.",
       "loadingMore": "Loading more…",
@@ -1062,6 +1074,33 @@
         "none": "–",
         "printCard": "Print QR card",
         "noCard": "No QR card: marked Do not photograph"
+      },
+      "chips": {
+        "label": "Show subjects",
+        "notOrdered": "Not ordered",
+        "noPhotos": "No photos",
+        "gradeMenu": "Grade…",
+        "grade": "Grade",
+        "gradeChip": "Grade {grade}",
+        "gradePlaceholder": "Search grades…",
+        "gradeList": "Grades"
+      },
+      "columns": {
+        "photos": "Photos",
+        "ordered": "Ordered"
+      },
+      "ordered": {
+        "yes": "Ordered",
+        "no": "Not yet"
+      },
+      "rename": "Rename",
+      "renameLabel": "{group, select, class {Rename class} team {Rename team} other {Rename group}} {name}",
+      "classes": {
+        "row": "{group, select, class {Classes} team {Teams} other {Groups}}",
+        "count": "{count, number}",
+        "title": "{group, select, class {This job's classes} team {This job's teams} other {This job's groups}}",
+        "meta": "Rename one; its children stay in it.",
+        "children": "{count, plural, one {# child} other {# children}}"
       }
     },
     "qrCards": {
@@ -1517,10 +1556,6 @@
     },
     "orders": {
       "title": "Orders",
-      "views": {
-        "label": "Order views",
-        "all": "All"
-      },
       "loading": "Loading…",
       "empty": "No orders yet.",
       "emptyFiltered": "No orders match.",
@@ -1542,15 +1577,8 @@
       "open": "Order {reference}",
       "noChildren": "—",
       "filters": {
-        "job": "Job",
-        "any": "Any",
         "searchLabel": "Search orders",
-        "referenceHelp": "For example 7KQ2-M9XA",
-        "delivery": "Delivery",
-        "deliveryShort": {
-          "home": "Home",
-          "school": "School"
-        }
+        "referenceHelp": "For example 7KQ2-M9XA"
       },
       "loadMore": "Show more orders",
       "statuses": {
@@ -1789,7 +1817,31 @@
           "checked": "Checked on {date}. Printing and shipping can go on.",
           "saved": "Marked as checked."
         }
+      },
+      "chips": {
+        "label": "Show orders",
+        "toPrint": "To print",
+        "toShip": "To ship",
+        "toSchool": "To take to school",
+        "done": "Done",
+        "deliveryHome": "Delivery: Home",
+        "deliverySchool": "Delivery: School",
+        "jobMenu": "Job…",
+        "job": "Job",
+        "jobPlaceholder": "Search jobs…",
+        "jobList": "Jobs"
       }
+    },
+    "chips": {
+      "addFilter": "Add filter",
+      "showOnly": "Show only",
+      "back": "Back",
+      "remove": "Remove filter: {name}",
+      "saveFailed": "We couldn’t save your filters. Try again in a moment.",
+      "all": "All",
+      "loadFailed": "We couldn’t load your saved filters.",
+      "retry": "Try again",
+      "loadingName": "…"
     }
   },
   "invite": {

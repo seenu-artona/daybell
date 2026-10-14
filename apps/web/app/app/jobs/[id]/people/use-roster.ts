@@ -1,6 +1,6 @@
 "use client";
 
-import type { Child, ChildrenResponse, Group, GroupsResponse } from "@daybell/api";
+import type { ChildrenResponse, Group, GroupsResponse, RosterChild } from "@daybell/api";
 import { ROSTER_VIEW_MAX } from "@daybell/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
@@ -9,7 +9,7 @@ const PAGE = 500;
 
 export interface Roster {
   /** Null until the first page arrives. */
-  rows: Child[] | null;
+  rows: RosterChild[] | null;
   groups: Group[];
   /** Children on the roster; can be more than the rows loaded (ROSTER_VIEW_MAX). */
   total: number;
@@ -26,7 +26,7 @@ export interface Roster {
  * whole job on the server.
  */
 export function useRoster(jobId: string): Roster {
-  const [rows, setRows] = useState<Child[] | null>(null);
+  const [rows, setRows] = useState<RosterChild[] | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);

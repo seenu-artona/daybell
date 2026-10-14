@@ -1,96 +1,65 @@
-import { applyFilters, matchesSearch, type PersonRow } from "@daybell/core";
 import { describe, expect, it } from "vitest";
-import {
-  classChoiceFrom,
-  classChoiceValue,
-  effectiveClassChoice,
-  effectiveGrade,
-  SUBJECT_VIEWS,
-  subjectFilters,
-  subjectsHref,
-  subjectView,
-} from "./views";
+import { subjectChipFrom, subjectChipFromSaved, subjectFilters, subjectsHref } from "./views";
 
-const BASE = "/app/jobs/0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e/people";
+const BASE = "/app/jobs/j1/people";
+const CLASS = "d0000000-0000-4000-8000-000000000001";
 const CHILD = "c0000000-0000-4000-8000-000000000001";
+const from = (query: string, seesOrders = true) =>
+  subjectChipFrom(new URLSearchParams(query), { seesOrders });
 
-const row = (over: Partial<PersonRow>): PersonRow => ({
-  id: "x",
-  firstName: "Ava",
-  lastName: "Patel",
-  studentId: null,
-  grade: null,
-  accessCode: null,
-  group: null,
-  doNotPhotograph: false,
-  doNotPublish: false,
-  duplicate: false,
-  ...over,
-});
-
-describe("Subjects views (D144)", () => {
-  it("are All and the three flag views, in order", () => {
-    expect(SUBJECT_VIEWS).toEqual(["all", "duplicates", "doNotPhotograph", "doNotPublish"]);
+describe("Subjects chips (D147)", () => {
+  it("reads one chip from the address and round-trips it with the open child", () => {
+    for (const query of [
+      "show=notOrdered",
+      "show=noPhotos",
+      "show=duplicates",
+      "show=doNotPhotograph",
+      "show=doNotPublish",
+      "show=noClass",
+      `class=${CLASS}`,
+    ]) {
+      const { chip, clean } = from(query);
+      expect(clean).toBe(false);
+      expect(subjectsHref(BASE, chip)).toBe(`${BASE}?${query}`);
+      expect(subjectsHref(BASE, chip, CHILD)).toBe(`${BASE}?${query}&child=${CHILD}`);
+    }
+    // The open child alone is All.
+    expect(from(`child=${CHILD}`)).toEqual({ chip: { kind: "all" }, clean: false });
+    expect(subjectsHref(BASE, { kind: "all" })).toBe(BASE);
   });
 
-  it("read ?show=, and treat anything unknown as All", () => {
-    expect(subjectView("duplicates")).toBe("duplicates");
-    expect(subjectView("doNotPublish")).toBe("doNotPublish");
-    for (const v of [null, "", "all", "nope", "Ava Patel"]) expect(subjectView(v)).toBe("all");
+  it("unknown words, both parameters or a class that isn't an id are All, and clean the address", () => {
+    for (const query of ["show=ordered", "class=4B", `show=noPhotos&class=${CLASS}`])
+      expect(from(query)).toEqual({ chip: { kind: "all" }, clean: true });
   });
 
-  it("keep the view in the address with the open child, and nothing else (D113)", () => {
-    expect(subjectsHref(BASE, "all")).toBe(BASE);
-    expect(subjectsHref(BASE, "duplicates")).toBe(`${BASE}?show=duplicates`);
-    expect(subjectsHref(BASE, "all", CHILD)).toBe(`${BASE}?child=${CHILD}`);
-    expect(subjectsHref(BASE, "doNotPhotograph", CHILD)).toBe(
-      `${BASE}?show=doNotPhotograph&child=${CHILD}`,
-    );
+  it("Not ordered is only for people who see orders", () => {
+    expect(from("show=notOrdered", false)).toEqual({ chip: { kind: "all" }, clean: true });
+    expect(from("show=noPhotos", false).chip).toEqual({ kind: "show", show: "noPhotos" });
   });
 
-  it("turn the class menu's value into a choice and back", () => {
-    for (const v of ["", "none", "g1"]) expect(classChoiceValue(classChoiceFrom(v))).toBe(v);
+  it("a grade never goes in the address", () => {
+    expect(subjectsHref(BASE, { kind: "grade", grade: "4" }, CHILD)).toBe(`${BASE}?child=${CHILD}`);
   });
 
-  it("combine the view, class and grade with AND; search applies on top", () => {
-    const rows = [
-      row({ id: "1", duplicate: true, group: { id: "g1", name: "4B" }, grade: "4" }),
-      row({ id: "2", duplicate: true, group: { id: "g2", name: "5A" }, grade: "4" }),
-      row({ id: "3", duplicate: false, group: { id: "g1", name: "4B" }, grade: "4" }),
-      row({ id: "4", duplicate: true, group: null, grade: "4", firstName: "Liam" }),
-      row({ id: "5", duplicate: true, group: { id: "g1", name: "4B" }, grade: "5" }),
-    ];
-    const pick = (f: Parameters<typeof subjectFilters>[0], q = "") =>
-      applyFilters(rows, subjectFilters(f))
-        .filter((r) => matchesSearch(r, q))
-        .map((r) => r.id);
-    const all = { kind: "all" } as const;
-    expect(pick({ view: "all", classChoice: all, grade: "" })).toEqual(["1", "2", "3", "4", "5"]);
-    expect(pick({ view: "duplicates", classChoice: all, grade: "" })).toEqual(["1", "2", "4", "5"]);
-    expect(
-      pick({ view: "duplicates", classChoice: { kind: "group", id: "g1" }, grade: "" }),
-    ).toEqual(["1", "5"]);
-    expect(
-      pick({ view: "duplicates", classChoice: { kind: "group", id: "g1" }, grade: "4" }),
-    ).toEqual(["1"]);
-    expect(pick({ view: "all", classChoice: { kind: "none" }, grade: "" })).toEqual(["4"]);
-    expect(pick({ view: "duplicates", classChoice: all, grade: "4" }, "liam")).toEqual(["4"]);
+  it("each chip is one of core's filters", () => {
+    expect(subjectFilters({ kind: "all" })).toEqual([]);
+    expect(subjectFilters({ kind: "show", show: "noClass" })).toEqual([{ kind: "noGroup" }]);
+    expect(subjectFilters({ kind: "show", show: "notOrdered" })).toEqual([{ kind: "notOrdered" }]);
+    expect(subjectFilters({ kind: "class", id: CLASS })).toEqual([{ kind: "group", id: CLASS }]);
+    expect(subjectFilters({ kind: "grade", grade: "K" })).toEqual([{ kind: "grade", value: "K" }]);
   });
 
-  it("add no filter for All, every class and every grade", () => {
-    expect(subjectFilters({ view: "all", classChoice: { kind: "all" }, grade: "" })).toEqual([]);
-  });
-
-  it("fall back to All when the chosen class or grade is no longer on the roster", () => {
-    const groups = [{ id: "g1" }];
-    expect(effectiveClassChoice({ kind: "group", id: "g1" }, groups)).toEqual({
-      kind: "group",
-      id: "g1",
+  it("saved chips become filters; built-in and unknown keys don't", () => {
+    expect(subjectChipFromSaved({ key: "class", value: CLASS })).toEqual({
+      kind: "class",
+      id: CLASS,
     });
-    expect(effectiveClassChoice({ kind: "group", id: "gone" }, groups)).toEqual({ kind: "all" });
-    expect(effectiveClassChoice({ kind: "none" }, groups)).toEqual({ kind: "none" });
-    expect(effectiveGrade("5", ["4", "5"])).toBe("5");
-    expect(effectiveGrade("6", ["4", "5"])).toBe("");
-    expect(effectiveGrade("", [])).toBe("");
+    expect(subjectChipFromSaved({ key: "doNotPublish", value: null })).toEqual({
+      kind: "show",
+      show: "doNotPublish",
+    });
+    expect(subjectChipFromSaved({ key: "noPhotos", value: null })).toBeNull();
+    expect(subjectChipFromSaved({ key: "grade", value: null })).toBeNull();
   });
 });

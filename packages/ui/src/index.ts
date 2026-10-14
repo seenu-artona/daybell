@@ -5,6 +5,16 @@ export { Celebration, type CelebrationProps } from "./components/celebration";
 export { CONFETTI_MS, ConfettiBurst, type ConfettiBurstProps } from "./components/confetti";
 export { Banner, type BannerProps, Toast } from "./components/feedback";
 export { Field, type FieldProps } from "./components/field";
+export {
+  AddFilterLabel,
+  AddFilterTrigger,
+  type AddFilterTriggerProps,
+  addFilterTriggerClass,
+  FilterChip,
+  type FilterChipProps,
+  FilterChips,
+  type FilterChipsProps,
+} from "./components/filter-chips";
 export { IconButton, type IconButtonProps, iconButtonVariants } from "./components/icon-button";
 export {
   ICON_CHIP_TONES,
@@ -37,14 +47,6 @@ export {
   type TableProps,
   TableRow,
 } from "./components/table";
-export {
-  ViewBar,
-  type ViewBarProps,
-  ViewTab,
-  type ViewTabProps,
-  ViewTabs,
-  type ViewTabsProps,
-} from "./components/view-bar";
 export { cn } from "./lib/cn";
 export {
   contrastRatio,

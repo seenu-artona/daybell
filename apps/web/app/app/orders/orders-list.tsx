@@ -3,24 +3,16 @@
 import type {
   BulkOrderStatusResponse,
   JobsResponse,
+  ListFilterChip,
   OrdersResponse,
   StudioOrder,
 } from "@daybell/api";
-import {
-  canFulfil,
-  formatOrderReference,
-  ORDER_FULFILMENTS,
-  type OrderFulfilment,
-  SHOP_SHIPPING_METHODS,
-  type ShopShippingMethod,
-} from "@daybell/core";
+import { canFulfil, formatOrderReference } from "@daybell/core";
 import {
   Banner,
   Button,
   ClickableRow,
   ListCard,
-  MainTab,
-  MainTabs,
   RowChevron,
   RowChevronHead,
   SearchToggle,
@@ -28,119 +20,98 @@ import {
   TableCell,
   TableHead,
   TableRow,
-  ViewBar,
-  ViewTab,
-  ViewTabs,
 } from "@daybell/ui";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { LocalTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { createLoadGuard } from "@/lib/load-guard";
-import { FilterMenu } from "../filter-menu";
+import type { AddFilterChoice } from "../filter-chips/add-filter-menu";
+import { type ChipItem, ChipRow } from "../filter-chips/chip-row";
+import { SavedChipsNotice } from "../filter-chips/saved-chips-notice";
+import { useListFilters } from "../filter-chips/use-list-filters";
+import { jobName, recordKey, useRecordNames } from "../filter-chips/use-record-names";
 import { useStudio } from "../me-context";
 import { orderHref } from "../notification-links";
 import { OrderBadges, orderMoney } from "./order-badges";
-import { deliveryFrom, orderViewHref, statusFrom } from "./order-view";
+import {
+  ALL_ORDERS,
+  BUILT_IN_ORDER_CHIPS,
+  type OrderChip,
+  orderChipFrom,
+  orderChipFromSaved,
+  orderChipHref,
+  orderChipQuery,
+  sameOrderChip,
+} from "./order-view";
 
 const LINK =
   "inline-flex min-h-11 items-center font-bold text-ink no-underline hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
 const CHECKBOX =
   "size-5 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
-const VIEWS = ["", ...ORDER_FULFILMENTS] as const;
-
-/** The filters kept in this browser: the job and the reference search (never in the address, D113). */
-interface Filters {
-  jobId: string;
-  q: string;
-}
-
-type ViewHref = (status: OrderFulfilment | "", delivery: ShopShippingMethod | "") => string;
-
-/** The view (?status=) and delivery (?delivery=) in the address, and the address for a view and delivery (D144). */
-export function useOrderView() {
-  const params = useSearchParams();
-  const pathname = usePathname();
-  return {
-    status: statusFrom(params.get("status")),
-    delivery: deliveryFrom(params.get("delivery")),
-    viewHref: ((status, delivery) => orderViewHref(pathname, status, delivery)) as ViewHref,
-  };
-}
 
 /**
- * The studio's paid orders (ADR 0024; D25, D144), shared by the Orders page and a job's Orders tab (which passes
- * `jobId`). One view bar: the status views as links (?status=; pills on the Orders page, dashes under a job's tabs),
- * then the filter icon, whose panel holds Delivery (?delivery=; both stay in the address as enum words, and switching
- * one keeps the other), Job (on the Orders page) and Clear filters, and a reference search (never a name; never in the
- * address, D113). D145, amends D144. Then a table with a caption in a white list card: reference, date, children (first name and last initial), items, total,
- * the status with its refund and dispute badges (words and icons, never colour alone: D91), delivery; a click on a row
- * opens the order, and its reference stays the link. Viewed as Paid or Printed, fully refunded orders are left out, so
- * Home's To do links list what they count (code review N3). Show more by cursor. Owners, admins and staff select orders
+ * The studio's paid orders (ADR 0024; D25, D144; D147), shared by the Orders page and a job's Orders tab (which passes
+ * `jobId`). One white list card: its toolbar has the chips (All, To print, To ship, To take to school, Done, then the
+ * person's own: Delivery: Home, Delivery: School and, on the Orders page, a job), one at a time in the address (enum
+ * words and ids only, D113; Home's Up next links open theirs), and the reference search (never a name, never in the
+ * address). Then a table with a caption: reference, date, children (first name and last initial), items, total, the
+ * status with its refund and dispute badges (words and icons, never colour alone: D91), delivery; a click on a row
+ * opens the order, and its reference stays the link. Viewed as To print or Printed, fully refunded orders are left out,
+ * so Home's links list what they count (code review N3). Show more by cursor. Owners, admins and staff select orders
  * with a checkbox each (and one for all shown) for Mark printed or Mark delivered to school, in a bar that stays in
  * view; each order's result is counted and announced.
  */
-export function OrdersList({
-  jobId,
-  level = "main",
-  status = "",
-  delivery = "",
-  viewHref,
-}: {
-  jobId?: string;
-  /**
-   * "main" on the Orders page, where the views are the page's first row of tabs (pills, no line under them); "sub" on
-   * a job's Orders tab, under the job's pill tabs (dashes on a hairline). D145, amends D144.
-   */
-  level?: "main" | "sub";
-  /** The current view, from the page's address. */
-  status?: OrderFulfilment | "";
-  /** The delivery filter, from the page's address. */
-  delivery?: ShopShippingMethod | "";
-  /** The address for a view and delivery; by default this page's path with ?status= and ?delivery=. */
-  viewHref?: ViewHref;
-}) {
+export function OrdersList({ jobId }: { jobId?: string }) {
   const t = useTranslations("app.orders");
+  const tc = useTranslations("app.chips");
   const text = useApiText();
   const format = useFormatter();
   const router = useRouter();
   const pathname = usePathname();
-  const hrefFor: ViewHref = viewHref ?? ((s, d) => orderViewHref(pathname, s, d));
+  const params = useSearchParams().toString();
+  const withJob = !jobId;
+  const { chip, clean } = useMemo(
+    () => orderChipFrom(new URLSearchParams(params), { withJob }),
+    [params, withJob],
+  );
+  const saved = useListFilters(jobId ? "job_orders" : "orders", jobId);
   const { me } = useStudio();
   const canMark = canFulfil(me.studio.role);
-  const [filters, setFilters] = useState<Filters>({ jobId: "", q: "" });
+  const [q, setQ] = useState("");
   const [typed, setTyped] = useState("");
   const [guard] = useState(createLoadGuard);
   const [orders, setOrders] = useState<StudioOrder[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [jobs, setJobs] = useState<{ id: string; name: string }[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("");
   const busy = useRef(false);
   const [working, setWorking] = useState(false);
   const barTitle = useId();
 
+  // An address with a combination no chip has goes back to All.
+  useEffect(() => {
+    if (clean) router.replace(orderChipHref(pathname, ALL_ORDERS), { scroll: false });
+  }, [clean, router, pathname]);
+
   const query = useCallback(
     (after: string | null) => {
-      const q = new URLSearchParams();
-      if (jobId) q.set("jobId", jobId);
-      else if (filters.jobId) q.set("jobId", filters.jobId);
-      if (status) q.set("status", status);
-      if (delivery) q.set("delivery", delivery);
-      if (filters.q) q.set("q", filters.q);
-      if (after) q.set("cursor", after);
-      const s = q.toString();
+      const query = new URLSearchParams(orderChipQuery(chip));
+      if (jobId) query.set("jobId", jobId);
+      if (q) query.set("q", q);
+      if (after) query.set("cursor", after);
+      const s = query.toString();
       return `/orders${s ? `?${s}` : ""}`;
     },
-    [jobId, status, delivery, filters],
+    [jobId, chip, q],
   );
   const load = useCallback(
     async (after: string | null) => {
-      // Answers that a newer view, filter or search overtook are dropped; Show more runs once at a time.
+      // Answers that a newer chip or search overtook are dropped; Show more runs once at a time.
       const ticket = after ? guard.more() : guard.first();
       if (!ticket) return;
       const res = await api<OrdersResponse>(query(after));
@@ -163,13 +134,114 @@ export function OrdersList({
     void load(null);
   }, [load]);
 
-  // The job filter (Orders page only): the studio's jobs, by name.
+  // Jobs' names, by id (Orders page only); a saved job that is gone is dropped, and an address naming one goes to All.
+  const refs = useMemo<ListFilterChip[]>(
+    () => [
+      ...(saved.chips ?? []),
+      ...(chip.kind === "job" ? [{ key: "job", value: chip.id }] : []),
+    ],
+    [saved.chips, chip],
+  );
+  const names = useRecordNames(refs, withJob ? { job: jobName } : {});
+  const { forget } = saved;
   useEffect(() => {
-    if (jobId) return;
-    void api<JobsResponse>("/jobs?limit=100").then((res) => {
-      if (res.ok) setJobs(res.data.jobs.map((j) => ({ id: j.id, name: j.name })));
-    });
-  }, [jobId]);
+    const gone = (saved.chips ?? []).filter(
+      (c) => c.value !== null && names.get(recordKey(c.key, c.value)) === null,
+    );
+    if (gone.length > 0) forget(gone);
+    if (chip.kind === "job" && names.get(recordKey("job", chip.id)) === null)
+      router.replace(orderChipHref(pathname, ALL_ORDERS), { scroll: false });
+  }, [names, saved.chips, forget, chip, router, pathname]);
+
+  const label = (c: OrderChip): string => {
+    switch (c.kind) {
+      case "all":
+        return tc("all");
+      case "job":
+        return names.get(recordKey("job", c.id)) ?? tc("loadingName");
+      default:
+        return t(`chips.${c.kind}`);
+    }
+  };
+  const item = (c: OrderChip, remove?: ListFilterChip): ChipItem => ({
+    id: orderChipHref("", c),
+    label: label(c),
+    selected: sameOrderChip(c, chip),
+    href: orderChipHref(pathname, c),
+    // Until the record's name is known, the chip is named by its kind rather than "…".
+    ...(c.kind === "job" && !names.get(recordKey("job", c.id))
+      ? { ariaLabel: t("chips.job") }
+      : {}),
+    ...(remove
+      ? {
+          onRemove: () => {
+            void saved.remove(remove);
+            if (sameOrderChip(c, chip))
+              router.push(orderChipHref(pathname, ALL_ORDERS), { scroll: false });
+          },
+          // Until the job's name is known, the button says what kind of chip it removes.
+          ...(c.kind === "job" && !names.get(recordKey("job", c.id))
+            ? { removeLabel: tc("remove", { name: t("chips.job") }) }
+            : {}),
+        }
+      : {}),
+  });
+  const added = (saved.chips ?? []).flatMap((s) => {
+    const c = orderChipFromSaved(s, withJob);
+    return c ? [{ chip: c, saved: s }] : [];
+  });
+  const items: ChipItem[] = [
+    ...BUILT_IN_ORDER_CHIPS.map((c) => item(c)),
+    ...added.map((a) => item(a.chip, a.saved)),
+  ];
+  // A chip in the address that isn't saved (a shared link) still shows, selected, without a remove button.
+  if (!items.some((i) => i.selected)) items.push(item(chip));
+
+  const addChip = (saving: ListFilterChip, c: OrderChip) => {
+    void saved.add(saving);
+    router.push(orderChipHref(pathname, c), { scroll: false });
+  };
+  // Nothing can be added until the saved chips have loaded (a list built from a failed load is never saved).
+  const choices: AddFilterChoice[] =
+    saved.chips === null || saved.full
+      ? []
+      : [
+          ...(["deliveryHome", "deliverySchool"] as const)
+            .filter((key) => !added.some((a) => a.saved.key === key))
+            .map(
+              (key): AddFilterChoice => ({
+                kind: "plain",
+                id: key,
+                label: t(`chips.${key}`),
+                onPick: () => addChip({ key, value: null }, { kind: key }),
+              }),
+            ),
+          // The job chip is the Orders page's only: a job's Orders tab is that job's already.
+          ...(withJob
+            ? [
+                {
+                  kind: "search",
+                  id: "job",
+                  label: t("chips.jobMenu"),
+                  fieldLabel: t("chips.job"),
+                  placeholder: t("chips.jobPlaceholder"),
+                  listLabel: t("chips.jobList"),
+                  search: async (typed: string) => {
+                    const res = await api<JobsResponse>(
+                      `/jobs?limit=20${typed ? `&q=${encodeURIComponent(typed)}` : ""}`,
+                    );
+                    return res.ok
+                      ? res.data.jobs
+                          .filter((j) => !added.some((a) => a.saved.value === j.id))
+                          .map((j) => ({ id: j.id, name: j.name, detail: j.internalNumber }))
+                      : null;
+                  },
+                  onPick: (option: { id: string }) =>
+                    addChip({ key: "job", value: option.id }, { kind: "job", id: option.id }),
+                } satisfies AddFilterChoice,
+              ]
+            : []),
+        ];
 
   function toggle(id: string, on: boolean) {
     setSelected((s) => {
@@ -204,103 +276,48 @@ export function OrdersList({
   const shown = orders ?? [];
   const allSelected = shown.length > 0 && shown.every((o) => selected.has(o.id));
 
-  const filtered = Boolean(delivery || filters.jobId || filters.q);
-
-  /** The filter panel's Clear filters: the delivery (in the address) and the job. The search keeps its own box. */
-  function clearFilters() {
-    setFilters((f) => ({ ...f, jobId: "" }));
-    if (delivery) router.replace(hrefFor(status, ""), { scroll: false });
-  }
-  const [Tabs, Tab] = level === "main" ? [MainTabs, MainTab] : [ViewTabs, ViewTab];
+  const filtered = chip.kind !== "all" || q !== "";
 
   return (
     <div className="flex flex-col gap-4" aria-busy={working || undefined}>
-      <ViewBar
-        variant={level}
-        tabs={
-          <Tabs label={t("views.label")}>
-            {VIEWS.map((view) => (
-              <Tab key={view || "all"} asChild current={status === view}>
-                <Link href={hrefFor(view, delivery)} scroll={false}>
-                  {view ? t(`statuses.${view}`) : t("views.all")}
-                </Link>
-              </Tab>
-            ))}
-          </Tabs>
-        }
-        actions={
-          <>
-            <FilterMenu
-              onClear={clearFilters}
-              groups={[
-                {
-                  key: "delivery",
-                  legend: t("filters.delivery"),
-                  value: delivery,
-                  onChange: (v) =>
-                    router.replace(hrefFor(status, deliveryFrom(v)), { scroll: false }),
-                  options: [
-                    { value: "", label: t("filters.any") },
-                    ...SHOP_SHIPPING_METHODS.map((m) => ({
-                      value: m,
-                      label: t(`filters.deliveryShort.${m}`),
-                    })),
-                  ],
-                },
-                // The job filter is the Orders page's only: a job's Orders tab is that job's already.
-                ...(jobId
-                  ? []
-                  : [
-                      {
-                        key: "job",
-                        legend: t("filters.job"),
-                        value: filters.jobId,
-                        onChange: (v: string) => setFilters((f) => ({ ...f, jobId: v })),
-                        options: [
-                          { value: "", label: t("filters.any") },
-                          ...jobs.map((j) => ({ value: j.id, label: j.name })),
-                        ],
-                      },
-                    ]),
-              ]}
-            />
-            <SearchToggle
-              label={t("filters.searchLabel")}
-              description={t("filters.referenceHelp")}
-              maxLength={12}
-              value={typed}
-              onChange={(v) => {
-                setTyped(v);
-                // An emptied box closes, so its search can't stay applied out of sight.
-                if (v.trim() === "") setFilters((f) => (f.q ? { ...f, q: "" } : f));
-              }}
-              onSubmit={(v) => setFilters((f) => ({ ...f, q: v.trim() }))}
-            />
-          </>
-        }
-      />
-
       <p role="status" aria-live="polite" className="m-0 empty:sr-only">
         {message}
       </p>
+      <SavedChipsNotice filters={saved} />
       {problem ? <Banner tone="danger" title={problem} /> : null}
 
-      {!orders ? (
-        <p className="m-0 text-muted">{t("loading")}</p>
-      ) : orders.length === 0 ? (
-        <p className="m-0 rounded-list bg-surface px-6 py-10 text-center text-muted shadow-card">
-          {status || filtered ? t("emptyFiltered") : t("empty")}
-        </p>
-      ) : (
-        <ListCard
-          footer={
-            cursor ? (
-              <Button variant="quiet" shape="pill" onClick={() => void load(cursor)}>
-                {t("loadMore")}
-              </Button>
-            ) : null
-          }
-        >
+      <ListCard
+        toolbar={<ChipRow label={t("chips.label")} items={items} choices={choices} />}
+        toolbarEnd={
+          <SearchToggle
+            label={t("filters.searchLabel")}
+            description={t("filters.referenceHelp")}
+            maxLength={12}
+            onCard
+            value={typed}
+            onChange={(v) => {
+              setTyped(v);
+              // An emptied box closes, so its search can't stay applied out of sight.
+              if (v.trim() === "") setQ("");
+            }}
+            onSubmit={(v) => setQ(v.trim())}
+          />
+        }
+        footer={
+          orders && orders.length > 0 && cursor ? (
+            <Button variant="quiet" shape="pill" onClick={() => void load(cursor)}>
+              {t("loadMore")}
+            </Button>
+          ) : null
+        }
+      >
+        {!orders ? (
+          <p className="m-0 px-6 py-10 text-center text-muted">{t("loading")}</p>
+        ) : orders.length === 0 ? (
+          <p className="m-0 px-6 py-10 text-center text-muted">
+            {filtered ? t("emptyFiltered") : t("empty")}
+          </p>
+        ) : (
           <Table variant="list">
             <caption className="sr-only">{jobId ? t("captionJob") : t("caption")}</caption>
             <thead>
@@ -377,8 +394,8 @@ export function OrdersList({
               })}
             </tbody>
           </Table>
-        </ListCard>
-      )}
+        )}
+      </ListCard>
 
       {canMark && selected.size > 0 ? (
         <section

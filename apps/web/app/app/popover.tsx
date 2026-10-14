@@ -74,7 +74,12 @@ export function Popover({
         }
       }}
       onBlur={(e) => {
-        if (open && !root.current?.contains(e.relatedTarget as Node | null)) setOpen(false);
+        if (!open || root.current?.contains(e.relatedTarget as Node | null)) return;
+        // Checked once focus has settled: a panel that swaps its content (the Add filter menu's second step) moves
+        // focus to the new content right after the old focused element goes, and must stay open.
+        setTimeout(() => {
+          if (!root.current?.contains(document.activeElement)) setOpen(false);
+        }, 0);
       }}
     >
       <button

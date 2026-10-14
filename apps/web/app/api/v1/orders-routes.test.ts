@@ -235,7 +235,7 @@ describe("GET /orders (Q4)", () => {
       expect(db.rpc).toHaveBeenCalledWith("studio_orders", {
         p_studio_id: STUDIO,
         p_job_id: null,
-        p_status: "printed",
+        p_statuses: ["printed"],
         p_reference: "7KQ2M9",
         p_delivery: null,
         p_limit: 2,
@@ -256,8 +256,28 @@ describe("GET /orders (Q4)", () => {
   it("narrows to one delivery (code review N3), and refuses another", async () => {
     const db = signIn("staff", { studio_orders: [] });
     expect((await list("status=printed&delivery=home")).status).toBe(200);
-    expect(db.rpc.mock.calls[0]?.[1]).toMatchObject({ p_status: "printed", p_delivery: "home" });
+    expect(db.rpc.mock.calls[0]?.[1]).toMatchObject({
+      p_statuses: ["printed"],
+      p_delivery: "home",
+    });
     expect((await list("delivery=drone")).status).toBe(400);
+  });
+
+  it("lists Done as shipped, delivered or complete in one call, never with a status (D147)", async () => {
+    const db = signIn("staff", { studio_orders: [] });
+    expect((await list("stage=done&delivery=school")).status).toBe(200);
+    expect(db.rpc.mock.calls[0]?.[1]).toMatchObject({
+      p_studio_id: STUDIO,
+      p_statuses: ["shipped", "delivered", "complete"],
+      p_delivery: "school",
+    });
+    expect((await list("")).status).toBe(200);
+    expect(db.rpc.mock.calls[1]?.[1]).toMatchObject({ p_studio_id: STUDIO, p_statuses: null });
+    const both = await list("stage=done&status=paid");
+    expect(both.status).toBe(400);
+    expect((await both.json()).error.fields).toEqual({ stage: "validation.invalid" });
+    expect((await list("stage=waiting")).status).toBe(400);
+    expect(db.rpc).toHaveBeenCalledTimes(2);
   });
 
   it("refuses photographers (Q4), and a search that isn't a reference", async () => {

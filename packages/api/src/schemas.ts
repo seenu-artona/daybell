@@ -268,12 +268,30 @@ const todayParam = z.iso.date({ error: "validation.invalid" }).optional().meta({
   description:
     "Today's date in the person's time zone, YYYY-MM-DD; within a day of the server's UTC date. Defaults to the UTC date.",
 });
+/** The Jobs list's "Show only" filters (D147): also the keys of the chips people save for them. */
+export const JOB_SHOW_FILTERS = ["closingThisWeek", "pictureDayThisMonth"] as const;
+export type JobShowFilter = (typeof JOB_SHOW_FILTERS)[number];
+
 export const jobListQuery = listQuery.extend({
   today: todayParam,
   status: z
     .enum(JOB_STATUSES, { error: "validation.invalid" })
     .optional()
     .meta({ description: "Only jobs in this state, e.g. selling (Home's Jobs selling now)." }),
+  show: z.enum(JOB_SHOW_FILTERS, { error: "validation.invalid" }).optional().meta({
+    description:
+      "closingThisWeek: selling jobs whose shop closes from now to the end of the seventh day counting today (today + 6). pictureDayThisMonth: picture day in today's calendar month. Days are `today`'s.",
+  }),
+  clientId: z
+    .uuid({ error: "validation.client" })
+    .optional()
+    .meta({ description: "Only this client's jobs." }),
+  q: z
+    .string()
+    .trim()
+    .max(120)
+    .optional()
+    .meta({ description: "Only jobs whose name or internal number contains this." }),
 });
 export const studioChecklistQuery = z.object({ today: todayParam });
 
@@ -1069,9 +1087,13 @@ const referenceSearch = z
   .transform((v) => v.replace(/[\s-]/g, "").toUpperCase())
   .pipe(z.string().regex(/^[0-9A-HJKMNP-TV-Z]{1,8}$/, { error: "validation.reference" }));
 
+/** Groups of order statuses asked for by name (D147): done is ORDER_DONE_STATUSES. */
+export const ORDER_STAGES = ["done"] as const;
+export type OrderStage = (typeof ORDER_STAGES)[number];
+
 /**
- * The studio's paid orders, a page at a time (owners, admins and staff; Q4): optionally one job's, one status's, or
- * those whose reference starts with `q`. Names are never searched (and never in a URL).
+ * The studio's paid orders, a page at a time (owners, admins and staff; Q4): optionally one job's, one status's (or
+ * stage's), or those whose reference starts with `q`. Names are never searched (and never in a URL).
  */
 export const orderListQuery = listQuery.extend({
   jobId: z
@@ -1089,8 +1111,90 @@ export const orderListQuery = listQuery.extend({
     description:
       "Only home delivery or delivery to school. With status paid or printed (what is waiting), fully refunded orders are left out.",
   }),
+  stage: z.enum(ORDER_STAGES, { error: "validation.invalid" }).optional().meta({
+    description:
+      "done: orders with nothing left to do (shipped, delivered to school or complete; D147). Not with status.",
+  }),
 });
 export type OrderListQuery = z.infer<typeof orderListQuery>;
+
+// ── Saved filter chips (D147, ADR 0026) ───────────────────────────────────────────────────────────────────────────
+
+/** The lists whose "+ Add filter" chips are saved, per person: two studio-wide ones and three of a job's tabs. */
+export const LIST_PAGES = ["jobs", "orders", "job_subjects", "job_orders", "job_photos"] as const;
+export type ListPage = (typeof LIST_PAGES)[number];
+/** The lists that belong to one job: their chips are that job's only. */
+export const JOB_LIST_PAGES = ["job_subjects", "job_orders", "job_photos"] as const;
+export function isJobListPage(page: ListPage): boolean {
+  return (JOB_LIST_PAGES as readonly string[]).includes(page);
+}
+/** At most this many saved chips per list (and per job, for a job's tabs). */
+export const MAX_LIST_FILTERS = 8;
+/**
+ * The chips each list takes, by key: true when the chip names a record by id (a client, a job, a class), which must be
+ * the studio's own (and a class of the job's). Never text: names are looked up by id when shown (D113).
+ */
+export const LIST_FILTER_KEYS = {
+  jobs: { closingThisWeek: false, pictureDayThisMonth: false, client: true },
+  orders: { deliveryHome: false, deliverySchool: false, job: true },
+  job_orders: { deliveryHome: false, deliverySchool: false },
+  job_subjects: { class: true, noClass: false, doNotPhotograph: false, doNotPublish: false },
+  job_photos: {},
+} as const satisfies Record<ListPage, Record<string, boolean>>;
+
+/** Whether `key` is one of `page`'s chips, and if so whether it takes an id. */
+export function listFilterNeedsValue(page: ListPage, key: string): boolean | undefined {
+  const keys: Record<string, boolean> = LIST_FILTER_KEYS[page];
+  return Object.hasOwn(keys, key) ? keys[key] : undefined;
+}
+
+export const listFiltersQuery = z.object({
+  page: z.enum(LIST_PAGES, { error: "validation.invalid" }).meta({ description: "Which list." }),
+  jobId: z
+    .uuid({ error: "validation.invalid" })
+    .optional()
+    .meta({ description: "The job, for a job's tab (job_subjects, job_orders, job_photos) only." }),
+});
+
+const listFilterChipInput = z.strictObject(
+  {
+    key: z
+      .string({ error: "validation.filterChips" })
+      .regex(/^[a-z][a-zA-Z]{1,39}$/, { error: "validation.filterChips" }),
+    value: z.uuid({ error: "validation.filterChips" }).nullable().optional(),
+  },
+  { error: "validation.filterChips" },
+);
+
+/**
+ * A person's chips for one list, in order, replacing what was saved. Each key must be one of the list's (see
+ * LIST_FILTER_KEYS), with an id exactly when the key names a record, and each chip only once.
+ */
+export const listFiltersInput = z
+  .object({
+    page: listFiltersQuery.shape.page,
+    jobId: listFiltersQuery.shape.jobId,
+    chips: z
+      .array(listFilterChipInput, { error: "validation.filterChips" })
+      .max(MAX_LIST_FILTERS, { error: "validation.filterChips" })
+      .meta({ description: `At most ${MAX_LIST_FILTERS}, in the order shown.` }),
+  })
+  .superRefine((input, ctx) => {
+    if ((input.jobId !== undefined) !== isJobListPage(input.page))
+      ctx.addIssue({ code: "custom", path: ["jobId"], message: "validation.invalid" });
+    const seen = new Set<string>();
+    for (const chip of input.chips) {
+      const needsValue = listFilterNeedsValue(input.page, chip.key);
+      const hasValue = chip.value !== undefined && chip.value !== null;
+      const id = `${chip.key}:${hasValue ? chip.value?.toLowerCase() : ""}`;
+      if (needsValue === undefined || needsValue !== hasValue || seen.has(id)) {
+        ctx.addIssue({ code: "custom", path: ["chips"], message: "validation.filterChips" });
+        return;
+      }
+      seen.add(id);
+    }
+  });
+export type ListFiltersInput = z.infer<typeof listFiltersInput>;
 
 const trackingNumber = z
   .string({ error: "validation.trackingNumber" })

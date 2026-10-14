@@ -8,6 +8,8 @@ import {
   Button,
   ClickableRow,
   Field,
+  FilterChip,
+  FilterChips,
   ListCard,
   RowChevron,
   RowChevronHead,
@@ -34,12 +36,13 @@ const LINK =
 /**
  * Products › Price lists (ADR 0019, D144; the menu item stays "Products", Claude's call 5). Every member sees the
  * studio's lists, the default first, with what they hold and how many jobs use them, in a white list card; a click on a
- * row opens the list. Owners and admins add a list (blank or a copy) from the view bar's green button, and make one the
- * default or delete one that isn't the default and that no job uses (Claude's call 2) with quiet buttons on its row.
- * Prices are before tax (the card's footer).
+ * row opens the list; the card's toolbar has the All chip only (D147). Owners and admins add a list (blank or a copy)
+ * from the green button in the title row, and make one the default or delete one that isn't the default and that no
+ * job uses (Claude's call 2) with quiet buttons on its row. Prices are before tax (the card's footer).
  */
 export default function PriceListsPage() {
   const t = useTranslations("app.products");
+  const tc = useTranslations("app.chips");
   const text = useApiText();
   const price = usePriceText();
   const router = useRouter();
@@ -72,7 +75,7 @@ export default function PriceListsPage() {
   return (
     <ListPage
       title={t("title")}
-      actions={
+      action={
         canManage ? (
           <Button shape="pill" onClick={() => setAdding(true)}>
             <Plus aria-hidden="true" />
@@ -88,7 +91,18 @@ export default function PriceListsPage() {
       {!lists && !problem ? <p className="m-0 text-muted">{t("loading")}</p> : null}
 
       {lists ? (
-        <ListCard footer={t("beforeTax")}>
+        <ListCard
+          footer={t("beforeTax")}
+          toolbar={
+            <FilterChips label={t("chipsLabel")}>
+              <FilterChip asChild selected>
+                <Link href="/app/products" scroll={false}>
+                  {tc("all")}
+                </Link>
+              </FilterChip>
+            </FilterChips>
+          }
+        >
           <Table variant="list">
             <thead>
               <TableRow>

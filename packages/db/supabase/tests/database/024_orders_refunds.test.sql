@@ -11,7 +11,7 @@
 -- amounts, names or tracking numbers.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(230);
+select plan(234);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -240,7 +240,7 @@ select is((select count(*) from system_fns, unnest(array['anon', 'authenticated'
   where has_function_privilege(r, f, 'execute')), 0::bigint, 'browsers and logged-out visitors run none of them');
 select ok((select bool_and(has_function_privilege('service_role', f, 'execute')) from system_fns),
   'the service role (the API) runs them all');
-select ok(has_function_privilege('authenticated', 'public.studio_orders(uuid, uuid, public.order_fulfilment, text, integer, uuid, public.shop_shipping_method)', 'execute')
+select ok(has_function_privilege('authenticated', 'public.studio_orders(uuid, uuid, public.order_fulfilment[], text, integer, uuid, public.shop_shipping_method)', 'execute')
   and not (select prosecdef from pg_proc where proname = 'studio_orders')
   and not (select prosecdef from pg_proc where proname = 'studio_sales')
   and not (select prosecdef from pg_proc where proname = 'studio_order_todo'),
@@ -737,12 +737,19 @@ select is(jsonb_array_length(public.studio_order('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaa
   4, 'and the order''s refunds on its page');
 select ok(jsonb_array_length(public.studio_order('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oH')) -> 'ledger')
   = 5, 'and its ledger: the sale and four refunds');
-select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, 'delivered') -> 0 ->> 'id',
+select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{delivered}') -> 0 ->> 'id',
   pg_temp.v('oS')::text, 'filtered by status');
+-- D147: Orders' Done chip asks for several statuses at once (shipped, delivered or complete).
+select set_eq($$ select (e ->> 'id')::uuid from jsonb_array_elements(public.studio_orders(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{shipped,delivered,complete}')) e $$,
+  $$ values (pg_temp.v('oP')), (pg_temp.v('oS')), (pg_temp.v('oD')) $$,
+  'filtered by several statuses: Done is the shipped, delivered and complete orders (D147)');
+select is(jsonb_array_length(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{paid,printed}')),
+  1, 'and Paid with Printed together still leave out what was refunded in full (oU only)');
 select is(jsonb_array_length(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, null,
   lower(left((select reference from public.orders where id = pg_temp.v('oP')), 4)))) >= 1, true,
   'and by the start of a reference');
-select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, 'canceled') -> 0 -> 'children' -> 0,
+select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{canceled}') -> 0 -> 'children' -> 0,
   jsonb_build_object('id', 'c0000000-0000-4000-8000-000000000001', 'first_name', 'Ava', 'last_initial', 'P'),
   'children by first name and last initial');
 select is((public.studio_sales('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'America/Toronto') -> 'ranges' -> 'today'
@@ -761,12 +768,16 @@ select pg_temp.as_user('33333333-3333-4333-8333-333333333333');
 select is((select count(*) from public.orders) + (select count(*) from public.order_refunds), 0::bigint,
   'a photographer reads no orders or refunds');
 select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), '[]'::jsonb, 'nor through the list');
+select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{shipped,delivered,complete}'), '[]'::jsonb,
+  'nor through the list asked for several statuses (D147)');
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222');
 select is((select count(*) from public.orders o where o.studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
   + (select count(*) from public.order_refunds) + (select count(*) from public.order_refund_lines)
   + (select count(*) from public.order_refund_recoveries) + (select count(*) from public.order_shipping_addresses),
   0::bigint, 'studio B''s owner sees none of A''s orders, refunds, refund lines, recoveries or addresses');
 select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), '[]'::jsonb, 'nor A''s list');
+select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{paid,printed,shipped,delivered,complete}'),
+  '[]'::jsonb, 'nor A''s list asked for several statuses (D147)');
 select is(public.studio_order('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oH')), null, 'nor an order of A''s');
 select is(public.studio_order_todo('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
   '{"to_ship": 0, "to_print": 0, "to_deliver": 0}'::jsonb, 'nor A''s to-do');

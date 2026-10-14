@@ -3,6 +3,8 @@ import axe from "axe-core";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AddFilterTrigger,
+  addFilterTriggerClass,
   Badge,
   Banner,
   Button,
@@ -19,6 +21,8 @@ import {
   cn,
   contrastRatio,
   Field,
+  FilterChip,
+  FilterChips,
   IconButton,
   IconChip,
   iconButtonVariants,
@@ -43,9 +47,6 @@ import {
   TableRow,
   Toast,
   uiColorOn,
-  ViewBar,
-  ViewTab,
-  ViewTabs,
 } from "./index";
 
 async function expectNoA11yViolations(container: HTMLElement) {
@@ -420,57 +421,14 @@ describe("D144 list pieces", () => {
     await expectNoA11yViolations(container);
   });
 
-  it("view bar: a page's first row has no line under it; a second level under pill tabs does", () => {
-    render(
-      <main>
-        <ViewBar data-testid="main" actions={<button type="button">New job</button>} />
-        <ViewBar data-testid="sub" variant="sub" actions={<button type="button">Upload</button>} />
-      </main>,
-    );
-    expect(screen.getByTestId("main").className).not.toMatch(/\bborder-b\b/);
-    expect(screen.getByTestId("sub").className).toMatch(/\bborder-b\b/);
-    expect(screen.getByTestId("sub").className).toMatch(/\bborder-line-canvas\b/);
-  });
-
-  it("view tabs: aria-current, bold, and a dash hidden from screen readers; the bar puts actions on the right in order", async () => {
-    const { container } = render(
-      <main>
-        <ViewBar
-          variant="sub"
-          tabs={
-            <ViewTabs label="Order views">
-              <ViewTab href="?status=" current>
-                All
-              </ViewTab>
-              <ViewTab href="?status=paid">Paid</ViewTab>
-            </ViewTabs>
-          }
-          actions={
-            <>
-              <button type="button">Delivery: Any</button>
-              <button type="button">Print QR cards</button>
-              <button type="button">New job</button>
-            </>
-          }
-        />
-      </main>,
-    );
-    const all = screen.getByRole("link", { name: "All" });
-    expect(all.getAttribute("aria-current")).toBe("page");
-    expect(all.className).toMatch(/\bfont-bold\b/);
-    expect(all.className).toMatch(/\bh-14\b/);
-    expect(screen.getByRole("link", { name: "Paid" }).getAttribute("aria-current")).toBeNull();
-    const dashes = container.querySelectorAll("[data-view-dash]");
-    expect(dashes).toHaveLength(1);
-    expect(dashes[0]?.getAttribute("aria-hidden")).toBe("true");
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "Delivery: Any",
-      "Print QR cards",
-      "New job",
-    ]);
-    const nav = screen.getByRole("navigation", { name: "Order views" });
-    expect(nav.querySelector("ul")?.className).toMatch(/\boverflow-x-auto\b/);
-    await expectNoA11yViolations(container);
+  it("search toggle: on a card, the open box is canvas grey so it shows on white (D147)", () => {
+    function OnCard() {
+      const [value, setValue] = useState("");
+      return <SearchToggle label="Search jobs" value={value} onChange={setValue} onCard />;
+    }
+    render(<OnCard />);
+    fireEvent.click(screen.getByRole("button", { name: "Search jobs" }));
+    expect(screen.getByRole("searchbox").closest("label")?.className).toMatch(/\bbg-canvas\b/);
   });
 
   it("search toggle: a named button that opens a search box with focus in it", async () => {
@@ -681,5 +639,100 @@ describe("ConfettiBurst (D75, D91)", () => {
     });
     expect(container.querySelector("[data-confetti]")).toBeNull();
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("D147 filter chips", () => {
+  function Chips({ onRemove = () => {} }: { onRemove?: () => void }) {
+    return (
+      <main>
+        <ListCard
+          toolbar={
+            <FilterChips
+              label="Show jobs"
+              addFilter={<AddFilterTrigger aria-haspopup="true">Add filter</AddFilterTrigger>}
+            >
+              <FilterChip href="/app/jobs" selected>
+                All
+              </FilterChip>
+              <FilterChip href="/app/jobs?status=draft">Draft</FilterChip>
+              <FilterChip
+                href="/app/jobs?client=1"
+                remove={{ label: "Remove filter: Lincoln SD", onRemove }}
+              >
+                Lincoln SD
+              </FilterChip>
+            </FilterChips>
+          }
+          toolbarEnd={<button type="button">Search jobs</button>}
+        >
+          <p>Rows</p>
+        </ListCard>
+      </main>
+    );
+  }
+
+  it("a named navigation of 44px links; the selected one has aria-current, a check and an ink border", async () => {
+    const { container } = render(<Chips />);
+    const nav = screen.getByRole("navigation", { name: "Show jobs" });
+    expect(nav.querySelectorAll("li")).toHaveLength(3);
+    const all = screen.getByRole("link", { name: "All" });
+    expect(all.getAttribute("aria-current")).toBe("true");
+    expect(all.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    const pill = all.closest("li") as HTMLElement;
+    expect(pill.className).toMatch(/\bborder-ink\b/);
+    expect(pill.className).toMatch(/\bfont-bold\b/);
+    expect(pill.className).toMatch(/\bh-11\b/);
+    const draft = screen.getByRole("link", { name: "Draft" });
+    expect(draft.getAttribute("aria-current")).toBeNull();
+    expect(draft.querySelector("svg")).toBeNull();
+    expect((draft.closest("li") as HTMLElement).className).toMatch(/\bborder-line-strong\b/);
+    await expectNoA11yViolations(container);
+  });
+
+  it("as a child element (a router link or a button), keeps the check and aria-current on that element", () => {
+    render(
+      <main>
+        <FilterChips label="Show subjects">
+          <FilterChip asChild selected>
+            <button type="button">Grade 4</button>
+          </FilterChip>
+        </FilterChips>
+      </main>,
+    );
+    const chip = screen.getByRole("button", { name: "Grade 4" });
+    expect(chip.getAttribute("aria-current")).toBe("true");
+    expect(chip.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(chip.className).toMatch(/\bpx-4\b/);
+  });
+
+  it("an added chip has its own 44px remove button, named for it; built-in chips have none", () => {
+    const onRemove = vi.fn();
+    render(<Chips onRemove={onRemove} />);
+    const remove = screen.getByRole("button", { name: "Remove filter: Lincoln SD" });
+    expect(remove.className).toMatch(/\bsize-11\b/);
+    fireEvent.click(remove);
+    expect(onRemove).toHaveBeenCalledOnce();
+    expect(screen.getAllByRole("button", { name: /^Remove filter/ })).toHaveLength(1);
+    // The chip's link and its remove button are separate targets.
+    expect(screen.getByRole("link", { name: "Lincoln SD" }).contains(remove)).toBe(false);
+  });
+
+  it("the add filter pill is dashed and follows the chips; the toolbar puts search at the right over a hairline", () => {
+    const { container } = render(<Chips />);
+    const add = screen.getByRole("button", { name: "Add filter" });
+    expect(add.className).toMatch(/\bborder-dashed\b/);
+    expect(addFilterTriggerClass).toMatch(/\bh-11\b/);
+    const toolbar = container.querySelector("[data-list-toolbar]") as HTMLElement;
+    expect(toolbar.className).toMatch(/\bborder-b\b/);
+    expect(toolbar.className).toMatch(/\bborder-line\b/);
+    expect(toolbar.lastElementChild?.textContent).toBe("Search jobs");
+    expect(toolbar.nextElementSibling?.textContent).toBe("Rows");
+  });
+
+  it("a card that is only a toolbar has no hairline at its foot", () => {
+    const { container } = render(<ListCard toolbar={<span>Chips</span>} />);
+    const toolbar = container.querySelector("[data-list-toolbar]") as HTMLElement;
+    expect(toolbar.className).not.toMatch(/\bborder-b\b/);
   });
 });

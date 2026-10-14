@@ -15,6 +15,8 @@ export interface SearchToggleProps {
   /** Extra help read with the box (e.g. "For example 7KQ2-M9XA"). */
   description?: string;
   maxLength?: number;
+  /** In a white list card's toolbar (D147): the open box is canvas grey, so it shows on the card. */
+  onCard?: boolean;
   className?: string;
 }
 
@@ -30,6 +32,7 @@ export function SearchToggle({
   onSubmit,
   description,
   maxLength,
+  onCard = false,
   className,
 }: SearchToggleProps) {
   const id = useId();
@@ -83,7 +86,8 @@ export function SearchToggle({
   const box = (
     <label
       className={cn(
-        "flex h-11 w-64 items-center gap-2 rounded-full bg-surface px-4 text-muted focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary",
+        "flex h-11 w-64 items-center gap-2 rounded-full px-4 text-muted focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary",
+        onCard ? "bg-canvas" : "bg-surface",
         className,
       )}
     >
