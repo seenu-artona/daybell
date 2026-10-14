@@ -181,21 +181,22 @@ test("orders: printed then shipped with tracking, bulk delivered to school, a pa
   await expect(ledger.getByRole("cell", { name: "$32.01", exact: true })).toBeVisible();
   await expect(ledger.getByRole("cell", { name: "$0.99", exact: true })).toBeVisible();
 
-  // 7. Home: today's two orders; nothing left to do; the activity.
+  // 7. Home: today's two orders; no orders left in Up next (D146). Home has no activity any more (D146), so the
+  // activity is read from the API.
   await page.goto("/app");
   const today = main.getByRole("region", { name: "Today", exact: true });
   await expect(today.getByText("Orders", { exact: true })).toBeVisible();
   await expect(today.getByText("2", { exact: true })).toBeVisible();
-  await expect(
-    main
-      .getByRole("region", { name: "To do", exact: true })
-      .getByText("No orders are waiting.", { exact: true }),
-  ).toBeVisible();
-  await expect(main.getByText(new RegExp(`shipped order ${literal(a.reference)}$`))).toBeVisible();
-  await expect(main.getByText(new RegExp(`refunded order ${literal(a.reference)}$`))).toBeVisible();
-  await expect(
-    main.getByText(new RegExp(`marked order ${literal(b.reference)} delivered to school$`)),
-  ).toBeVisible();
+  const upNext = main.getByRole("region", { name: "Up next", exact: true });
+  await expect(upNext.getByRole("link", { name: /^(Print|Ship|Take) \d+ orders?/ })).toHaveCount(0);
+  const activity = (await (await page.request.get("/api/v1/studio/activity")).json()) as {
+    activity: { type: string; subjectName: string | null }[];
+  };
+  const did = (type: string, ref: string) =>
+    activity.activity.some((x) => x.type === type && x.subjectName === ref);
+  expect(did("order.shipped", a.reference)).toBe(true);
+  expect(did("order.refunded", a.reference)).toBe(true);
+  expect(did("order.delivered", b.reference)).toBe(true);
 
   // 8. The bell: a new order rings it, and the row opens the order.
   const menu = page.getByRole("complementary", { name: "Studio menu", exact: true });

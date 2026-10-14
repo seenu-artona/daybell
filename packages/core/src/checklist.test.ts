@@ -16,6 +16,7 @@ import {
   taskTarget,
   type UpNextCandidate,
   upNextForJob,
+  upNextRank,
 } from "./checklist";
 import { MILESTONES } from "./job-page";
 import { JOB_STATUSES, JOB_TYPES } from "./jobs";
@@ -403,6 +404,20 @@ describe("rankUpNext", () => {
     ];
     rankUpNext(input, TODAY);
     expect(input.map((x) => x.jobId)).toEqual(["b", "a"]);
+  });
+});
+
+describe("upNextRank", () => {
+  it("puts money waiting between something broken and the next step (D143, D146)", () => {
+    const kinds = [
+      "photosOverdue",
+      "dateClose",
+      "brokenPhotos",
+      "taggingProblems",
+      "moneyWaiting",
+      "nextStep",
+    ] as const;
+    expect(kinds.map(upNextRank)).toEqual([0, 1, 2, 2, 3, 4]);
   });
 });
 

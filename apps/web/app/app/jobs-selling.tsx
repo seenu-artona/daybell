@@ -2,26 +2,26 @@
 
 import type { JobsResponse } from "@daybell/api";
 import { localDay } from "@daybell/core";
-import { Megaphone } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { api } from "@/lib/client-api";
-import { HOME_FOOTER_LINK, HomeCard, HomeLinkRow, HomeNote, HomeRows } from "./home-card";
+import { HOME_FOOTER_LINK } from "./home-card";
 import { tabHref } from "./jobs/[id]/tabs";
 import { useFormatClosing } from "./jobs/closing-date";
 
-/** Home shows this many; "View all jobs" when there are more. */
+/** Home shows this many; "All jobs" is always there for the rest. */
 export const JOBS_SELLING_SHOWN = 5;
 
 /**
- * Home's "Jobs selling now" (D127; ADR 0021, call 7) as a list card (D145, amends D144): the studio's selling jobs,
- * newest first, each row a link to the job with its closing date in the viewer's own time, and "View all jobs" in the
- * footer when there are more. Sales numbers come with checkout (step 10).
+ * Home's "Selling now" (D127; ADR 0021, call 7) as quiet text on the canvas (D146, amends D145): an h2 with "All jobs"
+ * at its right, then the studio's selling jobs, newest first, each one link with its name and closing date (in the
+ * viewer's own time), thin lines between them. The jobs list has no sales per job yet, so the rows show what it has.
  */
 export function JobsSelling({ refreshKey }: { refreshKey: number }) {
   const t = useTranslations("app.home");
   const formatClosing = useFormatClosing();
+  const headingId = useId();
   const [data, setData] = useState<JobsResponse | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -40,42 +40,42 @@ export function JobsSelling({ refreshKey }: { refreshKey: number }) {
     };
   }, [refreshKey]);
 
+  const note = (words: string) => <p className="m-0 py-3 text-body-lg text-muted">{words}</p>;
   return (
-    <HomeCard
-      title={t("jobsSelling")}
-      footer={
-        data?.nextCursor ? (
-          <Link href="/app/jobs" className={HOME_FOOTER_LINK}>
-            {t("viewAllJobs")}
-          </Link>
-        ) : null
-      }
-    >
+    <section aria-labelledby={headingId} className="flex flex-col">
+      <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+        <h2 id={headingId} className="m-0 text-h3 font-bold text-ink">
+          {t("sellingNow")}
+        </h2>
+        <Link href="/app/jobs" className={`${HOME_FOOTER_LINK} underline`}>
+          {t("allJobs")}
+        </Link>
+      </div>
       {failed ? (
-        <HomeNote>{t("jobsSellingFailed")}</HomeNote>
+        note(t("jobsSellingFailed"))
       ) : !data ? (
-        <HomeNote>{t("checking")}</HomeNote>
+        note(t("checking"))
       ) : data.jobs.length === 0 ? (
-        <HomeNote>
-          <Megaphone className="size-5 shrink-0" aria-hidden="true" />
-          {t("noJobs")}
-        </HomeNote>
+        note(t("noJobs"))
       ) : (
-        <HomeRows>
+        <ul className="m-0 list-none p-0">
           {data.jobs.map((job) => (
-            <HomeLinkRow
-              key={job.id}
-              href={tabHref(job.id, "overview")}
-              name={job.name}
-              detail={
-                job.closesAt
-                  ? t("closesOn", { when: formatClosing(job.closesAt) })
-                  : t("noClosingDate")
-              }
-            />
+            <li key={job.id} className="border-b border-line last:border-b-0">
+              <Link
+                href={tabHref(job.id, "overview")}
+                className="group flex min-h-14 flex-col justify-center py-3 text-ink no-underline focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                <span className="text-body-lg font-semibold group-hover:underline">{job.name}</span>
+                <span className="text-body text-muted">
+                  {job.closesAt
+                    ? t("closesOn", { when: formatClosing(job.closesAt) })
+                    : t("noClosingDate")}
+                </span>
+              </Link>
+            </li>
           ))}
-        </HomeRows>
+        </ul>
       )}
-    </HomeCard>
+    </section>
   );
 }

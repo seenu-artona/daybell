@@ -146,3 +146,41 @@ Calls made in the amendment:
   heading.
 - F. The setup checklist's rows on Home use the new row look (`ChecklistGroups look="rows"`); the job Overview's
   checklist keeps its plain look.
+
+## Amendments (Oct 14, 2026): D146 (amends D143, D127 and D145)
+
+Seenu approved a new Home (D146). UI only: no schema, migration, API contract, RLS, event or region changes; Home reads
+the same `GET /studio/sales`, `GET /studio/checklist` and `GET /jobs?status=selling` as before. Where it differs from
+the D145 Home above, this wins.
+
+1. **Title.** The h1 is "Good morning", "Good afternoon" or "Good evening" by the browser's hour (5-11, 12-17, else;
+   `greeting.ts`), with no subline. Home leaves `ListPage`: the date range pill sits at the right end of the title row.
+   There is no New job button.
+2. **Numbers.** Four separate white cards (20px corners, soft shadow): Sales (still lime-highlighted), Orders, Average
+   order, Daybell fee.
+3. **Up next.** One white card, "Up next" with "Picked from all your jobs, most urgent first", replaces the To do card
+   and the three-row Up next: up to five rows mixing the jobs' D143 tasks with the orders waiting (to print, to ship,
+   to take to school), as plain links (task · job, a 14px muted reason line, the faint chevron). `upNextRows` merges
+   them by D143's tiers, the order to-dos counting as "money is waiting" (core's `upNextRank`: after something broken,
+   before the next step). The sort is stable: ties keep the server's order (nearest picture day first), and the order
+   to-dos go print, ship, school. "N more jobs in Jobs" counts the jobs not shown.
+4. **Selling now.** Quiet text on the canvas, not a card: an h2 with "All jobs" (always shown) at its right, each
+   selling job one link with its name and closing date, thin lines between rows.
+5. **Recently** is gone from Home (the job Overview keeps its activity).
+
+Role checks are as before: the numbers and the range for owners and admins (`canSeeSales`); the orders waiting for
+everyone who sees orders (`canSeeOrders`); job tasks for everyone, linked only where the role can do them. The setup
+checklist is unchanged.
+
+Calls made in the amendment:
+
+- G. **No first name.** Daybell stores no names for team members, only emails (Q1 of step 2b), and `GET /me` returns
+  none, so the greeting has no name until it does. Not derived from the email.
+- H. **Next payout** has no amount in any API (`GET /studio/payouts` gives only the next payout day, Canada only), so
+  the fourth card stays Daybell's fee.
+- I. **Selling now's sales, families bar and order count** are not in `GET /jobs`, so each row shows the name and
+  closing date only, as before.
+- J. While the setup checklist shows (or the checklist can't be loaded), the orders waiting get their own Up next card
+  under it, left out when nothing is waiting, so they never disappear for a studio still in setup.
+- K. The server still sends only the three most urgent jobs (`UP_NEXT_SHOWN`), so with three urgent jobs and three
+  order to-dos the fifth row is chosen from those six.

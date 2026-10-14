@@ -32,7 +32,7 @@ describe("locale files", () => {
     for (const messages of [enUS, enCA]) {
       expect(messages.app.checklist.progress).toBe("{done} of {total} done");
       expect(messages.app.checklist.nextTask).toBe("Next: {task}");
-      expect(messages.app.home.upNext.row).toBe("{job} · {reason}");
+      expect(messages.app.home.upNext.row).toBe("{task} · {job}");
     }
   });
 

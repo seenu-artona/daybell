@@ -462,7 +462,11 @@
       }
     },
     "home": {
-      "title": "Home",
+      "greeting": {
+        "morning": "Good morning",
+        "afternoon": "Good afternoon",
+        "evening": "Good evening"
+      },
       "range": "Date range",
       "ranges": {
         "today": "Today",
@@ -474,13 +478,12 @@
       "averageOrder": "Average order",
       "noData": "No sales yet",
       "dash": "–",
-      "jobsSelling": "Jobs selling now",
+      "sellingNow": "Selling now",
+      "allJobs": "All jobs",
       "noJobs": "No jobs are selling yet.",
       "closesOn": "Closes {when}",
       "noClosingDate": "No closing date",
-      "viewAllJobs": "View all jobs",
       "jobsSellingFailed": "We couldn’t load the jobs selling now.",
-      "recently": "Recently",
       "checking": "Checking…",
       "onboarding": {
         "title": "Set up your studio",
@@ -495,7 +498,7 @@
         "title": "Up next",
         "intro": "Picked from all your jobs, most urgent first",
         "empty": "Nothing needs you right now.",
-        "row": "{job} · {reason}",
+        "row": "{task} · {job}",
         "more": "{count, plural, one {# more job in Jobs} other {# more jobs in Jobs}}",
         "reasons": {
           "photosOverdue": "{days, plural, one {Picture day was # day ago, no photos yet} other {Picture day was # days ago, no photos yet}}",
@@ -503,20 +506,23 @@
           "brokenPhotos": "{count, plural, one {# photo failed} other {# photos failed}}",
           "taggingProblems": "{leftovers, number} in Leftovers, {flagged, number} to check",
           "nextStep": "Next step"
-        }
+        },
+        "orders": {
+          "toPrint": "{count, plural, one {Print # order} other {Print # orders}}",
+          "toShip": "{count, plural, one {Ship # order} other {Ship # orders}}",
+          "toDeliver": "{count, plural, one {Take # order to school} other {Take # orders to school}}"
+        },
+        "ordersWhy": {
+          "toPrint": "Paid and waiting to be printed",
+          "toShip": "Printed, waiting to be shipped",
+          "toDeliver": "Printed, waiting to go to school"
+        },
+        "ordersFailed": "We couldn’t load the orders waiting."
       },
       "checklistTitle": "Your next steps",
       "daybellFee": "Daybell fee",
       "since": "Since {date}",
-      "salesFailed": "We couldn’t load your numbers.",
-      "todo": {
-        "title": "To do",
-        "toPrint": "{count, plural, one {# order to print} other {# orders to print}}",
-        "toShip": "{count, plural, one {# order to ship} other {# orders to ship}}",
-        "toDeliver": "{count, plural, one {# order to take to school} other {# orders to take to school}}",
-        "nothing": "No orders are waiting.",
-        "failed": "We couldn’t load your to-do list."
-      }
+      "salesFailed": "We couldn’t load your numbers."
     },
     "signOutFailed": "We couldn't sign you out. Check your connection and try again.",
     "dialog": {

@@ -220,8 +220,8 @@ export type AttentionTaskKey = "reviewFailedPhotos";
 
 /**
  * Why a task was picked, most urgent kind first (D143): a date is close (a past picture day with no photos ranks
- * highest; Seenu, answer 7), something is broken, money is waiting, the next step in a job. "Money is waiting" has no
- * data yet (payouts arrive later), so it is never produced.
+ * highest; Seenu, answer 7), something is broken, money is waiting, the next step in a job. The server never produces
+ * "money is waiting" for a job; Home's order to-dos rank there instead (D146, `upNextRank`).
  */
 export type UpNextReason =
   | { kind: "photosOverdue"; days: number }
@@ -238,14 +238,21 @@ export const UP_NEXT_REASONS = [
   "nextStep",
 ] as const;
 
-const REASON_RANK: Record<UpNextReason["kind"], number> = {
+const REASON_RANK: Record<UpNextReason["kind"] | "moneyWaiting", number> = {
   photosOverdue: 0,
   dateClose: 1,
   brokenPhotos: 2,
   // The same tier as failed photos (plan answer 9).
   taggingProblems: 2,
+  // Orders paid and waiting to be printed, shipped or taken to school (D146).
+  moneyWaiting: 3,
   nextStep: 4,
 };
+
+/** D143's urgency tier of a reason kind, lower is more urgent; Home mixes its order to-dos in as "moneyWaiting" (D146). */
+export function upNextRank(kind: UpNextReason["kind"] | "moneyWaiting"): number {
+  return REASON_RANK[kind];
+}
 
 export interface UpNextPick {
   task: TaskKey | AttentionTaskKey;

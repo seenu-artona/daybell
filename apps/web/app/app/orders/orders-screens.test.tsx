@@ -11,7 +11,7 @@ import { StudioContext } from "../me-context";
 // status in words; owners, admins and staff select orders and mark them, each result counted and announced, refused
 // ones kept selected; photographers get no checkboxes. The refund dialog sums what was asked with the database's rule,
 // refuses more than is left, confirms with the amount and sends one request with its id however often it is tapped.
-// Home gives staff the To do list and never the money (Q4).
+// Home gives staff the orders waiting in Up next and never the money (Q4).
 const { push, replace } = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace, push, refresh: vi.fn(), prefetch: vi.fn() }),
@@ -24,10 +24,8 @@ vi.mock("@/lib/client-api", async (original) => ({
   ...(await original<typeof import("@/lib/client-api")>()),
   api,
 }));
-// Home's other cards make their own calls; they are tested elsewhere.
-vi.mock("../home-checklist", () => ({ HomeChecklist: () => null }));
+// Home's Selling now makes its own call; it is tested elsewhere.
 vi.mock("../jobs-selling", () => ({ JobsSelling: () => null }));
-vi.mock("../activity-card", () => ({ ActivityCard: () => <p>Activity card</p> }));
 
 const { OrdersList } = await import("./orders-list");
 const { RefundForm, RefundsSection } = await import("./[id]/refunds");
@@ -251,7 +249,7 @@ describe("the orders list", () => {
     expect(rows[1]?.textContent).toContain(messages.app.orders.refundBadges.partly_refunded);
   });
 
-  it("filters by delivery, and Home's To do links ask for what they count (code review N3)", async () => {
+  it("filters by delivery, and Home's order to-do links ask for what they count (code review N3)", async () => {
     api.mockImplementation(async (path: string) =>
       path.startsWith("/jobs") ? ok({ jobs: [] }) : ok({ orders: [], nextCursor: null }),
     );
@@ -602,7 +600,7 @@ describe("dates in the viewer's time zone, not the server's", () => {
   });
 });
 
-describe("Home (Q4)", () => {
+describe("Home (Q4, D146)", () => {
   const sales = {
     sales: {
       today: {
@@ -615,57 +613,115 @@ describe("Home (Q4)", () => {
     },
     todo: { toPrint: 2, toShip: 1, toDeliver: 0 },
   };
+  const checklist = {
+    onboarding: null,
+    upNext: {
+      items: [
+        {
+          jobId: "0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b01",
+          jobName: "Maple Grove",
+          task: "printQrCards",
+          reason: { kind: "nextStep" },
+        },
+        {
+          jobId: "0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b02",
+          jobName: "Oak Park",
+          task: "reviewFailedPhotos",
+          reason: { kind: "brokenPhotos", count: 4 },
+        },
+      ],
+      total: 2,
+    },
+  };
+  const answer = (salesData: unknown) => async (path: string) =>
+    path.startsWith("/studio/checklist") ? ok(checklist) : ok(salesData);
+  const link = (href: string) =>
+    [...container.querySelectorAll("a")].find((a) => a.getAttribute("href") === href);
 
-  it("gives staff the To do list and never the money", async () => {
-    api.mockResolvedValue(ok({ sales: null, todo: sales.todo }));
+  it("gives staff the orders waiting in Up next and never the money", async () => {
+    api.mockImplementation(answer({ sales: null, todo: sales.todo }));
     await render(<HomePage />, "staff");
-    expect(container.querySelector('a[href="/app/orders?status=paid"]')?.textContent).toBe(
-      "2 orders to print",
+    expect(link("/app/orders?status=paid")?.textContent).toBe(
+      "Print 2 ordersPaid and waiting to be printed",
     );
-    // (The selector engine trips on "&" in an attribute value, so the links are found by their href.)
-    const link = (href: string) =>
-      [...container.querySelectorAll("a")].find((a) => a.getAttribute("href") === href);
-    expect(link("/app/orders?status=printed&delivery=home")?.textContent).toBe("1 order to ship");
+    expect(link("/app/orders?status=printed&delivery=home")?.textContent).toBe(
+      "Ship 1 orderPrinted, waiting to be shipped",
+    );
     expect(container.querySelector("select")).toBeNull();
     expect(container.textContent).not.toContain("$");
-    expect(container.textContent).not.toContain("Activity card");
+    expect(container.textContent).not.toContain("Recently");
   });
 
-  it("gives owners today's sales from the ledger", async () => {
-    api.mockResolvedValue(ok(sales));
+  it("gives owners the range's numbers from the ledger in four cards, Daybell's fee last", async () => {
+    api.mockImplementation(answer(sales));
     await render(<HomePage />, "owner");
-    expect(api.mock.calls[0]?.[0]).toMatch(/^\/studio\/sales\?tz=/);
-    const today = container.querySelector('section[aria-label="Today"]')?.textContent ?? "";
-    expect(today).toContain("$124.30");
-    expect(today).toContain("$3.00");
+    expect(api.mock.calls.map((c) => c[0])).toContainEqual(
+      expect.stringMatching(/^\/studio\/sales\?tz=/),
+    );
+    const today = container.querySelector('section[aria-label="Today"]');
+    const cards = [...(today?.children ?? [])];
+    expect(cards.map((c) => c.querySelector("p")?.textContent)).toEqual([
+      "Sales",
+      "Orders",
+      "Average order",
+      "Daybell fee",
+    ]);
+    for (const card of cards) {
+      expect(card.className).toMatch(/\brounded-list\b/);
+      expect(card.className).toMatch(/\bshadow-card\b/);
+    }
+    expect(cards[0]?.textContent).toContain("$124.30");
+    expect(cards[3]?.textContent).toContain("$3.00");
   });
 
-  it("lays Home out like a list page: the title alone, sections as list cards with link rows (D145, amends D144)", async () => {
-    api.mockResolvedValue(ok(sales));
-    await render(<HomePage />, "owner");
+  it("greets by the time of day as the h1, the range on the same row, no subline", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 14, 19, 0));
+    try {
+      api.mockImplementation(answer(sales));
+      await render(<HomePage />, "owner");
+    } finally {
+      vi.useRealTimers();
+    }
     const header = container.querySelector("header");
-    expect(header?.querySelector("h1")?.textContent).toBe("Home");
+    expect(header?.querySelector("h1")?.textContent).toBe("Good evening");
     expect(header?.querySelector("p")).toBeNull();
-    // To do is a region named by its h2, in a white list card (20px corners, soft shadow).
-    const heading = [...container.querySelectorAll("h2")].find((h) => h.textContent === "To do");
-    const todo = container.querySelector(`section[aria-labelledby="${heading?.id}"]`);
-    expect(todo?.className).toMatch(/\brounded-list\b/);
-    expect(todo?.className).toMatch(/\bshadow-card\b/);
-    // Each row is one link: 16px words that underline on hover, a faint chevron hidden from screen readers, never green.
-    const row = todo?.querySelector('a[href="/app/orders?status=paid"]');
-    expect(row?.className).toMatch(/\bmin-h-14\b/);
-    expect(row?.className).toMatch(/\btext-body-lg\b/);
+    expect(header?.parentElement?.querySelector("label select")).not.toBeNull();
+  });
+
+  it("mixes the jobs' tasks with the orders waiting in one Up next card, most urgent first (D146)", async () => {
+    api.mockImplementation(answer(sales));
+    await render(<HomePage />, "owner");
+    const heading = [...container.querySelectorAll("h2")].find((h) => h.textContent === "Up next");
+    const card = container.querySelector(`section[aria-labelledby="${heading?.id}"]`);
+    expect(card?.className).toMatch(/\brounded-list\b/);
+    expect(card?.textContent).toContain("Picked from all your jobs, most urgent first");
+    const rows = [...(card?.querySelectorAll("li") ?? [])].map(
+      (li) => li.querySelector("a span span")?.textContent,
+    );
+    expect(rows).toEqual([
+      "Check failed photos · Oak Park",
+      "Print 2 orders",
+      "Ship 1 order",
+      "Print QR cards · Maple Grove",
+    ]);
+    // Each row is one link: words that underline on hover, a faint chevron hidden from screen readers, never green.
+    const row = link("/app/orders?status=paid");
     expect(row?.className).toMatch(/\bhover:bg-canvas\b/);
     expect(row?.className).not.toMatch(/\btext-primary\b/);
     expect(row?.querySelector("span span")?.className).toMatch(/\bgroup-hover:underline\b/);
+    expect(row?.querySelector("span span + span")?.className).toMatch(/\btext-body\b/);
     expect(row?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
-    // The date range is a labelled select at the right end of the row under the title.
-    expect(container.querySelector("label select")).not.toBeNull();
+    // No To do card any more.
+    expect([...container.querySelectorAll("h2")].map((h) => h.textContent)).not.toContain("To do");
   });
 
   it("asks nothing about orders for photographers", async () => {
+    api.mockImplementation(answer(sales));
     await render(<HomePage />, "photographer");
-    expect(api).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain("To do");
+    expect(api.mock.calls.map((c) => c[0])).not.toContainEqual(
+      expect.stringMatching(/^\/studio\/sales/),
+    );
+    expect(container.textContent).not.toContain("orders");
   });
 });

@@ -35,7 +35,10 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Save and continue" }).click();
   await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+  // Home's h1 greets by the browser's time of day (D146).
+  await expect(
+    page.getByRole("heading", { name: /^Good (morning|afternoon|evening)$/, level: 1 }),
+  ).toBeVisible();
   await expect(page.getByText(`North Peak ${tag}`).filter({ visible: true }).first()).toBeVisible();
   const setup = page.getByRole("region", { name: "Set up your studio", exact: true });
   // Account, payouts, price list and first job: inviting the team stays in Settings (Seenu, answer 12). D143's order:
@@ -186,15 +189,15 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await page.goto("/app");
   const upNext = page.getByRole("region", { name: "Up next", exact: true });
   await expect(upNext.getByRole("listitem")).toHaveCount(2);
-  await expect(upNext.getByRole("listitem").first()).toContainText("Add the roster");
-  await expect(upNext.getByRole("listitem").first()).toContainText(
-    `Soon ${tag} · Picture day in 3 days`,
-  );
+  // Each row: the task and its job, then why it was picked (D146).
+  await expect(upNext.getByRole("listitem").first()).toContainText(`Add the roster · Soon ${tag}`);
+  await expect(upNext.getByRole("listitem").first()).toContainText("Picture day in 3 days");
   await expect(upNext.getByRole("listitem").first().getByRole("link")).toHaveAttribute(
     "href",
     /^\/app\/jobs\/[0-9a-f-]{36}\/people$/,
   );
-  await expect(upNext.getByRole("listitem").nth(1)).toContainText(`Far ${tag} · Next step`);
+  await expect(upNext.getByRole("listitem").nth(1)).toContainText(` · Far ${tag}`);
+  await expect(upNext.getByRole("listitem").nth(1)).toContainText("Next step");
   await expect(setup).toHaveCount(0);
   // The photographer never sees the setup checklist; Up next is the same for them.
   await staffTab.goto("/app");
