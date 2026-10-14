@@ -161,13 +161,22 @@ export const CARD_LAYOUT = {
     group: 104,
     qr: 140,
   },
-  /** The back page: studio, access code, instructions. */
+  /**
+   * The back page: studio; whose card it is (display name and class, or "Blank card"), small, so a sheet printed with
+   * the wrong flip is caught before cards go home (security review); access code; instructions.
+   */
   back: {
-    studio: 120,
-    codeLabel: 156,
-    code: 172,
+    studio: 96,
+    owner: 124,
+    ownerGroup: 138,
+    codeLabel: 160,
+    code: 176,
     instructions: 224,
   },
+  /** The match mark: the card ID's last characters, small, in the bottom-right corner of both sides. */
+  mark: { size: 8, inset: 12, length: 4 },
+  owner: { size: 10 },
+  ownerGroup: { size: 9 },
   studio: { size: 10 },
   name: { max: 22, min: 12, twoLineMin: 11, lineHeight: 1.15 },
   group: { size: 12 },
@@ -175,6 +184,16 @@ export const CARD_LAYOUT = {
   code: { size: 28 },
   instructions: { size: 10 },
 } as const;
+
+/**
+ * The match mark printed on both sides of a card (security review): the card code's last four characters. A front and
+ * a back that don't share it are not the same card, which also catches a mixed-up blank card. Card codes are not
+ * secret (ADR 0018) and the mark is never part of the access code.
+ */
+export function cardMatchMark(cardCode: string): string {
+  if (!isCardCode(cardCode)) throw new Error("Not a card code");
+  return cardCode.slice(-CARD_LAYOUT.mark.length);
+}
 
 /** The top-left corner of the i-th card on its front page (0..3: left to right, then top to bottom). */
 export function cardOrigin(index: number): { x: number; y: number } {

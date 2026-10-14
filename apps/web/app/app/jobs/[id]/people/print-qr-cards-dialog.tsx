@@ -238,13 +238,16 @@ export function PrintQrCardsDialog({
           <p id={`${id}-duplex`} className="m-0 text-sm font-semibold text-ink">
             {t("duplex")}
           </p>
+          <p id={`${id}-check`} className="m-0 text-caption text-muted">
+            {t("checkNames")}
+          </p>
           <div className="flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={close}>
               {t("close")}
             </Button>
             <Button
               type="submit"
-              aria-describedby={`${id}-duplex`}
+              aria-describedby={`${id}-duplex ${id}-check`}
               aria-disabled={busy || undefined}
               className="aria-disabled:opacity-60"
             >

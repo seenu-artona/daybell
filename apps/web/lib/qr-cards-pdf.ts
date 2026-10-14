@@ -4,11 +4,14 @@ import { join } from "node:path";
 import {
   backCardOrigin,
   CARD_LAYOUT,
+  cardMatchMark,
   cardOrigin,
   fitLine,
   fitName,
   type MeasureText,
   paginate,
+  parentDisplayName,
+  parseCardQrPayload,
   printableText,
 } from "@daybell/core";
 import tokens from "@daybell/ui/tokens.json";
@@ -25,6 +28,9 @@ import QRCode from "qrcode";
  * back page. The front (photographed on picture day) holds the studio's name, the child's name and class and the QR,
  * never the access code. The back holds the access code, the instructions and the studio's name; its columns are
  * mirrored so each back lands behind its own front. Even a photo of a card whose QR isn't found shows no access code.
+ * In case a sheet is flipped the wrong way (security review), the back also names whose card it is (first name and
+ * last initial, and class; or "Blank card"), and both sides carry the same match mark (the card ID's last four
+ * characters) in the corner.
  */
 
 export interface PrintCard {
@@ -50,6 +56,8 @@ export interface CardTexts {
   accessCodeLabel: string;
   /** "Go to {link}, enter your code". */
   instructions: string;
+  /** "Blank card", on a blank card's back where a child's name would be. */
+  blankCard: string;
 }
 
 const FONT_DIR = join(process.cwd(), "assets", "fonts");
@@ -222,6 +230,18 @@ function drawFront(
   }
 
   drawQr(doc, card.qrPayload, origin.x + (size.width - qrSymbol) / 2, top + AT.qr, qrSymbol, ink);
+  matchMark(doc, origin, card);
+}
+
+/** The match mark, the same on both sides of a card, in the card's bottom-right corner. */
+function matchMark(doc: PDFKit.PDFDocument, origin: { x: number; y: number }, card: PrintCard) {
+  const { card: size, mark } = CARD_LAYOUT;
+  const code = parseCardQrPayload(card.qrPayload);
+  if (!code) throw new Error("Not a card QR payload");
+  const text = cardMatchMark(code);
+  doc.font(REGULAR).fontSize(mark.size).fillColor(color("muted"));
+  const x = origin.x + size.width - mark.inset - doc.widthOfString(text);
+  doc.text(text, x, origin.y + size.height - mark.inset - mark.size, { lineBreak: false });
 }
 
 /** The back, behind the front: studio, the access code (large) and the instructions. */
@@ -240,6 +260,35 @@ function drawBack(
   const ink = color("ink");
 
   studioLine(doc, origin, AT.studio, texts, clean, measure);
+
+  // Whose card this is, so a back behind the wrong front is caught before the card goes home.
+  const owner = fitLine(
+    card.child
+      ? clean(parentDisplayName(card.child.firstName, card.child.lastName))
+      : clean(texts.blankCard),
+    width,
+    { max: CARD_LAYOUT.owner.size, min: 8 },
+    measure(BOLD),
+  );
+  centered(doc, owner.text, origin.x, top + AT.owner, size.width, {
+    font: BOLD,
+    size: owner.size,
+    color: ink,
+  });
+  if (card.child?.group) {
+    const group = fitLine(
+      clean(texts.groupLine(card.child.group)),
+      width,
+      { max: CARD_LAYOUT.ownerGroup.size, min: 7 },
+      measure(REGULAR),
+    );
+    centered(doc, group.text, origin.x, top + AT.ownerGroup, size.width, {
+      font: REGULAR,
+      size: group.size,
+      color: ink,
+    });
+  }
+
   centered(doc, clean(texts.accessCodeLabel), origin.x, top + AT.codeLabel, size.width, {
     font: REGULAR,
     size: CARD_LAYOUT.codeLabel.size,
@@ -261,6 +310,7 @@ function drawBack(
       height: CARD_LAYOUT.instructions.size * 2.6,
       ellipsis: true,
     });
+  matchMark(doc, origin, card);
 }
 
 /** "Name ______": a label and a line to write on, for blank cards and children without a class. */

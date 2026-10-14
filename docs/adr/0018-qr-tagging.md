@@ -281,6 +281,15 @@ cards per sheet (2×2); each sheet is a front page followed by a back page.
   each page's text (through the fonts' ToUnicode maps) and check the code is only ever on a back page, each back sits
   in the mirrored column, and a blank card's sides. The e2e counts two pages per sheet.
 
+- **A sheet flipped the wrong way** (short edge, or backs pasted by hand) would silently put one child's code behind
+  another child's card (security review). So the back also names whose card it is, small, above the code: the child's
+  display name (first name and last initial, `parentDisplayName`) and class, or "Blank card" (`pdf.qrCards.blankCard`).
+  Both sides carry a **match mark**, the card ID's last four characters (`cardMatchMark`), small in the bottom-right
+  corner, so a mixed-up blank card is caught too. Card codes are not secret, and the mark is not part of the access
+  code. The dialog adds "Check the name on the back matches the front before handing cards out."
+  (`app.qrCards.checkNames`), also part of the button's description. Tests check the back names the same child and
+  carries the same mark as its front, in the mirrored slot, and that the front still never shows the code.
+
 Unchanged: cards are made on demand and never stored, built in the studio's region, and printed by the same roles.
 
 ## Calls made in this step (for review)

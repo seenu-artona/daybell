@@ -6,6 +6,7 @@ import {
   CARD_LAYOUT,
   type CardPerson,
   cardChildren,
+  cardMatchMark,
   cardOrigin,
   cardQrPayload,
   fitLine,
@@ -196,6 +197,8 @@ describe("pages", () => {
     ]);
     inOrder([
       [back.studio, CARD_LAYOUT.studio.size],
+      [back.owner, CARD_LAYOUT.owner.size],
+      [back.ownerGroup, CARD_LAYOUT.ownerGroup.size],
       [back.codeLabel, CARD_LAYOUT.codeLabel.size],
       [back.code, CARD_LAYOUT.code.size],
       [back.instructions, CARD_LAYOUT.instructions.size],
@@ -219,8 +222,19 @@ describe("pages", () => {
       "code",
       "codeLabel",
       "instructions",
+      "owner",
+      "ownerGroup",
       "studio",
     ]);
+  });
+
+  it("marks both sides with the card ID's last four characters, in a corner clear of everything else", () => {
+    expect(cardMatchMark(CODE)).toBe("GHJK");
+    expect(() => cardMatchMark("K7QM-4XPA")).toThrow();
+    const { mark, card, front, back, qrSymbol, qrQuietModules } = CARD_LAYOUT;
+    const markTop = card.height - mark.inset - mark.size;
+    expect(markTop).toBeGreaterThan(front.qr + qrSymbol + (qrSymbol / 25) * qrQuietModules);
+    expect(markTop).toBeGreaterThan(back.instructions + CARD_LAYOUT.instructions.size * 2.6);
   });
 });
 

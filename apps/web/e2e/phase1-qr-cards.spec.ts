@@ -134,9 +134,11 @@ test("QR cards: print from the API and from People, with the checklist task", as
   // How to print them, next to the button and read with it.
   const duplex = dialog.getByText("Print double-sided, flip on long edge", { exact: true });
   await expect(duplex).toBeVisible();
+  const check = "Check the name on the back matches the front before handing cards out.";
+  await expect(dialog.getByText(check, { exact: true })).toBeVisible();
   await expect(
     dialog.getByRole("button", { name: "Download PDF", exact: true }),
-  ).toHaveAccessibleDescription("Print double-sided, flip on long edge");
+  ).toHaveAccessibleDescription(`Print double-sided, flip on long edge ${check}`);
   const [file] = await Promise.all([
     page.waitForEvent("download"),
     dialog.getByRole("button", { name: "Download PDF", exact: true }).click(),

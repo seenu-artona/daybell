@@ -67,8 +67,12 @@ describe("PrintQrCardsDialog", () => {
     );
     const described = button?.getAttribute("aria-describedby");
     expect(described).toBeTruthy();
-    expect(container.ownerDocument.getElementById(described as string)?.textContent).toBe(
-      messages.app.qrCards.duplex,
+    const description = (described ?? "")
+      .split(" ")
+      .map((ref) => container.ownerDocument.getElementById(ref)?.textContent);
+    expect(description).toEqual([messages.app.qrCards.duplex, messages.app.qrCards.checkNames]);
+    expect(messages.app.qrCards.checkNames).toBe(
+      "Check the name on the back matches the front before handing cards out.",
     );
     expect(messages.app.qrCards.duplex).toBe("Print double-sided, flip on long edge");
   });

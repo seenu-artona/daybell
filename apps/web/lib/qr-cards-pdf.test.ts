@@ -16,6 +16,7 @@ const TEXTS = {
   nameLabel: "Name",
   accessCodeLabel: "Access code",
   instructions: "Go to shop.example.test, enter your code",
+  blankCard: "Blank card",
 };
 
 const card = (firstName: string, lastName: string, group: string | null, n: number) => ({
@@ -177,17 +178,28 @@ describe("renderQrCardsPdf", () => {
 
   it("prints the studio, name, class and QR on the front, and the access code only on the back", async () => {
     const [front, back] = readPdf((await render([card("Maya", "Johnson", "Room 4", 1)])).pdf);
+    // The match mark (the card ID's last four characters) ends both sides; the back names whose card it is.
     expect(front?.runs.map((r) => r.text)).toEqual([
       "North Peak Photo",
       "Maya Johnson",
       "Class: Room 4",
+      "0001",
     ]);
     expect(back?.runs.map((r) => r.text)).toEqual([
       "North Peak Photo",
+      "Maya J.",
+      "Class: Room 4",
       "Access code",
       "K7QM-4XPA",
       "Go to shop.example.test, enter your code",
+      "0001",
     ]);
+    // Small, above the code.
+    const owner = back?.runs.find((r) => r.text === "Maya J.");
+    expect(owner?.size).toBeLessThan(CARD_LAYOUT.code.size / 2);
+    expect(owner?.baseline).toBeLessThan(
+      back?.runs.find((r) => r.text === "K7QM-4XPA")?.baseline ?? 0,
+    );
     // Large: the code is the biggest text on the card.
     const code = back?.runs.find((r) => r.text === "K7QM-4XPA");
     expect(code?.size).toBe(CARD_LAYOUT.code.size);
@@ -210,13 +222,15 @@ describe("renderQrCardsPdf", () => {
 
   it("prints a blank card's studio, name and class lines and QR on the front, and its code on the back (D138)", async () => {
     const [front, back] = readPdf((await render([blank(2)])).pdf);
-    expect(front?.runs.map((r) => r.text)).toEqual(["North Peak Photo", "Name", "Class"]);
+    expect(front?.runs.map((r) => r.text)).toEqual(["North Peak Photo", "Name", "Class", "1112"]);
     expect(front?.rects.length).toBeGreaterThan(20);
     expect(back?.runs.map((r) => r.text)).toEqual([
       "North Peak Photo",
+      "Blank card",
       "Access code",
       "JKMN-PQRS",
       "Go to shop.example.test, enter your code",
+      "1112",
     ]);
   });
 
@@ -248,6 +262,13 @@ describe("renderQrCardsPdf", () => {
       if (!name || !onBack) throw new Error(`Card ${i} is missing a side`);
       const f = slot(name.x, name.baseline);
       const b = slot(onBack.x, onBack.baseline);
+      // The back names the same child and carries the same match mark as its front, in the same slot.
+      const at = (page: Page | undefined, text: string) =>
+        page?.runs.filter((r) => r.text === text).map((r) => slot(r.x, r.baseline));
+      expect(at(back, `Kid${i + 1} J.`)).toEqual([b]);
+      const mark = `000${i + 1}`;
+      expect(at(front, mark)).toEqual([f]);
+      expect(at(back, mark)).toEqual([b]);
       expect(f).toEqual(slot(cardOrigin(i).x, cardOrigin(i).y));
       expect(b).toEqual(slot(backCardOrigin(i).x, backCardOrigin(i).y));
       // Same row, opposite column.

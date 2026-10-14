@@ -1084,6 +1084,7 @@
       "blankCardsHelp": "Extra cards with lines for the name and {group, select, class {class} team {team} other {group}} and their own access code, for children not on the roster. Up to {max}.",
       "summary": "{cards, plural, one {# card} other {# cards}} on {sheets, plural, one {# sheet} other {# sheets}} of US Letter",
       "duplex": "Print double-sided, flip on long edge",
+      "checkNames": "Check the name on the back matches the front before handing cards out.",
       "dnpNote": "Children marked Do not photograph get no card. Each child keeps the same card on every print.",
       "download": "Download PDF",
       "preparing": "Preparing the PDF…",
@@ -1859,7 +1860,8 @@
       "groupLabel": "{group, select, class {Class} team {Team} other {Group}}",
       "nameLabel": "Name",
       "accessCode": "Access code",
-      "instructions": "Go to {link}, enter your code"
+      "instructions": "Go to {link}, enter your code",
+      "blankCard": "Blank card"
     }
   },
   "shop": {
