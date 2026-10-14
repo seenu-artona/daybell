@@ -161,4 +161,22 @@ describe("GET /jobs/:id/children (D147)", () => {
     const { preferredRegion } = await import("./route");
     expect(preferredRegion).toBe("yul1");
   });
+
+  it("adds a child to a Canadian studio's roster in Montréal only too, before reading the body (D113)", async () => {
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const db = signIn(A, "owner", "ca");
+    const { POST } = await import("./route");
+    const res = await POST(
+      new Request(`http://localhost/api/v1/jobs/${JOB_A}/children`, {
+        method: "POST",
+        body: "{ not json",
+      }),
+      { params: Promise.resolve({ id: JOB_A }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("region_unavailable");
+    expect(db.rpc).not.toHaveBeenCalled();
+    expect(db.calls).toEqual([]);
+  });
 });

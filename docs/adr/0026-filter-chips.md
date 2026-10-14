@@ -123,7 +123,7 @@ Roster editors rename classes from the "Classes N ›" row under the list (answe
   `hasPaidOrder` for roles that don't see orders and, carrying order data now, runs in Montréal for Canadian studios
   like `/orders` (`preferredRegion`, `assertFunctionRegion`). `preferredRegion` is per route file, so the same file's
   `POST` (add a child) runs in Montréal too; that is where Canadian roster writes belong anyway (access codes, D113),
-  and only `GET` asserts the region.
+  and both `GET` and `POST` assert the region.
 - `GET /me/list-filters?page=&jobId=` (the caller's chips, filtered by studio and person) and `PUT /me/list-filters`
   (`{page, jobId?, chips}`; each key one of the list's, an id exactly where the key names a record; every client, job
   or class id checked to be the studio's own, a class the job's; 204). Refusals are `validation.filterChips` and never

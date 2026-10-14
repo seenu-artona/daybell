@@ -73,6 +73,8 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
   // Who and what role first: nobody else gets as far as reading the body (S4).
   const { supabase, studio, userId } = await studioScope();
+  // Canadian rosters are written in Montréal, like they are read (D113).
+  assertFunctionRegion(studio.region);
   assertCanEditRoster(studio);
   const input = await parseBody(request, childInput);
   await loadRosterJob(supabase, studio.id, jobId);
