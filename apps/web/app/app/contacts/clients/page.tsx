@@ -17,9 +17,10 @@ import {
 import { Plus } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { createLoadGuard } from "@/lib/load-guard";
 import { Dialog } from "../../dialog";
 import { ListPage } from "../../list-page";
 import { useStudio } from "../../me-context";
@@ -27,6 +28,9 @@ import { ClientForm } from "../client-form";
 
 /** How long the search waits after the last key before asking the API (GET /clients?q=). */
 const CLIENT_SEARCH_DEBOUNCE_MS = 300;
+
+/** The DOM id of a client's name button, so focus can return to it when the dialog closes. */
+const nameId = (clientId: string) => `client-name-${clientId}`;
 
 const NAME_BUTTON =
   "inline-flex min-h-11 items-center text-left font-bold text-ink hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
@@ -53,29 +57,44 @@ function ClientsPage() {
   const canManage = me.studio.role === "owner" || me.studio.role === "admin";
   const [clients, setClients] = useState<Client[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  // The list's own problem, and the problem opening a client from the menu search (?client=): apart, so neither
+  // wipes the other.
+  const [listProblem, setListProblem] = useState<string | null>(null);
+  const [openProblem, setOpenProblem] = useState<string | null>(null);
   const [editing, setEditing] = useState<Client | "new" | null>(null);
   const [typed, setTyped] = useState("");
   const [q, setQ] = useState("");
-  // Only the newest request may fill the list, so a slow answer to an older search can't replace a newer one.
-  const latest = useRef(0);
+  // Only the newest search may fill the list, and Show more runs once at a time (lib/load-guard).
+  const [guard] = useState(createLoadGuard);
 
   const load = useCallback(
     async (cursor: string | null) => {
-      const request = ++latest.current;
+      const ticket = cursor ? guard.more() : guard.first();
+      if (!ticket) return;
       const query = new URLSearchParams();
       if (q) query.set("q", q);
       if (cursor) query.set("cursor", cursor);
       const s = query.toString();
       const res = await api<ClientsResponse>(`/clients${s ? `?${s}` : ""}`);
-      if (request !== latest.current) return;
-      if (!res.ok) return setProblem(text.error(res.code));
-      setProblem(null);
+      if (!ticket.finish()) return;
+      if (!res.ok) return setListProblem(text.error(res.code));
+      setListProblem(null);
       setClients((prev) => (cursor && prev ? [...prev, ...res.data.clients] : res.data.clients));
       setNextCursor(res.data.nextCursor);
     },
-    [text, q],
+    [text, q, guard],
   );
+
+  /** Opens a client from its row or name; focus goes back to the name when the dialog closes. */
+  function open(client: Client) {
+    setEditing(client);
+  }
+
+  function close() {
+    const back = editing !== null && editing !== "new" ? editing.id : null;
+    setEditing(null);
+    if (back) setTimeout(() => document.getElementById(nameId(back))?.focus(), 0);
+  }
 
   // A new search starts from the first page.
   useEffect(() => {
@@ -97,8 +116,10 @@ function ClientsPage() {
     let current = true;
     api<{ client: Client }>(`/clients/${encodeURIComponent(requested)}`).then((res) => {
       if (!current) return;
-      if (res.ok) setEditing(res.data.client);
-      else setProblem(text.error(res.code));
+      if (res.ok) {
+        setOpenProblem(null);
+        setEditing(res.data.client);
+      } else setOpenProblem(text.error(res.code));
       router.replace("/app/contacts/clients", { scroll: false });
     });
     return () => {
@@ -121,8 +142,9 @@ function ClientsPage() {
         </>
       }
     >
-      {problem ? <Banner tone="danger" title={problem} /> : null}
-      {!clients && !problem ? <p className="m-0 text-muted">{t("clients.loading")}</p> : null}
+      {openProblem ? <Banner tone="danger" title={openProblem} /> : null}
+      {listProblem ? <Banner tone="danger" title={listProblem} /> : null}
+      {!clients && !listProblem ? <p className="m-0 text-muted">{t("clients.loading")}</p> : null}
       {clients && clients.length === 0 ? (
         <p className="m-0 rounded-list bg-surface px-6 py-10 text-center text-muted shadow-card">
           {q ? t("clients.noMatches") : t("clients.empty")}
@@ -133,7 +155,14 @@ function ClientsPage() {
         <ListCard
           footer={
             nextCursor ? (
-              <Button variant="quiet" shape="pill" onClick={() => load(nextCursor)}>
+              <Button
+                variant="quiet"
+                shape="pill"
+                onClick={() => {
+                  // While a new search waits to be sent, the list on screen is about to change: no next page of it.
+                  if (typed.trim() === q) void load(nextCursor);
+                }}
+              >
                 {t("clients.loadMore")}
               </Button>
             ) : null
@@ -150,9 +179,14 @@ function ClientsPage() {
             </thead>
             <tbody>
               {clients.map((c) => (
-                <ClickableRow key={c.id} onActivate={() => setEditing(c)}>
+                <ClickableRow key={c.id} onActivate={() => open(c)}>
                   <TableCell>
-                    <button type="button" className={NAME_BUTTON} onClick={() => setEditing(c)}>
+                    <button
+                      type="button"
+                      id={nameId(c.id)}
+                      className={NAME_BUTTON}
+                      onClick={() => open(c)}
+                    >
                       {c.name}
                     </button>
                   </TableCell>
@@ -170,7 +204,7 @@ function ClientsPage() {
 
       <Dialog
         open={editing !== null}
-        onClose={() => setEditing(null)}
+        onClose={close}
         title={
           editing === "new"
             ? t("form.addTitle")
@@ -183,9 +217,9 @@ function ClientsPage() {
           <ClientForm
             client={editing === "new" ? null : editing}
             readOnly={!canManage}
-            onCancel={() => setEditing(null)}
+            onCancel={close}
             onSaved={() => {
-              setEditing(null);
+              close();
               void load(null);
             }}
           />

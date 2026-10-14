@@ -51,6 +51,8 @@ describe("QuietMenu (D144)", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     expect(trigger().className).toMatch(/\bmin-h-11\b/);
     expect(trigger().querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    // Cut on screen only: the span truncates, the text (and so the name) stays whole.
+    expect(trigger().querySelector("span")?.className).toMatch(/\btruncate\b/);
   });
 
   it("opens a named group of radio buttons; choosing applies and keeps it open", async () => {

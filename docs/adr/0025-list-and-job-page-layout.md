@@ -32,20 +32,29 @@ right end go in this order: quiet menus, quiet actions, search, then the one gre
   the link and the job number sits under it; the D143 progress cell and its Next link are unchanged; Show more in the
   card's footer.
 - Orders (and a job's Orders tab, the same component): views All plus every fulfilment status; quiet menus
-  "Delivery: Any" and (Orders page only) "Job: Any"; the reference search submits on Enter; Clear filters while a
-  filter is set; the bulk bar stays. Home's `?status=` and `?delivery=` links still work.
+  "Delivery: Any" and (Orders page only) "Job: Any", whose long job names are cut with an ellipsis on screen only; the
+  reference search submits on Enter; Clear filters while a filter is set, which closes the search and puts focus on
+  the current view; the bulk bar stays. The view and the delivery are both in the address (`?status=`, `?delivery=`)
+  and switching one keeps the other; the job and the search stay in the browser and survive a view switch. Home's
+  links still work.
 - Clients: the menu item and page are "Clients" (key `contacts` and route `/app/contacts/clients` unchanged); the
   disabled Parents and Children tabs are gone; search by name through `GET /clients?q=` (300ms after typing stops,
   from the first page again); New client; a row or its name opens the existing dialog (edit for owners and admins,
   view otherwise), so the Edit buttons are gone.
 - Price lists: New price list; Make default and Delete stay visible on the row as quiet buttons; "Prices before tax"
-  is the card's footer.
+  is the card's footer. The intro line is gone, like the other list pages'.
+
+Rows open their item on a click anywhere except on their own links, buttons and form controls, or at the end of a
+text selection; Ctrl- or Cmd-click opens the row's main link in a new tab. Paged lists drop answers that a newer view,
+filter or search overtook, and run one "Show more" at a time (`lib/load-guard.ts`).
 
 **Job page.** The header and the tabs share one sticky block. Its negative top lets the title row scroll away while
 the 72px tab row stays; once stuck (an IntersectionObserver sentinel) it turns canvas with a hairline and shows a back
 button and the job's name in small type (`aria-hidden`; the h1 stays in the page). No animation with reduced motion.
-`html:has([data-sticky-header])` keeps focused controls 88px clear of it (WCAG 2.4.11), and the floating panel sticks
-at 88px. The shop button (Start selling, Close shop, Reopen shop) is a white pill before the round ⋯; dialogs are
+While stuck, the header's own back link leaves the tab order and the accessibility tree (one back link at a time), and
+focus moving into the header scrolls the page back to it (instantly with reduced motion), so its controls stay
+reachable. One CSS variable, `--sticky-header-height` (72px), sizes the tab row; `html:has([data-sticky-header])` keeps
+focused controls that plus 16px clear of it (WCAG 2.4.11), and the floating panel sticks at the same place. The shop button (Start selling, Close shop, Reopen shop) is a white pill before the round ⋯; dialogs are
 unchanged. The tab row shows only the built sections (Overview, Subjects, Photos, Shop, Orders); Messages and Settings
 keep their routes and open by address. People is labelled Subjects. A section's heading is a visually hidden h2; its
 green subline is gone.
@@ -53,10 +62,11 @@ green subline is gone.
   view (`?show=…&child=<id>`). Quiet menus "Class: All" (each class and No class), "Grade: All" (only when the roster
   has grades) and "Group: None"; quiet Print QR cards; the search; the green "Add subjects" menu (Add child, Import
   roster) for roster editors. The view, class, grade and search combine with AND through core's `applyFilters`. The
-  duplicates notice's "Show them" switches to the duplicates view. The roster's size moved from the tab to the list
-  card's footer ("6 children · 3 classes · no duplicates").
+  duplicates notice's "Show them" switches to the duplicates view. A class or grade that leaves the roster stops
+  filtering. The roster's size moved from the tab to the list card's footer ("6 children · 3 classes · no
+  duplicates"; the duplicates part waits for the job's summary).
 - Photos: views All and Review; a quiet Bin (n) or Back to photos and the green Upload photos; the counts are a muted
-  line above the grid. Review's Mark reviewed is the green action (still disabled with its reason as description).
+  line above the grid (its photo count is hidden from screen readers, which hear it in the section's h2). Review's Mark reviewed is the green action (still disabled with its reason as description).
 - Overview, Shop, Import, Messages and Settings keep their content in the new frame; Shop's "Prices before tax" sits in
   the price list card.
 
@@ -75,8 +85,11 @@ Clients. 8. The removed filters became quiet menus or views; view tabs scroll si
 style changes). 13. `/dev/components` is not updated. 14. "Show more" stays a footer button.
 
 Also: a search box closes when it is left empty (Escape on it puts focus back on the button; tabbing away does not move
-focus); the Orders delivery menu uses short values ("Delivery: Home"); a filtered Jobs view with no jobs says so rather
-than showing the first-job card; Price lists keep their intro line.
+focus), and its button has no `aria-controls` because the box doesn't exist until it opens; the Orders delivery menu
+uses short values ("Delivery: Home"); a filtered Jobs view with no jobs says so rather than showing the first-job card.
+
+**Leak test.** `app/api/v1/clients/route.test.ts` checks that `GET /clients?q=` is scoped by `studio_id` from the
+caller's studio and that `q` is an ilike on the name only.
 
 ## Waiting on API data (defaults used)
 

@@ -643,7 +643,6 @@
     "products": {
       "title": "Price lists",
       "beforeTax": "Prices before tax",
-      "intro": "Each job sells from one price list. New jobs get the default.",
       "loading": "Loading price lists…",
       "default": "Default",
       "columns": {
@@ -1026,9 +1025,9 @@
       "addSubjects": "Add subjects",
       "heading": "{count, plural, one {# child} other {# children}}",
       "footer": "{count, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · {duplicates, plural, =0 {no duplicates} one {# possible duplicate} other {# possible duplicates}}",
+      "footerCounting": "{count, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
       "views": {
-        "label": "Subject views",
-        "all": "All"
+        "label": "Subject views"
       },
       "all": "All",
       "classMenu": "{group, select, class {Class} team {Team} other {Group}}: {value}",
@@ -1549,8 +1548,7 @@
         "deliveryMenu": "Delivery: {value}",
         "deliveryShort": {
           "home": "Home",
-          "school": "School",
-          "none": "Downloads only"
+          "school": "School"
         }
       },
       "loadMore": "Show more orders",

@@ -81,7 +81,6 @@ export default function PriceListsPage() {
         ) : null
       }
     >
-      <p className="m-0 text-muted">{t("intro")}</p>
       <p role="status" aria-live="polite" className="m-0 empty:sr-only">
         {status}
       </p>

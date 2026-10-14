@@ -12,7 +12,8 @@ export interface QuietMenuOption {
 /**
  * A quiet menu in a view bar (D144), e.g. "Delivery: Any ▾": a text button whose visible words are its accessible
  * name (WCAG 2.5.3), opening a group of radio buttons. Choosing keeps it open, so arrow keys move through the choices
- * and each one applies as it is reached; Escape or a click outside closes it.
+ * and each one applies as it is reached; Escape or a click outside closes it. Long words are cut with an ellipsis on
+ * screen only.
  */
 export function QuietMenu({
   label,
@@ -34,7 +35,8 @@ export function QuietMenu({
     <Popover
       trigger={
         <>
-          <span>{label}</span>
+          {/* A long value (a job's name) is cut with an ellipsis; the whole text stays the button's name. */}
+          <span className="max-w-60 truncate">{label}</span>
           <ChevronDown aria-hidden="true" className="text-muted" />
         </>
       }

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   classChoiceFrom,
   classChoiceValue,
+  effectiveClassChoice,
+  effectiveGrade,
   SUBJECT_VIEWS,
   subjectFilters,
   subjectsHref,
@@ -77,5 +79,18 @@ describe("Subjects views (D144)", () => {
 
   it("add no filter for All, every class and every grade", () => {
     expect(subjectFilters({ view: "all", classChoice: { kind: "all" }, grade: "" })).toEqual([]);
+  });
+
+  it("fall back to All when the chosen class or grade is no longer on the roster", () => {
+    const groups = [{ id: "g1" }];
+    expect(effectiveClassChoice({ kind: "group", id: "g1" }, groups)).toEqual({
+      kind: "group",
+      id: "g1",
+    });
+    expect(effectiveClassChoice({ kind: "group", id: "gone" }, groups)).toEqual({ kind: "all" });
+    expect(effectiveClassChoice({ kind: "none" }, groups)).toEqual({ kind: "none" });
+    expect(effectiveGrade("5", ["4", "5"])).toBe("5");
+    expect(effectiveGrade("6", ["4", "5"])).toBe("");
+    expect(effectiveGrade("", [])).toBe("");
   });
 });

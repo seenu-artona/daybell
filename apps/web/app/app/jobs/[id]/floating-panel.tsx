@@ -49,7 +49,7 @@ export function FloatingPanel({
           onClose();
         }
       }}
-      className="pointer-events-auto sticky top-[88px] flex max-h-[calc(100dvh-104px)] w-full flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-lg"
+      className="pointer-events-auto sticky top-[calc(var(--sticky-header-height)+16px)] flex max-h-[calc(100dvh-var(--sticky-header-height)-32px)] w-full flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-lg"
     >
       <div className="flex items-center gap-3">
         {lead}

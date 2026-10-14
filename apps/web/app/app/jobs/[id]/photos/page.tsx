@@ -220,8 +220,13 @@ function PhotosPage() {
           ) : null}
           {photos.failed ? <Banner tone="danger" title={t("loadFailed")} /> : null}
           {title ? (
+            // The count is the section's h2 for screen readers already: here it is shown, not read twice.
             <p className="m-0 text-body text-muted">
-              {[title, subline].filter(Boolean).join(" · ")}
+              <span aria-hidden="true">
+                {title}
+                {subline ? " · " : ""}
+              </span>
+              {subline}
             </p>
           ) : null}
         </>
@@ -246,11 +251,11 @@ function PhotosPage() {
 
       {empty ? (
         bin ? (
-          <p className="m-0 rounded-xl bg-surface px-6 py-10 text-center text-muted">
+          <p className="m-0 rounded-list bg-surface px-6 py-10 text-center text-muted shadow-card">
             {t("binEmpty")}
           </p>
         ) : (
-          <div className="flex flex-col items-center gap-3 rounded-xl bg-surface px-6 py-16 text-center">
+          <div className="flex flex-col items-center gap-3 rounded-list bg-surface px-6 py-16 text-center shadow-card">
             <h2 className="m-0 text-h3">{t("emptyTitle")}</h2>
             <p className="m-0 max-w-120 text-muted">{t("emptyBody")}</p>
             {canEdit ? null : <p className="m-0 text-caption text-muted">{t("emptyReadOnly")}</p>}

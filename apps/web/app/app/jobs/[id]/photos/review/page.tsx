@@ -394,7 +394,7 @@ export default function ReviewPage() {
         {s ? (
           <div className="flex flex-col gap-6">
             {s.photos === 0 ? (
-              <p className="m-0 rounded-xl bg-surface px-6 py-10 text-center text-muted">
+              <p className="m-0 rounded-list bg-surface px-6 py-10 text-center text-muted shadow-card">
                 {t("empty")}
               </p>
             ) : null}

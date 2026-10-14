@@ -25,6 +25,7 @@ import { useTranslations } from "next-intl";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { createLoadGuard } from "@/lib/load-guard";
 import { taskHref } from "../checklist-links";
 import { Dialog } from "../dialog";
 import { ListPage } from "../list-page";
@@ -100,11 +101,16 @@ function JobsPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [guard] = useState(createLoadGuard);
 
   const load = useCallback(
     async (cursor: string | null) => {
+      // An older view's slow answer is dropped; Show more runs once at a time (no duplicate pages).
+      const ticket = cursor ? guard.more() : guard.first();
+      if (!ticket) return;
       // The browser's own day, so Picture day ticks on the person's calendar (ADR 0017).
       const res = await api<JobsResponse>(jobsQuery(view, localDay(new Date()), cursor));
+      if (!ticket.finish()) return;
       if (!res.ok) {
         setError(text.error(res.code));
         return;
@@ -113,7 +119,7 @@ function JobsPage() {
       setJobs((prev) => (cursor && prev ? [...prev, ...res.data.jobs] : res.data.jobs));
       setNextCursor(res.data.nextCursor);
     },
-    [text, view],
+    [text, view, guard],
   );
 
   useEffect(() => {

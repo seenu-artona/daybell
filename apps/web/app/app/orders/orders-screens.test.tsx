@@ -12,9 +12,9 @@ import { StudioContext } from "../me-context";
 // ones kept selected; photographers get no checkboxes. The refund dialog sums what was asked with the database's rule,
 // refuses more than is left, confirms with the amount and sends one request with its id however often it is tapped.
 // Home gives staff the To do list and never the money (Q4).
-const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+const { push, replace } = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), push, refresh: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ replace, push, refresh: vi.fn(), prefetch: vi.fn() }),
   useParams: () => ({}),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/app/orders",
@@ -250,7 +250,7 @@ describe("the orders list", () => {
     api.mockImplementation(async (path: string) =>
       path.startsWith("/jobs") ? ok({ jobs: [] }) : ok({ orders: [], nextCursor: null }),
     );
-    await render(<OrdersList status="printed" initialDelivery="home" />);
+    await render(<OrdersList status="printed" delivery="home" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=home");
     // A quiet menu whose visible words are its name (WCAG 2.5.3), opening radio buttons that apply as they change.
     const trigger = button("Delivery: Home");
@@ -258,10 +258,73 @@ describe("the orders list", () => {
     await act(async () => trigger?.click());
     expect(trigger?.getAttribute("aria-expanded")).toBe("true");
     expect((field("Home") as HTMLInputElement).checked).toBe(true);
+    // The delivery lives in the address (an enum word, D113), and keeps the view.
     await act(async () => (field("School") as HTMLInputElement).click());
-    await wait(20);
+    expect(replace).toHaveBeenCalledWith("/app/orders?status=printed&delivery=school", {
+      scroll: false,
+    });
+    await render(<OrdersList status="printed" delivery="school" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=school");
     expect(button("Delivery: School")?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps the delivery in every view's link, and the job and search across views", async () => {
+    answer();
+    await render(<OrdersList delivery="school" />);
+    const views = container.querySelector('nav[aria-label="Order views"]');
+    const hrefs = [...(views?.querySelectorAll("a") ?? [])].map((a) => a.getAttribute("href"));
+    expect(hrefs[0]).toBe("/app/orders?delivery=school");
+    expect(hrefs[1]).toBe("/app/orders?status=paid&delivery=school");
+    const opener = container.querySelector('button[aria-label="Search orders"]') as HTMLElement;
+    await act(async () => opener.click());
+    const box = container.querySelector('input[type="search"]') as HTMLInputElement;
+    await type(box, "7KQ2");
+    await act(async () => box.form?.requestSubmit());
+    await wait(20);
+    // The page's view changes (a new ?status=): the same list stays, with its search.
+    await render(<OrdersList status="paid" delivery="school" />);
+    expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=paid&delivery=school&q=7KQ2");
+    expect((container.querySelector('input[type="search"]') as HTMLInputElement).value).toBe(
+      "7KQ2",
+    );
+  });
+
+  it("drops an older view's slow answer, and fetches Show more once however often it is tapped", async () => {
+    const resolvers: ((v: unknown) => void)[] = [];
+    api.mockImplementation((path: string) =>
+      path.startsWith("/jobs")
+        ? Promise.resolve(ok({ jobs: [] }))
+        : new Promise((r) => resolvers.push(r)),
+    );
+    await render(<OrdersList status="paid" />);
+    await render(<OrdersList status="printed" />);
+    const [slow, fresh] = resolvers;
+    await act(async () => fresh?.(ok({ orders: [listed(O2, "8ABC2DEF")], nextCursor: "c2" })));
+    await act(async () => slow?.(ok({ orders: [listed(O1, "7KQ2M9XA")], nextCursor: null })));
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(container.querySelector("tbody")?.textContent).toContain("8ABC-2DEF");
+    const before = api.mock.calls.length;
+    await act(async () => {
+      button("Show more orders")?.click();
+      button("Show more orders")?.click();
+    });
+    expect(api.mock.calls.slice(before).map((c) => c[0])).toEqual([
+      "/orders?status=printed&cursor=c2",
+    ]);
+  });
+
+  it("Clear filters clears the address's delivery, closes the search and puts focus on the current view", async () => {
+    answer();
+    await render(<OrdersList status="paid" delivery="home" />);
+    const opener = container.querySelector('button[aria-label="Search orders"]') as HTMLElement;
+    await act(async () => opener.click());
+    await type(container.querySelector('input[type="search"]') as HTMLInputElement, "7KQ2");
+    await act(async () => button("Clear filters")?.click());
+    await wait(10);
+    expect(replace).toHaveBeenCalledWith("/app/orders?status=paid", { scroll: false });
+    expect(container.querySelector('input[type="search"]')).toBeNull();
+    expect(document.activeElement?.getAttribute("aria-current")).toBe("page");
+    expect(document.activeElement?.textContent).toBe(messages.app.orders.statuses.paid);
   });
 
   it("shows the status views as links to ?status=, the current one marked (D144)", async () => {

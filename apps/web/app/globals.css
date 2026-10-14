@@ -27,8 +27,11 @@ html:has([data-shop-header]) {
   scroll-padding-top: 4.5rem;
 }
 
-/* The job page's sticky header and tabs (D144): keep a focused control clear of them when scrolling it into view
-   (WCAG 2.4.11). */
+/* The job page's sticky tab row (D144): its height, used by the row itself (sticky-frame.tsx) and by the floating panel
+   that sticks under it. Keep a focused control clear of it when scrolling it into view (WCAG 2.4.11). */
+:root {
+  --sticky-header-height: 72px;
+}
 html:has([data-sticky-header]) {
-  scroll-padding-top: 88px;
+  scroll-padding-top: calc(var(--sticky-header-height) + 16px);
 }

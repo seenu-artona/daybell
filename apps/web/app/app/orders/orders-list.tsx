@@ -37,6 +37,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { LocalTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { createLoadGuard } from "@/lib/load-guard";
 import { useStudio } from "../me-context";
 import { orderHref } from "../notification-links";
 import { QuietMenu } from "../quiet-menu";
@@ -49,27 +50,30 @@ const CHECKBOX =
   "size-5 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 const VIEWS = ["", ...ORDER_FULFILMENTS] as const;
 
+/** The filters kept in this browser: the job and the reference search (never in the address, D113). */
 interface Filters {
-  delivery: ShopShippingMethod | "";
   jobId: string;
   q: string;
 }
 
-/** The view (?status=) and delivery (?delivery=) in the address, and each view's address (D144). */
+type ViewHref = (status: OrderFulfilment | "", delivery: ShopShippingMethod | "") => string;
+
+/** The view (?status=) and delivery (?delivery=) in the address, and the address for a view and delivery (D144). */
 export function useOrderView() {
   const params = useSearchParams();
   const pathname = usePathname();
   return {
     status: statusFrom(params.get("status")),
     delivery: deliveryFrom(params.get("delivery")),
-    viewHref: (status: OrderFulfilment | "") => orderViewHref(pathname, status),
+    viewHref: ((status, delivery) => orderViewHref(pathname, status, delivery)) as ViewHref,
   };
 }
 
 /**
  * The studio's paid orders (ADR 0024; D25, D144), shared by the Orders page and a job's Orders tab (which passes
- * `jobId`). One view bar: the status views as links (?status=, from the page's address), then quiet menus Delivery and
- * Job (on the Orders page), a reference search (never a name; never in the address, D113) and Clear filters. Then a
+ * `jobId`). One view bar: the status views as links (?status=), then quiet menus Delivery (?delivery=; both stay in the
+ * address as enum words, and switching one keeps the other) and Job (on the Orders page), a reference search (never a
+ * name; never in the address, D113) and Clear filters, which puts focus on the current view. Then a
  * table with a caption in a white list card: reference, date, children (first name and last initial), items, total,
  * the status with its refund and dispute badges (words and icons, never colour alone: D91), delivery; a click on a row
  * opens the order, and its reference stays the link. Viewed as Paid or Printed, fully refunded orders are left out, so
@@ -80,30 +84,31 @@ export function useOrderView() {
 export function OrdersList({
   jobId,
   status = "",
-  initialDelivery = "",
+  delivery = "",
   viewHref,
 }: {
   jobId?: string;
   /** The current view, from the page's address. */
   status?: OrderFulfilment | "";
-  initialDelivery?: ShopShippingMethod | "";
-  /** A view's address; by default this page's path with ?status=. */
-  viewHref?: (status: OrderFulfilment | "") => string;
+  /** The delivery filter, from the page's address. */
+  delivery?: ShopShippingMethod | "";
+  /** The address for a view and delivery; by default this page's path with ?status= and ?delivery=. */
+  viewHref?: ViewHref;
 }) {
   const t = useTranslations("app.orders");
   const text = useApiText();
   const format = useFormatter();
   const router = useRouter();
   const pathname = usePathname();
-  const hrefFor = viewHref ?? ((s: OrderFulfilment | "") => orderViewHref(pathname, s));
+  const hrefFor: ViewHref = viewHref ?? ((s, d) => orderViewHref(pathname, s, d));
   const { me } = useStudio();
   const canMark = canFulfil(me.studio.role);
-  const [filters, setFilters] = useState<Filters>({
-    delivery: initialDelivery,
-    jobId: "",
-    q: "",
-  });
+  const [filters, setFilters] = useState<Filters>({ jobId: "", q: "" });
   const [typed, setTyped] = useState("");
+  // Clearing the filters closes an open search box (a new one is mounted) and puts focus on the current view.
+  const [cleared, setCleared] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const [guard] = useState(createLoadGuard);
   const [orders, setOrders] = useState<StudioOrder[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -120,17 +125,21 @@ export function OrdersList({
       if (jobId) q.set("jobId", jobId);
       else if (filters.jobId) q.set("jobId", filters.jobId);
       if (status) q.set("status", status);
-      if (filters.delivery) q.set("delivery", filters.delivery);
+      if (delivery) q.set("delivery", delivery);
       if (filters.q) q.set("q", filters.q);
       if (after) q.set("cursor", after);
       const s = q.toString();
       return `/orders${s ? `?${s}` : ""}`;
     },
-    [jobId, status, filters],
+    [jobId, status, delivery, filters],
   );
   const load = useCallback(
     async (after: string | null) => {
+      // Answers that a newer view, filter or search overtook are dropped; Show more runs once at a time.
+      const ticket = after ? guard.more() : guard.first();
+      if (!ticket) return;
       const res = await api<OrdersResponse>(query(after));
+      if (!ticket.finish()) return;
       if (!res.ok) {
         setProblem(text.field(res.fields.q) ?? text.error(res.code));
         if (!after) setOrders([]);
@@ -140,7 +149,7 @@ export function OrdersList({
       setOrders((prev) => (after && prev ? [...prev, ...res.data.orders] : res.data.orders));
       setCursor(res.data.nextCursor);
     },
-    [query, text],
+    [query, text, guard],
   );
 
   useEffect(() => {
@@ -190,17 +199,29 @@ export function OrdersList({
   const shown = orders ?? [];
   const allSelected = shown.length > 0 && shown.every((o) => selected.has(o.id));
 
-  const filtered = Boolean(filters.delivery || filters.jobId || filters.q);
+  const filtered = Boolean(delivery || filters.jobId || filters.q);
+
+  function clearFilters() {
+    setTyped("");
+    setFilters({ jobId: "", q: "" });
+    setCleared((n) => n + 1);
+    if (delivery) router.replace(hrefFor(status, ""), { scroll: false });
+    // The button goes away: focus moves to the current view, not to the page (WCAG 2.4.3).
+    setTimeout(
+      () => root.current?.querySelector<HTMLElement>('nav a[aria-current="page"]')?.focus(),
+      0,
+    );
+  }
   const jobName = jobs.find((j) => j.id === filters.jobId)?.name;
 
   return (
-    <div className="flex flex-col gap-4" aria-busy={working || undefined}>
+    <div ref={root} className="flex flex-col gap-4" aria-busy={working || undefined}>
       <ViewBar
         tabs={
           <ViewTabs label={t("views.label")}>
             {VIEWS.map((view) => (
               <ViewTab key={view || "all"} asChild current={status === view}>
-                <Link href={hrefFor(view)} scroll={false}>
+                <Link href={hrefFor(view, delivery)} scroll={false}>
                   {view ? t(`statuses.${view}`) : t("views.all")}
                 </Link>
               </ViewTab>
@@ -211,13 +232,11 @@ export function OrdersList({
           <>
             <QuietMenu
               label={t("filters.deliveryMenu", {
-                value: filters.delivery
-                  ? t(`filters.deliveryShort.${filters.delivery}`)
-                  : t("filters.any"),
+                value: delivery ? t(`filters.deliveryShort.${delivery}`) : t("filters.any"),
               })}
               legend={t("filters.delivery")}
-              value={filters.delivery}
-              onChange={(v) => setFilters((f) => ({ ...f, delivery: v as Filters["delivery"] }))}
+              value={delivery}
+              onChange={(v) => router.replace(hrefFor(status, deliveryFrom(v)), { scroll: false })}
               options={[
                 { value: "", label: t("filters.any") },
                 ...SHOP_SHIPPING_METHODS.map((m) => ({
@@ -239,6 +258,7 @@ export function OrdersList({
               />
             )}
             <SearchToggle
+              key={cleared}
               label={t("filters.searchLabel")}
               description={t("filters.referenceHelp")}
               maxLength={12}
@@ -251,14 +271,7 @@ export function OrdersList({
               onSubmit={(v) => setFilters((f) => ({ ...f, q: v.trim() }))}
             />
             {filtered ? (
-              <Button
-                variant="quiet"
-                shape="pill"
-                onClick={() => {
-                  setTyped("");
-                  setFilters({ delivery: "", jobId: "", q: "" });
-                }}
-              >
+              <Button variant="quiet" shape="pill" onClick={clearFilters}>
                 {t("filters.clear")}
               </Button>
             ) : null}

@@ -21,7 +21,18 @@ export function deliveryFrom(value: string | null): ShopShippingMethod | "" {
     : "";
 }
 
-/** A view's address: the page's path with ?status=, or the bare path for All. */
-export function orderViewHref(pathname: string, status: OrderFulfilment | ""): string {
-  return status ? `${pathname}?status=${status}` : pathname;
+/**
+ * A view's address: the page's path with ?status= and ?delivery= (enum words only, D113), or the bare path for All with
+ * any delivery. Switching views keeps the delivery; the Delivery menu keeps the view.
+ */
+export function orderViewHref(
+  pathname: string,
+  status: OrderFulfilment | "",
+  delivery: ShopShippingMethod | "" = "",
+): string {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (delivery) params.set("delivery", delivery);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }

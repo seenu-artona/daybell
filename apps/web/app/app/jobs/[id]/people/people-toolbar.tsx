@@ -27,7 +27,7 @@ export function SubjectsViews({ base, view }: { base: string; view: SubjectView 
       {SUBJECT_VIEWS.map((v) => (
         <ViewTab key={v} asChild current={v === view}>
           <Link href={subjectsHref(base, v)} scroll={false}>
-            {v === "all" ? t("views.all") : t(`flags.${v}`)}
+            {v === "all" ? t("all") : t(`flags.${v}`)}
           </Link>
         </ViewTab>
       ))}

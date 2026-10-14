@@ -43,7 +43,7 @@ type Open = "edit" | "sell" | "closeShop" | "closingDate" | null;
  * Going live bursts confetti (D75; none with reduced motion) and is announced in words. Photographers and staff see the
  * state only.
  */
-export function JobHeader() {
+export function JobHeader({ stuck = false }: { stuck?: boolean }) {
   const t = useTranslations("app.job");
   const tj = useTranslations("app.jobs");
   const text = useApiText();
@@ -235,7 +235,12 @@ export function JobHeader() {
         headingRef={heading}
         back={
           <IconButton asChild label={tj("detail.back")}>
-            <Link href="/app/jobs">
+            {/* While the tab row is stuck it has its own back link; this one, above the window, steps aside. */}
+            <Link
+              href="/app/jobs"
+              aria-hidden={stuck || undefined}
+              tabIndex={stuck ? -1 : undefined}
+            >
               <ArrowLeft aria-hidden="true" />
             </Link>
           </IconButton>

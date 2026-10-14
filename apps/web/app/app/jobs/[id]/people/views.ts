@@ -59,3 +59,18 @@ export function subjectFilters({
   if (grade) filters.push({ kind: "grade", value: grade });
   return filters;
 }
+
+/** The class choice that applies: a class that is no longer on the roster (renamed away, removed) falls back to All. */
+export function effectiveClassChoice(
+  choice: ClassChoice,
+  groups: readonly { id: string }[],
+): ClassChoice {
+  return choice.kind === "group" && !groups.some((g) => g.id === choice.id)
+    ? { kind: "all" }
+    : choice;
+}
+
+/** The grade that applies: one no child has any more falls back to every grade (""). */
+export function effectiveGrade(grade: string, grades: readonly string[]): string {
+  return grade && !grades.includes(grade) ? "" : grade;
+}

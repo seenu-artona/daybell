@@ -9,26 +9,19 @@ import type {
   QrCardStatusResponse,
 } from "@daybell/api";
 import { canEditRoster } from "@daybell/core";
-import { Banner, IconButton } from "@daybell/ui";
+import { Banner } from "@daybell/ui";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { useStudio } from "../../me-context";
 import { JobContext, type JobContextValue, type JobSummary } from "./job-context";
 import { JobHeader } from "./job-header";
 import { JobTabs } from "./job-tabs";
+import { StickyFrame } from "./sticky-frame";
 
 /**
  * Every job section's frame (D137, D144): the title row and the pill tabs on the grey canvas, then the section.
@@ -101,7 +94,7 @@ export function JobShell({ children }: { children: ReactNode }) {
 
   if (!value) {
     return (
-      <div className="flex flex-col gap-4 px-12 pt-10">
+      <div className="flex flex-col gap-4 px-10 pt-8">
         <Link
           href="/app/jobs"
           className="inline-flex min-h-11 items-center gap-2 self-start font-semibold text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
@@ -121,81 +114,15 @@ export function JobShell({ children }: { children: ReactNode }) {
   return (
     <JobContext.Provider value={value}>
       <div className="flex min-h-dvh flex-col px-10 pt-8 pb-12">
-        <StickyFrame name={value.job.name} />
+        <StickyFrame
+          name={value.job.name}
+          backHref="/app/jobs"
+          backLabel={tj("back")}
+          header={(stuck) => <JobHeader stuck={stuck} />}
+          tabs={<JobTabs />}
+        />
         <div className="mt-2 flex flex-col">{children}</div>
       </div>
     </JobContext.Provider>
-  );
-}
-
-/**
- * The header and the tabs in one sticky block (D144). Its negative top lets the title row scroll away while the tab row
- * stays. Once the tab row reaches the top it is "stuck": a canvas bar with a hairline under it, a back button and the
- * job's name in small type (hidden from screen readers; the h1 is still on the page), and the same tab navigation.
- * The tab row is always 72px, so nothing below moves when it sticks. The page keeps focused controls clear of it
- * (globals.css, WCAG 2.4.11).
- */
-function StickyFrame({ name }: { name: string }) {
-  const tj = useTranslations("app.jobs.detail");
-  const sentinel = useRef<HTMLDivElement>(null);
-  const row = useRef<HTMLDivElement>(null);
-  const [offset, setOffset] = useState(0);
-  const [stuck, setStuck] = useState(false);
-
-  // How far the tab row sits below the block's top: the title row's height, which changes with its text.
-  useLayoutEffect(() => {
-    const el = row.current;
-    if (!el) return;
-    const measure = () => setOffset(el.offsetTop);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    if (el.parentElement) observer.observe(el.parentElement);
-    return () => observer.disconnect();
-  }, []);
-
-  // The sentinel sits just above the block: once it has scrolled further above the window than the title row is tall,
-  // the tab row is at the top of the window. The root reaches that far above the window (rootMargin).
-  useEffect(() => {
-    const el = sentinel.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      ([entry]) =>
-        setStuck(entry ? !entry.isIntersecting && entry.boundingClientRect.top < 0 : false),
-      { rootMargin: `${offset}px 0px 0px 0px`, threshold: 0 },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [offset]);
-
-  return (
-    <>
-      <div ref={sentinel} aria-hidden="true" className="h-px -mb-px" />
-      <div
-        data-sticky-header=""
-        data-stuck={stuck ? "" : undefined}
-        style={{ top: -offset }}
-        className={`sticky z-30 -mx-10 px-10 motion-safe:transition-colors motion-safe:duration-[var(--duration-base)] ${
-          stuck ? "border-b border-line-canvas bg-canvas" : "border-b border-transparent"
-        }`}
-      >
-        <JobHeader />
-        <div ref={row} className="flex h-18 items-center gap-4">
-          {stuck ? (
-            <>
-              <IconButton asChild label={tj("back")}>
-                <Link href="/app/jobs">
-                  <ArrowLeft aria-hidden="true" />
-                </Link>
-              </IconButton>
-              <p aria-hidden="true" className="m-0 max-w-80 truncate text-h3 font-bold">
-                {name}
-              </p>
-            </>
-          ) : null}
-          <JobTabs />
-        </div>
-      </div>
-    </>
   );
 }

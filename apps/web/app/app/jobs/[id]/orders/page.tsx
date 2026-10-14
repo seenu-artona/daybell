@@ -13,13 +13,7 @@ function JobOrders() {
   const { status, delivery, viewHref } = useOrderView();
   return (
     <JobSection title={tt("orders")}>
-      <OrdersList
-        key={delivery}
-        jobId={job.id}
-        status={status}
-        initialDelivery={delivery}
-        viewHref={viewHref}
-      />
+      <OrdersList jobId={job.id} status={status} delivery={delivery} viewHref={viewHref} />
     </JobSection>
   );
 }

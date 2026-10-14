@@ -28,7 +28,14 @@ import { PeopleList, rowLinkId } from "./people-list";
 import { type GroupBy, SubjectsTools, SubjectsViews } from "./people-toolbar";
 import { PrintQrCardsDialog } from "./print-qr-cards-dialog";
 import { useRoster } from "./use-roster";
-import { type ClassChoice, subjectFilters, subjectsHref, subjectView } from "./views";
+import {
+  type ClassChoice,
+  effectiveClassChoice,
+  effectiveGrade,
+  subjectFilters,
+  subjectsHref,
+  subjectView,
+} from "./views";
 
 export default function PeoplePageRoute() {
   // useSearchParams (the selected child) needs a Suspense boundary.
@@ -57,8 +64,8 @@ function PeoplePage() {
   const base = tabHref(job.id, "people");
   const roster = useRoster(job.id);
   const [query, setQuery] = useState("");
-  const [classChoice, setClassChoice] = useState<ClassChoice>({ kind: "all" });
-  const [grade, setGrade] = useState("");
+  const [chosenClass, setClassChoice] = useState<ClassChoice>({ kind: "all" });
+  const [chosenGrade, setGrade] = useState("");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [status, setStatus] = useState("");
@@ -97,6 +104,13 @@ function PeoplePage() {
       router.replace(here, { scroll: false });
   }, [selectedId, selected, roster.rows, roster.loadingMore, router, here]);
 
+  const grades = useMemo(() => gradeOptions(roster.rows ?? []), [roster.rows]);
+  // A class or grade that left the roster (renamed, removed, last child gone) stops filtering: back to All.
+  const classChoice = useMemo(
+    () => effectiveClassChoice(chosenClass, roster.groups),
+    [chosenClass, roster.groups],
+  );
+  const grade = useMemo(() => effectiveGrade(chosenGrade, grades), [chosenGrade, grades]);
   const filters = useMemo(
     () => subjectFilters({ view, classChoice, grade }),
     [view, classChoice, grade],
@@ -110,7 +124,6 @@ function PeoplePage() {
     () => groupPeople(visible, roster.groups, groupBy, { includeEmptyGroups: !searching }),
     [visible, roster.groups, groupBy, searching],
   );
-  const grades = useMemo(() => gradeOptions(roster.rows ?? []), [roster.rows]);
 
   /** One child's card, from the panel (Seenu, answer 4): the same card on every print. */
   async function printCard(child: Child) {
@@ -160,12 +173,10 @@ function PeoplePage() {
   const empty = roster.rows !== null && roster.total === 0;
   const hasRows = roster.rows !== null && !empty;
   const duplicates = summary?.duplicates ?? 0;
-  const footer = t("footer", {
-    count: roster.total,
-    groups: roster.groups.length,
-    group: word,
-    duplicates,
-  });
+  // Until the job's summary has loaded, the duplicates are unknown: the footer leaves them out rather than say "none".
+  const footer = summary
+    ? t("footer", { count: roster.total, groups: roster.groups.length, group: word, duplicates })
+    : t("footerCounting", { count: roster.total, groups: roster.groups.length, group: word });
 
   return (
     <JobSection

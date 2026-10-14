@@ -15,4 +15,12 @@ describe("the Orders view in the address (D144, D113)", () => {
     expect(orderViewHref("/app/orders", "printed")).toBe("/app/orders?status=printed");
     expect(orderViewHref("/app/jobs/j1/orders", "paid")).toBe("/app/jobs/j1/orders?status=paid");
   });
+
+  it("keeps the delivery in the address both ways: with a view, and with All", () => {
+    expect(orderViewHref("/app/orders", "printed", "home")).toBe(
+      "/app/orders?status=printed&delivery=home",
+    );
+    expect(orderViewHref("/app/orders", "", "school")).toBe("/app/orders?delivery=school");
+    expect(orderViewHref("/app/orders", "paid", "")).toBe("/app/orders?status=paid");
+  });
 });

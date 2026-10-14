@@ -10,8 +10,9 @@ function OrdersPage() {
   const { status, delivery, viewHref } = useOrderView();
   return (
     <ListPage title={t("title")}>
-      {/* A new delivery from the address (Home's To do links) starts the filters again; a new view keeps them. */}
-      <OrdersList key={delivery} status={status} initialDelivery={delivery} viewHref={viewHref} />
+      {/* The view and delivery live in the address (Home's To do links set them); switching either keeps the job filter
+      and the search, which stay in this browser. */}
+      <OrdersList status={status} delivery={delivery} viewHref={viewHref} />
     </ListPage>
   );
 }
