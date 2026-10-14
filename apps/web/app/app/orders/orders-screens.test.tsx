@@ -158,6 +158,11 @@ async function type(el: HTMLInputElement | HTMLSelectElement, value: string) {
     );
   });
 }
+/** The filter icon: named "Filter", or "Filter (n on)". */
+const filterButton = () =>
+  [...container.querySelectorAll("button")].find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Filter"),
+  );
 const status = () => container.querySelector('[role="status"][aria-live="polite"]')?.textContent;
 
 beforeEach(() => {
@@ -252,8 +257,10 @@ describe("the orders list", () => {
     );
     await render(<OrdersList status="printed" delivery="home" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=home");
-    // A quiet menu whose visible words are its name (WCAG 2.5.3), opening radio buttons that apply as they change.
-    const trigger = button("Delivery: Home");
+    // The filter icon says a filter is on in its name (D144, amended Oct 14), and opens radio buttons that apply as
+    // they change.
+    const trigger = filterButton();
+    expect(trigger?.getAttribute("aria-label")).toBe("Filter (1 on)");
     expect(trigger?.getAttribute("aria-expanded")).toBe("false");
     await act(async () => trigger?.click());
     expect(trigger?.getAttribute("aria-expanded")).toBe("true");
@@ -265,7 +272,8 @@ describe("the orders list", () => {
     });
     await render(<OrdersList status="printed" delivery="school" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=school");
-    expect(button("Delivery: School")?.getAttribute("aria-expanded")).toBe("true");
+    expect(filterButton()?.getAttribute("aria-expanded")).toBe("true");
+    expect((field("School") as HTMLInputElement).checked).toBe(true);
   });
 
   it("keeps the delivery in every view's link, and the job and search across views", async () => {
@@ -313,18 +321,36 @@ describe("the orders list", () => {
     ]);
   });
 
-  it("Clear filters clears the address's delivery, closes the search and puts focus on the current view", async () => {
+  it("Clear filters, in the filter panel, clears the address's delivery and puts focus back on the filter icon", async () => {
     answer();
     await render(<OrdersList status="paid" delivery="home" />);
-    const opener = container.querySelector('button[aria-label="Search orders"]') as HTMLElement;
-    await act(async () => opener.click());
-    await type(container.querySelector('input[type="search"]') as HTMLInputElement, "7KQ2");
+    expect(button("Clear filters")).toBeUndefined();
+    await act(async () => filterButton()?.click());
     await act(async () => button("Clear filters")?.click());
     await wait(10);
     expect(replace).toHaveBeenCalledWith("/app/orders?status=paid", { scroll: false });
-    expect(container.querySelector('input[type="search"]')).toBeNull();
-    expect(document.activeElement?.getAttribute("aria-current")).toBe("page");
-    expect(document.activeElement?.textContent).toBe(messages.app.orders.statuses.paid);
+    expect(filterButton()?.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(filterButton());
+  });
+
+  it("puts the filter icon, then the search, at the right end; a job's tab has no Job filter (D144, amended Oct 14)", async () => {
+    answer();
+    await render(<OrdersList />);
+    const named = [...container.querySelectorAll("button[aria-label]")].map((b) =>
+      b.getAttribute("aria-label"),
+    );
+    expect(named.slice(0, 2)).toEqual(["Filter", "Search orders"]);
+    await act(async () => filterButton()?.click());
+    expect([...container.querySelectorAll("fieldset legend")].map((l) => l.textContent)).toEqual([
+      "Delivery",
+      "Job",
+    ]);
+    // The same list re-rendered for a job's tab: the panel is still open.
+    await render(<OrdersList jobId={O1} level="sub" />);
+    expect(filterButton()?.getAttribute("aria-expanded")).toBe("true");
+    expect([...container.querySelectorAll("fieldset legend")].map((l) => l.textContent)).toEqual([
+      "Delivery",
+    ]);
   });
 
   it("shows the status views as links to ?status=, the current one marked (D144)", async () => {
@@ -367,7 +393,6 @@ describe("the orders list", () => {
     await act(async () => box.form?.requestSubmit());
     await wait(20);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?q=7KQ2");
-    expect(button("Clear filters")).toBeDefined();
   });
 
   it("gives photographers no checkboxes", async () => {

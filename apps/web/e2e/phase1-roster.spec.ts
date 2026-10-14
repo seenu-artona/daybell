@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { signUpOwner } from "./helpers";
+import { filterButton, setFilter, signUpOwner } from "./helpers";
 
 // Phase 1 step 2 "Roster" (D23; ADR 0011), in the job's People section since step 2b (D137, D138; ADR 0013),
 // restyled in step 2c (D140; ADR 0014) and relabelled Subjects with one view bar (D144; ADR 0025): an owner adds a
@@ -226,24 +226,33 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
     main.getByText("Roster imported: 5 added, 0 updated.", { exact: true }),
   ).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
-  // The name link is a 44px target (D91) in a 60px row; the quiet menus are 44px tall, the search button 44px round.
+  // The name link is a 44px target (D91) in a 60px row; the filter and search buttons are 44px round.
   const target = await main.getByRole("link", { name: "Olivia Brown", exact: true }).boundingBox();
   expect(target?.height).toBeGreaterThanOrEqual(44);
   expect(target?.width).toBeGreaterThanOrEqual(44);
   const rowBox = await row("Olivia Brown").boundingBox();
   expect(Math.round(rowBox?.height ?? 0)).toBeGreaterThanOrEqual(60);
   expect(rowBox?.height ?? 0).toBeLessThan(62);
-  for (const name of ["Class: All", "Grade: All", "Group: None"]) {
-    const box = await main.getByRole("button", { name, exact: true }).boundingBox();
-    expect(box?.height).toBe(44);
-  }
+  await expect(filterButton(page)).toHaveAccessibleName("Filter");
+  const filterBox = await filterButton(page).boundingBox();
+  expect(filterBox?.width).toBe(44);
+  expect(filterBox?.height).toBe(44);
+  // The right end, in order (D144, amended Oct 14): filter, search, Print QR cards, then the green Add subjects.
+  const tools = [
+    filterButton(page),
+    main.getByRole("button", { name: "Search children" }),
+    main.getByRole("button", { name: "Print QR cards", exact: true }),
+    main.getByRole("button", { name: "Add subjects", exact: true }),
+  ];
+  const lefts = await Promise.all(tools.map(async (tool) => (await tool.boundingBox())?.x ?? 0));
+  expect([...lefts].sort((a, b) => a - b)).toEqual(lefts);
   const searchBox = await main.getByRole("button", { name: "Search children" }).boundingBox();
   expect(searchBox?.width).toBe(44);
   expect(searchBox?.height).toBe(44);
   await expect(classOf("Sophia Wilson")).toHaveText("Room 5");
   expect(jobLoads).toBeLessThanOrEqual(2);
 
-  // 6. Search, views and quiet menus (combined with AND) and grouping. The search, class and grade stay in the
+  // 6. Search, views and filters (combined with AND) and grouping. The search, class and grade stay in the
   // browser; the view is in the address as an enum word (?show=, D113).
   await main.getByRole("button", { name: "Search children" }).click();
   const search = main.getByRole("searchbox", { name: "Search children" });
@@ -273,14 +282,10 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await views.getByRole("link", { name: "All", exact: true }).click();
   await expect(page).toHaveURL(people);
 
-  await main.getByRole("button", { name: "Class: All", exact: true }).click();
-  await main.getByLabel("Room 5", { exact: true }).check();
-  await page.keyboard.press("Escape");
-  await main.getByRole("button", { name: "Grade: All", exact: true }).click();
-  await main.getByLabel("5", { exact: true }).check();
-  await page.keyboard.press("Escape");
-  await expect(main.getByRole("button", { name: "Class: Room 5", exact: true })).toBeVisible();
-  await expect(main.getByRole("button", { name: "Grade: 5", exact: true })).toBeVisible();
+  await setFilter(page, "Class", "Room 5");
+  await setFilter(page, "Grade", "5");
+  // The icon says so in words (and a dot), never colour alone (D91).
+  await expect(filterButton(page)).toHaveAccessibleName("Filter (2 on)");
   // Nobody in Room 5 is opted out: AND gives no rows.
   await views.getByRole("link", { name: "Do not photograph", exact: true }).click();
   await expect(main.getByText("No children match.", { exact: true })).toBeVisible();
@@ -288,35 +293,27 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
   // "No class" replaces the class.
-  await main.getByRole("button", { name: "Class: Room 5", exact: true }).click();
-  await main.getByLabel("No class", { exact: true }).check();
-  await page.keyboard.press("Escape");
+  await setFilter(page, "Class", "No class");
   await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
-  await main.getByRole("button", { name: "Class: No class", exact: true }).click();
-  await main.getByLabel("All", { exact: true }).check();
-  await page.keyboard.press("Escape");
-  await main.getByRole("button", { name: "Grade: 5", exact: true }).click();
-  await main.getByLabel("All", { exact: true }).check();
-  await page.keyboard.press("Escape");
+  // Clear filters, inside the panel, sets them all back and puts focus on the icon.
+  await filterButton(page).click();
+  await main.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(filterButton(page)).toHaveAccessibleName("Filter");
+  await expect(filterButton(page)).toBeFocused();
+  await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
 
-  // The list is flat by default (no class headings); Group: Class brings the headings back, and they collapse.
+  // The list is flat by default (no class headings); Group by: Class brings the headings back, and they collapse.
   await expect(heading("4C")).toHaveCount(0);
-  await main.getByRole("button", { name: "Group: None" }).click();
-  await main.getByLabel("Class", { exact: true }).check();
-  await page.keyboard.press("Escape");
+  await setFilter(page, "Group by", "Class");
   await expect(heading("4C")).toHaveAttribute("aria-expanded", "true");
   await heading("4C").click();
   await expect(heading("4C")).toHaveAttribute("aria-expanded", "false");
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
   await heading("4C").click();
   // And back to one flat list.
-  await main.getByRole("button", { name: "Group: Class" }).click();
-  await main.getByLabel("None", { exact: true }).check();
-  await page.keyboard.press("Escape");
+  await setFilter(page, "Group by", "None");
   await expect(heading("4C")).toHaveCount(0);
-  await main.getByRole("button", { name: "Group: None" }).click();
-  await main.getByLabel("Class", { exact: true }).check();
-  await page.keyboard.press("Escape");
+  await setFilter(page, "Group by", "Class");
 
   // 7. Rename a class from its heading.
   await main.getByRole("button", { name: "Rename class 4C" }).click();

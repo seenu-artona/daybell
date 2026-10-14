@@ -10,7 +10,7 @@ export interface ViewBarProps extends HTMLAttributes<HTMLDivElement> {
   variant?: "main" | "sub";
   /** The left side: MainTabs on a "main" bar, ViewTabs on a "sub" bar. */
   tabs?: ReactNode;
-  /** The right end, in D144 order: quiet menus, quiet actions, search, then the one green action. */
+  /** The right end, in D144 order (amended Oct 14): the filter icon, search, quiet actions, then the one green action. */
   actions?: ReactNode;
 }
 

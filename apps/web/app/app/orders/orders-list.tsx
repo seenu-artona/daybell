@@ -40,9 +40,9 @@ import { LocalTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { createLoadGuard } from "@/lib/load-guard";
+import { FilterMenu } from "../filter-menu";
 import { useStudio } from "../me-context";
 import { orderHref } from "../notification-links";
-import { QuietMenu } from "../quiet-menu";
 import { OrderBadges, orderMoney } from "./order-badges";
 import { deliveryFrom, orderViewHref, statusFrom } from "./order-view";
 
@@ -73,10 +73,10 @@ export function useOrderView() {
 
 /**
  * The studio's paid orders (ADR 0024; D25, D144), shared by the Orders page and a job's Orders tab (which passes
- * `jobId`). One view bar: the status views as links (?status=), then quiet menus Delivery (?delivery=; both stay in the
- * address as enum words, and switching one keeps the other) and Job (on the Orders page), a reference search (never a
- * name; never in the address, D113) and Clear filters, which puts focus on the current view. Then a
- * table with a caption in a white list card: reference, date, children (first name and last initial), items, total,
+ * `jobId`). One view bar: the status views as links (?status=; pills on the Orders page, dashes under a job's tabs),
+ * then the filter icon, whose panel holds Delivery (?delivery=; both stay in the address as enum words, and switching
+ * one keeps the other), Job (on the Orders page) and Clear filters, and a reference search (never a name; never in the
+ * address, D113). D144, amended Oct 14. Then a table with a caption in a white list card: reference, date, children (first name and last initial), items, total,
  * the status with its refund and dispute badges (words and icons, never colour alone: D91), delivery; a click on a row
  * opens the order, and its reference stays the link. Viewed as Paid or Printed, fully refunded orders are left out, so
  * Home's To do links list what they count (code review N3). Show more by cursor. Owners, admins and staff select orders
@@ -113,9 +113,6 @@ export function OrdersList({
   const canMark = canFulfil(me.studio.role);
   const [filters, setFilters] = useState<Filters>({ jobId: "", q: "" });
   const [typed, setTyped] = useState("");
-  // Clearing the filters closes an open search box (a new one is mounted) and puts focus on the current view.
-  const [cleared, setCleared] = useState(0);
-  const root = useRef<HTMLDivElement>(null);
   const [guard] = useState(createLoadGuard);
   const [orders, setOrders] = useState<StudioOrder[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -209,22 +206,15 @@ export function OrdersList({
 
   const filtered = Boolean(delivery || filters.jobId || filters.q);
 
+  /** The filter panel's Clear filters: the delivery (in the address) and the job. The search keeps its own box. */
   function clearFilters() {
-    setTyped("");
-    setFilters({ jobId: "", q: "" });
-    setCleared((n) => n + 1);
+    setFilters((f) => ({ ...f, jobId: "" }));
     if (delivery) router.replace(hrefFor(status, ""), { scroll: false });
-    // The button goes away: focus moves to the current view, not to the page (WCAG 2.4.3).
-    setTimeout(
-      () => root.current?.querySelector<HTMLElement>('nav a[aria-current="page"]')?.focus(),
-      0,
-    );
   }
-  const jobName = jobs.find((j) => j.id === filters.jobId)?.name;
   const [Tabs, Tab] = level === "main" ? [MainTabs, MainTab] : [ViewTabs, ViewTab];
 
   return (
-    <div ref={root} className="flex flex-col gap-4" aria-busy={working || undefined}>
+    <div className="flex flex-col gap-4" aria-busy={working || undefined}>
       <ViewBar
         variant={level}
         tabs={
@@ -240,35 +230,41 @@ export function OrdersList({
         }
         actions={
           <>
-            <QuietMenu
-              label={t("filters.deliveryMenu", {
-                value: delivery ? t(`filters.deliveryShort.${delivery}`) : t("filters.any"),
-              })}
-              legend={t("filters.delivery")}
-              value={delivery}
-              onChange={(v) => router.replace(hrefFor(status, deliveryFrom(v)), { scroll: false })}
-              options={[
-                { value: "", label: t("filters.any") },
-                ...SHOP_SHIPPING_METHODS.map((m) => ({
-                  value: m,
-                  label: t(`filters.deliveryShort.${m}`),
-                })),
+            <FilterMenu
+              onClear={clearFilters}
+              groups={[
+                {
+                  key: "delivery",
+                  legend: t("filters.delivery"),
+                  value: delivery,
+                  onChange: (v) =>
+                    router.replace(hrefFor(status, deliveryFrom(v)), { scroll: false }),
+                  options: [
+                    { value: "", label: t("filters.any") },
+                    ...SHOP_SHIPPING_METHODS.map((m) => ({
+                      value: m,
+                      label: t(`filters.deliveryShort.${m}`),
+                    })),
+                  ],
+                },
+                // The job filter is the Orders page's only: a job's Orders tab is that job's already.
+                ...(jobId
+                  ? []
+                  : [
+                      {
+                        key: "job",
+                        legend: t("filters.job"),
+                        value: filters.jobId,
+                        onChange: (v: string) => setFilters((f) => ({ ...f, jobId: v })),
+                        options: [
+                          { value: "", label: t("filters.any") },
+                          ...jobs.map((j) => ({ value: j.id, label: j.name })),
+                        ],
+                      },
+                    ]),
               ]}
             />
-            {jobId ? null : (
-              <QuietMenu
-                label={t("filters.jobMenu", { value: jobName ?? t("filters.any") })}
-                legend={t("filters.job")}
-                value={filters.jobId}
-                onChange={(v) => setFilters((f) => ({ ...f, jobId: v }))}
-                options={[
-                  { value: "", label: t("filters.any") },
-                  ...jobs.map((j) => ({ value: j.id, label: j.name })),
-                ]}
-              />
-            )}
             <SearchToggle
-              key={cleared}
               label={t("filters.searchLabel")}
               description={t("filters.referenceHelp")}
               maxLength={12}
@@ -280,11 +276,6 @@ export function OrdersList({
               }}
               onSubmit={(v) => setFilters((f) => ({ ...f, q: v.trim() }))}
             />
-            {filtered ? (
-              <Button variant="quiet" shape="pill" onClick={clearFilters}>
-                {t("filters.clear")}
-              </Button>
-            ) : null}
           </>
         }
       />
