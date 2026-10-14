@@ -208,10 +208,15 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(page.getByRole("dialog", { name: "Create job" })).toBeVisible();
   await page.keyboard.press("Escape");
 
-  // The activity log names jobs and clients by looking them up, never from the event (D96).
-  await page.goto("/app");
-  await expect(main.getByText(`${owner} created the job ${job} (edited)`)).toBeVisible();
-  await expect(main.getByText(`${owner} added the client ${client}`)).toBeVisible();
+  // The activity log names jobs and clients by looking them up, never from the event (D96). Home has no feed (D146):
+  // the job's own timeline is on its page, and the studio's log is in the API.
+  const { activity } = await (await page.request.get("/api/v1/studio/activity")).json();
+  const line = (type: string) =>
+    activity.find(
+      (a: { type: string; actorEmail: string }) => a.type === type && a.actorEmail === owner,
+    );
+  expect(line("job.created")?.subjectName).toBe(`${job} (edited)`);
+  expect(line("client.created")?.subjectName).toBe(client);
 
   // The API refuses changing a job's status directly, Quebec clients, and duplicate job numbers.
   const jobs = await (await page.request.get("/api/v1/jobs")).json();

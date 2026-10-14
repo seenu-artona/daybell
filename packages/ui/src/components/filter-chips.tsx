@@ -72,7 +72,8 @@ export function FilterChip({
       <Comp
         aria-current={selected ? "true" : undefined}
         className={cn(
-          "flex h-full items-center gap-1.5 rounded-full whitespace-nowrap no-underline",
+          // h-11 with -my over the pill's 1.5px border: the target is the full 44px, not the 41px inside it (D91).
+          "-my-[1.5px] flex h-11 items-center gap-1.5 rounded-full whitespace-nowrap no-underline",
           remove ? "pr-1 pl-4" : "px-4",
           TARGET,
         )}
@@ -87,7 +88,7 @@ export function FilterChip({
           aria-label={remove.label}
           onClick={remove.onRemove}
           className={cn(
-            "-mr-px grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-ink",
+            "-my-[1.5px] -mr-px grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-ink",
             TARGET,
           )}
         >

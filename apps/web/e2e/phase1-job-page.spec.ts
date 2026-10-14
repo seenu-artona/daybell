@@ -217,14 +217,22 @@ test("job page layout, menu search and studio separation", async ({
     tabActions.getByRole("button", { name: "Print QR cards", exact: true }),
   ).toBeVisible();
   await expect(tabActions.getByRole("button", { name: "Add subjects", exact: true })).toBeVisible();
+  // With one child the page is barely taller than the window, so it gets room to scroll past the header first.
   await page.setViewportSize({ width: 1280, height: 420 });
-  await page.mouse.wheel(0, 600);
+  await page.evaluate(() => {
+    document.body.style.paddingBottom = "1200px";
+    window.scrollTo(0, 600);
+  });
   await expect(tabRow).toHaveAttribute("data-stuck", "");
   await expect(
     tabActions.getByRole("button", { name: "Add subjects", exact: true }),
   ).toBeInViewport();
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.mouse.wheel(0, -600);
+  await page.evaluate(() => {
+    document.body.style.paddingBottom = "";
+    window.scrollTo(0, 0);
+  });
+  await expect(tabRow).not.toHaveAttribute("data-stuck", "");
   await main.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(row("Add the roster")).toContainText("Done");
   await expect(row("Add the roster")).toContainText("1 child");

@@ -94,11 +94,17 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByText("Waiting to join")).toBeVisible();
   inviteLink = (await page.locator("code").textContent())?.trim() ?? "";
 
-  // Inviting doesn't change the setup checklist; the activity log has all three changes (event log, D96).
+  // Inviting doesn't change the setup checklist. Home has no activity feed (D146), but the event log still has all
+  // three changes, by the owner (D96).
   await page.goto("/app");
   await expect(setup.getByText("1 of 4 done", { exact: true })).toBeVisible();
-  await expect(page.getByText(`${owner} withdrew an invite`)).toBeVisible();
-  await expect(page.getByText(`${owner} invited someone as photographer`).first()).toBeVisible();
+  const { activity } = await (await page.request.get("/api/v1/studio/activity")).json();
+  const mine = (type: string) =>
+    activity.filter(
+      (a: { type: string; actorEmail: string }) => a.type === type && a.actorEmail === owner,
+    );
+  expect(mine("invite.withdrawn")).toHaveLength(1);
+  expect(mine("invite.created")).toHaveLength(2);
 
   // ⌘K / Ctrl+K focuses the menu's search box (D138); the shortcut is never shown as a label.
   await page.keyboard.press("ControlOrMeta+k");
