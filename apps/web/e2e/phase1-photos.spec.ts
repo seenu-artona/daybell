@@ -7,10 +7,9 @@ import sharp from "sharp";
 import { signUpOwner } from "./helpers";
 
 // Phase 1 step 4 "Photo storage and upload" (D39, D60, D100, D140, D142; ADR 0016), with STORAGE_DRIVER=local: a
-// folder upload with a duplicate, a PNG and a hidden file; previews made once; the checklist's Upload photos task (D143;
-// ADR 0017); the bin; a dropped
-// connection; a reload and a second drop that resumes; and another studio that can't see any of it. Desktop only
-// (D136). JPEGs are made in the test.
+// folder upload (Upload photos in the job's tab row, D147) with a duplicate, a PNG and a hidden file; previews made
+// once; the checklist's Upload photos task (D143; ADR 0017); the bin; a dropped connection; a reload and a second
+// drop that resumes; and another studio that can't see any of it. Desktop only (D136). JPEGs are made in the test.
 const run = `${Date.now()}`;
 
 /** A JPEG with its own content: `seed` changes the colour; `noise` makes it large (random pixels don't compress). */
@@ -102,6 +101,18 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
   );
   writeFileSync(join(day, ".DS_Store"), "x");
 
+  // Upload photos is the green action at the right end of the job's tab row (D147); the chips All and Review are in
+  // the photos card's toolbar, All selected.
+  await expect(
+    page
+      .locator("[data-sticky-header] [data-tab-actions]")
+      .getByRole("button", { name: "Upload photos", exact: true }),
+  ).toBeVisible();
+  await expect(
+    main
+      .getByRole("navigation", { name: "Photos views", exact: true })
+      .getByRole("link", { name: "All", exact: true }),
+  ).toHaveAttribute("aria-current", "true");
   await main.getByRole("button", { name: "Upload photos", exact: true }).click();
   const sheet = main.getByRole("region", { name: "Upload photos", exact: true });
   await expect(sheet.getByRole("button", { name: "Choose folder", exact: true })).toBeVisible();

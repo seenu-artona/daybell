@@ -3,7 +3,8 @@ import { signUpOwner } from "./helpers";
 
 // Phase 1 step 1 "Jobs and clients" (ADR 0008–0010): an owner adds a client in Contacts, creates a job in the
 // one-form dialog picking that client in the combobox, then creates a second job adding a new client from the
-// combobox's last option.
+// combobox's last option. Then the Jobs list (D147): its columns, the chips, a client chip added from "+ Add filter"
+// (saved, kept after a reload, removed with its own button), the search, and Calendar coming soon.
 // The CI database is Canadian (D122), so address labels read Province / Postal code.
 const run = `${Date.now()}`;
 
@@ -146,14 +147,61 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(first).toContainText(client);
   await expect(first).toContainText("JOB00001");
   await expect(first).toContainText("Draft");
-  // Each row shows its checklist on one line (D143; D145, amends D144): progress and the next task, linked to
-  // where it's done. No milestone pill: the Status pill says the shop's state.
-  await expect(first.getByText("1 of 7", { exact: true })).toBeVisible();
-  await expect(first.getByText("Set up", { exact: true })).toHaveCount(0);
-  await expect(
-    first.getByRole("link", { name: `Next: Add the roster, ${job} (edited)`, exact: true }),
-  ).toHaveAttribute("href", /^\/app\/jobs\/[0-9a-f-]{36}\/people$/);
+  // Columns (D147): job, client, picture day, status, and when the shop closes ("Not selling yet" for a draft).
+  await expect(first).toContainText("Not selling yet");
+  for (const name of ["Job", "Client", "Picture day", "Status", "Shop closes"])
+    await expect(main.getByRole("columnheader", { name, exact: true })).toBeVisible();
   await expect(main.getByRole("row").filter({ hasText: newClient })).toContainText("JOB00002");
+
+  // Chips (D147): All, Draft, Selling and Closed are links, one selected (aria-current) at a time.
+  const chips = main.getByRole("navigation", { name: "Show jobs", exact: true });
+  await expect(chips.getByRole("link", { name: "All", exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await chips.getByRole("link", { name: "Selling", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/jobs\?status=selling$/);
+  await expect(main.getByText("No jobs match.", { exact: true })).toBeVisible();
+  await chips.getByRole("link", { name: "Draft", exact: true }).click();
+  await expect(first).toBeVisible();
+
+  // + Add filter › Client… adds the client as a chip of the person's own: it opens at once (?client=<id>, an id only),
+  // stays after a reload, and its own remove button takes it away (back to All).
+  await main.getByRole("button", { name: "Add filter", exact: true }).click();
+  await main.getByRole("button", { name: "Client…", exact: true }).click();
+  const clientField = main.getByRole("combobox", { name: "Client", exact: true });
+  await expect(clientField).toBeFocused();
+  await clientField.fill(client);
+  await main
+    .getByRole("listbox", { name: "Clients" })
+    .getByRole("option", { name: client })
+    .click();
+  await expect(page).toHaveURL(/\/app\/jobs\?client=[0-9a-f-]{36}$/);
+  await expect(chips.getByRole("link", { name: client, exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(main.getByRole("row").filter({ hasText: newClient })).toHaveCount(0);
+  await expect(first).toBeVisible();
+  await page.reload();
+  await expect(chips.getByRole("link", { name: client, exact: true })).toBeVisible();
+  await main.getByRole("button", { name: `Remove filter: ${client}`, exact: true }).click();
+  await expect(chips.getByRole("link", { name: client, exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/app\/jobs$/);
+
+  // The search finds a job by its name or number; its text never goes in the address (D113).
+  await main.getByRole("button", { name: "Search jobs", exact: true }).click();
+  await main.getByRole("searchbox", { name: "Search jobs", exact: true }).fill("JOB00002");
+  await expect(main.getByRole("row").filter({ hasText: newClient })).toBeVisible();
+  await expect(first).toHaveCount(0);
+  expect(page.url()).not.toContain("JOB00002");
+
+  // Calendar is its own section, coming soon.
+  await main.getByRole("link", { name: "Calendar", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/jobs\/calendar$/);
+  await expect(
+    main.getByRole("heading", { name: "Calendar is coming soon", level: 2, exact: true }),
+  ).toBeVisible();
 
   // Home's "Create job" link opens the same dialog.
   await page.goto("/app/jobs?new=1");

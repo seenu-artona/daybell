@@ -3,8 +3,8 @@ import { signUpOwner } from "./helpers";
 
 // Phase 1 step 2b "Job page layout" (D136, D137, D138; ADR 0013), restyled in step 2c (D140; ADR 0014), with one
 // checklist since step 2d (D143; ADR 0017): the one dark menu (fold, search, notifications, profile), the job's title
-// row and pill tabs, Overview's hero, checklist and activity, the coming-soon tabs, and that search and job activity
-// never cross studios. Desktop only (D136).
+// row and pill tabs (with a section's actions at the tab row's right end, also when it sticks: D147), Overview's hero,
+// checklist and activity, the coming-soon tabs, and that search and job activity never cross studios. Desktop only (D136).
 const run = `${Date.now()}`;
 
 test("job page layout, menu search and studio separation", async ({
@@ -209,20 +209,33 @@ test("job page layout, menu search and studio separation", async ({
   await add.getByLabel("Last name", { exact: true }).fill("Johnson");
   await add.getByRole("button", { name: "Add child", exact: true }).click();
   await expect(add).toBeHidden();
+  // Subjects' actions sit at the right end of the tab row (D147): Print QR cards, then the green Add subjects. They
+  // stay in the row once it sticks to the top of the window, as the tabs do.
+  const tabRow = page.locator("[data-sticky-header]");
+  const tabActions = tabRow.locator("[data-tab-actions]");
+  await expect(
+    tabActions.getByRole("button", { name: "Print QR cards", exact: true }),
+  ).toBeVisible();
+  await expect(tabActions.getByRole("button", { name: "Add subjects", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await page.mouse.wheel(0, 600);
+  await expect(tabRow).toHaveAttribute("data-stuck", "");
+  await expect(
+    tabActions.getByRole("button", { name: "Add subjects", exact: true }),
+  ).toBeInViewport();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.mouse.wheel(0, -600);
   await main.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(row("Add the roster")).toContainText("Done");
   await expect(row("Add the roster")).toContainText("1 child");
   await expect(row("Print QR cards")).toContainText("Next");
   await expect(checklist.getByText("2 of 7 done", { exact: true })).toBeVisible();
 
-  // The Jobs list shows the same progress per row, on one line with no milestone pill (D143; D145, amends D144).
+  // The Jobs list no longer shows the checklist (D147): a draft's row says "Not selling yet" where the shop closes.
   await page.goto("/app/jobs");
   const jobRow = main.getByRole("row").filter({ hasText: jobName });
-  await expect(jobRow.getByText("2 of 7", { exact: true })).toBeVisible();
-  await expect(jobRow.getByText("Set up", { exact: true })).toHaveCount(0);
-  await expect(
-    jobRow.getByRole("link", { name: `Next: Print QR cards, ${jobName}`, exact: true }),
-  ).toHaveAttribute("href", `/app/jobs/${job.id}/people?print=qr`);
+  await expect(jobRow).toContainText("Not selling yet");
+  await expect(jobRow.getByText("2 of 7", { exact: true })).toHaveCount(0);
   await page.goto(`/app/jobs/${job.id}`);
 
   // 6. Photos is real since step 4 (ADR 0016), Shop since step 6 (ADR 0019) and Orders since step 11 (ADR 0024); the

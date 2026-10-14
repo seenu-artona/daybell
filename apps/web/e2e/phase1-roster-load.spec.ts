@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { setFilter, signUpOwner } from "./helpers";
+import { signUpOwner } from "./helpers";
 
 // Load test (ADR 0013): a full-size roster import, People drawing all 5,000 children, and the QR card PDF for all of
 // them (ADR 0015: 1,250 double-sided sheets, inside the route's 60-second limit). Tagged @load: CI runs it on pushes to main, not on
@@ -75,8 +75,10 @@ test(
       timeout: 60_000,
     });
     await expect(main.getByRole("link", { name: "Load Test 4999", exact: true })).toHaveCount(1);
-    await setFilter(page, "Group by", "Class");
-    await expect(main.getByRole("button", { name: /^Load \d+ \d+ children$/ })).toHaveCount(20);
+    // "+ Add filter" offers each of the 20 classes as a chip (D147).
+    await main.getByRole("button", { name: "Add filter", exact: true }).click();
+    await expect(main.getByRole("button", { name: /^Load \d+$/ })).toHaveCount(20);
+    await page.keyboard.press("Escape");
     // Search covers the whole roster.
     await main.getByRole("button", { name: "Search children" }).click();
     await main.getByRole("searchbox", { name: "Search children" }).fill("L-4321");
