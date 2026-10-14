@@ -161,6 +161,11 @@ function PeoplePage() {
     router.replace(childHref(childId), { scroll: false });
   }
 
+  // A child in the address (opened from a row, or back and forward in history) takes the panel from the classes.
+  useEffect(() => {
+    if (selectedId) setClassesFocus(null);
+  }, [selectedId]);
+
   /** Opens the classes panel in place of any open child. */
   function openClasses() {
     if (selectedId) router.replace(here, { scroll: false });
