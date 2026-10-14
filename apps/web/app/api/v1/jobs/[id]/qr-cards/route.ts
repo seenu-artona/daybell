@@ -145,7 +145,6 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
       nameLabel: t("nameLabel"),
       accessCodeLabel: t("accessCode"),
       instructions: t("instructions", { link }),
-      foldBack: t("foldBack"),
     });
   } catch {
     // The job's id only: never names, codes or the error's text, which could quote them (D96).

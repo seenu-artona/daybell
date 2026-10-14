@@ -75,7 +75,8 @@ export function PrintQrCardsDialog({
         };
   const children = cardChildren(roster, scope).length;
   const cards = children + (blankValid ? blankCards : 0);
-  const pages = Math.ceil(cards / CARDS_PER_PAGE);
+  // Each sheet prints double-sided: a front page and a back page.
+  const sheets = Math.ceil(cards / CARDS_PER_PAGE);
 
   const perGroup = useMemo(() => {
     const counts = new Map<string, number>();
@@ -214,7 +215,7 @@ export function PrintQrCardsDialog({
         />
 
         <div className="flex flex-col gap-1">
-          <p className="m-0 font-semibold text-ink">{t("summary", { cards, pages })}</p>
+          <p className="m-0 font-semibold text-ink">{t("summary", { cards, sheets })}</p>
           <p className="m-0 text-caption text-muted">{t("dnpNote")}</p>
         </div>
 
@@ -232,18 +233,25 @@ export function PrintQrCardsDialog({
           ) : null}
         </div>
 
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="secondary" onClick={close}>
-            {t("close")}
-          </Button>
-          <Button
-            type="submit"
-            aria-disabled={busy || undefined}
-            className="aria-disabled:opacity-60"
-          >
-            <Download aria-hidden="true" />
-            {busy ? t("preparing") : t("download")}
-          </Button>
+        <div className="flex flex-col items-end gap-2">
+          {/* The cards' backs line up only when printed this way (Seenu, Oct 13, 2026). */}
+          <p id={`${id}-duplex`} className="m-0 text-sm font-semibold text-ink">
+            {t("duplex")}
+          </p>
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="secondary" onClick={close}>
+              {t("close")}
+            </Button>
+            <Button
+              type="submit"
+              aria-describedby={`${id}-duplex`}
+              aria-disabled={busy || undefined}
+              className="aria-disabled:opacity-60"
+            >
+              <Download aria-hidden="true" />
+              {busy ? t("preparing") : t("download")}
+            </Button>
+          </div>
         </div>
       </form>
     </Dialog>

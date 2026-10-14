@@ -1082,7 +1082,8 @@
       "noGroupOption": "{group, select, class {No class} team {No team} other {No group}} ({count, plural, one {# card} other {# cards}})",
       "blankCards": "Blank cards",
       "blankCardsHelp": "Extra cards with a line for the name and their own access code, for children not on the roster. Up to {max}.",
-      "summary": "{cards, plural, one {# card} other {# cards}} on {pages, plural, one {# page} other {# pages}} of US Letter",
+      "summary": "{cards, plural, one {# card} other {# cards}} on {sheets, plural, one {# sheet} other {# sheets}} of US Letter",
+      "duplex": "Print double-sided, flip on long edge",
       "dnpNote": "Children marked Do not photograph get no card. Each child keeps the same card on every print.",
       "download": "Download PDF",
       "preparing": "Preparing the PDF…",
@@ -1858,8 +1859,7 @@
       "groupLabel": "{group, select, class {Class} team {Team} other {Group}}",
       "nameLabel": "Name",
       "accessCode": "Access code",
-      "instructions": "Go to {link}, enter your code",
-      "foldBack": "Fold back before picture day"
+      "instructions": "Go to {link}, enter your code"
     }
   },
   "shop": {
