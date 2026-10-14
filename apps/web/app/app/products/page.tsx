@@ -2,7 +2,20 @@
 
 import type { PriceListResponse, PriceListSummary, PriceListsResponse } from "@daybell/api";
 import { canEditPriceLists } from "@daybell/core";
-import { Badge, Banner, Button, Field, Table, TableCell, TableHead, TableRow } from "@daybell/ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  ClickableRow,
+  Field,
+  ListCard,
+  RowChevron,
+  RowChevronHead,
+  Table,
+  TableCell,
+  TableHead,
+  TableRow,
+} from "@daybell/ui";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,23 +24,25 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { Dialog, SelectField } from "../dialog";
+import { ListPage } from "../list-page";
 import { useStudio } from "../me-context";
-import { PageFrame } from "../page-frame";
 import { priceListHref, usePriceText } from "./price-text";
 
 const LINK =
-  "inline-flex min-h-11 items-center font-semibold text-ink no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary";
+  "inline-flex min-h-11 items-center font-bold text-ink no-underline hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
 
 /**
- * Products › Price lists (ADR 0019; the menu item stays "Products", Claude's call 5). Every member sees the studio's
- * lists, the default first, with what they hold and how many jobs use them; owners and admins add a list (blank or a
- * copy), make one the default, and delete one that isn't the default and that no job uses (Claude's call 2). Prices
- * are before tax.
+ * Products › Price lists (ADR 0019, D144; the menu item stays "Products", Claude's call 5). Every member sees the
+ * studio's lists, the default first, with what they hold and how many jobs use them, in a white list card; a click on a
+ * row opens the list. Owners and admins add a list (blank or a copy) from the view bar's green button, and make one the
+ * default or delete one that isn't the default and that no job uses (Claude's call 2) with quiet buttons on its row.
+ * Prices are before tax (the card's footer).
  */
 export default function PriceListsPage() {
   const t = useTranslations("app.products");
   const text = useApiText();
   const price = usePriceText();
+  const router = useRouter();
   const { me } = useStudio();
   const canManage = canEditPriceLists(me.studio.role);
   const [lists, setLists] = useState<PriceListSummary[] | null>(null);
@@ -55,20 +70,17 @@ export default function PriceListsPage() {
   }
 
   return (
-    <PageFrame>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="m-0 text-h1">{t("title")}</h1>
-          <p className="m-0 text-muted">{t("beforeTax")}</p>
-        </div>
-        {canManage ? (
-          <Button onClick={() => setAdding(true)}>
+    <ListPage
+      title={t("title")}
+      actions={
+        canManage ? (
+          <Button shape="pill" onClick={() => setAdding(true)}>
             <Plus aria-hidden="true" />
             {t("add")}
           </Button>
-        ) : null}
-      </div>
-      <p className="m-0 text-muted">{t("intro")}</p>
+        ) : null
+      }
+    >
       <p role="status" aria-live="polite" className="m-0 empty:sr-only">
         {status}
       </p>
@@ -76,65 +88,71 @@ export default function PriceListsPage() {
       {!lists && !problem ? <p className="m-0 text-muted">{t("loading")}</p> : null}
 
       {lists ? (
-        <Table>
-          <thead>
-            <TableRow>
-              <TableHead>{t("columns.name")}</TableHead>
-              <TableHead>{t("columns.items")}</TableHead>
-              <TableHead>{t("columns.usedBy")}</TableHead>
-              {canManage ? (
-                <TableHead>
-                  <span className="sr-only">{t("columns.actions")}</span>
-                </TableHead>
-              ) : null}
-            </TableRow>
-          </thead>
-          <tbody>
-            {lists.map((list) => (
-              <TableRow key={list.id}>
-                <TableCell>
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Link href={priceListHref(list.id)} className={LINK}>
-                      {list.name}
-                    </Link>
-                    {list.isDefault ? <Badge tone="info">{t("default")}</Badge> : null}
-                  </span>
-                </TableCell>
-                <TableCell>{t("itemCounts", list.counts)}</TableCell>
-                <TableCell>{t("usedBy", { count: list.jobs })}</TableCell>
+        <ListCard footer={t("beforeTax")}>
+          <Table variant="list">
+            <thead>
+              <TableRow>
+                <TableHead>{t("columns.name")}</TableHead>
+                <TableHead>{t("columns.items")}</TableHead>
+                <TableHead>{t("columns.usedBy")}</TableHead>
                 {canManage ? (
-                  <TableCell className="text-right">
-                    {list.isDefault ? null : (
-                      <span className="inline-flex gap-1">
-                        <Button
-                          variant="ghost"
-                          aria-label={t("makeDefaultLabel", { name: list.name })}
-                          onClick={() => void makeDefault(list)}
-                        >
-                          {t("makeDefault")}
-                        </Button>
-                        {/* A list jobs use can't be deleted (the API answers 409), so say why instead. */}
-                        {list.jobs > 0 ? (
-                          <span className="inline-flex min-h-11 items-center px-2 text-caption text-muted">
-                            {t("inUseNoDelete")}
-                          </span>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            aria-label={t("deleteLabel", { name: list.name })}
-                            onClick={() => setDeleting(list)}
-                          >
-                            {t("delete")}
-                          </Button>
-                        )}
-                      </span>
-                    )}
-                  </TableCell>
+                  <TableHead>
+                    <span className="sr-only">{t("columns.actions")}</span>
+                  </TableHead>
                 ) : null}
+                <RowChevronHead />
               </TableRow>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {lists.map((list) => (
+                <ClickableRow key={list.id} onActivate={() => router.push(priceListHref(list.id))}>
+                  <TableCell>
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Link href={priceListHref(list.id)} className={LINK}>
+                        {list.name}
+                      </Link>
+                      {list.isDefault ? <Badge tone="info">{t("default")}</Badge> : null}
+                    </span>
+                  </TableCell>
+                  <TableCell>{t("itemCounts", list.counts)}</TableCell>
+                  <TableCell>{t("usedBy", { count: list.jobs })}</TableCell>
+                  {canManage ? (
+                    <TableCell className="py-0 text-right">
+                      {list.isDefault ? null : (
+                        <span className="inline-flex items-center gap-1">
+                          <Button
+                            variant="quiet"
+                            shape="pill"
+                            aria-label={t("makeDefaultLabel", { name: list.name })}
+                            onClick={() => void makeDefault(list)}
+                          >
+                            {t("makeDefault")}
+                          </Button>
+                          {/* A list jobs use can't be deleted (the API answers 409), so say why instead. */}
+                          {list.jobs > 0 ? (
+                            <span className="inline-flex min-h-11 items-center px-2 text-caption text-muted">
+                              {t("inUseNoDelete")}
+                            </span>
+                          ) : (
+                            <Button
+                              variant="quiet"
+                              shape="pill"
+                              aria-label={t("deleteLabel", { name: list.name })}
+                              onClick={() => setDeleting(list)}
+                            >
+                              {t("delete")}
+                            </Button>
+                          )}
+                        </span>
+                      )}
+                    </TableCell>
+                  ) : null}
+                  <RowChevron />
+                </ClickableRow>
+              ))}
+            </tbody>
+          </Table>
+        </ListCard>
       ) : null}
 
       <Dialog open={adding} onClose={() => setAdding(false)} title={t("add")}>
@@ -159,7 +177,7 @@ export default function PriceListsPage() {
           />
         ) : null}
       </Dialog>
-    </PageFrame>
+    </ListPage>
   );
 }
 

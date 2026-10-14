@@ -116,7 +116,7 @@ export default function ShopPage() {
   const items = list ? orderedItems(list.items) : [];
 
   return (
-    <JobSection title={tt("shop")} subline={tp("beforeTax")}>
+    <JobSection title={tt("shop")}>
       <div className="flex flex-col gap-4" aria-busy={busy || undefined}>
         <LiveNote />
         {closed ? <Banner tone="info" title={t("closed")} /> : null}
@@ -128,9 +128,12 @@ export default function ShopPage() {
 
         <Card variant="sheet" asChild>
           <section aria-labelledby={listTitle} className="flex flex-col gap-3 px-6 pt-5 pb-4">
-            <h3 id={listTitle} className="m-0 text-h3 font-bold">
-              {t("priceList")}
-            </h3>
+            <div className="flex flex-col">
+              <h3 id={listTitle} className="m-0 text-h3 font-bold">
+                {t("priceList")}
+              </h3>
+              <p className="m-0 text-body text-muted">{tp("beforeTax")}</p>
+            </div>
             {canChange && lists ? (
               <form onSubmit={saveList} className="flex max-w-xl flex-wrap items-end gap-3">
                 <div className="min-w-0 flex-1">

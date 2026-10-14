@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isSoonTab, JOB_TABS, tabForPath, tabHref } from "./tabs";
+import { isSoonTab, JOB_TABS, tabForPath, tabHref, VISIBLE_JOB_TABS } from "./tabs";
 
 const ID = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
 
@@ -17,6 +17,19 @@ describe("job tabs", () => {
       "orders",
       "settings",
     ]);
+  });
+
+  it("show only the built sections in the tab row; Messages and Settings open by URL (D144)", () => {
+    expect(VISIBLE_JOB_TABS.map((t) => t.key)).toEqual([
+      "overview",
+      "people",
+      "photos",
+      "shop",
+      "orders",
+    ]);
+    for (const tab of VISIBLE_JOB_TABS) expect(isSoonTab(tab.segment)).toBe(false);
+    expect(tabHref(ID, "messages")).toBe(`/app/jobs/${ID}/messages`);
+    expect(tabForPath(`/app/jobs/${ID}/settings`)).toBe("settings");
   });
 
   it("link to real routes", () => {

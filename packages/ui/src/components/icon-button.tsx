@@ -12,6 +12,8 @@ const variants = cva(
         surface: "bg-surface hover:bg-subtle",
         /** Canvas grey, on a white card or panel. */
         canvas: "bg-canvas hover:bg-line",
+        /** No fill until hovered, in a view bar on the canvas (D144). */
+        quiet: "bg-transparent hover:bg-surface",
       },
     },
     defaultVariants: { tone: "surface" },

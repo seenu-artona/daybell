@@ -61,6 +61,24 @@ describe("tokens", () => {
     expect(css).toContain("--radius-xl: 24px;");
   });
 
+  it("has the D144 list tokens in the theme", () => {
+    const css = buildThemeCss(tokens) as string;
+    expect(c("line-canvas")).toBe("#DAD7CF");
+    expect(css).toContain("--color-line-canvas: #dad7cf;");
+    expect(css).toContain("--radius-list: 20px;");
+    expect(css).toContain(
+      "--shadow-card: 0 1px 2px rgba(20,35,28,0.04), 0 8px 24px rgba(20,35,28,0.05);",
+    );
+    expect(css).toContain("--text-job-title: 28px;");
+    expect(css).toContain("--text-job-title--line-height: 36px;");
+    expect(css).toContain("--text-job-title--font-weight: 700;");
+  });
+
+  it("D144: the current main tab (white on ink) and inactive tabs (muted on canvas) pass 4.5:1", () => {
+    expect(contrastRatio(c("on-primary"), c("ink"))).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+    expect(contrastRatio(c("muted"), c("canvas"))).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+  });
+
   it("the access code's label (white at 80% on ink) still passes 4.5:1", () => {
     // 80% white over ink, blended per channel.
     const ink = c("ink").slice(1);

@@ -1,5 +1,6 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import axe from "axe-core";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Badge,
@@ -10,6 +11,7 @@ import {
   CardRow,
   CardTitle,
   Celebration,
+  ClickableRow,
   CONFETTI_MS,
   CodeInput,
   ConfettiBurst,
@@ -21,10 +23,17 @@ import {
   IconChip,
   iconButtonVariants,
   JobProgress,
+  ListCard,
+  MainTab,
+  MainTabs,
   MIN_UI_CONTRAST,
   MoneyStat,
   OptionCard,
+  PageHeader,
   PhotoTile,
+  RowChevron,
+  RowChevronHead,
+  SearchToggle,
   ShopFrame,
   SideMenu,
   SideMenuItem,
@@ -34,6 +43,9 @@ import {
   TableRow,
   Toast,
   uiColorOn,
+  ViewBar,
+  ViewTab,
+  ViewTabs,
 } from "./index";
 
 async function expectNoA11yViolations(container: HTMLElement) {
@@ -344,7 +356,7 @@ describe("D140 job page pieces", () => {
     expect(button.className).toMatch(/\brounded-full\b/);
   });
 
-  it("a sheet card has 24px corners and no border; its rows are hairlines", async () => {
+  it("a sheet card has 20px corners, a soft shadow and no border; its rows are hairlines (D144)", async () => {
     const { container } = render(
       <main>
         <Card variant="sheet" asChild>
@@ -356,11 +368,255 @@ describe("D140 job page pieces", () => {
       </main>,
     );
     const sheet = screen.getByRole("region", { name: "To-dos" });
-    expect(sheet.className).toMatch(/\brounded-xl\b/);
+    expect(sheet.className).toMatch(/\brounded-list\b/);
+    expect(sheet.className).toMatch(/\bshadow-card\b/);
     expect(sheet.className).not.toMatch(/\bborder\b/);
     expect(screen.getByText("One").className).toMatch(/\bborder-b\b/);
     expect(screen.getByText("One").className).toMatch(/\bmin-h-14\b/);
     await expectNoA11yViolations(container);
+  });
+});
+
+function Search({ initial = "", onSubmit }: { initial?: string; onSubmit?: (v: string) => void }) {
+  const [value, setValue] = useState(initial);
+  return (
+    <main>
+      <SearchToggle
+        label="Search children"
+        value={value}
+        onChange={setValue}
+        {...(onSubmit ? { onSubmit } : {})}
+      />
+    </main>
+  );
+}
+
+describe("D144 list pieces", () => {
+  it("main tabs: a navigation of links, the current one ink, white and bold with aria-current", async () => {
+    const { container } = render(
+      <main>
+        <MainTabs label="Job sections">
+          <MainTab href="/a" current>
+            Overview
+          </MainTab>
+          <MainTab href="/b">Subjects</MainTab>
+        </MainTabs>
+      </main>,
+    );
+    expect(screen.getByRole("navigation", { name: "Job sections" })).toBeDefined();
+    const current = screen.getByRole("link", { name: "Overview" });
+    expect(current.getAttribute("aria-current")).toBe("page");
+    expect(current.className).toMatch(/\bbg-ink\b/);
+    expect(current.className).toMatch(/\btext-on-primary\b/);
+    expect(current.className).toMatch(/\bfont-bold\b/);
+    expect(current.className).toMatch(/\bh-11\b/);
+    const other = screen.getByRole("link", { name: "Subjects" });
+    expect(other.getAttribute("aria-current")).toBeNull();
+    expect(other.className).toMatch(/\btext-muted\b/);
+    expect(other.className).not.toMatch(/\bfont-bold\b/);
+    await expectNoA11yViolations(container);
+  });
+
+  it("view tabs: aria-current, bold, and a dash hidden from screen readers; the bar puts actions on the right in order", async () => {
+    const { container } = render(
+      <main>
+        <ViewBar
+          tabs={
+            <ViewTabs label="Order views">
+              <ViewTab href="?status=" current>
+                All
+              </ViewTab>
+              <ViewTab href="?status=paid">Paid</ViewTab>
+            </ViewTabs>
+          }
+          actions={
+            <>
+              <button type="button">Delivery: Any</button>
+              <button type="button">Print QR cards</button>
+              <button type="button">New job</button>
+            </>
+          }
+        />
+      </main>,
+    );
+    const all = screen.getByRole("link", { name: "All" });
+    expect(all.getAttribute("aria-current")).toBe("page");
+    expect(all.className).toMatch(/\bfont-bold\b/);
+    expect(all.className).toMatch(/\bh-14\b/);
+    expect(screen.getByRole("link", { name: "Paid" }).getAttribute("aria-current")).toBeNull();
+    const dashes = container.querySelectorAll("[data-view-dash]");
+    expect(dashes).toHaveLength(1);
+    expect(dashes[0]?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Delivery: Any",
+      "Print QR cards",
+      "New job",
+    ]);
+    const nav = screen.getByRole("navigation", { name: "Order views" });
+    expect(nav.querySelector("ul")?.className).toMatch(/\boverflow-x-auto\b/);
+    await expectNoA11yViolations(container);
+  });
+
+  it("search toggle: a named button that opens a search box with focus in it", async () => {
+    const { container } = render(<Search />);
+    const button = screen.getByRole("button", { name: "Search children" });
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    // No aria-controls while the box doesn't exist: it would point at nothing.
+    expect(button.hasAttribute("aria-controls")).toBe(false);
+    expect(button.className).toMatch(/\bsize-11\b/);
+    fireEvent.click(button);
+    const box = screen.getByRole("searchbox", { name: "Search children" });
+    expect(document.activeElement).toBe(box);
+    await expectNoA11yViolations(container);
+  });
+
+  it("search toggle: leaving an empty box closes it without taking focus back", () => {
+    render(<Search />);
+    fireEvent.click(screen.getByRole("button", { name: "Search children" }));
+    fireEvent.blur(screen.getByRole("searchbox"));
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.getByRole("button", { name: "Search children" })).toBeDefined();
+  });
+
+  it("search toggle: Escape on an empty box closes it and returns focus to the button", () => {
+    render(<Search />);
+    fireEvent.click(screen.getByRole("button", { name: "Search children" }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Search children" }));
+  });
+
+  it("search toggle: stays open while it holds text, even on blur and Escape", () => {
+    render(<Search />);
+    fireEvent.click(screen.getByRole("button", { name: "Search children" }));
+    const box = screen.getByRole("searchbox");
+    fireEvent.change(box, { target: { value: "Maya" } });
+    fireEvent.blur(box);
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.getByRole("searchbox")).toBeDefined();
+  });
+
+  it("search toggle: starts open with a value, and submits on Enter when asked", () => {
+    const onSubmit = vi.fn();
+    render(<Search initial="7KQ2" onSubmit={onSubmit} />);
+    const box = screen.getByRole("searchbox", { name: "Search children" });
+    expect(screen.getByRole("search")).toBeDefined();
+    fireEvent.submit(box.closest("form") as HTMLFormElement);
+    expect(onSubmit).toHaveBeenCalledWith("7KQ2");
+  });
+
+  it("clickable row: a click on the row activates it; clicks on its link, button or checkbox don't", async () => {
+    const onActivate = vi.fn();
+    const { container } = render(
+      <main>
+        <ListCard footer="3 jobs">
+          <Table variant="list">
+            <thead>
+              <TableRow>
+                <TableHead>Job</TableHead>
+                <TableHead>Pick</TableHead>
+                <RowChevronHead />
+              </TableRow>
+            </thead>
+            <tbody>
+              <ClickableRow onActivate={onActivate}>
+                <TableCell>
+                  <a href="/jobs/1" className="group-hover:underline">
+                    Lincoln
+                  </a>
+                </TableCell>
+                <TableCell>
+                  <label>
+                    <input type="checkbox" /> Select Lincoln
+                  </label>
+                  <button type="button">Make default</button>
+                </TableCell>
+                <RowChevron />
+              </ClickableRow>
+            </tbody>
+          </Table>
+        </ListCard>
+      </main>,
+    );
+    const row = screen.getAllByRole("row")[1] as HTMLElement;
+    expect(row.className).toMatch(/\bcursor-pointer\b/);
+    expect(row.className).toMatch(/hover:bg-canvas/);
+    fireEvent.click(screen.getByRole("cell", { name: "Lincoln" }));
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("link", { name: "Lincoln" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Lincoln" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make default" }));
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    // A click that ends a text selection is the selection's, not the row's.
+    const selection = vi.spyOn(window, "getSelection").mockReturnValue({
+      toString: () => "Linc",
+    } as Selection);
+    fireEvent.click(screen.getByRole("cell", { name: "Lincoln" }));
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    selection.mockRestore();
+    // Ctrl- or Cmd-click opens the row's main link in a new tab, like the link itself would.
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    fireEvent.click(screen.getByRole("cell", { name: "Lincoln" }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("cell", { name: "Lincoln" }), { metaKey: true });
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenCalledWith(expect.stringMatching(/\/jobs\/1$/), "_blank", "noopener");
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    open.mockRestore();
+    const chevron = row.lastElementChild as HTMLElement;
+    expect(chevron.getAttribute("aria-hidden")).toBe("true");
+    expect(chevron.className).toMatch(/\btext-line-strong\b/);
+    expect(screen.getByText("3 jobs").className).toMatch(/\btext-muted\b/);
+    const card = container.querySelector("section") as HTMLElement;
+    expect(card.className).toMatch(/\brounded-list\b/);
+    expect(card.className).toMatch(/\bshadow-card\b/);
+    await expectNoA11yViolations(container);
+  });
+
+  it("page header: a list page has its h1; a record has a back button, its h1 and actions", async () => {
+    const { container, rerender } = render(
+      <main>
+        <PageHeader title="Jobs" />
+      </main>,
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Jobs" }).className).toMatch(
+      /\btext-h1\b/,
+    );
+    rerender(
+      <main>
+        <PageHeader
+          variant="record"
+          title="Lincoln Elementary"
+          back={
+            <IconButton asChild label="All jobs">
+              <a href="/app/jobs">
+                <svg aria-hidden="true" />
+              </a>
+            </IconButton>
+          }
+          status={<Badge tone="selling">Selling</Badge>}
+          details="School · Sep 24"
+          actions={<Button shape="pill">Close shop</Button>}
+        />
+      </main>,
+    );
+    const h1 = screen.getByRole("heading", { level: 1, name: "Lincoln Elementary" });
+    expect(h1.className).toMatch(/\btext-job-title\b/);
+    expect(screen.getByRole("link", { name: "All jobs" }).className).toMatch(/\bsize-11\b/);
+    expect(screen.getByText("School · Sep 24")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Close shop" })).toBeDefined();
+    await expectNoA11yViolations(container);
+  });
+
+  it("quiet buttons and icon buttons have no fill until hovered, and stay 44px", () => {
+    const quiet = buttonVariants({ variant: "quiet" });
+    expect(quiet).toMatch(/\bbg-transparent\b/);
+    expect(quiet).toMatch(/\bhover:bg-surface\b/);
+    expect(quiet).toMatch(/\bmin-h-11\b/);
+    expect(iconButtonVariants({ tone: "quiet" })).toMatch(/\bbg-transparent\b/);
+  });
+
+  it("cn lets a later radius or shadow token replace an earlier one", () => {
+    expect(cn("rounded-xl shadow-sm", "rounded-list shadow-card")).toBe("rounded-list shadow-card");
   });
 });
 

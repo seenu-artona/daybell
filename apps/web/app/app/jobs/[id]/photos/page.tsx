@@ -34,9 +34,9 @@ const CONFLICT_KEYS = Object.fromEntries(
 ) as Record<string, keyof typeof PHOTO_CONFLICTS>;
 
 /**
- * A job's Photos (D39, D60, D140; Phase 1 step 4, ADR 0016): "N photos" with a green subline (uploads, processing,
- * duplicates skipped), white pills Upload photos and Bin (n), the upload sheet, then the photos as thumbnails in
- * tagging order, 200 at a time. A photo opens in the floating panel (?photo=<id>). Owners, admins and photographers
+ * A job's Photos (D39, D60, D140, D144; Phase 1 step 4, ADR 0016): the view bar (All and Review; a quiet Bin (n) and the
+ * green Upload photos), the upload sheet, a muted line with the counts (photos, uploads, processing, duplicates
+ * skipped), then the photos as thumbnails in tagging order, 200 at a time. A photo opens in the floating panel (?photo=<id>). Owners, admins and photographers
  * upload, bin and restore; staff look. Closed jobs take no photos.
  */
 function PhotosPage() {
@@ -144,24 +144,23 @@ function PhotosPage() {
   return (
     <JobSection
       title={title}
-      subline={subline}
-      toolbar={
+      views={bin ? null : <PhotosViews jobId={job.id} current="all" />}
+      tools={
         bin ? (
-          <Button variant="white" shape="pill" onClick={() => showBin(false)}>
+          <Button variant="quiet" shape="pill" onClick={() => showBin(false)}>
             <ArrowLeft aria-hidden="true" />
             {t("backToPhotos")}
           </Button>
         ) : (
           <>
             {counts ? (
-              <Button variant="white" shape="pill" onClick={() => showBin(true)}>
+              <Button variant="quiet" shape="pill" onClick={() => showBin(true)}>
                 <Trash2 aria-hidden="true" />
                 {t("bin", { count: counts.binned })}
               </Button>
             ) : null}
             {canUpload ? (
               <Button
-                variant="white"
                 shape="pill"
                 aria-expanded={sheetOpen}
                 onClick={() => setSheetOpen((o) => !o)}
@@ -175,7 +174,6 @@ function PhotosPage() {
       }
       below={
         <>
-          {bin ? null : <PhotosViews jobId={job.id} current="all" />}
           {closed && !bin ? <Banner tone="info" title={t("closed")} /> : null}
           {bin ? null : <LiveNote />}
           {bin ? <p className="m-0 text-sm text-muted">{t("binNote")}</p> : null}
@@ -221,6 +219,16 @@ function PhotosPage() {
             </div>
           ) : null}
           {photos.failed ? <Banner tone="danger" title={t("loadFailed")} /> : null}
+          {title ? (
+            // The count is the section's h2 for screen readers already: here it is shown, not read twice.
+            <p className="m-0 text-body text-muted">
+              <span aria-hidden="true">
+                {title}
+                {subline ? " · " : ""}
+              </span>
+              {subline}
+            </p>
+          ) : null}
         </>
       }
       panel={
@@ -243,11 +251,11 @@ function PhotosPage() {
 
       {empty ? (
         bin ? (
-          <p className="m-0 rounded-xl bg-surface px-6 py-10 text-center text-muted">
+          <p className="m-0 rounded-list bg-surface px-6 py-10 text-center text-muted shadow-card">
             {t("binEmpty")}
           </p>
         ) : (
-          <div className="flex flex-col items-center gap-3 rounded-xl bg-surface px-6 py-16 text-center">
+          <div className="flex flex-col items-center gap-3 rounded-list bg-surface px-6 py-16 text-center shadow-card">
             <h2 className="m-0 text-h3">{t("emptyTitle")}</h2>
             <p className="m-0 max-w-120 text-muted">{t("emptyBody")}</p>
             {canEdit ? null : <p className="m-0 text-caption text-muted">{t("emptyReadOnly")}</p>}

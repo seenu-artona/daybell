@@ -59,7 +59,8 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   // Every section is in the one dark menu; unbuilt ones say "Soon" (D126, D128). Products is built since step 6
   // (ADR 0019) and Orders since step 11 (ADR 0024). There is no top bar (D137).
   const menu = page.getByRole("navigation", { name: "Main" });
-  await expect(menu.getByRole("link", { name: "Contacts", exact: true })).toBeVisible();
+  // Contacts is labelled Clients (D144); its route stays /app/contacts.
+  await expect(menu.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Products", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Orders", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Marketing Soon" })).toBeVisible();

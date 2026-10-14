@@ -201,7 +201,8 @@ test("job page layout, menu search and studio separation", async ({
   await row("Add the roster").getByRole("link").click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
 
-  // After adding a child, Add the roster ticks itself and says how many.
+  // After adding a child (from the green Add subjects menu, D144), Add the roster ticks itself and says how many.
+  await main.getByRole("button", { name: "Add subjects", exact: true }).click();
   await main.getByRole("button", { name: "Add child", exact: true }).click();
   const add = page.getByRole("dialog", { name: "Add child" });
   await add.getByLabel("First name", { exact: true }).fill("Maya");
@@ -246,11 +247,17 @@ test("job page layout, menu search and studio separation", async ({
     .getByRole("link", { name: "Orders", exact: true })
     .click();
   await expect(main.getByText("No orders yet.", { exact: true })).toBeVisible();
-  for (const name of ["Messages", "Settings"]) {
-    await main
-      .getByRole("navigation", { name: "Job sections" })
-      .getByRole("link", { name, exact: true })
-      .click();
+  // Messages and Settings aren't built: they leave the tab row (D144) but still open by their address.
+  for (const [name, segment] of [
+    ["Messages", "messages"],
+    ["Settings", "settings"],
+  ] as const) {
+    await expect(
+      main
+        .getByRole("navigation", { name: "Job sections" })
+        .getByRole("link", { name, exact: true }),
+    ).toHaveCount(0);
+    await page.goto(`/app/jobs/${job.id}/${segment}`);
     await expect(
       main.getByRole("heading", { name: `${name} is coming soon`, level: 2 }),
     ).toBeVisible();

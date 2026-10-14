@@ -22,6 +22,12 @@ export function isSoonTab(segment: string): segment is SoonTab {
   return (SOON_TABS as readonly string[]).includes(segment);
 }
 
+/**
+ * The tabs in the job's tab row (D144): the built sections only. Messages and Settings (coming soon) still have their
+ * routes and open by URL, but leave the row until they are built.
+ */
+export const VISIBLE_JOB_TABS = JOB_TABS.filter((t) => !isSoonTab(t.segment));
+
 /** Photos' Review (ADR 0018): QR tagging, fixed by hand. Part of the Photos tab. */
 export function reviewHref(jobId: string): string {
   return `${tabHref(jobId, "photos")}/review`;

@@ -21,9 +21,10 @@ import { useStudio } from "../../me-context";
 import { JobContext, type JobContextValue, type JobSummary } from "./job-context";
 import { JobHeader } from "./job-header";
 import { JobTabs } from "./job-tabs";
+import { StickyFrame } from "./sticky-frame";
 
 /**
- * Every job section's frame (D137, D140): the title row and the pill tabs on the grey canvas, then the section.
+ * Every job section's frame (D137, D144): the title row and the pill tabs on the grey canvas, then the section.
  * Loads the job and its roster numbers once; the layout stays mounted while people move between sections, so
  * switching tabs never loads the job again.
  */
@@ -93,7 +94,7 @@ export function JobShell({ children }: { children: ReactNode }) {
 
   if (!value) {
     return (
-      <div className="flex flex-col gap-4 px-12 pt-10">
+      <div className="flex flex-col gap-4 px-10 pt-8">
         <Link
           href="/app/jobs"
           className="inline-flex min-h-11 items-center gap-2 self-start font-semibold text-primary no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
@@ -112,10 +113,15 @@ export function JobShell({ children }: { children: ReactNode }) {
 
   return (
     <JobContext.Provider value={value}>
-      <div className="flex min-h-dvh flex-col gap-4 px-7 pt-5 pb-12">
-        <JobHeader />
-        <JobTabs />
-        {children}
+      <div className="flex min-h-dvh flex-col px-10 pt-8 pb-12">
+        <StickyFrame
+          name={value.job.name}
+          backHref="/app/jobs"
+          backLabel={tj("back")}
+          header={(stuck) => <JobHeader stuck={stuck} />}
+          tabs={<JobTabs />}
+        />
+        <div className="mt-2 flex flex-col">{children}</div>
       </div>
     </JobContext.Provider>
   );

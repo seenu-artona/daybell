@@ -4,8 +4,8 @@ import { cn } from "../lib/cn";
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   /**
-   * "default" is the bordered card. "sheet" is a white card with 24px corners and no border, on the canvas (D140);
-   * its content is usually hairline rows (CardRow).
+   * "default" is the bordered card. "sheet" is a white card with 20px corners, a soft shadow and no border, on the
+   * canvas (D140, D144); its content is usually hairline rows (CardRow).
    */
   variant?: "default" | "sheet";
   /** Render the child element (for example a section) with the card's styles. */
@@ -18,7 +18,7 @@ export function Card({ className, variant = "default", asChild = false, ...props
     <Comp
       className={cn(
         variant === "sheet"
-          ? "rounded-xl bg-surface px-6 py-1.5"
+          ? "rounded-list bg-surface px-6 py-1.5 shadow-card"
           : "rounded-lg border border-line bg-surface p-4 shadow-sm sm:p-6",
         className,
       )}
