@@ -43,9 +43,10 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   // Look inside the page's main area (the menu has its own links and search).
   const main = page.getByRole("main");
 
-  // 1. Contacts opens on Clients (labelled Clients, D144). Add a client with New client; Quebec is refused (D131).
+  // 1. People opens on Clients (D150); the old Contacts address still lands there. Add a client with New client;
+  // Quebec is refused (D131).
   await page.goto("/app/contacts");
-  await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
+  await expect(page).toHaveURL(/\/app\/people\/clients$/);
   await expect(main.getByRole("heading", { name: "Clients", level: 1 })).toBeVisible();
   await main.getByRole("button", { name: "New client", exact: true }).click();
   const addClient = page.getByRole("dialog", { name: "Add client" });

@@ -39,7 +39,7 @@ const NAME_BUTTON =
   "inline-flex min-h-11 items-center text-left font-bold text-ink hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
 
 /**
- * Clients (D144; the menu's Clients, at /app/contacts/clients). Clients are added here ahead of time, or from the job
+ * Clients (D144; People › Clients since D150, at /app/people/clients). Clients are added here ahead of time, or from the job
  * form. The green New client in the title row; the list card's toolbar has the All chip (D147: Clients has no other
  * chips yet) and the search (GET /clients?q=, by name; never in the address, D113). A
  * click on a row, or its name, opens the client in the dialog: editable for owners and admins, read-only for everyone
@@ -133,7 +133,7 @@ function ClientsPage() {
         setOpenProblem(null);
         setEditing(res.data.client);
       } else setOpenProblem(text.error(res.code));
-      router.replace("/app/contacts/clients", { scroll: false });
+      router.replace("/app/people/clients", { scroll: false });
     });
     return () => {
       current = false;
@@ -159,7 +159,7 @@ function ClientsPage() {
         toolbar={
           <FilterChips label={t("clients.chipsLabel")}>
             <FilterChip asChild selected>
-              <Link href="/app/contacts/clients" scroll={false}>
+              <Link href="/app/people/clients" scroll={false}>
                 {tc("all")}
               </Link>
             </FilterChip>

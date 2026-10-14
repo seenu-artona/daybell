@@ -90,7 +90,7 @@ export function MenuSearch({ inputRef }: { inputRef: Ref<HTMLInputElement> }) {
     router.push(
       option.kind === "job"
         ? `/app/jobs/${option.job.id}`
-        : `/app/contacts/clients?client=${option.client.id}`,
+        : `/app/people/clients?client=${option.client.id}`,
     );
   }
 

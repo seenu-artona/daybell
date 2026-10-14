@@ -9,17 +9,12 @@ import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { onRestoredFromCache } from "@/lib/page-restored";
 import { useStudio } from "../../me-context";
-import {
-  FeesCard,
-  PayoutsCard,
-  payoutProblemKey,
-  ScheduleCard,
-  StatusCard,
-  scheduleFormKey,
-} from "./payout-cards";
+import { payoutProblemKey, ScheduleCard, StatusCard, scheduleFormKey } from "./payout-cards";
 
 /**
- * Settings › Payouts (Phase 1 step 7; D56, D98, D106; Seenu, answers 1–4; ADR 0020): connection status, the payout
+ * Settings › Stripe (D150: only the Stripe connection; Seenu, 2026-10-14: the payout schedule stays, it is a Stripe
+ * setting; recent payouts and fees move to Analytics when it is built, their cards wait in payout-cards.tsx).
+ * Was Settings › Payouts (Phase 1 step 7; D56, D98, D106; Seenu, answers 1–4; ADR 0020): connection status, the payout
  * schedule, the next and recent payouts, and the fees explained. The owner sets up payouts on Stripe's own pages and
  * changes the schedule; admins see everything read-only; photographers and staff get a plain refusal (the API answers
  * 403 too). Coming back from Stripe (?stripe=return) checks the status with Stripe at once; an expired link
@@ -153,8 +148,6 @@ export default function PayoutsPage() {
             }}
             onProblem={(fields, code) => setProblem(conflictText(fields, code))}
           />
-          <PayoutsCard data={data} />
-          <FeesCard fees={data.fees} />
         </>
       ) : null}
     </div>

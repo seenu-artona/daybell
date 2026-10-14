@@ -100,7 +100,7 @@ test("job page layout, menu search and studio separation", async ({
   await expect(results.getByRole("option", { name: new RegExp(clientName) })).toBeVisible();
   await expect(results.getByRole("option")).toHaveCount(1);
   await box.press("Enter");
-  await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
+  await expect(page).toHaveURL(/\/app\/people\/clients$/);
   const clientDialog = page.getByRole("dialog", { name: "Edit client" });
   await expect(clientDialog.getByLabel("Client name", { exact: true })).toHaveValue(clientName);
   await page.keyboard.press("Escape");
@@ -269,7 +269,7 @@ test("job page layout, menu search and studio separation", async ({
     .getByRole("link", { name: "Orders", exact: true })
     .click();
   await expect(main.getByText("No orders yet.", { exact: true })).toBeVisible();
-  // Messages and Settings aren't built: they leave the tab row (D144) but still open by their address.
+  // Messages and Settings are dropped (D150): not in the tab row, and their addresses are 404s like any unknown tab.
   for (const [name, segment] of [
     ["Messages", "messages"],
     ["Settings", "settings"],
@@ -279,11 +279,7 @@ test("job page layout, menu search and studio separation", async ({
         .getByRole("navigation", { name: "Job sections" })
         .getByRole("link", { name, exact: true }),
     ).toHaveCount(0);
-    await page.goto(`/app/jobs/${job.id}/${segment}`);
-    await expect(
-      main.getByRole("heading", { name: `${name} is coming soon`, level: 2 }),
-    ).toBeVisible();
-    await expect(main.getByRole("heading", { name: jobName, level: 1 })).toBeVisible();
+    expect((await page.goto(`/app/jobs/${job.id}/${segment}`))?.status()).toBe(404);
   }
   const unknown = await page.goto(`/app/jobs/${job.id}/nope`);
   expect(unknown?.status()).toBe(404);

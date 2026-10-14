@@ -6,7 +6,7 @@ import { joinAs, signUpOwner } from "./helpers";
 // Claude's call Q12): the owner goes from Not started through Stripe's (fake) hosted onboarding, leaving it unfinished
 // (Needs info) then finishing it (Active, by the signed webhook and the return check); "Set up payouts" and the Start
 // selling dialog's "Payouts connected" tick; an expired Stripe link asks the owner to continue; the schedule changes to
-// monthly, and a failed save's problem goes once a save works; a paid payout shows in CAD; an admin sees it read-only; a photographer has no Payouts link and is refused; another studio sees nothing; and it all works from
+// monthly, and a failed save's problem goes once a save works; a paid payout is recorded in CAD; an admin sees it read-only; a photographer has no Stripe link and is refused; another studio sees nothing; and it all works from
 // the keyboard. The local stack is the Canadian database (D122). Desktop only (D136).
 const run = `${Date.now()}`;
 /** A whole-text match: the status line says exactly this, not something that merely contains it. */
@@ -25,36 +25,26 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   });
   const main = page.getByRole("main");
 
-  // 1. Home's setup checklist starts with "Set up payouts" (D143's order), linked to Settings › Payouts.
+  // 1. Home's setup checklist starts with "Set up payouts" (D143's order), linked to Settings › Stripe (D150).
   const setup = page.getByRole("region", { name: "Set up your studio", exact: true });
   await expect(setup.getByText("1 of 4 done", { exact: true })).toBeVisible();
   await setup.getByRole("link", { name: "Set up payouts Next", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/settings\/payouts$/);
   const sections = main.getByRole("navigation", { name: "Settings sections", exact: true });
-  await expect(sections.getByRole("link", { name: "Payouts", exact: true })).toHaveAttribute(
+  await expect(sections.getByRole("link", { name: "Stripe", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );
-  // Settings (h1) › Payouts (h2, for screen readers) › the cards (h3): no skipped heading level.
-  await expect(main.getByRole("heading", { name: "Payouts", level: 2, exact: true })).toHaveCount(
-    1,
-  );
+  // Settings (h1) › Stripe (h2, for screen readers) › the cards (h3): no skipped heading level.
+  await expect(main.getByRole("heading", { name: "Stripe", level: 2, exact: true })).toHaveCount(1);
   const connection = main.getByRole("region", { name: "Connection", exact: true });
   await expect(connection.getByText("Not started", { exact: true })).toBeVisible();
   await expect(
     connection.getByText("You’ll go to Stripe to finish, then come back here.", { exact: true }),
   ).toBeVisible();
-  const fees = main.getByRole("region", { name: "Fees", exact: true });
-  await expect(
-    fees.getByText(
-      "Daybell: 3% of product sales. Nothing if nothing sells, and never on shipping or tax.",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await expect(
-    fees.getByText(/^Stripe payout fees: .* passed on at Stripe’s rates\.$/),
-  ).toBeVisible();
-  await expect(fees.getByText(/^Instant payouts: .*coming later\.$/)).toBeVisible();
+  // Only the Stripe connection and its schedule (D150; Seenu, 2026-10-14): payouts and fees wait for Analytics.
+  for (const name of ["Fees", "Next payout", "Recent payouts"])
+    await expect(main.getByRole("region", { name, exact: true })).toHaveCount(0);
   await expect(
     main
       .getByRole("region", { name: "Payout schedule", exact: true })
@@ -102,8 +92,6 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   await expect(
     connection.getByRole("button", { name: "Manage on Stripe", exact: true }),
   ).toBeVisible();
-  const next = main.getByRole("region", { name: "Next payout", exact: true });
-  await expect(next.getByText(/^.+, if there’s money to pay out$/)).toBeVisible();
 
   // The onboarding task ticks (Seenu, Q5)...
   await page.goto("/app");
@@ -174,14 +162,9 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   ).toBeVisible();
   await expect(problem).toHaveCount(0);
 
-  // 6. Stripe pays a payout (the fake's signed payout.paid): it shows in CAD.
+  // 6. Stripe pays a payout (the fake's signed payout.paid): the API has it in CAD (its list moves to Analytics, D150).
   const paid = await page.request.post("/api/dev-stripe", { data: { action: "payoutPaid" } });
   expect(paid.status()).toBe(200);
-  await page.reload();
-  const recent = main.getByRole("region", { name: "Recent payouts", exact: true });
-  const row = recent.getByRole("row").filter({ hasText: "$123.45" });
-  await expect(row.getByRole("cell", { name: "Paid", exact: true })).toBeVisible();
-  await expect(row.getByRole("cell", { name: "Standard", exact: true })).toBeVisible();
   const mine = await (await page.request.get("/api/v1/studio/payouts")).json();
   expect(mine.payouts[0].amount).toEqual({ cents: 12345, currency: "CAD" });
 
@@ -210,7 +193,7 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   ).toBe(403);
   expect((await admin.request.post("/api/v1/studio/payouts/onboarding-link")).status()).toBe(403);
 
-  // 8. A photographer has no Payouts link, and the page and the API refuse.
+  // 8. A photographer has no Stripe link, and the page and the API refuse.
   const photographer = await joinAs(
     page,
     browser,
@@ -222,7 +205,7 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   await expect(
     photoMain
       .getByRole("navigation", { name: "Settings sections", exact: true })
-      .getByRole("link", { name: "Payouts", exact: true }),
+      .getByRole("link", { name: "Stripe", exact: true }),
   ).toHaveCount(0);
   await photographer.goto("/app/settings/payouts");
   await expect(
