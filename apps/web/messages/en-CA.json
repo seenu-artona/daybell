@@ -415,6 +415,8 @@
     "checklist": {
       "title": "Checklist",
       "progress": "{done} of {total} done",
+      "progressShort": "{done} of {total}",
+      "separator": "·",
       "next": "Next",
       "nextTask": "Next: {task}",
       "nextTaskIn": "Next: {task}, {job}",
@@ -929,6 +931,11 @@
       "loading": "Searching…",
       "empty": "No jobs or clients match."
     },
+    "filters": {
+      "label": "Filter",
+      "labelOn": "Filter ({count} on)",
+      "clear": "Clear filters"
+    },
     "job": {
       "moreActions": "More actions",
       "startSelling": "Start selling",
@@ -1030,15 +1037,12 @@
         "label": "Subject views"
       },
       "all": "All",
-      "classMenu": "{group, select, class {Class} team {Team} other {Group}}: {value}",
       "grade": "Grade",
-      "gradeMenu": "Grade: {value}",
       "flags": {
         "doNotPhotograph": "Do not photograph",
         "doNotPublish": "Do not publish",
         "duplicates": "Possible duplicates"
       },
-      "groupBy": "Group: {by}",
       "groupByLegend": "Group by",
       "groupNone": "None",
       "duplicatesNotice": "{count, plural, one {# possible duplicate} other {# possible duplicates}}",
@@ -1540,12 +1544,9 @@
       "filters": {
         "job": "Job",
         "any": "Any",
-        "jobMenu": "Job: {value}",
         "searchLabel": "Search orders",
         "referenceHelp": "For example 7KQ2-M9XA",
-        "clear": "Clear filters",
         "delivery": "Delivery",
-        "deliveryMenu": "Delivery: {value}",
         "deliveryShort": {
           "home": "Home",
           "school": "School"

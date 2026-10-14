@@ -2,8 +2,9 @@ import { PageHeader, ViewBar } from "@daybell/ui";
 import type { ReactNode } from "react";
 
 /**
- * A studio list page (D144): full width on the canvas, the title alone, then one view bar (views on the left, tools on
- * the right) over the list's white card. Home and Settings keep PageFrame.
+ * A studio list page (D144): full width on the canvas, the title alone, then one view bar (pill views on the left,
+ * tools on the right end, no line under it: D145, amends D144) over the list's white card. Settings, an order and a
+ * price list keep PageFrame.
  */
 export function ListPage({
   title,
@@ -12,7 +13,7 @@ export function ListPage({
   children,
 }: {
   title: ReactNode;
-  /** ViewTabs, when the list has views. */
+  /** MainTabs, when the list has views: a page's first row of tabs is pills. */
   views?: ReactNode;
   /** The view bar's right end, in D144 order. */
   actions?: ReactNode;

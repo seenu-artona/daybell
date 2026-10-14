@@ -38,7 +38,11 @@ export function Popover({
   /** Accessible name for an icon-only trigger. Leave out when the trigger shows text. */
   label?: string;
   trigger: ReactNode;
-  children: (close: () => void) => ReactNode;
+  /**
+   * The panel's content. `close` shuts it; `closeToButton` also puts focus back on the button, for an action that goes
+   * away with the panel.
+   */
+  children: (close: () => void, closeToButton: () => void) => ReactNode;
   placement?: keyof typeof PLACEMENT;
   tone?: keyof typeof TONE;
   triggerClassName?: string;
@@ -97,7 +101,13 @@ export function Popover({
             panelClassName,
           )}
         >
-          {children(() => setOpen(false))}
+          {children(
+            () => setOpen(false),
+            () => {
+              setOpen(false);
+              button.current?.focus();
+            },
+          )}
         </div>
       ) : null}
     </div>

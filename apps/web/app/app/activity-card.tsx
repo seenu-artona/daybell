@@ -20,6 +20,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { type ActivityIcon, activityChip, unnamedSubject } from "@/lib/activity";
 import { api } from "@/lib/client-api";
+import { HomeCard, HomeNote, HomeRow, HomeRows } from "./home-card";
 
 const ICONS: Record<ActivityIcon, typeof Pencil> = {
   created: FilePlus2,
@@ -121,26 +122,21 @@ export function ActivityCard({
     );
   }
 
+  // Home: a list card with a hairline row per event (D145, amends D144).
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-      <h2 className="m-0 px-5 pt-4 pb-3 text-[15px] leading-5 font-bold">
-        {jobId ? t("jobTitle") : t("title")}
-      </h2>
+    <HomeCard title={jobId ? t("jobTitle") : t("title")}>
       {items.length === 0 ? (
-        <p className="m-0 border-t border-line px-5 py-4 text-muted">{t("empty")}</p>
+        <HomeNote>{t("empty")}</HomeNote>
       ) : (
-        <ol className="m-0 flex list-none flex-col border-t border-line px-5 py-2">
+        <HomeRows ordered>
           {items.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-sm"
-            >
-              <span>{sentence(item)}</span>
+            <HomeRow key={item.id} className="flex-wrap justify-between gap-x-3">
+              <span className="min-w-0 flex-1 break-words">{sentence(item)}</span>
               {when(item)}
-            </li>
+            </HomeRow>
           ))}
-        </ol>
+        </HomeRows>
       )}
-    </section>
+    </HomeCard>
   );
 }

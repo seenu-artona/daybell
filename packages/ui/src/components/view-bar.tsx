@@ -3,17 +3,29 @@ import type { AnchorHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 export interface ViewBarProps extends HTMLAttributes<HTMLDivElement> {
-  /** The left side: ViewTabs. */
+  /**
+   * "main" (default) is a page's first row (D145, amends D144): pill MainTabs on the left, no line under it.
+   * "sub" is a second level under pill tabs (a job's Subjects, Photos, Orders): dash ViewTabs over a hairline.
+   */
+  variant?: "main" | "sub";
+  /** The left side: MainTabs on a "main" bar, ViewTabs on a "sub" bar. */
   tabs?: ReactNode;
-  /** The right end, in D144 order: quiet menus, quiet actions, search, then the one green action. */
+  /** The right end, in D145 order (amends D144): the filter icon, search, quiet actions, then the one green action. */
   actions?: ReactNode;
 }
 
-/** One row over a list (D144): its views on the left, its tools on the right, a hairline under it. */
-export function ViewBar({ tabs, actions, className, ...props }: ViewBarProps) {
+/**
+ * One row over a list (D144): its views on the left, its tools on the right end. Only a second-level ("sub") bar has
+ * a hairline under it, for its dashes to sit on.
+ */
+export function ViewBar({ variant = "main", tabs, actions, className, ...props }: ViewBarProps) {
   return (
     <div
-      className={cn("flex min-h-14 items-center gap-6 border-b border-line-canvas", className)}
+      className={cn(
+        "flex min-h-14 items-center gap-6",
+        variant === "sub" && "border-b border-line-canvas",
+        className,
+      )}
       {...props}
     >
       <div className="min-w-0 flex-1">{tabs}</div>
@@ -28,8 +40,9 @@ export interface ViewTabsProps extends HTMLAttributes<HTMLElement> {
 }
 
 /**
- * A list's views (D144): links that change the address (?status=…), so a navigation with aria-current, not an ARIA
- * tablist. Scrolls sideways when the row is full at 1280px (D136).
+ * A list's views as a second level under pill tabs (D145, amends D144: a page's first row of tabs is MainTabs):
+ * links that change the address (?status=…), so a navigation with aria-current, not an ARIA tablist. Scrolls
+ * sideways when the row is full at 1280px (D136).
  */
 export function ViewTabs({ label, className, children, ...props }: ViewTabsProps) {
   return (

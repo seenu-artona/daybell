@@ -1,22 +1,21 @@
 "use client";
 
 import type { JobListItem, JobsResponse } from "@daybell/api";
-import { canDoTask, localDay, taskTarget } from "@daybell/core";
+import { localDay } from "@daybell/core";
 import {
-  Badge,
   Banner,
   Button,
   Card,
   ClickableRow,
   ListCard,
+  MainTab,
+  MainTabs,
   RowChevron,
   RowChevronHead,
   Table,
   TableCell,
   TableHead,
   TableRow,
-  ViewTab,
-  ViewTabs,
 } from "@daybell/ui";
 import { Camera, Plus } from "lucide-react";
 import Link from "next/link";
@@ -26,54 +25,16 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { createLoadGuard } from "@/lib/load-guard";
-import { taskHref } from "../checklist-links";
 import { Dialog } from "../dialog";
 import { ListPage } from "../list-page";
 import { useStudio } from "../me-context";
 import { JobForm } from "./job-form";
 import { JOB_VIEWS, jobsQuery, jobViewFrom, jobViewHref } from "./job-views";
+import { ProgressCell } from "./progress-cell";
 import { StatusBadge, useFormatDay } from "./status-badge";
 
-const LINK =
-  "font-semibold text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary";
 const NAME_LINK =
   "inline-flex min-h-11 items-center font-bold text-ink no-underline hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
-
-/**
- * A job's checklist in one cell (D143; ADR 0017): the milestone pill, "3 of 5 done", and the next task as a link to
- * where the work happens (plain text if the person's role can't do it). Closed jobs say "All done".
- */
-function ProgressCell({ job, role }: { job: JobListItem; role: string }) {
-  const t = useTranslations("app.checklist");
-  const { milestone, done, total, next } = job.checklist;
-  const nextText = next ? t("nextTask", { task: t(`tasks.${next}`) }) : null;
-  return (
-    <div className="flex flex-col items-start gap-0.5">
-      <span className="flex flex-wrap items-center gap-2">
-        <Badge tone="draft" className="before:hidden">
-          {milestone ? t(`milestones.${milestone}`) : t("allDone")}
-        </Badge>
-        <span className="text-caption whitespace-nowrap text-muted">
-          {t("progress", { done, total })}
-        </span>
-      </span>
-      {next && nextText ? (
-        canDoTask(role, next) ? (
-          <Link
-            href={taskHref(job.id, taskTarget(next))}
-            // Many rows say "Next: Print QR cards"; the name says which job (and starts with the visible words).
-            aria-label={t("nextTaskIn", { task: t(`tasks.${next}`), job: job.name })}
-            className={`${LINK} inline-flex min-h-11 items-center text-label text-primary`}
-          >
-            {nextText}
-          </Link>
-        ) : (
-          <span className="text-label">{nextText}</span>
-        )
-      ) : null}
-    </div>
-  );
-}
 
 export default function JobsPageRoute() {
   // useSearchParams (the view) needs a Suspense boundary.
@@ -142,15 +103,15 @@ function JobsPage() {
     <ListPage
       title={t("title")}
       views={
-        <ViewTabs label={t("views.label")}>
+        <MainTabs label={t("views.label")}>
           {JOB_VIEWS.map((v) => (
-            <ViewTab key={v || "all"} asChild current={view === v}>
+            <MainTab key={v || "all"} asChild current={view === v}>
               <Link href={jobViewHref(v)} scroll={false}>
                 {v ? t(`statuses.${v}`) : t("views.all")}
               </Link>
-            </ViewTab>
+            </MainTab>
           ))}
-        </ViewTabs>
+        </MainTabs>
       }
       actions={
         canManage && !noJobsYet ? (

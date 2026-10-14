@@ -1,7 +1,8 @@
 "use client";
 
 import type { TaskState } from "@daybell/core";
-import { Check } from "lucide-react";
+import { cn } from "@daybell/ui";
+import { Check, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
@@ -43,23 +44,35 @@ function CheckCircle({ state }: { state: TaskState }) {
   );
 }
 
-const ROW =
-  "flex min-h-11 w-full items-center gap-3 py-2 text-body no-underline text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
+/**
+ * "plain": rows inside a padded card (the job's Overview). "rows": full-width list-card rows in the ClickableRow style
+ * (Home; D145, amends D144): 16px text, 56px rows, canvas grey on hover with the task underlined and a faint
+ * chevron that darkens.
+ */
+export type ChecklistLook = "plain" | "rows";
+
+const ROW = {
+  plain:
+    "flex min-h-11 w-full items-center gap-3 py-2 text-body no-underline text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+  rows: "group flex min-h-14 w-full items-center gap-3 px-6 py-2 text-body-lg no-underline text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
+} as const;
 
 /** One task. The whole row is one link (44px or more) when there is somewhere to go; never a button (D143). */
-function Row({ row }: { row: ChecklistRow }) {
+function Row({ row, look }: { row: ChecklistRow; look: ChecklistLook }) {
   const t = useTranslations("app.checklist");
   const content: ReactNode = (
     <>
       <CheckCircle state={row.state} />
       <span
-        className={`min-w-0 flex-1 ${
+        className={cn(
+          "min-w-0 flex-1",
           row.state === "done"
             ? "text-muted line-through decoration-line-strong"
             : row.state === "next"
               ? "font-bold"
-              : ""
-        }`}
+              : "",
+          look === "rows" && row.href && "group-hover:underline",
+        )}
       >
         {row.label}
       </span>
@@ -72,16 +85,25 @@ function Row({ row }: { row: ChecklistRow }) {
       ) : (
         <span className="sr-only">{row.state === "done" ? t("done") : t("todo")}</span>
       )}
+      {look === "rows" && row.href ? (
+        <ChevronRight
+          aria-hidden="true"
+          className="size-5 shrink-0 text-line-strong group-hover:text-ink"
+        />
+      ) : null}
     </>
   );
   return (
-    <li className="border-t border-line first:border-t-0">
+    <li className={cn("border-t border-line", look === "plain" && "first:border-t-0")}>
       {row.href ? (
-        <Link href={row.href} className={`${ROW} hover:bg-subtle`}>
+        <Link
+          href={row.href}
+          className={cn(ROW[look], look === "rows" ? "hover:bg-canvas" : "hover:bg-subtle")}
+        >
           {content}
         </Link>
       ) : (
-        <div className={ROW}>{content}</div>
+        <div className={ROW[look]}>{content}</div>
       )}
     </li>
   );
@@ -108,9 +130,11 @@ export function ChecklistProgress({ done, total }: { done: number; total: number
 export function ChecklistGroups({
   groups,
   headingLevel = 3,
+  look = "plain",
 }: {
   groups: ChecklistRowGroup[];
   headingLevel?: 3 | 4;
+  look?: ChecklistLook;
 }) {
   const t = useTranslations("app.checklist");
   const Heading = headingLevel === 3 ? "h3" : "h4";
@@ -119,7 +143,12 @@ export function ChecklistGroups({
       {groups.map((group) => (
         <div key={group.key} className="flex flex-col">
           {group.title ? (
-            <Heading className="m-0 flex items-center gap-2 pt-3 pb-1 text-micro tracking-wide text-muted uppercase">
+            <Heading
+              className={cn(
+                "m-0 flex items-center gap-2 pt-3 pb-1 text-micro tracking-wide text-muted uppercase",
+                look === "rows" && "px-6",
+              )}
+            >
               {group.title}
               {group.current ? (
                 <span className="rounded-full bg-subtle px-2 text-ink normal-case">{t("now")}</span>
@@ -128,7 +157,7 @@ export function ChecklistGroups({
           ) : null}
           <ul className="m-0 list-none p-0">
             {group.rows.map((row) => (
-              <Row key={row.key} row={row} />
+              <Row key={row.key} row={row} look={look} />
             ))}
           </ul>
         </div>

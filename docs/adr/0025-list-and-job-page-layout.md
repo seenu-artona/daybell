@@ -102,3 +102,47 @@ caller's studio and that `q` is an ilike on the name only.
 - An ARIA tablist for views and sections: each is its own address, so links with `aria-current`.
 - Hover-only row actions: nothing appears on hover; a row's main link or button stays the keyboard target.
 - Search text in the address: it may hold a child's or client's name (D113).
+
+## Amendments (Oct 14, 2026): D145 (amends D144)
+
+Seenu tried the D144 UI on staging and asked for these changes (D145, amends D144). UI only: no schema, migration,
+API contract, RLS, event or region changes. Where they differ from the sections above, these win.
+
+1. **Tab levels.** The first row of tabs on any page is pills (`MainTabs`, the current one near-black); dash
+   `ViewTabs` are only a second level under pill tabs. Jobs (All · Draft · Selling · Closed) and the Orders page's
+   status views are pills, still links with `aria-current`. Their tools sit on the same row at the right end, and that
+   row has no line under it: `ViewBar` has `variant="main"` (the default, no line) and `"sub"` (the hairline, for the
+   dashes). The job page keeps pill job tabs over dash sub tabs (Subjects, Photos, the job's Orders: `JobSection` uses
+   `"sub"`, and `OrdersList` takes `level="sub"` there). `MainTabs` scroll sideways when full at 1280px. Clients and
+   Price lists have no views; their tool row loses its line too.
+2. **Jobs rows.** The Progress cell is one line, "5 of 7 · Next: Picture day" (the next task stays a link, D143; a
+   closed job ends with "All done"). The milestone pill is gone from the row: the Status pill already says the shop's
+   state. The line never wraps; a long task is cut with an ellipsis on screen only, and its text and the link's name
+   stay whole for screen readers.
+3. **One filter icon.** The quiet menus are gone (QuietMenu and its test removed). Subjects (Class, Grade when the
+   roster has grades, Group by) and Orders (Delivery, and Job on the Orders page) have one 44px filter icon: named
+   "Filter", or "Filter (n on)" with a small dot while filters are set (words, not colour alone, D91), with
+   `aria-expanded`. It opens the existing Popover with one named radio group per filter (the same options) and, while
+   any is set, Clear filters, which resets them, closes the panel and puts focus back on the icon. The right end's
+   order is now: filter icon, search, quiet actions, then the one green action (Subjects: filter, search, Print QR
+   cards, Add subjects). Orders' delivery stays in the address (`?delivery=`); the bar's own Clear filters is gone.
+4. **Home.** Home leaves PageFrame for `ListPage`: the h1 alone on the canvas, the date range at the right end of the
+   row under it. Every section is a white list card named by its h2; rows that open somewhere are one link each in the
+   ClickableRow style (16px, canvas grey on hover, name underlined, faint chevron that darkens). Links are ink; Home
+   has no green action. Data and D143 behaviour (setup checklist, Up next with reasons) are unchanged. Call 12 now
+   reads: Settings, an order and a price list keep PageFrame.
+
+Calls made in the amendment:
+
+- A. Group by sits in the filter panel with Class and Grade (Seenu listed it); it counts as "on" when it is not None,
+  and Clear filters sets it back to None.
+- B. Orders' Clear filters (in the panel) clears the delivery and the job, not the reference search, which keeps its
+  own box (emptying it closes it and drops the search). The earlier "focus on the current view" is replaced by focus
+  back on the filter icon.
+- C. The filter icon is lucide's Funnel; the panel scrolls when a studio has many jobs.
+- D. Jobs rows that wait with no next task (a milestone but no next) show only "5 of 7".
+- E. Home never had a page intro, so nothing was removed there. Up next keeps its own muted line ("Picked from all
+  your jobs, most urgent first") under its card title, as D143 has it. Recently on Home is now a region named by its
+  heading.
+- F. The setup checklist's rows on Home use the new row look (`ChecklistGroups look="rows"`); the job Overview's
+  checklist keeps its plain look.

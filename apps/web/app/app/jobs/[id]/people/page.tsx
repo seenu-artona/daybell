@@ -48,8 +48,8 @@ export default function PeoplePageRoute() {
 
 /**
  * A job's Subjects (D137, D138, D144; the People route, Phase 1 step 2's roster): one view bar (the views All,
- * Possible duplicates, Do not photograph and Do not publish in ?show=; quiet class, grade and grouping menus, Print QR
- * cards, the search and the green Add subjects menu), then a flat list with a Class column in a white list card, its
+ * Possible duplicates, Do not photograph and Do not publish in ?show=; the filter icon for the class, grade and
+ * grouping, the search, Print QR cards and the green Add subjects menu), then a flat list with a Class column in a white list card, its
  * footer counting the roster (Group: Class brings the class headings back), and the selected child in the floating
  * panel (?child=<id>, an id only). Add and edit keep the existing child form dialog (D133); Import stays its own page.
  */

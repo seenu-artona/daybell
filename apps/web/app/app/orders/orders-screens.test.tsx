@@ -158,6 +158,11 @@ async function type(el: HTMLInputElement | HTMLSelectElement, value: string) {
     );
   });
 }
+/** The filter icon: named "Filter", or "Filter (n on)". */
+const filterButton = () =>
+  [...container.querySelectorAll("button")].find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Filter"),
+  );
 const status = () => container.querySelector('[role="status"][aria-live="polite"]')?.textContent;
 
 beforeEach(() => {
@@ -252,8 +257,10 @@ describe("the orders list", () => {
     );
     await render(<OrdersList status="printed" delivery="home" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=home");
-    // A quiet menu whose visible words are its name (WCAG 2.5.3), opening radio buttons that apply as they change.
-    const trigger = button("Delivery: Home");
+    // The filter icon says a filter is on in its name (D145, amends D144), and opens radio buttons that apply as
+    // they change.
+    const trigger = filterButton();
+    expect(trigger?.getAttribute("aria-label")).toBe("Filter (1 on)");
     expect(trigger?.getAttribute("aria-expanded")).toBe("false");
     await act(async () => trigger?.click());
     expect(trigger?.getAttribute("aria-expanded")).toBe("true");
@@ -265,7 +272,8 @@ describe("the orders list", () => {
     });
     await render(<OrdersList status="printed" delivery="school" />);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=school");
-    expect(button("Delivery: School")?.getAttribute("aria-expanded")).toBe("true");
+    expect(filterButton()?.getAttribute("aria-expanded")).toBe("true");
+    expect((field("School") as HTMLInputElement).checked).toBe(true);
   });
 
   it("keeps the delivery in every view's link, and the job and search across views", async () => {
@@ -313,18 +321,36 @@ describe("the orders list", () => {
     ]);
   });
 
-  it("Clear filters clears the address's delivery, closes the search and puts focus on the current view", async () => {
+  it("Clear filters, in the filter panel, clears the address's delivery and puts focus back on the filter icon", async () => {
     answer();
     await render(<OrdersList status="paid" delivery="home" />);
-    const opener = container.querySelector('button[aria-label="Search orders"]') as HTMLElement;
-    await act(async () => opener.click());
-    await type(container.querySelector('input[type="search"]') as HTMLInputElement, "7KQ2");
+    expect(button("Clear filters")).toBeUndefined();
+    await act(async () => filterButton()?.click());
     await act(async () => button("Clear filters")?.click());
     await wait(10);
     expect(replace).toHaveBeenCalledWith("/app/orders?status=paid", { scroll: false });
-    expect(container.querySelector('input[type="search"]')).toBeNull();
-    expect(document.activeElement?.getAttribute("aria-current")).toBe("page");
-    expect(document.activeElement?.textContent).toBe(messages.app.orders.statuses.paid);
+    expect(filterButton()?.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(filterButton());
+  });
+
+  it("puts the filter icon, then the search, at the right end; a job's tab has no Job filter (D145, amends D144)", async () => {
+    answer();
+    await render(<OrdersList />);
+    const named = [...container.querySelectorAll("button[aria-label]")].map((b) =>
+      b.getAttribute("aria-label"),
+    );
+    expect(named.slice(0, 2)).toEqual(["Filter", "Search orders"]);
+    await act(async () => filterButton()?.click());
+    expect([...container.querySelectorAll("fieldset legend")].map((l) => l.textContent)).toEqual([
+      "Delivery",
+      "Job",
+    ]);
+    // The same list re-rendered for a job's tab: the panel is still open.
+    await render(<OrdersList jobId={O1} level="sub" />);
+    expect(filterButton()?.getAttribute("aria-expanded")).toBe("true");
+    expect([...container.querySelectorAll("fieldset legend")].map((l) => l.textContent)).toEqual([
+      "Delivery",
+    ]);
   });
 
   it("shows the status views as links to ?status=, the current one marked (D144)", async () => {
@@ -367,7 +393,6 @@ describe("the orders list", () => {
     await act(async () => box.form?.requestSubmit());
     await wait(20);
     expect(api.mock.calls.map((c) => c[0])).toContain("/orders?q=7KQ2");
-    expect(button("Clear filters")).toBeDefined();
   });
 
   it("gives photographers no checkboxes", async () => {
@@ -613,6 +638,29 @@ describe("Home (Q4)", () => {
     const today = container.querySelector('section[aria-label="Today"]')?.textContent ?? "";
     expect(today).toContain("$124.30");
     expect(today).toContain("$3.00");
+  });
+
+  it("lays Home out like a list page: the title alone, sections as list cards with link rows (D145, amends D144)", async () => {
+    api.mockResolvedValue(ok(sales));
+    await render(<HomePage />, "owner");
+    const header = container.querySelector("header");
+    expect(header?.querySelector("h1")?.textContent).toBe("Home");
+    expect(header?.querySelector("p")).toBeNull();
+    // To do is a region named by its h2, in a white list card (20px corners, soft shadow).
+    const heading = [...container.querySelectorAll("h2")].find((h) => h.textContent === "To do");
+    const todo = container.querySelector(`section[aria-labelledby="${heading?.id}"]`);
+    expect(todo?.className).toMatch(/\brounded-list\b/);
+    expect(todo?.className).toMatch(/\bshadow-card\b/);
+    // Each row is one link: 16px words that underline on hover, a faint chevron hidden from screen readers, never green.
+    const row = todo?.querySelector('a[href="/app/orders?status=paid"]');
+    expect(row?.className).toMatch(/\bmin-h-14\b/);
+    expect(row?.className).toMatch(/\btext-body-lg\b/);
+    expect(row?.className).toMatch(/\bhover:bg-canvas\b/);
+    expect(row?.className).not.toMatch(/\btext-primary\b/);
+    expect(row?.querySelector("span span")?.className).toMatch(/\bgroup-hover:underline\b/);
+    expect(row?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    // The date range is a labelled select at the right end of the row under the title.
+    expect(container.querySelector("label select")).not.toBeNull();
   });
 
   it("asks nothing about orders for photographers", async () => {

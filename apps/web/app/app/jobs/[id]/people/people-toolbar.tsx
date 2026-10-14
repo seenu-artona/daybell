@@ -6,8 +6,8 @@ import { Button, buttonVariants, SearchToggle, ViewTab, ViewTabs } from "@daybel
 import { ChevronDown, Plus, QrCode, Upload } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { FilterMenu } from "../../../filter-menu";
 import { MENU_ROW, Popover } from "../../../popover";
-import { QuietMenu } from "../../../quiet-menu";
 import {
   type ClassChoice,
   classChoiceFrom,
@@ -36,9 +36,9 @@ export function SubjectsViews({ base, view }: { base: string; view: SubjectView 
 }
 
 /**
- * Subjects' tools at the right end of the view bar (D138, D144), in order: quiet menus for the class, the grade (only
- * when the roster has grades) and grouping; a quiet Print QR cards; the search; and the green Add subjects menu (Add
- * child, Import roster) for roster editors. The search text, class and grade stay in this browser: they are never sent
+ * Subjects' tools at the right end of the view bar (D138; D145, amends D144), in order: the filter icon, whose panel
+ * holds the class, the grade (only when the roster has grades) and the grouping, with Clear filters; the search; then
+ * a quiet Print QR cards just before the green Add subjects menu (Add child, Import roster) for roster editors. The search text, class and grade stay in this browser: they are never sent
  * or put in the address (D113).
  */
 export function SubjectsTools({
@@ -81,59 +81,62 @@ export function SubjectsTools({
   const tr = useTranslations("app.roster");
   const tq = useTranslations("app.qrCards");
   const noGroup = tr("noGroup", { group: word });
-  const className =
-    classChoice.kind === "all"
-      ? t("all")
-      : classChoice.kind === "none"
-        ? noGroup
-        : (groups.find((g) => g.id === classChoice.id)?.name ?? t("all"));
-
   return (
     <>
       {hasRows ? (
         <>
-          <QuietMenu
-            label={t("classMenu", { group: word, value: className })}
-            legend={tr("filter", { group: word })}
-            value={classChoiceValue(classChoice)}
-            onChange={(v) => onClassChoice(classChoiceFrom(v))}
-            options={[
-              { value: "", label: t("all") },
-              ...groups.map((g) => ({ value: g.id, label: g.name })),
-              { value: "none", label: noGroup },
+          <FilterMenu
+            onClear={() => {
+              onClassChoice({ kind: "all" });
+              onGrade("");
+              onGroupBy("none");
+            }}
+            groups={[
+              {
+                key: "class",
+                legend: tr("filter", { group: word }),
+                value: classChoiceValue(classChoice),
+                onChange: (v) => onClassChoice(classChoiceFrom(v)),
+                options: [
+                  { value: "", label: t("all") },
+                  ...groups.map((g) => ({ value: g.id, label: g.name })),
+                  { value: "none", label: noGroup },
+                ],
+              },
+              ...(grades.length > 0
+                ? [
+                    {
+                      key: "grade",
+                      legend: t("grade"),
+                      value: grade,
+                      onChange: onGrade,
+                      options: [
+                        { value: "", label: t("all") },
+                        ...grades.map((g) => ({ value: g, label: g })),
+                      ],
+                    },
+                  ]
+                : []),
+              {
+                key: "groupBy",
+                legend: t("groupByLegend"),
+                value: groupBy,
+                initial: "none",
+                onChange: (v) => onGroupBy(v as GroupBy),
+                options: [
+                  { value: "group", label: tr("filter", { group: word }) },
+                  { value: "none", label: t("groupNone") },
+                ],
+              },
             ]}
           />
-          {grades.length > 0 ? (
-            <QuietMenu
-              label={t("gradeMenu", { value: grade || t("all") })}
-              legend={t("grade")}
-              value={grade}
-              onChange={onGrade}
-              options={[
-                { value: "", label: t("all") },
-                ...grades.map((g) => ({ value: g, label: g })),
-              ]}
-            />
-          ) : null}
-          <QuietMenu
-            label={t("groupBy", {
-              by: groupBy === "group" ? tr("filter", { group: word }) : t("groupNone"),
-            })}
-            legend={t("groupByLegend")}
-            value={groupBy}
-            onChange={(v) => onGroupBy(v as GroupBy)}
-            options={[
-              { value: "group", label: tr("filter", { group: word }) },
-              { value: "none", label: t("groupNone") },
-            ]}
-          />
+          <SearchToggle label={t("searchLabel")} value={query} onChange={onQuery} />
           {canEdit ? (
             <Button variant="quiet" shape="pill" onClick={onPrint}>
               <QrCode aria-hidden="true" />
               {tq("button")}
             </Button>
           ) : null}
-          <SearchToggle label={t("searchLabel")} value={query} onChange={onQuery} />
         </>
       ) : null}
       {canEdit ? (

@@ -1,3 +1,4 @@
+import type { JobListItem } from "@daybell/api";
 import { JOB_STATUSES, type JobStatus } from "@daybell/core";
 
 /** The Jobs list's views (D144): All, then each shop state, in ?status= (enum words only, D113). */
@@ -19,4 +20,18 @@ export function jobsQuery(view: JobView, today: string, cursor: string | null): 
   if (view) query.set("status", view);
   if (cursor) query.set("cursor", cursor);
   return `/jobs?${query}`;
+}
+
+type Checklist = JobListItem["checklist"];
+
+/**
+ * What follows "5 of 7" on a Jobs row's one progress line (D143; D145, amends D144): the next task, "All done" once
+ * the checklist has no milestone left (a closed job), or nothing while a job waits with no next task. The milestone
+ * itself is not shown on the row: the Status pill already says the shop's state.
+ */
+export function progressEnd(
+  checklist: Pick<Checklist, "milestone" | "next">,
+): { kind: "next"; task: NonNullable<Checklist["next"]> } | { kind: "allDone" } | null {
+  if (checklist.next) return { kind: "next", task: checklist.next };
+  return checklist.milestone ? null : { kind: "allDone" };
 }
