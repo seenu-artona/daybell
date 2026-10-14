@@ -168,6 +168,10 @@ export function OrdersList({ jobId }: { jobId?: string }) {
     label: label(c),
     selected: sameOrderChip(c, chip),
     href: orderChipHref(pathname, c),
+    // Until the record's name is known, the chip is named by its kind rather than "…".
+    ...(c.kind === "job" && !names.get(recordKey("job", c.id))
+      ? { ariaLabel: t("chips.job") }
+      : {}),
     ...(remove
       ? {
           onRemove: () => {

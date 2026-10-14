@@ -413,6 +413,19 @@ describe("the orders list", () => {
     expect(container.textContent).not.toContain(messages.app.chips.loadFailed);
   });
 
+  it("names a saved job chip by its kind while the job's name loads, never by the placeholder", async () => {
+    api.mockImplementation((path: string) =>
+      path.startsWith("/jobs/")
+        ? new Promise(() => {})
+        : Promise.resolve(ok({ orders: [listed(O1, "7KQ2M9XA")], nextCursor: null })),
+    );
+    saved.chips = [{ key: "job", value: O2 }];
+    await render(<OrdersList />);
+    const pending = chipLinks().find((a) => a.textContent === "…");
+    expect(pending?.getAttribute("aria-label")).toBe("Job");
+    expect(container.querySelector('button[aria-label="Remove filter: Job"]')).toBeTruthy();
+  });
+
   it("a job's tab has its own chips, without Job…, saved for that job only", async () => {
     answer();
     address.path = `/app/jobs/${O1}/orders`;

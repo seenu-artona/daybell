@@ -110,6 +110,10 @@ export function useSubjectChips({
     label: label(c),
     selected: sameSubjectChip(c, chip),
     href: subjectsHref(base, c, childId),
+    // Until the record's name is known, the chip is named by its kind rather than "…".
+    ...(c.kind === "class" && !groups.some((g) => g.id === c.id)
+      ? { ariaLabel: tr("columns.group", { group: word }) }
+      : {}),
     // Any chip with an address takes over from a grade chosen in this browser.
     onSelect: () => setGrade(null),
     ...(remove

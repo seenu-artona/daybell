@@ -167,6 +167,10 @@ function JobsPage() {
     label: label(c),
     selected: sameJobChip(c, chip),
     href: jobChipHref(c),
+    // Until the record's name is known, the chip is named by its kind rather than "…".
+    ...(c.kind === "client" && !names.get(recordKey("client", c.id))
+      ? { ariaLabel: t("chips.client") }
+      : {}),
     ...(remove
       ? {
           onRemove: () => {

@@ -20,6 +20,8 @@ export interface ChipItem {
   onRemove?: () => void;
   /** The remove button's name when the label isn't the chip's name yet (still loading): e.g. "Remove filter: Client". */
   removeLabel?: string;
+  /** The chip's own name while its label is a placeholder ("…"): its kind, e.g. "Client". */
+  ariaLabel?: string;
 }
 
 const CHIP_TARGET = "[data-chip-target]";
@@ -89,6 +91,7 @@ export function ChipRow({
                 href={item.href}
                 scroll={false}
                 data-chip-target=""
+                {...(item.ariaLabel ? { "aria-label": item.ariaLabel } : {})}
                 {...(item.onSelect ? { onClick: item.onSelect } : {})}
               >
                 {item.label}
@@ -97,6 +100,7 @@ export function ChipRow({
               <button
                 type="button"
                 data-chip-target=""
+                {...(item.ariaLabel ? { "aria-label": item.ariaLabel } : {})}
                 {...(item.onSelect ? { onClick: item.onSelect } : {})}
               >
                 {item.label}
