@@ -218,10 +218,10 @@ test("job page layout, menu search and studio separation", async ({
   ).toBeVisible();
   await expect(tabActions.getByRole("button", { name: "Add subjects", exact: true })).toBeVisible();
   // With one child the page is barely taller than the window, so the job's frame (the sticky row's container: a
-  // sticky element never leaves it) gets room to scroll past the header first.
+  // sticky element never leaves its content box, padding excluded) is made taller to scroll past the header first.
   await page.setViewportSize({ width: 1280, height: 420 });
   await tabRow.evaluate((row) => {
-    if (row.parentElement) row.parentElement.style.paddingBottom = "1200px";
+    if (row.parentElement) row.parentElement.style.minHeight = "2400px";
     window.scrollTo(0, 600);
   });
   await expect(tabRow).toHaveAttribute("data-stuck", "");
@@ -230,7 +230,7 @@ test("job page layout, menu search and studio separation", async ({
   ).toBeInViewport();
   await page.setViewportSize({ width: 1280, height: 900 });
   await tabRow.evaluate((row) => {
-    if (row.parentElement) row.parentElement.style.paddingBottom = "";
+    if (row.parentElement) row.parentElement.style.minHeight = "";
     window.scrollTo(0, 0);
   });
   await expect(tabRow).not.toHaveAttribute("data-stuck", "");
