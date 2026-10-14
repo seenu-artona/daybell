@@ -61,7 +61,8 @@ export type PeopleFilter =
   | { kind: "doNotPublish" }
   | { kind: "duplicates" }
   | { kind: "notOrdered" }
-  | { kind: "noPhotos" };
+  | { kind: "noPhotos" }
+  | { kind: "notPhotographed" };
 export type PeopleFilterKind = PeopleFilter["kind"];
 
 /** The two class filters exclude each other: a child is either in a class or in none. */
@@ -104,6 +105,9 @@ function passes(row: PersonRow, filter: PeopleFilter): boolean {
       return row.hasPaidOrder === false;
     case "noPhotos":
       return row.photoCount === 0;
+    // D153: no photos, and not someone who mustn't be photographed (they are never "missing").
+    case "notPhotographed":
+      return row.photoCount === 0 && !row.doNotPhotograph;
   }
 }
 
@@ -174,4 +178,14 @@ export function groupPeople<R extends PersonRow>(
   }
   if (none.length > 0) sections.push({ key: "none", group: null, rows: none });
   return sections;
+}
+
+/**
+ * A parent email as the Subjects person view shows it (D153; Seenu, Oct 14): the first letter of the name, dots, then
+ * the domain whole, e.g. p•••@gmail.com. The full address stays in the edit form for roster editors.
+ */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return "•••";
+  return `${email.slice(0, 1)}•••${email.slice(at)}`;
 }

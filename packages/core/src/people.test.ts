@@ -4,6 +4,7 @@ import {
   applyFilters,
   gradeOptions,
   groupPeople,
+  maskEmail,
   matchesSearch,
   type PeopleFilter,
   type PersonRow,
@@ -92,6 +93,25 @@ describe("filters", () => {
     // Unknown (a photographer's null, or a list without the column) never counts as "no photos" or "not ordered".
     expect(at(applyFilters(listed, [{ kind: "noPhotos" }]))).toEqual([1]);
     expect(at(applyFilters(listed, [{ kind: "notOrdered" }, { kind: "noPhotos" }]))).toEqual([1]);
+  });
+
+  it("Not photographed is no photos and not Do not photograph (D153)", () => {
+    const listed = [
+      person({ photoCount: 0 }),
+      person({ photoCount: 0, doNotPhotograph: true }),
+      person({ photoCount: 2 }),
+      person({}),
+    ];
+    const at = (list: PersonRow[]) => list.map((r) => listed.indexOf(r));
+    expect(at(applyFilters(listed, [{ kind: "notPhotographed" }]))).toEqual([0]);
+  });
+
+  it("masks a parent email to its first letter and domain (D153)", () => {
+    expect(maskEmail("priya.patel@gmail.com")).toBe("p•••@gmail.com");
+    expect(maskEmail("m@school.example")).toBe("m•••@school.example");
+    // Nothing usable: no letters leak.
+    expect(maskEmail("@nowhere")).toBe("•••");
+    expect(maskEmail("plain")).toBe("•••");
   });
 
   it("different kinds combine with AND", () => {
