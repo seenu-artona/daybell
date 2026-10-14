@@ -523,7 +523,8 @@
       "checklistTitle": "Your next steps",
       "daybellFee": "Daybell fee",
       "since": "Since {date}",
-      "salesFailed": "We couldn’t load your numbers."
+      "salesFailed": "We couldn’t load your numbers.",
+      "closesIn": "{days, plural, =0 {Closes today} one {Closes in # day} other {Closes in # days}}"
     },
     "signOutFailed": "We couldn't sign you out. Check your connection and try again.",
     "dialog": {

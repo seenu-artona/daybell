@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import { endOfLocalDay, localDay } from "@daybell/core";
 import { NextIntlClientProvider } from "next-intl";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -55,5 +57,47 @@ describe("JobsSelling", () => {
     expect(row?.textContent).toBe("Lincoln ElementaryNo closing date");
     expect(row?.className).toMatch(/\bmin-h-14\b/);
     expect(row?.querySelector("span")?.className).toMatch(/\bgroup-hover:underline\b/);
+  });
+});
+
+describe("JobsSelling closing lines (D147)", () => {
+  const day = (offset: number) => localDay(new Date(Date.now() + offset * 86_400_000));
+  it("says when the shop closes: amber with words when two days or fewer away, else the last day", async () => {
+    api.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        jobs: [
+          { id: JOB, name: "Soon", closesAt: endOfLocalDay(day(1)).toISOString() },
+          {
+            id: `${JOB.slice(0, -1)}2`,
+            name: "Later",
+            closesAt: endOfLocalDay("2030-10-24").toISOString(),
+          },
+          {
+            id: `${JOB.slice(0, -1)}3`,
+            name: "Today",
+            closesAt: endOfLocalDay(day(0)).toISOString(),
+          },
+        ],
+        nextCursor: null,
+      },
+    });
+    await act(async () =>
+      root.render(
+        <NextIntlClientProvider locale="en-US" messages={messages} timeZone="America/Toronto">
+          <JobsSelling refreshKey={0} />
+        </NextIntlClientProvider>,
+      ),
+    );
+    await act(() => new Promise<void>((r) => setTimeout(r, 0)));
+    const lines = [...container.querySelectorAll("li a > span:last-child")];
+    expect(lines.map((l) => l.textContent)).toEqual([
+      "Closes in 1 day",
+      "Closes Oct 24",
+      "Closes today",
+    ]);
+    expect(lines[0]?.className).toMatch(/\btext-warning-text\b/);
+    expect(lines[1]?.className).not.toMatch(/\btext-warning-text\b/);
   });
 });

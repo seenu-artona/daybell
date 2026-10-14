@@ -1,26 +1,27 @@
 "use client";
 
 import type { JobsResponse } from "@daybell/api";
-import { localDay } from "@daybell/core";
+import { closesSoon, closingDay, localDay } from "@daybell/core";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { api } from "@/lib/client-api";
 import { HOME_FOOTER_LINK } from "./home-card";
 import { tabHref } from "./jobs/[id]/tabs";
-import { useFormatClosing } from "./jobs/closing-date";
 
 /** Home shows this many; "All jobs" is always there for the rest. */
 export const JOBS_SELLING_SHOWN = 5;
 
 /**
  * Home's "Selling now" (D127; ADR 0021, call 7) as quiet text on the canvas (D146, amends D145): an h2 with "All jobs"
- * at its right, then the studio's selling jobs, newest first, each one link with its name and closing date (in the
- * viewer's own time), thin lines between them. The jobs list has no sales per job yet, so the rows show what it has.
+ * at its right, then the studio's selling jobs, newest first, each one link with its name and when its shop closes:
+ * the last day to order in the viewer's own time ("Closes Oct 24"), or, two days or fewer away, amber and in words
+ * ("Closes in 2 days", never colour alone: D91), or "No closing date" (D147, the Jobs list's closingDay and
+ * closesSoon). No sales per job (Seenu, Oct 14).
  */
 export function JobsSelling({ refreshKey }: { refreshKey: number }) {
   const t = useTranslations("app.home");
-  const formatClosing = useFormatClosing();
+  const closes = useClosesLine();
   const headingId = useId();
   const [data, setData] = useState<JobsResponse | null>(null);
   const [failed, setFailed] = useState(false);
@@ -66,11 +67,7 @@ export function JobsSelling({ refreshKey }: { refreshKey: number }) {
                 className="group flex min-h-14 flex-col justify-center py-3 text-ink no-underline focus-visible:outline-2 focus-visible:outline-primary"
               >
                 <span className="text-body-lg font-semibold group-hover:underline">{job.name}</span>
-                <span className="text-body text-muted">
-                  {job.closesAt
-                    ? t("closesOn", { when: formatClosing(job.closesAt) })
-                    : t("noClosingDate")}
-                </span>
+                {closes(job.closesAt)}
               </Link>
             </li>
           ))}
@@ -78,4 +75,25 @@ export function JobsSelling({ refreshKey }: { refreshKey: number }) {
       )}
     </section>
   );
+}
+
+/** A selling job's closing line on Home (D147): amber with words when two days or fewer away. */
+function useClosesLine() {
+  const t = useTranslations("app.home");
+  const format = useFormatter();
+  return (closesAt: string | null) => {
+    if (!closesAt) return <span className="text-body text-muted">{t("noClosingDate")}</span>;
+    const days = closesSoon(closesAt, localDay(new Date()));
+    if (days !== null)
+      return (
+        <span className="text-body font-semibold text-warning-text">{t("closesIn", { days })}</span>
+      );
+    // The last day to order, as a calendar date: never shifted by formatting it in another zone.
+    const when = format.dateTime(new Date(`${closingDay(closesAt)}T00:00:00Z`), {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+    return <span className="text-body text-muted">{t("closesOn", { when })}</span>;
+  };
 }
