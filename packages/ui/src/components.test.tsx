@@ -48,8 +48,6 @@ import {
   Toast,
   uiColorOn,
   ViewBar,
-  ViewTab,
-  ViewTabs,
 } from "./index";
 
 async function expectNoA11yViolations(container: HTMLElement) {
@@ -424,34 +422,20 @@ describe("D144 list pieces", () => {
     await expectNoA11yViolations(container);
   });
 
-  it("view bar: a page's first row has no line under it; a second level under pill tabs does", () => {
+  it("view bar: pill tabs on the left, tools at the right end in order, no line under it", () => {
     render(
       <main>
-        <ViewBar data-testid="main" actions={<button type="button">New job</button>} />
-        <ViewBar data-testid="sub" variant="sub" actions={<button type="button">Upload</button>} />
-      </main>,
-    );
-    expect(screen.getByTestId("main").className).not.toMatch(/\bborder-b\b/);
-    expect(screen.getByTestId("sub").className).toMatch(/\bborder-b\b/);
-    expect(screen.getByTestId("sub").className).toMatch(/\bborder-line-canvas\b/);
-  });
-
-  it("view tabs: aria-current, bold, and a dash hidden from screen readers; the bar puts actions on the right in order", async () => {
-    const { container } = render(
-      <main>
         <ViewBar
-          variant="sub"
+          data-testid="bar"
           tabs={
-            <ViewTabs label="Order views">
-              <ViewTab href="?status=" current>
-                All
-              </ViewTab>
-              <ViewTab href="?status=paid">Paid</ViewTab>
-            </ViewTabs>
+            <MainTabs label="Jobs sections">
+              <MainTab href="/app/jobs" current>
+                List
+              </MainTab>
+            </MainTabs>
           }
           actions={
             <>
-              <button type="button">Delivery: Any</button>
               <button type="button">Print QR cards</button>
               <button type="button">New job</button>
             </>
@@ -459,22 +443,21 @@ describe("D144 list pieces", () => {
         />
       </main>,
     );
-    const all = screen.getByRole("link", { name: "All" });
-    expect(all.getAttribute("aria-current")).toBe("page");
-    expect(all.className).toMatch(/\bfont-bold\b/);
-    expect(all.className).toMatch(/\bh-14\b/);
-    expect(screen.getByRole("link", { name: "Paid" }).getAttribute("aria-current")).toBeNull();
-    const dashes = container.querySelectorAll("[data-view-dash]");
-    expect(dashes).toHaveLength(1);
-    expect(dashes[0]?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByTestId("bar").className).not.toMatch(/\bborder-b\b/);
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "Delivery: Any",
       "Print QR cards",
       "New job",
     ]);
-    const nav = screen.getByRole("navigation", { name: "Order views" });
-    expect(nav.querySelector("ul")?.className).toMatch(/\boverflow-x-auto\b/);
-    await expectNoA11yViolations(container);
+  });
+
+  it("search toggle: on a card, the open box is canvas grey so it shows on white (D147)", () => {
+    function OnCard() {
+      const [value, setValue] = useState("");
+      return <SearchToggle label="Search jobs" value={value} onChange={setValue} onCard />;
+    }
+    render(<OnCard />);
+    fireEvent.click(screen.getByRole("button", { name: "Search jobs" }));
+    expect(screen.getByRole("searchbox").closest("label")?.className).toMatch(/\bbg-canvas\b/);
   });
 
   it("search toggle: a named button that opens a search box with focus in it", async () => {
@@ -774,5 +757,11 @@ describe("D147 filter chips", () => {
     expect(toolbar.className).toMatch(/\bborder-line\b/);
     expect(toolbar.lastElementChild?.textContent).toBe("Search jobs");
     expect(toolbar.nextElementSibling?.textContent).toBe("Rows");
+  });
+
+  it("a card that is only a toolbar has no hairline at its foot", () => {
+    const { container } = render(<ListCard toolbar={<span>Chips</span>} />);
+    const toolbar = container.querySelector("[data-list-toolbar]") as HTMLElement;
+    expect(toolbar.className).not.toMatch(/\bborder-b\b/);
   });
 });

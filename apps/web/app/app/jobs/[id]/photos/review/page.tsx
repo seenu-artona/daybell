@@ -12,14 +12,14 @@ import {
   type TaggingSummaryResponse,
 } from "@daybell/api";
 import { MAX_PHOTOS_PER_BIN_REQUEST, MAX_PHOTOS_PER_MOVE } from "@daybell/core";
-import { Banner, Button, Card } from "@daybell/ui";
+import { Banner, Button, Card, ListCard } from "@daybell/ui";
 import { CheckCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocalDateTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
-import { useJob } from "../../job-context";
+import { JobTabActions, useJob } from "../../job-context";
 import { JobSection } from "../../job-section";
 import { LiveNote } from "../../live-note";
 import { PhotosViews } from "../photos-views";
@@ -287,22 +287,22 @@ export default function ReviewPage() {
     <ReviewContext.Provider value={context}>
       <JobSection
         title={t("title")}
-        views={<PhotosViews jobId={job.id} current="review" />}
-        tools={
-          canEdit && s ? (
-            <Button
-              shape="pill"
-              disabled={!s.canMarkReviewed || busy}
-              aria-describedby="review-state"
-              onClick={() => void markReviewed()}
-            >
-              <CheckCheck aria-hidden="true" />
-              {t("markReviewed")}
-            </Button>
-          ) : null
-        }
         below={
           <>
+            {canEdit && s ? (
+              <JobTabActions>
+                <Button
+                  shape="pill"
+                  disabled={!s.canMarkReviewed || busy}
+                  aria-describedby="review-state"
+                  onClick={() => void markReviewed()}
+                >
+                  <CheckCheck aria-hidden="true" />
+                  {t("markReviewed")}
+                </Button>
+              </JobTabActions>
+            ) : null}
+            <ListCard toolbar={<PhotosViews jobId={job.id} current="review" />} />
             {subline ? <p className="m-0 text-body text-muted">{subline}</p> : null}
             {s ? (
               <p id="review-state" className="m-0 text-sm text-muted">

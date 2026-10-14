@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import { Children, type HTMLAttributes, type ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 export interface ListCardProps extends HTMLAttributes<HTMLElement> {
@@ -25,6 +25,8 @@ export function ListCard({
   children,
   ...props
 }: ListCardProps) {
+  // A card that is only a toolbar (a section's chips over content in cards of its own) has no hairline at its foot.
+  const below = Children.toArray(children).length > 0 || Boolean(footer);
   return (
     <section
       aria-label={label}
@@ -34,7 +36,10 @@ export function ListCard({
       {toolbar || toolbarEnd ? (
         <div
           data-list-toolbar=""
-          className="flex min-h-17 items-center gap-3 border-b border-line px-3.5 py-3"
+          className={cn(
+            "flex min-h-17 items-center gap-3 px-3.5 py-3",
+            below && "border-b border-line",
+          )}
         >
           <div className="min-w-0 flex-1">{toolbar}</div>
           {toolbarEnd ? <div className="flex shrink-0 items-center gap-2">{toolbarEnd}</div> : null}

@@ -47,14 +47,7 @@ export {
   type TableProps,
   TableRow,
 } from "./components/table";
-export {
-  ViewBar,
-  type ViewBarProps,
-  ViewTab,
-  type ViewTabProps,
-  ViewTabs,
-  type ViewTabsProps,
-} from "./components/view-bar";
+export { ViewBar, type ViewBarProps } from "./components/view-bar";
 export { cn } from "./lib/cn";
 export {
   contrastRatio,

@@ -16,7 +16,8 @@ const OPTION = "flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 
  * A picker as one field (D133, ADR 0010): an ARIA 1.2 combobox with a listbox. The list opens on click, typing or
  * ArrowDown, not on focus alone, so it stays shut when focus returns from a dialog. Arrow keys move, Enter picks the
  * active option, Escape closes the list (and only the list). Nothing is active until the arrow keys or pointer choose,
- * so Enter alone submits the form. "+ Add new …" is always the last option, so with nothing to pick it is the only one.
+ * so Enter alone submits the form. "+ Add new …", when given, is always the last option, so with nothing to pick it is
+ * the only one; a filter (D147) has none.
  * `search` may call the API (clients) or filter a list already loaded (classes); only its newest answer is used.
  */
 export function Combobox<T extends ComboboxOption>({
@@ -36,8 +37,9 @@ export function Combobox<T extends ComboboxOption>({
   value: { id: string; name: string } | null;
   onChange: (option: T | null) => void;
   search: (query: string) => Promise<T[] | null>;
-  addNewLabel: string;
-  onAddNew: (typed: string) => void;
+  /** "+ Add new …", always the last option; left out (with onAddNew) where nothing can be added, e.g. a filter. */
+  addNewLabel?: string;
+  onAddNew?: (typed: string) => void;
   error?: string | undefined;
 }) {
   const id = useId();
@@ -80,9 +82,10 @@ export function Combobox<T extends ComboboxOption>({
     return () => clearTimeout(timer);
   }, [query, open]);
 
-  // The options: matches, then "Add new …" last.
-  const count = results.length + 1;
-  const addIndex = results.length;
+  // The options: matches, then "Add new …" last when there is one.
+  const canAdd = addNewLabel !== undefined && onAddNew !== undefined;
+  const count = results.length + (canAdd ? 1 : 0);
+  const addIndex = canAdd ? results.length : -2;
 
   // Keep the active option in sight as the arrow keys move through a long list.
   useEffect(() => {
@@ -100,7 +103,7 @@ export function Combobox<T extends ComboboxOption>({
   }
 
   function pick(index: number) {
-    if (index === addIndex) {
+    if (index === addIndex && onAddNew) {
       setOpen(false);
       setTyped(false);
       setText(value?.name ?? "");
@@ -193,18 +196,20 @@ export function Combobox<T extends ComboboxOption>({
             {option.detail ? <span className="text-sm text-muted">{option.detail}</span> : null}
           </li>
         ))}
-        <li
-          id={`${id}-opt-${addIndex}`}
-          role="option"
-          aria-selected={active === addIndex}
-          onMouseDown={(e) => e.preventDefault()}
-          onMouseEnter={() => setActive(addIndex)}
-          onClick={() => pick(addIndex)}
-          className={`${OPTION} font-semibold text-primary ${active === addIndex ? "bg-primary-soft" : ""}`}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          {addNewLabel}
-        </li>
+        {canAdd ? (
+          <li
+            id={`${id}-opt-${addIndex}`}
+            role="option"
+            aria-selected={active === addIndex}
+            onMouseDown={(e) => e.preventDefault()}
+            onMouseEnter={() => setActive(addIndex)}
+            onClick={() => pick(addIndex)}
+            className={`${OPTION} font-semibold text-primary ${active === addIndex ? "bg-primary-soft" : ""}`}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            {addNewLabel}
+          </li>
+        ) : null}
       </ul>
       {error ? (
         <span id={errorId} className="text-caption text-danger">

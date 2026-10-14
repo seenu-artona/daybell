@@ -2,14 +2,14 @@
 
 import { PHOTO_CONFLICTS, type PhotosMovedResponse } from "@daybell/api";
 import { MAX_PHOTOS_PER_BIN_REQUEST } from "@daybell/core";
-import { Banner, Button } from "@daybell/ui";
+import { Banner, Button, ListCard } from "@daybell/ui";
 import { ArrowLeft, Trash2, Undo2, Upload } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
-import { useJob } from "../job-context";
+import { JobTabActions, useJob } from "../job-context";
 import { JobSection } from "../job-section";
 import { LiveNote } from "../live-note";
 import { tabHref } from "../tabs";
@@ -34,9 +34,10 @@ const CONFLICT_KEYS = Object.fromEntries(
 ) as Record<string, keyof typeof PHOTO_CONFLICTS>;
 
 /**
- * A job's Photos (D39, D60, D140, D144; Phase 1 step 4, ADR 0016): the view bar (All and Review; a quiet Bin (n) and the
- * green Upload photos), the upload sheet, a muted line with the counts (photos, uploads, processing, duplicates
- * skipped), then the photos as thumbnails in tagging order, 200 at a time. A photo opens in the floating panel (?photo=<id>). Owners, admins and photographers
+ * A job's Photos (D39, D60, D140, D144, D147; Phase 1 step 4, ADR 0016): a quiet Bin (n) and the green Upload photos at
+ * the right end of the job's tab row, the upload sheet, a muted line with the counts (photos, uploads, processing,
+ * duplicates skipped), then a white card with the chips All and Review in its toolbar and the photos as thumbnails in
+ * tagging order, 200 at a time. A photo opens in the floating panel (?photo=<id>). Owners, admins and photographers
  * upload, bin and restore; staff look. Closed jobs take no photos.
  */
 function PhotosPage() {
@@ -144,36 +145,35 @@ function PhotosPage() {
   return (
     <JobSection
       title={title}
-      views={bin ? null : <PhotosViews jobId={job.id} current="all" />}
-      tools={
-        bin ? (
-          <Button variant="quiet" shape="pill" onClick={() => showBin(false)}>
-            <ArrowLeft aria-hidden="true" />
-            {t("backToPhotos")}
-          </Button>
-        ) : (
-          <>
-            {counts ? (
-              <Button variant="quiet" shape="pill" onClick={() => showBin(true)}>
-                <Trash2 aria-hidden="true" />
-                {t("bin", { count: counts.binned })}
-              </Button>
-            ) : null}
-            {canUpload ? (
-              <Button
-                shape="pill"
-                aria-expanded={sheetOpen}
-                onClick={() => setSheetOpen((o) => !o)}
-              >
-                <Upload aria-hidden="true" />
-                {t("upload")}
-              </Button>
-            ) : null}
-          </>
-        )
-      }
       below={
         <>
+          <JobTabActions>
+            {bin ? (
+              <Button variant="quiet" shape="pill" onClick={() => showBin(false)}>
+                <ArrowLeft aria-hidden="true" />
+                {t("backToPhotos")}
+              </Button>
+            ) : (
+              <>
+                {counts ? (
+                  <Button variant="quiet" shape="pill" onClick={() => showBin(true)}>
+                    <Trash2 aria-hidden="true" />
+                    {t("bin", { count: counts.binned })}
+                  </Button>
+                ) : null}
+                {canUpload ? (
+                  <Button
+                    shape="pill"
+                    aria-expanded={sheetOpen}
+                    onClick={() => setSheetOpen((o) => !o)}
+                  >
+                    <Upload aria-hidden="true" />
+                    {t("upload")}
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </JobTabActions>
           {closed && !bin ? <Banner tone="info" title={t("closed")} /> : null}
           {bin ? null : <LiveNote />}
           {bin ? <p className="m-0 text-sm text-muted">{t("binNote")}</p> : null}
@@ -247,52 +247,54 @@ function PhotosPage() {
         ) : null
       }
     >
-      {!photos.rows && !photos.failed ? <p className="m-0 text-muted">{t("loading")}</p> : null}
-
-      {empty ? (
-        bin ? (
-          <p className="m-0 rounded-list bg-surface px-6 py-10 text-center text-muted shadow-card">
-            {t("binEmpty")}
-          </p>
-        ) : (
-          <div className="flex flex-col items-center gap-3 rounded-list bg-surface px-6 py-16 text-center shadow-card">
-            <h2 className="m-0 text-h3">{t("emptyTitle")}</h2>
-            <p className="m-0 max-w-120 text-muted">{t("emptyBody")}</p>
-            {canEdit ? null : <p className="m-0 text-caption text-muted">{t("emptyReadOnly")}</p>}
-          </div>
-        )
-      ) : null}
-
-      {rows.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          <PhotoGrid
-            photos={rows}
-            selectedId={selected?.id ?? null}
-            checked={canEdit ? checked : null}
-            onToggle={(id, on) =>
-              setChecked((current) => {
-                const next = new Set(current);
-                if (on) next.add(id);
-                else next.delete(id);
-                return next;
-              })
-            }
-            onOpen={open}
-            busy={photos.loadingMore}
-          />
-          {photos.nextCursor ? (
-            <Button
-              variant="white"
-              shape="pill"
-              className="self-center"
-              disabled={photos.loadingMore}
-              onClick={() => void photos.loadMore()}
-            >
-              {t("showMore")}
-            </Button>
+      <div className="flex flex-col gap-3">
+        <ListCard toolbar={bin ? null : <PhotosViews jobId={job.id} current="all" />}>
+          {!photos.rows && !photos.failed ? (
+            <p className="m-0 px-6 py-10 text-center text-muted">{t("loading")}</p>
           ) : null}
-        </div>
-      ) : null}
+          {empty ? (
+            bin ? (
+              <p className="m-0 px-6 py-10 text-center text-muted">{t("binEmpty")}</p>
+            ) : (
+              <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+                <h2 className="m-0 text-h3">{t("emptyTitle")}</h2>
+                <p className="m-0 max-w-120 text-muted">{t("emptyBody")}</p>
+                {canEdit ? null : (
+                  <p className="m-0 text-caption text-muted">{t("emptyReadOnly")}</p>
+                )}
+              </div>
+            )
+          ) : null}
+          {rows.length > 0 ? (
+            <PhotoGrid
+              photos={rows}
+              selectedId={selected?.id ?? null}
+              checked={canEdit ? checked : null}
+              onToggle={(id, on) =>
+                setChecked((current) => {
+                  const next = new Set(current);
+                  if (on) next.add(id);
+                  else next.delete(id);
+                  return next;
+                })
+              }
+              onOpen={open}
+              busy={photos.loadingMore}
+            />
+          ) : null}
+        </ListCard>
+        {photos.nextCursor ? (
+          <Button
+            variant="white"
+            shape="pill"
+            className="self-center"
+            disabled={photos.loadingMore}
+            onClick={() => void photos.loadMore()}
+          >
+            {t("showMore")}
+          </Button>
+        ) : null}
+      </div>
     </JobSection>
   );
 }

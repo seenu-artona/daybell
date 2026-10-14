@@ -1,7 +1,8 @@
 "use client";
 
 import type { Job, PhotoCounts, QrCardStatus } from "@daybell/api";
-import { createContext, useContext } from "react";
+import { createContext, type ReactNode, useContext } from "react";
+import { createPortal } from "react-dom";
 
 export interface JobSummary {
   /** Children on the roster. */
@@ -34,6 +35,8 @@ export interface JobContextValue {
   canManage: boolean;
   /** Owners, admins and photographers: add, import, edit and remove children. */
   canEditRoster: boolean;
+  /** The right end of the job's tab row, where a section puts its actions (D147); null until it is on the page. */
+  tabActions: HTMLElement | null;
 }
 
 export const JobContext = createContext<JobContextValue | null>(null);
@@ -43,4 +46,14 @@ export function useJob(): JobContextValue {
   const value = useContext(JobContext);
   if (!value) throw new Error("useJob must be used inside the job layout");
   return value;
+}
+
+/**
+ * A section's actions at the right end of the job's tab row (D147, ADR 0026), e.g. Subjects' Print QR cards and Add
+ * subjects, or Photos' Upload photos: rendered there (a portal) so they stay in the sticky row, after the tabs in the
+ * reading and tab order, and before the section's content.
+ */
+export function JobTabActions({ children }: { children: ReactNode }) {
+  const { tabActions } = useJob();
+  return tabActions ? createPortal(children, tabActions) : null;
 }

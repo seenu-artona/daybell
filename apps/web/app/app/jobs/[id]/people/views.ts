@@ -1,76 +1,91 @@
+import type { ListFilterChip } from "@daybell/api";
 import type { PeopleFilter } from "@daybell/core";
 
 /**
- * Subjects' views (D144): All, Possible duplicates, Do not photograph and Do not publish, in the address as ?show=
- * (enum words only, never search text: D113). Ordered / Not ordered / No photos wait for API data (plan B1).
+ * Subjects' chips (D147, amends D144 and D145): All, Not ordered (for people who see orders), No photos and Possible
+ * duplicates built in; a class, No class, Do not photograph and Do not publish added by the person (saved), and a grade
+ * (kept in this browser only: never saved, never in the address). One chip at a time, in the address as ?show=<word>
+ * or ?class=<id>, with the open child in &child=<id> (enum words and ids only, never search text: D113).
  */
-export const SUBJECT_VIEWS = ["all", "duplicates", "doNotPhotograph", "doNotPublish"] as const;
-export type SubjectView = (typeof SUBJECT_VIEWS)[number];
+export const SUBJECT_SHOWS = [
+  "notOrdered",
+  "noPhotos",
+  "duplicates",
+  "doNotPhotograph",
+  "doNotPublish",
+  "noClass",
+] as const;
+export type SubjectShow = (typeof SUBJECT_SHOWS)[number];
 
-/** The view in ?show=; anything unknown is All. */
-export function subjectView(param: string | null): SubjectView {
-  return (SUBJECT_VIEWS as readonly string[]).includes(param ?? "") && param !== "all"
-    ? (param as SubjectView)
-    : "all";
+/** Built in after All, in order. */
+export const BUILT_IN_SHOWS = ["notOrdered", "noPhotos", "duplicates"] as const;
+/** What "+ Add filter" offers beside each class and a grade. */
+export const SAVED_SHOWS = ["noClass", "doNotPhotograph", "doNotPublish"] as const;
+
+export type SubjectChip =
+  | { kind: "all" }
+  | { kind: "show"; show: SubjectShow }
+  | { kind: "class"; id: string }
+  | { kind: "grade"; grade: string };
+
+export const ALL_SUBJECTS: SubjectChip = { kind: "all" };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The chip in the address. Not ordered needs order data (`seesOrders`). Anything unknown, both parameters, or Not ordered
+ * for someone who doesn't see orders, is All, and `clean` says the page should replace the address.
+ */
+export function subjectChipFrom(
+  params: URLSearchParams,
+  { seesOrders }: { seesOrders: boolean },
+): { chip: SubjectChip; clean: boolean } {
+  const show = params.get("show");
+  const id = params.get("class");
+  if (show === null && id === null) return { chip: ALL_SUBJECTS, clean: false };
+  if (show !== null && id === null && (SUBJECT_SHOWS as readonly string[]).includes(show)) {
+    if (show !== "notOrdered" || seesOrders)
+      return { chip: { kind: "show", show: show as SubjectShow }, clean: false };
+  }
+  if (id !== null && show === null && UUID.test(id))
+    return { chip: { kind: "class", id: id.toLowerCase() }, clean: false };
+  return { chip: ALL_SUBJECTS, clean: true };
 }
 
-/** A view's address, with the open child's id when there is one. Only enum words and ids go in it. */
-export function subjectsHref(base: string, view: SubjectView, childId?: string | null): string {
+/** A chip's address, with the open child's id when there is one. A grade chip's is the plain list's. */
+export function subjectsHref(base: string, chip: SubjectChip, childId?: string | null): string {
   const params = new URLSearchParams();
-  if (view !== "all") params.set("show", view);
+  if (chip.kind === "show") params.set("show", chip.show);
+  if (chip.kind === "class") params.set("class", chip.id);
   if (childId) params.set("child", childId);
   const query = params.toString();
   return query ? `${base}?${query}` : base;
 }
 
-/** The class menu's choice: every class, children with no class, or one class by id. */
-export type ClassChoice = { kind: "all" } | { kind: "none" } | { kind: "group"; id: string };
-
-/** The class menu's choice as one string, for its radio buttons: "" (all), "none" or a class id. */
-export function classChoiceValue(choice: ClassChoice): string {
-  return choice.kind === "all" ? "" : choice.kind === "none" ? "none" : choice.id;
+export function sameSubjectChip(a: SubjectChip, b: SubjectChip): boolean {
+  if (a.kind === "grade" || b.kind === "grade")
+    return a.kind === "grade" && b.kind === "grade" && a.grade === b.grade;
+  return subjectsHref("", a) === subjectsHref("", b);
 }
 
-export function classChoiceFrom(value: string): ClassChoice {
-  return value === ""
-    ? { kind: "all" }
-    : value === "none"
-      ? { kind: "none" }
-      : { kind: "group", id: value };
+/** A saved chip's filter, or null for a key Subjects doesn't take. */
+export function subjectChipFromSaved(saved: ListFilterChip): SubjectChip | null {
+  if (saved.key === "class" && saved.value) return { kind: "class", id: saved.value };
+  if ((SAVED_SHOWS as readonly string[]).includes(saved.key) && !saved.value)
+    return { kind: "show", show: saved.key as SubjectShow };
+  return null;
 }
 
-/**
- * The view, the class menu and the grade menu as core filters (they combine with AND; the search box is applied on
- * top). The grade is "" for every grade.
- */
-export function subjectFilters({
-  view,
-  classChoice,
-  grade,
-}: {
-  view: SubjectView;
-  classChoice: ClassChoice;
-  grade: string;
-}): PeopleFilter[] {
-  const filters: PeopleFilter[] = [];
-  if (view !== "all") filters.push({ kind: view });
-  if (classChoice.kind === "none") filters.push({ kind: "noGroup" });
-  if (classChoice.kind === "group") filters.push({ kind: "group", id: classChoice.id });
-  if (grade) filters.push({ kind: "grade", value: grade });
-  return filters;
-}
-
-/** The class choice that applies: a class that is no longer on the roster (renamed away, removed) falls back to All. */
-export function effectiveClassChoice(
-  choice: ClassChoice,
-  groups: readonly { id: string }[],
-): ClassChoice {
-  return choice.kind === "group" && !groups.some((g) => g.id === choice.id)
-    ? { kind: "all" }
-    : choice;
-}
-
-/** The grade that applies: one no child has any more falls back to every grade (""). */
-export function effectiveGrade(grade: string, grades: readonly string[]): string {
-  return grade && !grades.includes(grade) ? "" : grade;
+/** The chip as one of core's filters (the search box is applied on top). */
+export function subjectFilters(chip: SubjectChip): PeopleFilter[] {
+  switch (chip.kind) {
+    case "all":
+      return [];
+    case "class":
+      return [{ kind: "group", id: chip.id }];
+    case "grade":
+      return [{ kind: "grade", value: chip.grade }];
+    case "show":
+      return [chip.show === "noClass" ? { kind: "noGroup" } : { kind: chip.show }];
+  }
 }

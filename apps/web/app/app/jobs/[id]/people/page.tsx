@@ -3,13 +3,13 @@
 import { type Child, QR_CARD_HEADERS } from "@daybell/api";
 import {
   applyFilters,
+  canSeeOrders,
   gradeOptions,
   groupLabel,
-  groupPeople,
   matchesSearch,
   ROSTER_VIEW_MAX,
 } from "@daybell/core";
-import { Banner } from "@daybell/ui";
+import { Banner, SearchToggle } from "@daybell/ui";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -17,7 +17,9 @@ import { useApiText } from "@/components/use-messages";
 import { download } from "@/lib/client-api";
 import { qrCardProblem } from "@/lib/qr-card-messages";
 import { Dialog } from "../../../dialog";
-import { ChildForm, GroupForm } from "../child-form";
+import { ChipRow } from "../../../filter-chips/chip-row";
+import { useStudio } from "../../../me-context";
+import { ChildForm } from "../child-form";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
 import { LiveNote } from "../live-note";
@@ -25,17 +27,11 @@ import { RemoveChildDialog } from "../remove-child-dialog";
 import { tabHref } from "../tabs";
 import { ChildPanel } from "./child-panel";
 import { PeopleList, rowLinkId } from "./people-list";
-import { type GroupBy, SubjectsTools, SubjectsViews } from "./people-toolbar";
 import { PrintQrCardsDialog } from "./print-qr-cards-dialog";
+import { useSubjectChips } from "./subject-chips";
+import { SubjectsActions } from "./subjects-actions";
 import { useRoster } from "./use-roster";
-import {
-  type ClassChoice,
-  effectiveClassChoice,
-  effectiveGrade,
-  subjectFilters,
-  subjectsHref,
-  subjectView,
-} from "./views";
+import { subjectFilters, subjectsHref } from "./views";
 
 export default function PeoplePageRoute() {
   // useSearchParams (the selected child) needs a Suspense boundary.
@@ -47,46 +43,55 @@ export default function PeoplePageRoute() {
 }
 
 /**
- * A job's Subjects (D137, D138, D144; the People route, Phase 1 step 2's roster): one view bar (the views All,
- * Possible duplicates, Do not photograph and Do not publish in ?show=; the filter icon for the class, grade and
- * grouping, the search, Print QR cards and the green Add subjects menu), then a flat list with a Class column in a white list card, its
- * footer counting the roster (Group: Class brings the class headings back), and the selected child in the floating
- * panel (?child=<id>, an id only). Add and edit keep the existing child form dialog (D133); Import stays its own page.
+ * A job's Subjects (D137, D138, D144, D147; the People route, Phase 1 step 2's roster): Print QR cards and the green
+ * Add subjects menu at the right end of the job's tab row; then one flat list in a white list card whose toolbar has
+ * the chips (All, Not ordered for people who see orders, No photos, Possible duplicates, then the person's own: a
+ * class, No class, Do not photograph, Do not publish, and grades kept in this browser) and the search (never sent or
+ * put in the address, D113); a Photos and an Ordered column; the footer counts the roster. The selected child opens in
+ * the floating panel (?child=<id>, an id only). Add and edit keep the existing child form dialog (D133); Import stays
+ * its own page.
  */
 function PeoplePage() {
   const t = useTranslations("app.people");
   const tr = useTranslations("app.roster");
   const tq = useTranslations("app.qrCards");
   const text = useApiText();
+  const tc = useTranslations("app.chips");
   const router = useRouter();
+  const { me } = useStudio();
+  const seesOrders = canSeeOrders(me.studio.role);
   const { job, summary, refreshSummary, canEditRoster: canEdit } = useJob();
   const word = groupLabel(job.type);
   const base = tabHref(job.id, "people");
   const roster = useRoster(job.id);
   const [query, setQuery] = useState("");
-  const [chosenClass, setClassChoice] = useState<ClassChoice>({ kind: "all" });
-  const [chosenGrade, setGrade] = useState("");
-  const [groupBy, setGroupBy] = useState<GroupBy>("none");
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [status, setStatus] = useState("");
   const [editing, setEditing] = useState<Child | "new" | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [removing, setRemoving] = useState<Child | null>(null);
   const [printing, setPrinting] = useState(false);
   // Set when the person opens a child, so focus moves to the panel; not on a refresh with ?child= in the URL.
   const [panelFocus, setPanelFocus] = useState<string | null>(null);
   const opener = useRef<string | null>(null);
 
-  const params = useSearchParams();
-  const selectedId = params.get("child");
-  const view = subjectView(params.get("show"));
+  const grades = useMemo(() => gradeOptions(roster.rows ?? []), [roster.rows]);
+  const chips = useSubjectChips({
+    base,
+    jobId: job.id,
+    groups: roster.groups,
+    grades,
+    loaded: roster.rows !== null && !roster.failed && !roster.loadingMore,
+    word,
+    seesOrders,
+  });
+  const { chip } = chips;
+  const selectedId = useSearchParams().get("child");
   const selected = roster.rows?.find((c) => c.id === selectedId) ?? null;
-  const childHref = (childId: string) => subjectsHref(base, view, childId);
-  // The list's own address: the view stays, the open child goes.
-  const here = subjectsHref(base, view);
+  const childHref = (childId: string) => subjectsHref(base, chip, childId);
+  // The list's own address: the chip stays, the open child goes.
+  const here = subjectsHref(base, chip);
 
-  // ?imported=a.b (numbers only) and ?print=qr arrive once from Import and Overview; then the URL is cleaned. The view
-  // (?show=) stays: it is the list's state (D144).
+  // ?imported=a.b (numbers only) and ?print=qr arrive once from Import and Overview; then the URL is cleaned. The chip
+  // (?show=, ?class=) stays: it is the list's state (D144, D147).
   // biome-ignore lint/correctness/useExhaustiveDependencies: read once on open.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -104,25 +109,11 @@ function PeoplePage() {
       router.replace(here, { scroll: false });
   }, [selectedId, selected, roster.rows, roster.loadingMore, router, here]);
 
-  const grades = useMemo(() => gradeOptions(roster.rows ?? []), [roster.rows]);
-  // A class or grade that left the roster (renamed, removed, last child gone) stops filtering: back to All.
-  const classChoice = useMemo(
-    () => effectiveClassChoice(chosenClass, roster.groups),
-    [chosenClass, roster.groups],
-  );
-  const grade = useMemo(() => effectiveGrade(chosenGrade, grades), [chosenGrade, grades]);
-  const filters = useMemo(
-    () => subjectFilters({ view, classChoice, grade }),
-    [view, classChoice, grade],
-  );
+  const filters = useMemo(() => subjectFilters(chip), [chip]);
   const searching = query.trim() !== "" || filters.length > 0;
   const visible = useMemo(
     () => applyFilters(roster.rows ?? [], filters).filter((c) => matchesSearch(c, query)),
     [roster.rows, filters, query],
-  );
-  const sections = useMemo(
-    () => groupPeople(visible, roster.groups, groupBy, { includeEmptyGroups: !searching }),
-    [visible, roster.groups, groupBy, searching],
   );
 
   /** One child's card, from the panel (Seenu, answer 4): the same card on every print. */
@@ -181,35 +172,22 @@ function PeoplePage() {
   return (
     <JobSection
       title={hasRows ? t("heading", { count: roster.total }) : null}
-      views={hasRows ? <SubjectsViews base={base} view={view} /> : null}
-      tools={
-        <SubjectsTools
-          hasRows={hasRows}
-          query={query}
-          onQuery={setQuery}
-          classChoice={classChoice}
-          onClassChoice={setClassChoice}
-          grade={grade}
-          onGrade={setGrade}
-          groupBy={groupBy}
-          onGroupBy={setGroupBy}
-          groups={roster.groups}
-          grades={grades}
-          word={word}
-          canEdit={canEdit}
-          importHref={`/app/jobs/${job.id}/import`}
-          onPrint={() => setPrinting(true)}
-          onAdd={() => setEditing("new")}
-        />
-      }
       below={
         <>
+          <SubjectsActions
+            hasRows={hasRows}
+            canEdit={canEdit}
+            importHref={`/app/jobs/${job.id}/import`}
+            onPrint={() => setPrinting(true)}
+            onAdd={() => setEditing("new")}
+          />
           {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3); while empty it
           takes no room (the negative margin cancels the column gap). */}
           <p role="status" className="m-0 text-sm text-muted empty:-mb-4">
             {status}
           </p>
-          {duplicates > 0 && view !== "duplicates" && !empty ? (
+          {chips.saveFailed ? <Banner tone="danger" title={tc("saveFailed")} /> : null}
+          {duplicates > 0 && !(chip.kind === "show" && chip.show === "duplicates") && !empty ? (
             <Banner
               tone="warning"
               className="py-1"
@@ -220,7 +198,11 @@ function PeoplePage() {
                   <span aria-hidden="true">·</span>
                   <button
                     type="button"
-                    onClick={() => router.push(subjectsHref(base, "duplicates"), { scroll: false })}
+                    onClick={() =>
+                      router.push(subjectsHref(base, { kind: "show", show: "duplicates" }), {
+                        scroll: false,
+                      })
+                    }
                     className="min-h-11 font-bold underline focus-visible:outline-2 focus-visible:outline-primary"
                   >
                     {t("showThem")}
@@ -266,29 +248,23 @@ function PeoplePage() {
       {roster.rows && !empty ? (
         <div className="flex flex-col gap-3">
           <PeopleList
-            sections={sections}
-            grouped={groupBy === "group"}
-            collapsed={collapsed}
-            onToggle={(key) =>
-              setCollapsed((current) => {
-                const next = new Set(current);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-              })
+            rows={visible}
+            toolbar={
+              <ChipRow label={t("chips.label")} items={chips.items} choices={chips.choices} />
             }
+            toolbarEnd={
+              <SearchToggle label={t("searchLabel")} value={query} onChange={setQuery} onCard />
+            }
+            empty={visible.length === 0 && searching ? t("noMatches") : null}
+            showOrdered={seesOrders}
             selectedId={selected?.id ?? null}
             childHref={childHref}
             onOpen={open}
             onLinkOpen={opened}
-            onRename={canEdit ? setRenaming : null}
             word={word}
             busy={roster.loadingMore}
             footer={footer}
           />
-          {visible.length === 0 && searching ? (
-            <p className="m-0 text-muted">{t("noMatches")}</p>
-          ) : null}
           {roster.loadingMore ? <p className="m-0 text-sm text-muted">{t("loadingMore")}</p> : null}
         </div>
       ) : null}
@@ -312,25 +288,6 @@ function PeoplePage() {
               setEditing(null);
               router.replace(here, { scroll: false });
               changed(tr("removed"));
-            }}
-          />
-        ) : null}
-      </Dialog>
-
-      <Dialog
-        open={renaming !== null}
-        onClose={() => setRenaming(null)}
-        title={tr("groupForm.renameTitle", { group: word })}
-      >
-        {renaming ? (
-          <GroupForm
-            jobId={job.id}
-            group={renaming}
-            word={word}
-            onCancel={() => setRenaming(null)}
-            onSaved={() => {
-              setRenaming(null);
-              changed(tr("saved"));
             }}
           />
         ) : null}

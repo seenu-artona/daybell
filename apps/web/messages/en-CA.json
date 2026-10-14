@@ -531,10 +531,6 @@
     },
     "jobs": {
       "title": "Jobs",
-      "views": {
-        "label": "Job views",
-        "all": "All"
-      },
       "new": "New job",
       "loading": "Loading jobs…",
       "emptyTitle": "No jobs yet",
@@ -546,9 +542,7 @@
         "name": "Job",
         "client": "Client",
         "pictureDay": "Picture day",
-        "subjects": "Subjects",
         "status": "Status",
-        "progress": "Progress",
         "shopCloses": "Shop closes"
       },
       "none": "–",
@@ -817,7 +811,6 @@
       "emptyBody": "Import the {group, select, class {class} team {team} other {group}} list from a CSV or Excel file, or add children one by one. Each child gets an access code for their parents.",
       "emptyReadOnly": "Owners, admins and photographers manage the roster.",
       "loadFailed": "The roster couldn't be loaded. Reload the page to try again.",
-      "filter": "{group, select, class {Class} team {Team} other {Group}}",
       "noGroup": "{group, select, class {No class} team {No team} other {No group}}",
       "columns": {
         "name": "Name",
@@ -869,7 +862,6 @@
       },
       "groupForm": {
         "addTitle": "{group, select, class {Add class} team {Add team} other {Add group}}",
-        "renameTitle": "{group, select, class {Rename class} team {Rename team} other {Rename group}}",
         "name": "Name",
         "namePlaceholder": "{group, select, class {e.g. Room 4B · Ms. Lee} team {e.g. U10 Tigers} other {e.g. Morning session}}",
         "create": "{group, select, class {Add class} team {Add team} other {Add group}}",
@@ -962,11 +954,6 @@
       "jobMeta": "{number} · {status}",
       "loading": "Searching…",
       "empty": "No jobs or clients match."
-    },
-    "filters": {
-      "label": "Filter",
-      "labelOn": "Filter ({count} on)",
-      "clear": "Clear filters"
     },
     "job": {
       "moreActions": "More actions",
@@ -1065,22 +1052,13 @@
       "heading": "{count, plural, one {# child} other {# children}}",
       "footer": "{count, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}} · {duplicates, plural, =0 {no duplicates} one {# possible duplicate} other {# possible duplicates}}",
       "footerCounting": "{count, plural, one {# child} other {# children}} · {groups, plural, one {# {group, select, class {class} team {team} other {group}}} other {# {group, select, class {classes} team {teams} other {groups}}}}",
-      "views": {
-        "label": "Subject views"
-      },
-      "all": "All",
-      "grade": "Grade",
       "flags": {
         "doNotPhotograph": "Do not photograph",
         "doNotPublish": "Do not publish",
         "duplicates": "Possible duplicates"
       },
-      "groupByLegend": "Group by",
-      "groupNone": "None",
       "duplicatesNotice": "{count, plural, one {# possible duplicate} other {# possible duplicates}}",
       "showThem": "Show them",
-      "rename": "Rename",
-      "renameLabel": "{group, select, class {Rename class} team {Rename team} other {Rename group}} {name}",
       "duplicateBadge": "Duplicate?",
       "noMatches": "No children match.",
       "loadingMore": "Loading more…",
@@ -1567,10 +1545,6 @@
     },
     "orders": {
       "title": "Orders",
-      "views": {
-        "label": "Order views",
-        "all": "All"
-      },
       "loading": "Loading…",
       "empty": "No orders yet.",
       "emptyFiltered": "No orders match.",
@@ -1592,15 +1566,8 @@
       "open": "Order {reference}",
       "noChildren": "—",
       "filters": {
-        "job": "Job",
-        "any": "Any",
         "searchLabel": "Search orders",
-        "referenceHelp": "For example 7KQ2-M9XA",
-        "delivery": "Delivery",
-        "deliveryShort": {
-          "home": "Home",
-          "school": "School"
-        }
+        "referenceHelp": "For example 7KQ2-M9XA"
       },
       "loadMore": "Show more orders",
       "statuses": {

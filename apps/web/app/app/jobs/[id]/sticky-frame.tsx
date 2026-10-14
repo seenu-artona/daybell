@@ -13,7 +13,8 @@ function reducedMotion(): boolean {
 }
 
 /**
- * A record's header and tabs in one sticky block (D144). Its negative top lets the header scroll away while the tab
+ * A record's header and tabs in one sticky block (D144), with the section's actions at the right end of the tab row
+ * (D147). Its negative top lets the header scroll away while the tab
  * row stays. Once the tab row reaches the top it is "stuck": a canvas bar with a hairline under it, a back link and the
  * record's name in small type (hidden from screen readers; the h1 is still on the page), and the same tab navigation.
  * The tab row is always `--sticky-header-height` tall (globals.css), so nothing below moves when it sticks; the page
@@ -29,12 +30,15 @@ export function StickyFrame({
   backLabel,
   header,
   tabs,
+  actionsRef,
 }: {
   name: string;
   backHref: string;
   backLabel: string;
   header: (stuck: boolean) => ReactNode;
   tabs: ReactNode;
+  /** The tab row's right end, for the section's actions (D147): JobTabActions renders into it. */
+  actionsRef?: (element: HTMLDivElement | null) => void;
 }) {
   const sentinel = useRef<HTMLDivElement>(null);
   const row = useRef<HTMLDivElement>(null);
@@ -109,6 +113,13 @@ export function StickyFrame({
             </>
           ) : null}
           {tabs}
+          {actionsRef ? (
+            <div
+              ref={actionsRef}
+              data-tab-actions=""
+              className="ml-auto flex shrink-0 items-center gap-2 empty:hidden"
+            />
+          ) : null}
         </div>
       </div>
     </>

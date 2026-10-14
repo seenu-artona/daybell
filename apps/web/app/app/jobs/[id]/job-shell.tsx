@@ -24,7 +24,8 @@ import { JobTabs } from "./job-tabs";
 import { StickyFrame } from "./sticky-frame";
 
 /**
- * Every job section's frame (D137, D144): the title row and the pill tabs on the grey canvas, then the section.
+ * Every job section's frame (D137, D144): the title row and the pill tabs on the grey canvas, the section's actions at
+ * the tab row's right end (D147), then the section.
  * Loads the job and its roster numbers once; the layout stays mounted while people move between sections, so
  * switching tabs never loads the job again.
  */
@@ -37,6 +38,7 @@ export function JobShell({ children }: { children: ReactNode }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [summary, setSummary] = useState<JobSummary | null>(null);
   const [taggingReviewed, setTaggingReviewed] = useState(false);
+  const [tabActions, setTabActions] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     api<JobDetailResponse>(`/jobs/${encodeURIComponent(id)}`).then((res) => {
@@ -87,9 +89,10 @@ export function JobShell({ children }: { children: ReactNode }) {
             setTaggingReviewed,
             canManage: role === "owner" || role === "admin",
             canEditRoster: canEditRoster(role),
+            tabActions,
           }
         : null,
-    [job, summary, refreshSummary, taggingReviewed, role],
+    [job, summary, refreshSummary, taggingReviewed, role, tabActions],
   );
 
   if (!value) {
@@ -120,6 +123,7 @@ export function JobShell({ children }: { children: ReactNode }) {
           backLabel={tj("back")}
           header={(stuck) => <JobHeader stuck={stuck} />}
           tabs={<JobTabs />}
+          actionsRef={setTabActions}
         />
         <div className="mt-2 flex flex-col">{children}</div>
       </div>

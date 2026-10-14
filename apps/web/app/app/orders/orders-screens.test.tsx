@@ -12,17 +12,35 @@ import { StudioContext } from "../me-context";
 // ones kept selected; photographers get no checkboxes. The refund dialog sums what was asked with the database's rule,
 // refuses more than is left, confirms with the amount and sends one request with its id however often it is tapped.
 // Home gives staff the orders waiting in Up next and never the money (Q4).
-const { push, replace } = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+const { push, replace, address } = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  address: { search: "", path: "/app/orders" },
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace, push, refresh: vi.fn(), prefetch: vi.fn() }),
   useParams: () => ({}),
-  useSearchParams: () => new URLSearchParams(),
-  usePathname: () => "/app/orders",
+  useSearchParams: () => new URLSearchParams(address.search),
+  usePathname: () => address.path,
 }));
-const { api } = vi.hoisted(() => ({ api: vi.fn() }));
+const { api, saved } = vi.hoisted(() => ({
+  api: vi.fn(),
+  saved: { chips: [] as { key: string; value: string | null }[], putOk: true },
+}));
+// The person's saved chips (D147) answer from `saved` whatever else a test fakes.
 vi.mock("@/lib/client-api", async (original) => ({
   ...(await original<typeof import("@/lib/client-api")>()),
-  api,
+  api: async (path: string, init?: { method?: string; body?: unknown }) => {
+    if (path.startsWith("/me/list-filters")) {
+      api.mock.calls.push([path, init]);
+      if (init?.method === "PUT")
+        return saved.putOk
+          ? { ok: true, status: 204, data: undefined }
+          : { ok: false, status: 500, code: "internal", message: "", fields: {} };
+      return { ok: true, status: 200, data: { chips: saved.chips } };
+    }
+    return api(path, init);
+  },
 }));
 // Home's Selling now makes its own call; it is tested elsewhere.
 vi.mock("../jobs-selling", () => ({ JobsSelling: () => null }));
@@ -156,11 +174,6 @@ async function type(el: HTMLInputElement | HTMLSelectElement, value: string) {
     );
   });
 }
-/** The filter icon: named "Filter", or "Filter (n on)". */
-const filterButton = () =>
-  [...container.querySelectorAll("button")].find((b) =>
-    b.getAttribute("aria-label")?.startsWith("Filter"),
-  );
 const status = () => container.querySelector('[role="status"][aria-live="polite"]')?.textContent;
 
 beforeEach(() => {
@@ -178,6 +191,10 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.clearAllMocks();
+  address.search = "";
+  address.path = "/app/orders";
+  saved.chips = [];
+  saved.putOk = true;
 });
 
 describe("the orders list", () => {
@@ -249,61 +266,78 @@ describe("the orders list", () => {
     expect(rows[1]?.textContent).toContain(messages.app.orders.refundBadges.partly_refunded);
   });
 
-  it("filters by delivery, and Home's order to-do links ask for what they count (code review N3)", async () => {
-    api.mockImplementation(async (path: string) =>
-      path.startsWith("/jobs") ? ok({ jobs: [] }) : ok({ orders: [], nextCursor: null }),
-    );
-    await render(<OrdersList status="printed" delivery="home" />);
-    expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=home");
-    // The filter icon says a filter is on in its name (D145, amends D144), and opens radio buttons that apply as
-    // they change.
-    const trigger = filterButton();
-    expect(trigger?.getAttribute("aria-label")).toBe("Filter (1 on)");
-    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
-    await act(async () => trigger?.click());
-    expect(trigger?.getAttribute("aria-expanded")).toBe("true");
-    expect((field("Home") as HTMLInputElement).checked).toBe(true);
-    // The delivery lives in the address (an enum word, D113), and keeps the view.
-    await act(async () => (field("School") as HTMLInputElement).click());
-    expect(replace).toHaveBeenCalledWith("/app/orders?status=printed&delivery=school", {
-      scroll: false,
-    });
-    await render(<OrdersList status="printed" delivery="school" />);
-    expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=printed&delivery=school");
-    expect(filterButton()?.getAttribute("aria-expanded")).toBe("true");
-    expect((field("School") as HTMLInputElement).checked).toBe(true);
+  /** The API paths the list asked for, after the first call (path only, never the PUT body). */
+  const asked = () => api.mock.calls.map((c) => c[0] as string);
+  const chipNav = () => container.querySelector('nav[aria-label="Show orders"]');
+  const chipLinks = () => [...(chipNav()?.querySelectorAll("a") ?? [])];
+
+  it("shows the chips All, To print, To ship, To take to school and Done as links, one selected (D147)", async () => {
+    answer();
+    address.search = "status=paid";
+    await render(<OrdersList />);
+    expect(chipLinks().map((a) => a.textContent)).toEqual([
+      "All",
+      "To print",
+      "To ship",
+      "To take to school",
+      "Done",
+    ]);
+    expect(chipLinks().map((a) => a.getAttribute("href"))).toEqual([
+      "/app/orders",
+      "/app/orders?status=paid",
+      "/app/orders?status=printed&delivery=home",
+      "/app/orders?status=printed&delivery=school",
+      "/app/orders?status=done",
+    ]);
+    const selected = chipLinks().filter((a) => a.getAttribute("aria-current"));
+    expect(selected.map((a) => a.textContent)).toEqual(["To print"]);
+    expect(asked()).toContain("/orders?status=paid");
   });
 
-  it("keeps the delivery in every view's link, and the job and search across views", async () => {
+  it("asks for what Home's order to-do links count, and Done as one stage (code review N3; D147)", async () => {
+    api.mockImplementation(async () => ok({ orders: [], nextCursor: null }));
+    address.search = "status=printed&delivery=home";
+    await render(<OrdersList />);
+    expect(asked()).toContain("/orders?status=printed&delivery=home");
+    address.search = "status=done";
+    await render(<OrdersList />);
+    expect(asked()).toContain("/orders?stage=done");
+    // Another combination is All: the address is cleaned.
+    address.search = "status=shipped";
+    await render(<OrdersList />);
+    expect(replace).toHaveBeenCalledWith("/app/orders", { scroll: false });
+  });
+
+  it("keeps the reference search across chips (never in the address)", async () => {
     answer();
-    await render(<OrdersList delivery="school" />);
-    const views = container.querySelector('nav[aria-label="Order views"]');
-    const hrefs = [...(views?.querySelectorAll("a") ?? [])].map((a) => a.getAttribute("href"));
-    expect(hrefs[0]).toBe("/app/orders?delivery=school");
-    expect(hrefs[1]).toBe("/app/orders?status=paid&delivery=school");
+    address.search = "delivery=school";
+    await render(<OrdersList />);
     const opener = container.querySelector('button[aria-label="Search orders"]') as HTMLElement;
     await act(async () => opener.click());
     const box = container.querySelector('input[type="search"]') as HTMLInputElement;
     await type(box, "7KQ2");
     await act(async () => box.form?.requestSubmit());
     await wait(20);
-    // The page's view changes (a new ?status=): the same list stays, with its search.
-    await render(<OrdersList status="paid" delivery="school" />);
-    expect(api.mock.calls.map((c) => c[0])).toContain("/orders?status=paid&delivery=school&q=7KQ2");
+    address.search = "status=paid";
+    await render(<OrdersList />);
+    expect(asked()).toContain("/orders?status=paid&q=7KQ2");
     expect((container.querySelector('input[type="search"]') as HTMLInputElement).value).toBe(
       "7KQ2",
     );
+    expect(push.mock.calls.flat().join(" ")).not.toContain("7KQ2");
   });
 
-  it("drops an older view's slow answer, and fetches Show more once however often it is tapped", async () => {
+  it("drops an older chip's slow answer, and fetches Show more once however often it is tapped", async () => {
     const resolvers: ((v: unknown) => void)[] = [];
     api.mockImplementation((path: string) =>
       path.startsWith("/jobs")
         ? Promise.resolve(ok({ jobs: [] }))
         : new Promise((r) => resolvers.push(r)),
     );
-    await render(<OrdersList status="paid" />);
-    await render(<OrdersList status="printed" />);
+    address.search = "status=paid";
+    await render(<OrdersList />);
+    address.search = "status=done";
+    await render(<OrdersList />);
     const [slow, fresh] = resolvers;
     await act(async () => fresh?.(ok({ orders: [listed(O2, "8ABC2DEF")], nextCursor: "c2" })));
     await act(async () => slow?.(ok({ orders: [listed(O1, "7KQ2M9XA")], nextCursor: null })));
@@ -314,57 +348,65 @@ describe("the orders list", () => {
       button("Show more orders")?.click();
       button("Show more orders")?.click();
     });
-    expect(api.mock.calls.slice(before).map((c) => c[0])).toEqual([
-      "/orders?status=printed&cursor=c2",
-    ]);
+    expect(asked().slice(before)).toEqual(["/orders?stage=done&cursor=c2"]);
   });
 
-  it("Clear filters, in the filter panel, clears the address's delivery and puts focus back on the filter icon", async () => {
-    answer();
-    await render(<OrdersList status="paid" delivery="home" />);
-    expect(button("Clear filters")).toBeUndefined();
-    await act(async () => filterButton()?.click());
-    await act(async () => button("Clear filters")?.click());
-    await wait(10);
-    expect(replace).toHaveBeenCalledWith("/app/orders?status=paid", { scroll: false });
-    expect(filterButton()?.getAttribute("aria-expanded")).toBe("false");
-    expect(document.activeElement).toBe(filterButton());
-  });
-
-  it("puts the filter icon, then the search, at the right end; a job's tab has no Job filter (D145, amends D144)", async () => {
+  it("adds a chip from + Add filter: saved for the person and opened at once", async () => {
     answer();
     await render(<OrdersList />);
-    const named = [...container.querySelectorAll("button[aria-label]")].map((b) =>
-      b.getAttribute("aria-label"),
-    );
-    expect(named.slice(0, 2)).toEqual(["Filter", "Search orders"]);
-    await act(async () => filterButton()?.click());
-    expect([...container.querySelectorAll("fieldset legend")].map((l) => l.textContent)).toEqual([
-      "Delivery",
-      "Job",
+    const add = button("Add filter");
+    await act(async () => add?.click());
+    expect(add?.getAttribute("aria-expanded")).toBe("true");
+    expect([...container.querySelectorAll("[data-choice]")].map((b) => b.textContent)).toEqual([
+      "Delivery: Home",
+      "Delivery: School",
+      "Job…",
     ]);
-    // The same list re-rendered for a job's tab: the panel is still open.
-    await render(<OrdersList jobId={O1} level="sub" />);
-    expect(filterButton()?.getAttribute("aria-expanded")).toBe("true");
-    expect([...container.querySelectorAll("fieldset legend")].map((l) => l.textContent)).toEqual([
-      "Delivery",
-    ]);
+    await act(async () => button("Delivery: Home")?.click());
+    await wait(10);
+    expect(
+      api.mock.calls.find((c) => (c[1] as { method?: string })?.method === "PUT")?.[1],
+    ).toEqual({
+      method: "PUT",
+      body: { page: "orders", chips: [{ key: "deliveryHome" }] },
+    });
+    expect(push).toHaveBeenCalledWith("/app/orders?delivery=home", { scroll: false });
+    expect(chipLinks().map((a) => a.textContent)).toContain("Delivery: Home");
+    // The panel closed and focus went back to its pill.
+    expect(document.activeElement).toBe(button("Add filter"));
   });
 
-  it("shows the status views as links to ?status=, the current one marked (D144)", async () => {
+  it("removes a saved chip with its own button, back to All if it was selected; undone if saving fails", async () => {
     answer();
-    await render(<OrdersList status="paid" />);
-    const views = container.querySelector('nav[aria-label="Order views"]');
-    const links = [...(views?.querySelectorAll("a") ?? [])];
-    expect(links.map((a) => a.textContent)).toEqual([
-      "All",
-      ...Object.values(messages.app.orders.statuses),
+    saved.chips = [{ key: "deliverySchool", value: null }];
+    address.search = "delivery=school";
+    await render(<OrdersList />);
+    const remove = container.querySelector(
+      'button[aria-label="Remove filter: Delivery: School"]',
+    ) as HTMLButtonElement;
+    expect(remove).toBeTruthy();
+    // Built-in chips have no remove button.
+    expect(container.querySelectorAll('button[aria-label^="Remove filter"]')).toHaveLength(1);
+    saved.putOk = false;
+    await act(async () => remove.click());
+    await wait(10);
+    expect(push).toHaveBeenCalledWith("/app/orders", { scroll: false });
+    expect(chipLinks().map((a) => a.textContent)).toContain("Delivery: School");
+    expect(container.textContent).toContain(messages.app.chips.saveFailed);
+  });
+
+  it("a job's tab has its own chips, without Job…, saved for that job only", async () => {
+    answer();
+    address.path = `/app/jobs/${O1}/orders`;
+    await render(<OrdersList jobId={O1} />);
+    expect(asked()).toContain(`/me/list-filters?page=job_orders&jobId=${O1}`);
+    expect(asked()).toContain(`/orders?jobId=${O1}`);
+    await act(async () => button("Add filter")?.click());
+    expect([...container.querySelectorAll("[data-choice]")].map((b) => b.textContent)).toEqual([
+      "Delivery: Home",
+      "Delivery: School",
     ]);
-    expect(links[0]?.getAttribute("href")).toBe("/app/orders");
-    const paid = links.find((a) => a.textContent === messages.app.orders.statuses.paid);
-    expect(paid?.getAttribute("href")).toBe("/app/orders?status=paid");
-    expect(paid?.getAttribute("aria-current")).toBe("page");
-    expect(links.filter((a) => a.getAttribute("aria-current")).length).toBe(1);
+    expect(chipLinks()[1]?.getAttribute("href")).toBe(`/app/jobs/${O1}/orders?status=paid`);
   });
 
   it("opens an order from a click on its row, but not from its checkbox", async () => {
