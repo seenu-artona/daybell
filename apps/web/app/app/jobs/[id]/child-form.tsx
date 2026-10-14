@@ -15,8 +15,8 @@ import { RemoveChildDialog } from "./remove-child-dialog";
 type GroupRef = { id: string; name: string };
 
 /**
- * Add or rename a class, team or group (one field). Used on top of the child form ("+ Add new class") and from a
- * People group heading ("Rename").
+ * Add or rename a class, team or group (one field). Used on top of the child form ("+ Add new class") and from the
+ * classes panel under Subjects' list ("Rename", D147).
  */
 export function GroupForm({
   jobId,

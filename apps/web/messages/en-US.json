@@ -867,7 +867,8 @@
         "create": "{group, select, class {Add class} team {Add team} other {Add group}}",
         "save": "Save changes",
         "cancel": "Cancel",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "renameTitle": "{group, select, class {Rename class} team {Rename team} other {Rename group}}"
       },
       "importPage": {
         "title": "Import roster",
@@ -1090,6 +1091,15 @@
       "ordered": {
         "yes": "Ordered",
         "no": "Not yet"
+      },
+      "rename": "Rename",
+      "renameLabel": "{group, select, class {Rename class} team {Rename team} other {Rename group}} {name}",
+      "classes": {
+        "row": "{group, select, class {Classes} team {Teams} other {Groups}}",
+        "count": "{count, number}",
+        "title": "{group, select, class {This job's classes} team {This job's teams} other {This job's groups}}",
+        "meta": "Rename one; its children stay in it.",
+        "children": "{count, plural, one {# child} other {# children}}"
       }
     },
     "qrCards": {

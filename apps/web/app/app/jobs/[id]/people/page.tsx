@@ -1,6 +1,6 @@
 "use client";
 
-import { type Child, QR_CARD_HEADERS } from "@daybell/api";
+import { type Child, type Group, QR_CARD_HEADERS } from "@daybell/api";
 import {
   applyFilters,
   canSeeOrders,
@@ -20,13 +20,14 @@ import { Dialog } from "../../../dialog";
 import { ChipRow } from "../../../filter-chips/chip-row";
 import { SavedChipsNotice } from "../../../filter-chips/saved-chips-notice";
 import { useStudio } from "../../../me-context";
-import { ChildForm } from "../child-form";
+import { ChildForm, GroupForm } from "../child-form";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
 import { LiveNote } from "../live-note";
 import { RemoveChildDialog } from "../remove-child-dialog";
 import { tabHref } from "../tabs";
 import { ChildPanel } from "./child-panel";
+import { ClassesPanel, ClassesRow, renameButtonId } from "./classes-panel";
 import { PeopleList, rowLinkId } from "./people-list";
 import { PrintQrCardsDialog } from "./print-qr-cards-dialog";
 import { useSubjectChips } from "./subject-chips";
@@ -49,8 +50,9 @@ export default function PeoplePageRoute() {
  * the chips (All, Not ordered for people who see orders, No photos, Possible duplicates, then the person's own: a
  * class, No class, Do not photograph, Do not publish, and grades kept in this browser) and the search (never sent or
  * put in the address, D113); a Photos and an Ordered column; the footer counts the roster. The selected child opens in
- * the floating panel (?child=<id>, an id only). Add and edit keep the existing child form dialog (D133); Import stays
- * its own page.
+ * the floating panel (?child=<id>, an id only). Under the list, roster editors get a "Classes N ›" row that opens the
+ * job's classes in the same panel, each with Rename (D147). Add and edit keep the existing child form dialog (D133);
+ * Import stays its own page.
  */
 function PeoplePage() {
   const t = useTranslations("app.people");
@@ -72,6 +74,10 @@ function PeoplePage() {
   // Set when the person opens a child, so focus moves to the panel; not on a refresh with ?child= in the URL.
   const [panelFocus, setPanelFocus] = useState<string | null>(null);
   const opener = useRef<string | null>(null);
+  // The classes panel (roster editors, D147): open with a focus key, and the class being renamed.
+  const [classesFocus, setClassesFocus] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<Group | null>(null);
+  const classesRow = useRef<HTMLButtonElement>(null);
 
   const grades = useMemo(() => gradeOptions(roster.rows ?? []), [roster.rows]);
   const chips = useSubjectChips({
@@ -145,6 +151,7 @@ function PeoplePage() {
 
   /** Notes who opened the panel: focus moves to it, and returns to this row when it closes. */
   function opened(childId: string) {
+    setClassesFocus(null);
     opener.current = childId;
     setPanelFocus(childId);
   }
@@ -152,6 +159,18 @@ function PeoplePage() {
   function open(childId: string) {
     opened(childId);
     router.replace(childHref(childId), { scroll: false });
+  }
+
+  /** Opens the classes panel in place of any open child. */
+  function openClasses() {
+    if (selectedId) router.replace(here, { scroll: false });
+    setPanelFocus(null);
+    setClassesFocus(`classes-${Date.now()}`);
+  }
+
+  function closeClasses() {
+    setClassesFocus(null);
+    setTimeout(() => classesRow.current?.focus(), 0);
   }
 
   function closePanel() {
@@ -219,7 +238,15 @@ function PeoplePage() {
         </>
       }
       panel={
-        selected ? (
+        classesFocus !== null && canEdit ? (
+          <ClassesPanel
+            groups={roster.groups}
+            word={word}
+            focusKey={classesFocus}
+            onClose={closeClasses}
+            onRename={setRenaming}
+          />
+        ) : selected ? (
           <ChildPanel
             key={selected.id}
             child={selected}
@@ -268,6 +295,39 @@ function PeoplePage() {
           {roster.loadingMore ? <p className="m-0 text-sm text-muted">{t("loadingMore")}</p> : null}
         </div>
       ) : null}
+
+      {canEdit && roster.rows && roster.groups.length > 0 ? (
+        <div className="mt-3">
+          <ClassesRow
+            ref={classesRow}
+            count={roster.groups.length}
+            word={word}
+            open={classesFocus !== null}
+            onOpen={openClasses}
+          />
+        </div>
+      ) : null}
+
+      <Dialog
+        open={renaming !== null}
+        onClose={() => setRenaming(null)}
+        title={tr("groupForm.renameTitle", { group: word })}
+      >
+        {renaming ? (
+          <GroupForm
+            jobId={job.id}
+            group={renaming}
+            word={word}
+            onCancel={() => setRenaming(null)}
+            onSaved={() => {
+              const back = renaming.id;
+              setRenaming(null);
+              changed(tr("saved"));
+              setTimeout(() => document.getElementById(renameButtonId(back))?.focus(), 0);
+            }}
+          />
+        ) : null}
+      </Dialog>
 
       <Dialog
         open={editing !== null}
