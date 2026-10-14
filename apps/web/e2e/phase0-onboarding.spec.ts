@@ -59,20 +59,49 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   ).toContainText("To do");
   await expect(setup.getByText("Invite your team")).toHaveCount(0);
 
-  // Every section is in the one dark menu; unbuilt ones say "Soon" (D126, D128). Products is built since step 6
-  // (ADR 0019) and Orders since step 11 (ADR 0024). There is no top bar (D137).
+  // Every section is in the one dark menu; unbuilt ones say "Soon" (D150's menu, D128). There is no top bar (D137).
   const menu = page.getByRole("navigation", { name: "Main" });
-  // Contacts is labelled Clients (D144); its route stays /app/contacts.
-  await expect(menu.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Products", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "People", exact: true })).toHaveAttribute(
+    "href",
+    "/app/people",
+  );
+  await expect(menu.getByRole("link", { name: "Price lists", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Orders", exact: true })).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Marketing Soon" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Shop Soon" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Analytics Soon" })).toBeVisible();
+  for (const gone of [/Marketing/, /Money/, /Reports/, /Activity/])
+    await expect(menu.getByRole("link", { name: gone })).toHaveCount(0);
   await expect(page.getByRole("banner")).toHaveCount(0);
-  await page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: /Marketing/ })
-    .click();
-  await expect(page.getByRole("heading", { name: "Marketing is coming soon" })).toBeVisible();
+  await menu.getByRole("link", { name: /Analytics/ }).click();
+  await expect(page.getByRole("heading", { name: "Analytics is coming soon" })).toBeVisible();
+  // The section links in D150's order ("Soon" is part of an unbuilt one's name); the old labels are gone.
+  const sectionLinks = menu.getByRole("link");
+  const order = [
+    "Home",
+    "Jobs",
+    "Orders",
+    "Price lists",
+    "People",
+    "Shop",
+    "Analytics",
+    "Settings",
+  ];
+  await expect(sectionLinks).toHaveCount(order.length);
+  for (const [i, label] of order.entries())
+    await expect(sectionLinks.nth(i)).toHaveAccessibleName(new RegExp(`^${label}( Soon)?$`));
+  for (const old of ["Clients", "Products"])
+    await expect(menu.getByRole("link", { name: old, exact: true })).toHaveCount(0);
+  await menu.getByRole("link", { name: "Shop Soon", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Shop is coming soon" })).toBeVisible();
+  // "View my shop" (the profile menu) is the parent-shop preview, under Shop since D150, so Shop stays highlighted.
+  await page.getByRole("button", { name: owner }).click();
+  await page.getByRole("link", { name: "View my shop", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/shop\/preview$/);
+  await expect(page.getByRole("heading", { name: "View my shop is coming soon" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Shop Soon", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
 
   // 3. Goes to Settings and invites a photographer.
   await menu.getByRole("link", { name: "Settings", exact: true }).click();
@@ -136,13 +165,13 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(
     staffTab.getByText(`North Peak ${tag}`).filter({ visible: true }).first(),
   ).toBeVisible();
-  // Photographers see the team but cannot invite, and have no Payouts section (ADR 0020).
+  // Photographers see the team but cannot invite, and have no Stripe section (ADR 0020, D150).
   await staffTab.goto("/app/settings");
   await expect(staffTab.getByText("Only owners can invite people.")).toBeVisible();
   await expect(
     staffTab
       .getByRole("navigation", { name: "Settings sections", exact: true })
-      .getByRole("link", { name: "Payouts", exact: true }),
+      .getByRole("link", { name: "Stripe", exact: true }),
   ).toHaveCount(0);
   const staffTeam = await (await staffTab.request.get("/api/v1/studio/team")).json();
   expect(staffTeam.team.map((m: { role: string }) => m.role).sort()).toEqual([

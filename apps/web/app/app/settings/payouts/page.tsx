@@ -11,7 +11,6 @@ import { onRestoredFromCache } from "@/lib/page-restored";
 import { useStudio } from "../../me-context";
 import {
   FeesCard,
-  PayoutsCard,
   payoutProblemKey,
   ScheduleCard,
   StatusCard,
@@ -19,13 +18,14 @@ import {
 } from "./payout-cards";
 
 /**
- * Settings › Payouts (Phase 1 step 7; D56, D98, D106; Seenu, answers 1–4; ADR 0020): connection status, the payout
- * schedule, the next and recent payouts, and the fees explained. The owner sets up payouts on Stripe's own pages and
- * changes the schedule; admins see everything read-only; photographers and staff get a plain refusal (the API answers
- * 403 too). Coming back from Stripe (?stripe=return) checks the status with Stripe at once; an expired link
- * (?stripe=refresh) asks the owner to continue, with no automatic redirect, so focus stays put. Every result is
- * announced in a status region; a new attempt clears the last problem. Coming Back from Stripe (the browser's
- * back-forward cache) resets "Opening Stripe…" so the buttons work again.
+ * Settings › Stripe, formerly Settings › Payouts (ADR 0020): the Stripe connection, the payout schedule and the fees
+ * (D150; Seenu, 2026-10-14, ADR 0027: the schedule is a Stripe setting, and the fees card is the only place the 3% rate
+ * is stated, D59). The next and recent payouts wait for Analytics; PayoutsCard stays in payout-cards.tsx. The owner
+ * sets up payouts on Stripe's own pages and changes the schedule; admins see everything read-only; photographers and
+ * staff get a plain refusal (the API answers 403 too). Coming back from Stripe (?stripe=return) checks the status with
+ * Stripe at once; an expired link (?stripe=refresh) asks the owner to continue, with no automatic redirect, so focus
+ * stays put. Every result is announced in a status region; a new attempt clears the last problem. Coming back from
+ * Stripe (the browser's back-forward cache) resets "Opening Stripe…" so the buttons work again.
  */
 export default function PayoutsPage() {
   const t = useTranslations("app.payouts");
@@ -153,7 +153,6 @@ export default function PayoutsPage() {
             }}
             onProblem={(fields, code) => setProblem(conflictText(fields, code))}
           />
-          <PayoutsCard data={data} />
           <FeesCard fees={data.fees} />
         </>
       ) : null}

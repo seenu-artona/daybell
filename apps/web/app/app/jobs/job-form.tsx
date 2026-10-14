@@ -9,8 +9,8 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { Combobox } from "../combobox";
-import { ClientForm } from "../contacts/client-form";
 import { Dialog, SelectField } from "../dialog";
+import { ClientForm } from "../people/client-form";
 import { ClosingDateField, closesAtFor, closingFieldValue } from "./closing-date";
 
 type ClientRef = NonNullable<Job["client"]>;

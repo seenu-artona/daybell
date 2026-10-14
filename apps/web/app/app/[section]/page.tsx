@@ -3,8 +3,15 @@ import { SOON_SECTIONS } from "../nav";
 import { PageFrame } from "../page-frame";
 import { ComingSoon } from "./coming-soon";
 
-// Sections still being built (D128), plus the parent-shop preview ("View my shop") and Help.
-const ALLOWED = new Set([...SOON_SECTIONS, "shop", "help"]);
+// Coming-soon sections with a folder of their own, so this page must not claim them too. Shop (D150): its section
+// and the parent-shop preview ("View my shop", /app/shop/preview) live under /app/shop.
+const SECTIONS_WITH_OWN_FOLDER: readonly string[] = ["shop"];
+
+// Sections still being built (D128), plus Help.
+const ALLOWED = new Set([
+  ...SOON_SECTIONS.filter((s) => !SECTIONS_WITH_OWN_FOLDER.includes(s)),
+  "help",
+]);
 
 export function generateStaticParams() {
   return [...ALLOWED].map((section) => ({ section }));
@@ -15,12 +22,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   // dynamicParams = false: any other section is a 404 before this runs.
   const { section } = await params;
   const t = await getTranslations("app");
-  const name =
-    section === "shop"
-      ? t("top.viewShop")
-      : section === "help"
-        ? t("nav.help")
-        : t(`nav.${section as "orders"}`);
+  const name = section === "help" ? t("nav.help") : t(`nav.${section as "analytics"}`);
   return (
     <PageFrame>
       <ComingSoon name={name} />

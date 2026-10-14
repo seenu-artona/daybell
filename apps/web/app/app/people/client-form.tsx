@@ -70,7 +70,7 @@ const PAIR = "grid gap-5 sm:grid-cols-2";
 
 /**
  * Add or edit a client: name, address, contact person and notes, laid out by the D133 form rules (two columns on
- * desktop, one on phones, hints as placeholders). Used in Contacts › Clients and on top of the job form. Address
+ * desktop, one on phones, hints as placeholders). Used in People › Clients and on top of the job form. Address
  * labels follow the studio's region: State / ZIP code in the US, Province / Postal code in Canada.
  */
 export function ClientForm({

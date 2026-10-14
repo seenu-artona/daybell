@@ -9,9 +9,9 @@ export const runtime = "nodejs";
 export const preferredRegion = "yul1";
 
 /**
- * GET /api/v1/studio/payouts — Settings › Payouts (D56, D98; Seenu, answer 4): status, schedule, next payout day, the
- * latest payouts and the fees. Owners and admins (answer 1); Canadian studios only for now (Q3). Daybell's copy only:
- * no Stripe call (Q9).
+ * GET /api/v1/studio/payouts — Settings › Stripe (D56, D98, D150; Seenu, answer 4): status, schedule, next payout day,
+ * the latest payouts and the fees. Owners and admins (answer 1); Canadian studios only for now (Q3). Daybell's copy
+ * only: no Stripe call (Q9).
  */
 export const GET = handle(async () => {
   const { supabase, studio } = await studioScope();
