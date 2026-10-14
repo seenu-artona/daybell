@@ -14,8 +14,9 @@ import {
 import { MAX_PHOTOS_PER_BIN_REQUEST, MAX_PHOTOS_PER_MOVE } from "@daybell/core";
 import { Banner, Button, Card } from "@daybell/ui";
 import { CheckCheck } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocalDateTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { useJob } from "../../job-context";
@@ -59,7 +60,7 @@ export default function ReviewPage() {
   const t = useTranslations("app.photos.review");
   const tp = useTranslations("app.photos");
   const text = useApiText();
-  const format = useFormatter();
+  const local = useLocalDateTime();
   const { job, canEditRoster: canEdit, canManage, refreshSummary, setTaggingReviewed } = useJob();
   // Undoing "This is a card photo" is for owners and admins (Seenu, answer 12).
   const canUndoCard = canEdit && canManage;
@@ -308,7 +309,7 @@ export default function ReviewPage() {
               <p id="review-state" className="m-0 text-sm text-muted">
                 {s.done && s.reviewedAt
                   ? t("reviewed", {
-                      date: format.dateTime(new Date(s.reviewedAt), {
+                      date: local(s.reviewedAt, {
                         dateStyle: "medium",
                         timeStyle: "short",
                       }),

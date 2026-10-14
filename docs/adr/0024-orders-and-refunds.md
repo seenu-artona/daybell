@@ -292,3 +292,17 @@ not sent to Stripe while fresh), S4 (20 zips an order an hour; zips stop when th
 outside Daybell flag the order, ring the bell and stop fulfilment until checked), note 4 (an order's id refused as a
 request id). Left as they are, as decided: N4, N6, the staff refund badge (staff must know not to ship refunded items)
 and `next` 16.3.8 (a follow-up).
+
+## 19. Times in the viewer's time zone (Oct 13)
+
+Staging showed a 12:03 PM Vancouver payment as "Oct 13, 2026, 7:03 PM" and a refund made on Oct 13 local as Oct 14:
+next-intl has no time zone in the app's config, so `format.dateTime` used the server's (UTC). Moments are now formatted
+in the browser's zone by `app/_components/local-time.tsx` (D91, D96): `<LocalTime value />` renders a
+`<time dateTime>` for table cells (the ledger, the refunds table, the orders list), and `useLocalDateTime()` formats
+dates inside sentences (the order page's paid, canceled, disputed, outside-refund and address-removed dates; the
+shop's Your orders; Home's "since"; the review sets; team invitations' expiry; job closing moments). The zone comes from
+`useSyncExternalStore` with no server value, so the server and the hydrating render show no time (the same on both, no
+hydration mismatch) and the browser fills it in at once; these screens load their data in the browser anyway. Home's
+`?tz=` uses the same `viewerTimeZone()`. Calendar dates (picture day, the last day to order, a photo's capture time)
+keep `timeZone: "UTC"`. The activity log shows relative times ("2 hours ago"), which don't depend on the zone. No new
+dependency.

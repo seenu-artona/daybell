@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { StudioOrder, StudioOrderDetail } from "@daybell/api";
+import type { Refund, StudioOrder, StudioOrderDetail } from "@daybell/api";
 import { NextIntlClientProvider } from "next-intl";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -31,6 +31,7 @@ vi.mock("../activity-card", () => ({ ActivityCard: () => <p>Activity card</p> })
 const { OrdersList } = await import("./orders-list");
 const { RefundForm, RefundsSection } = await import("./[id]/refunds");
 const { FulfilmentPanel } = await import("./[id]/fulfilment");
+const { LedgerSection } = await import("./[id]/ledger");
 const { default: HomePage } = await import("../page");
 
 const STUDIO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -393,6 +394,70 @@ describe("a refund made outside Daybell (security review S5)", () => {
       "staff",
     );
     expect(button("Mark printed")).toBeDefined();
+  });
+});
+
+describe("dates in the viewer's time zone, not the server's", () => {
+  // Staging showed a 12:03 PM Vancouver payment as 7:03 PM, and a refund made on Oct 13 local as Oct 14. The provider
+  // here is Toronto; the browser says Vancouver, and the browser wins.
+  const PAID = "2026-10-13T19:03:00.000Z";
+  const REFUNDED = "2026-10-14T03:30:00.000Z";
+  beforeEach(() => {
+    const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockImplementation(function (
+      this: Intl.DateTimeFormat,
+    ) {
+      return { ...real.call(this), timeZone: "America/Vancouver" };
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const refund: Refund = {
+    id: "2c2c2c2c-2c2c-4c2c-8c2c-2c2c2c2c2c01",
+    kind: "lines",
+    reason: "damaged",
+    status: "succeeded",
+    products: money(2_000),
+    shipping: money(0),
+    tax: money(260),
+    amount: money(2_260),
+    daybellFee: money(60),
+    unrecovered: money(0),
+    createdAt: REFUNDED,
+    lines: [{ lineId: L1, quantity: 1 }],
+  };
+
+  it("dates the ledger and the refunds table in the viewer's zone", async () => {
+    const order = detail({
+      paidAt: PAID,
+      refunds: [refund],
+      ledger: [
+        {
+          id: "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c01",
+          kind: "order_paid",
+          createdAt: PAID,
+          entries: [{ id: 1, account: "parent_payments", amount: money(12_430) }],
+        },
+      ],
+    });
+    await render(<LedgerSection order={order} />);
+    const when = container.querySelector("tbody time");
+    expect(when?.textContent).toBe("Oct 13, 2026, 12:03 PM");
+    expect(when?.getAttribute("datetime")).toBe(PAID);
+    await render(<RefundsSection order={order} onRefunded={() => {}} />);
+    const refunded = container.querySelector("tbody time");
+    expect(refunded?.textContent).toBe("Oct 13, 2026");
+    expect(refunded?.getAttribute("datetime")).toBe(REFUNDED);
+  });
+
+  it("dates the orders list in the viewer's zone", async () => {
+    api.mockImplementation(async (path: string) =>
+      path.startsWith("/jobs")
+        ? ok({ jobs: [] })
+        : ok({ orders: [listed(O1, "7KQ2M9XA", { paidAt: REFUNDED })], nextCursor: null }),
+    );
+    await render(<OrdersList />);
+    expect(container.querySelector("tbody time")?.textContent).toBe("Oct 13, 2026");
   });
 });
 

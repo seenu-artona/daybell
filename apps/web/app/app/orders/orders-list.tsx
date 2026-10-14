@@ -19,6 +19,7 @@ import { Search } from "lucide-react";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { LocalTime } from "@/app/_components/local-time";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { SelectField } from "../dialog";
@@ -160,7 +161,6 @@ export function OrdersList({
 
   const shown = orders ?? [];
   const allSelected = shown.length > 0 && shown.every((o) => selected.has(o.id));
-  const date = (iso: string) => format.dateTime(new Date(iso), { dateStyle: "medium" });
 
   return (
     <div className="flex flex-col gap-4" aria-busy={working || undefined}>
@@ -297,7 +297,9 @@ export function OrdersList({
                       {reference}
                     </Link>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">{date(o.paidAt)}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <LocalTime value={o.paidAt} />
+                  </TableCell>
                   <TableCell>
                     {o.children.length > 0
                       ? format.list(o.children.map((c) => c.displayName))

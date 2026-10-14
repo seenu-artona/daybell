@@ -2,8 +2,9 @@
 
 import type { StudioOrderDetail } from "@daybell/api";
 import { Table, TableCell, TableHead, TableRow } from "@daybell/ui";
-import { useFormatter, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Fragment, useId } from "react";
+import { LocalTime } from "@/app/_components/local-time";
 import { orderMoney } from "../order-badges";
 
 /**
@@ -12,7 +13,6 @@ import { orderMoney } from "../order-badges";
  */
 export function LedgerSection({ order }: { order: StudioOrderDetail }) {
   const t = useTranslations("app.orders.detail.money");
-  const format = useFormatter();
   const titleId = useId();
   const ledger = order.ledger ?? [];
   return (
@@ -39,12 +39,12 @@ export function LedgerSection({ order }: { order: StudioOrderDetail }) {
                 {txn.entries.map((entry, j) => (
                   <TableRow key={entry.id}>
                     <TableCell className="whitespace-nowrap">
-                      {j === 0
-                        ? format.dateTime(new Date(txn.createdAt), {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          })
-                        : null}
+                      {j === 0 ? (
+                        <LocalTime
+                          value={txn.createdAt}
+                          options={{ dateStyle: "medium", timeStyle: "short" }}
+                        />
+                      ) : null}
                     </TableCell>
                     <TableCell>{j === 0 ? t(`kinds.${txn.kind}`) : null}</TableCell>
                     <TableCell>
