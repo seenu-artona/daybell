@@ -1,7 +1,13 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Browser, type BrowserContext, expect, type Page } from "@playwright/test";
+import {
+  type APIRequestContext,
+  type Browser,
+  type BrowserContext,
+  expect,
+  type Page,
+} from "@playwright/test";
 import { createServerClient } from "@supabase/ssr";
 import QRCode from "qrcode";
 import sharp, { type OverlayOptions } from "sharp";
@@ -180,4 +186,53 @@ export async function studioSellingAva(
   ).toBe(200);
   expect((await page.request.post(`/api/v1/jobs/${jobId}/start-selling`)).status()).toBe(200);
   return { context, page, studio, jobId, code: child.accessCode };
+}
+
+const formatted = (reference: string) => `${reference.slice(0, 4)}-${reference.slice(4)}`;
+
+/** A parent's paid order through the shop's API and the fake hosted checkout: its id and formatted reference. */
+export async function buy(
+  shop: APIRequestContext,
+  q: string,
+  lines: { childId: string; itemId: string; photoId: string }[],
+  method: "home" | "school",
+  tag: string,
+) {
+  for (const line of lines)
+    expect((await shop.post(`/api/v1/shop/cart/lines?${q}`, { data: line })).status()).toBe(201);
+  expect((await shop.put(`/api/v1/shop/cart/shipping?${q}`, { data: { method } })).status()).toBe(
+    200,
+  );
+  const started = await shop.post(`/api/v1/shop/checkout?${q}`);
+  expect(started.status()).toBe(201);
+  const session = new URL(((await started.json()) as { url: string }).url).searchParams.get(
+    "session",
+  );
+  const paid = await shop.post("/api/dev-stripe/checkout", {
+    data: {
+      action: "pay",
+      session,
+      email: `parent-${tag}@example.test`,
+      shipping:
+        method === "home"
+          ? {
+              name: "Priya Patel",
+              line1: "12 Maple Lane",
+              line2: null,
+              city: "Toronto",
+              state: "ON",
+              postalCode: "M5V 2T6",
+              country: "CA",
+            }
+          : null,
+    },
+  });
+  expect(paid.status()).toBe(200);
+  const orderId = /\/shop\/orders\/([0-9a-f-]{36})/.exec(
+    ((await paid.json()) as { redirect: string }).redirect,
+  )?.[1] as string;
+  const order = (await (await shop.get(`/api/v1/shop/orders/${orderId}?${q}`)).json()) as {
+    order: { reference: string };
+  };
+  return { orderId, reference: formatted(order.order.reference) };
 }

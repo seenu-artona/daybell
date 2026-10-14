@@ -1,6 +1,7 @@
 "use client";
 
-import type { Client, ClientsResponse } from "@daybell/api";
+import type { Client, ClientListItem, ClientsResponse } from "@daybell/api";
+import { contactName } from "@daybell/core";
 import {
   Banner,
   Button,
@@ -25,9 +26,9 @@ import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { createLoadGuard } from "@/lib/load-guard";
 import { Dialog } from "../../dialog";
-import { ListPage } from "../../list-page";
 import { useStudio } from "../../me-context";
 import { ClientForm } from "../client-form";
+import { PeoplePage } from "../people-page";
 
 /** How long the search waits after the last key before asking the API (GET /clients?q=). */
 const CLIENT_SEARCH_DEBOUNCE_MS = 300;
@@ -37,13 +38,16 @@ const nameId = (clientId: string) => `client-name-${clientId}`;
 
 const NAME_BUTTON =
   "inline-flex min-h-11 items-center text-left font-bold text-ink hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
+const JOB_LINK =
+  "inline-flex min-h-11 items-center text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary";
 
 /**
- * Clients (D144; People › Clients since D150, at /app/people/clients). Clients are added here ahead of time, or from the job
- * form. The green New client in the title row; the list card's toolbar has the All chip (D147: Clients has no other
- * chips yet) and the search (GET /clients?q=, by name; never in the address, D113). A
- * click on a row, or its name, opens the client in the dialog: editable for owners and admins, read-only for everyone
- * else. ?client=<id> (from the menu search, D138 Q2) opens that client the same way. Only an id goes in the URL.
+ * People › Clients (D144, D150; ADR 0028), at /app/people/clients. Clients are added here ahead of time, or from the job
+ * form. The green New client in the title row; the list card's toolbar has the All chip only (Seenu's answer 1: no
+ * client types) and the search (GET /clients?q=, by name; never in the address, D113). Columns: the client, its main
+ * contact (the name, then "· role" muted), how many jobs it has (right-aligned) and its latest job by picture day (a
+ * link to the job). No money. A click on a row, or its name, opens the client in the dialog: editable for owners and
+ * admins, read-only for everyone else. ?client=<id> (from the menu search, D138 Q2) opens that client the same way. Only an id goes in the URL.
  */
 export default function ClientsPageRoute() {
   // useSearchParams needs a Suspense boundary; the page loads its data in the browser anyway.
@@ -60,8 +64,9 @@ function ClientsPage() {
   const text = useApiText();
   const { me } = useStudio();
   const canManage = me.studio.role === "owner" || me.studio.role === "admin";
-  const [clients, setClients] = useState<Client[] | null>(null);
+  const [clients, setClients] = useState<ClientListItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   // The list's own problem, and the problem opening a client from the menu search (?client=): apart, so neither
   // wipes the other.
   const [listProblem, setListProblem] = useState<string | null>(null);
@@ -86,6 +91,7 @@ function ClientsPage() {
       setListProblem(null);
       setClients((prev) => (cursor && prev ? [...prev, ...res.data.clients] : res.data.clients));
       setNextCursor(res.data.nextCursor);
+      if (!cursor) setTotal(res.data.total);
     },
     [text, q, guard],
   );
@@ -141,8 +147,8 @@ function ClientsPage() {
   }, [requested, router, text]);
 
   return (
-    <ListPage
-      title={t("title")}
+    <PeoplePage
+      current="clients"
       action={
         canManage ? (
           <Button shape="pill" onClick={() => setEditing("new")}>
@@ -169,17 +175,23 @@ function ClientsPage() {
           <SearchToggle label={t("clients.searchLabel")} value={typed} onChange={setTyped} onCard />
         }
         footer={
-          clients && clients.length > 0 && nextCursor ? (
-            <Button
-              variant="quiet"
-              shape="pill"
-              onClick={() => {
-                // While a new search waits to be sent, the list on screen is about to change: no next page of it.
-                if (typed.trim() === q) void load(nextCursor);
-              }}
-            >
-              {t("clients.loadMore")}
-            </Button>
+          clients && clients.length > 0 ? (
+            <>
+              {total !== null ? <span>{t("clients.footer", { count: total })}</span> : null}
+              {nextCursor ? (
+                <Button
+                  variant="quiet"
+                  shape="pill"
+                  className="ml-auto"
+                  onClick={() => {
+                    // While a new search waits to be sent, the list on screen is about to change: no next page of it.
+                    if (typed.trim() === q) void load(nextCursor);
+                  }}
+                >
+                  {t("clients.loadMore")}
+                </Button>
+              ) : null}
+            </>
           ) : null
         }
       >
@@ -197,8 +209,9 @@ function ClientsPage() {
             <thead>
               <TableRow>
                 <TableHead>{t("clients.columns.name")}</TableHead>
-                <TableHead>{t("clients.columns.contact")}</TableHead>
-                <TableHead>{t("clients.columns.city")}</TableHead>
+                <TableHead>{t("clients.columns.mainContact")}</TableHead>
+                <TableHead numeric>{t("clients.columns.jobs")}</TableHead>
+                <TableHead>{t("clients.columns.latestJob")}</TableHead>
                 <RowChevronHead />
               </TableRow>
             </thead>
@@ -216,9 +229,32 @@ function ClientsPage() {
                     </button>
                   </TableCell>
                   <TableCell>
-                    {[c.contactFirstName, c.contactLastName].filter(Boolean).join(" ")}
+                    {c.mainContact ? (
+                      <>
+                        <span>{contactName(c.mainContact)}</span>
+                        {c.mainContact.role ? (
+                          <>
+                            {" "}
+                            <span className="text-muted">
+                              {t("clients.mainContactRole", { role: c.mainContact.role })}
+                            </span>
+                          </>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="text-muted">{t("clients.noContact")}</span>
+                    )}
                   </TableCell>
-                  <TableCell>{[c.city, c.region].filter(Boolean).join(", ")}</TableCell>
+                  <TableCell numeric>{c.jobCount}</TableCell>
+                  <TableCell>
+                    {c.latestJob ? (
+                      <Link href={`/app/jobs/${c.latestJob.id}`} className={JOB_LINK}>
+                        {c.latestJob.name}
+                      </Link>
+                    ) : (
+                      <span className="text-muted">{t("clients.noJobs")}</span>
+                    )}
+                  </TableCell>
                   <RowChevron />
                 </ClickableRow>
               ))}
@@ -250,6 +286,6 @@ function ClientsPage() {
           />
         ) : null}
       </Dialog>
-    </ListPage>
+    </PeoplePage>
   );
 }

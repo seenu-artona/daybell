@@ -127,7 +127,7 @@ export function gradeOptions(rows: readonly PersonRow[]): string[] {
   return [...seen.values()].sort(natural.compare);
 }
 
-export interface PeopleSection<R> {
+export interface RosterSection<R> {
   /** A group id, "none" for children without one, or "all" when not grouped. */
   key: string;
   /** The group, or null for "No class" and the ungrouped list. */
@@ -145,7 +145,7 @@ export function groupPeople<R extends PersonRow>(
   groups: readonly { id: string; name: string }[],
   groupBy: "group" | "none",
   { includeEmptyGroups }: { includeEmptyGroups: boolean },
-): PeopleSection<R>[] {
+): RosterSection<R>[] {
   if (groupBy === "none") return [{ key: "all", group: null, rows: [...rows] }];
   const byGroup = new Map<string, R[]>();
   const none: R[] = [];
@@ -158,7 +158,7 @@ export function groupPeople<R extends PersonRow>(
     if (list) list.push(row);
     else byGroup.set(row.group.id, [row]);
   }
-  const sections: PeopleSection<R>[] = [];
+  const sections: RosterSection<R>[] = [];
   const known = new Set<string>();
   for (const g of groups) {
     known.add(g.id);

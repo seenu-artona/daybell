@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** People opens on Clients until Contacts, Families and Subjects arrive (D150). */
-export default function PeoplePage() {
+/** People opens on its first section, Clients (D150; ADR 0028). */
+export default function PeopleIndexPage() {
   redirect("/app/people/clients");
 }

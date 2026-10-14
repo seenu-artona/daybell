@@ -47,7 +47,12 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   // Quebec is refused (D131).
   await page.goto("/app/contacts");
   await expect(page).toHaveURL(/\/app\/people\/clients$/);
-  await expect(main.getByRole("heading", { name: "Clients", level: 1 })).toBeVisible();
+  // People's h1, on its Clients tab (ADR 0028).
+  await expect(main.getByRole("heading", { name: "People", level: 1 })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Clients", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   await main.getByRole("button", { name: "New client", exact: true }).click();
   const addClient = page.getByRole("dialog", { name: "Add client" });
   await fillClient(addClient, client, "QC");
