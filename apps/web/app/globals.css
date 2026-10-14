@@ -35,3 +35,14 @@ html:has([data-shop-header]) {
 html:has([data-sticky-header]) {
   scroll-padding-top: calc(var(--sticky-header-height) + 16px);
 }
+
+/* The floating panel (floating-panel.tsx) uses the whole window height while the job header is in view, and moves under
+   the tab row, a row shorter, only once that row has stuck. */
+[data-floating-panel] {
+  top: 1rem;
+  max-height: calc(100dvh - 2rem);
+}
+html:has([data-sticky-header][data-stuck]) [data-floating-panel] {
+  top: calc(var(--sticky-header-height) + 1rem);
+  max-height: calc(100dvh - var(--sticky-header-height) - 2rem);
+}
