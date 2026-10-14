@@ -640,6 +640,29 @@ describe("Home (Q4)", () => {
     expect(today).toContain("$3.00");
   });
 
+  it("lays Home out like a list page: the title alone, sections as list cards with link rows (D144, amended Oct 14)", async () => {
+    api.mockResolvedValue(ok(sales));
+    await render(<HomePage />, "owner");
+    const header = container.querySelector("header");
+    expect(header?.querySelector("h1")?.textContent).toBe("Home");
+    expect(header?.querySelector("p")).toBeNull();
+    // To do is a region named by its h2, in a white list card (20px corners, soft shadow).
+    const heading = [...container.querySelectorAll("h2")].find((h) => h.textContent === "To do");
+    const todo = container.querySelector(`section[aria-labelledby="${heading?.id}"]`);
+    expect(todo?.className).toMatch(/\brounded-list\b/);
+    expect(todo?.className).toMatch(/\bshadow-card\b/);
+    // Each row is one link: 16px words that underline on hover, a faint chevron hidden from screen readers, never green.
+    const row = todo?.querySelector('a[href="/app/orders?status=paid"]');
+    expect(row?.className).toMatch(/\bmin-h-14\b/);
+    expect(row?.className).toMatch(/\btext-body-lg\b/);
+    expect(row?.className).toMatch(/\bhover:bg-canvas\b/);
+    expect(row?.className).not.toMatch(/\btext-primary\b/);
+    expect(row?.querySelector("span span")?.className).toMatch(/\bgroup-hover:underline\b/);
+    expect(row?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    // The date range is a labelled select at the right end of the row under the title.
+    expect(container.querySelector("label select")).not.toBeNull();
+  });
+
   it("asks nothing about orders for photographers", async () => {
     await render(<HomePage />, "photographer");
     expect(api).not.toHaveBeenCalled();
