@@ -51,6 +51,12 @@ export function useListFilters(page: ListPage, jobId?: string): ListFilters {
   const desired = useRef<ListFilterChip[] | null>(null);
   const saving = useRef<Promise<boolean> | null>(null);
   const savingToken = useRef<object | null>(null);
+  // Chips whose record is gone: never put back, even by a save that was in flight when they were forgotten.
+  const gone = useRef<ListFilterChip[]>([]);
+  const withoutGone = useCallback(
+    (list: ListFilterChip[]) => list.filter((c) => !gone.current.some((g) => sameChip(c, g))),
+    [],
+  );
   // Answers for an earlier page, job or load are dropped.
   const epoch = useRef(0);
 
@@ -65,6 +71,7 @@ export function useListFilters(page: ListPage, jobId?: string): ListFilters {
     confirmed.current = null;
     saving.current = null;
     savingToken.current = null;
+    gone.current = [];
     show(null);
     setLoadFailed(false);
     const query = new URLSearchParams({ page });
@@ -99,7 +106,9 @@ export function useListFilters(page: ListPage, jobId?: string): ListFilters {
         });
         if (mine !== epoch.current) return false;
         if (res.ok) {
-          confirmed.current = sent;
+          // What the server accepted, less anything forgotten while it was in flight (sent again next, without it).
+          const kept = withoutGone(sent);
+          confirmed.current = kept.length === sent.length ? sent : kept;
           ok = true;
           continue;
         }
@@ -120,7 +129,7 @@ export function useListFilters(page: ListPage, jobId?: string): ListFilters {
     })();
     if (savingToken.current === token) saving.current = run;
     return run;
-  }, [page, jobId, show]);
+  }, [page, jobId, show, withoutGone]);
 
   const change = useCallback(
     (next: ListFilterChip[]): Promise<boolean> => {
@@ -151,17 +160,18 @@ export function useListFilters(page: ListPage, jobId?: string): ListFilters {
   );
 
   const forget = useCallback(
-    (gone: readonly ListFilterChip[]) => {
+    (forgotten: readonly ListFilterChip[]) => {
       const now = desired.current;
       if (!now || !confirmed.current) return;
-      const keep = (c: ListFilterChip) => !gone.some((g) => sameChip(c, g));
+      const keep = (c: ListFilterChip) => !forgotten.some((g) => sameChip(c, g));
       const next = now.filter(keep);
       if (next.length === now.length) return;
-      // The records are gone either way: if saving fails, they are not put back.
-      confirmed.current = confirmed.current.filter(keep);
+      // The records are gone either way: if saving fails, they are not put back, nor by a save already in flight.
+      gone.current = [...gone.current, ...forgotten];
+      confirmed.current = withoutGone(confirmed.current);
       void change(next);
     },
-    [change],
+    [change, withoutGone],
   );
 
   return {

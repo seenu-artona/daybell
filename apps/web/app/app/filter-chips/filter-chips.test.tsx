@@ -206,6 +206,24 @@ describe("useListFilters", () => {
     expect(latest.saveFailed).toBe(true);
   });
 
+  it("never puts back a chip forgotten while a save was in flight, even if a later save fails", async () => {
+    const held = heldPuts([{ key: "client", value: GONE }]);
+    await render(<Probe />);
+    await act(async () => {
+      void latest.add({ key: "closingThisWeek", value: null });
+    });
+    // The client turns out to be gone while the first save is in flight.
+    await act(async () => latest.forget([{ key: "client", value: GONE }]));
+    expect(latest.chips).toEqual([{ key: "closingThisWeek", value: null }]);
+    await act(async () => held[0]?.(true));
+    await wait();
+    // The list the server accepted still had the client: the newest list goes next, and fails.
+    expect(bodies()[1]).toEqual([{ key: "closingThisWeek" }]);
+    await act(async () => held[1]?.(false));
+    await wait();
+    expect(latest.chips).toEqual([{ key: "closingThisWeek", value: null }]);
+  });
+
   it("offers no more than eight", async () => {
     answer(
       Array.from({ length: 8 }, (_, i) => ({ key: "client", value: `${CLIENT.slice(0, -1)}${i}` })),
