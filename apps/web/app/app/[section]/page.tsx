@@ -3,9 +3,15 @@ import { SOON_SECTIONS } from "../nav";
 import { PageFrame } from "../page-frame";
 import { ComingSoon } from "./coming-soon";
 
-// Sections still being built (D128), plus Help. Shop has its own folder (D150): its section and the parent-shop
-// preview ("View my shop", /app/shop/preview) live under /app/shop.
-const ALLOWED = new Set([...SOON_SECTIONS.filter((s) => s !== "shop"), "help"]);
+// Coming-soon sections with a folder of their own, so this page must not claim them too. Shop (D150): its section
+// and the parent-shop preview ("View my shop", /app/shop/preview) live under /app/shop.
+const SECTIONS_WITH_OWN_FOLDER: readonly string[] = ["shop"];
+
+// Sections still being built (D128), plus Help.
+const ALLOWED = new Set([
+  ...SOON_SECTIONS.filter((s) => !SECTIONS_WITH_OWN_FOLDER.includes(s)),
+  "help",
+]);
 
 export function generateStaticParams() {
   return [...ALLOWED].map((section) => ({ section }));

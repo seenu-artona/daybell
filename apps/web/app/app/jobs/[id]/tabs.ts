@@ -12,9 +12,6 @@ export const JOB_TABS = [
 
 export type JobTabKey = (typeof JOB_TABS)[number]["key"];
 
-/** The tabs in the job's tab row (D144): every tab is built since D150 dropped Messages and Settings. */
-export const VISIBLE_JOB_TABS = JOB_TABS;
-
 /** Photos' Review (ADR 0018): QR tagging, fixed by hand. Part of the Photos tab. */
 export function reviewHref(jobId: string): string {
   return `${tabHref(jobId, "photos")}/review`;

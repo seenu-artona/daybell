@@ -319,7 +319,7 @@ export function toPayout(row: PayoutRow): Payout {
 }
 
 /**
- * The fees Settings › Payouts explains, in the studio's currency (D98, D59; Claude's call Q8). Daybell's rate is the
+ * The fees Settings › Stripe explains, in the studio's currency (D98, D59; Claude's call Q8). Daybell's rate is the
  * database's platform setting (Seenu's answer 1; ADR 0023), which each new order copies.
  */
 export function feesFor(
@@ -340,7 +340,7 @@ export function feesFor(
 
 const utcToday = () => new Date().toISOString().slice(0, 10);
 
-/** Everything Settings › Payouts shows, from Daybell's copy (never a live Stripe call; Claude's call Q9). */
+/** Everything GET /studio/payouts answers, from Daybell's copy (never a live Stripe call; Claude's call Q9). */
 export async function loadStudioPayouts(
   supabase: SupabaseClient,
   studio: StudioSummary,

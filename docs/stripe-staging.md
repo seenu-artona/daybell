@@ -39,7 +39,7 @@ none. Please contact Daybell support." and nothing is sent to Stripe.
      confirmation).
    - **Branding**: add the Daybell name, icon and brand colour, so Stripe's hosted pages show Daybell.
    - **Payouts**: leave the default delay as it is. Daybell sets each account's schedule itself: weekly on Friday by
-     default, and the owner can change it in Settings › Payouts.
+     default, and the owner can change it in Settings › Stripe.
 
 ## 2. An API key
 
@@ -116,7 +116,7 @@ Notes:
 ## 5. Redeploy and smoke test
 
 1. Redeploy staging (the `main` branch, Vercel's Production environment).
-2. Sign in to staging as a **Canadian** studio's owner. Go to **Settings › Payouts** and click **Set up payouts**.
+2. Sign in to staging as a **Canadian** studio's owner. Go to **Settings › Stripe** and click **Set up payouts**.
 3. On Stripe's test onboarding, use Stripe's test data. The usual values (check them on Stripe's "Testing Connect"
    page, since they weren't checked from here):
    - Phone and SMS code: Stripe's test phone and the code `000 000`.
@@ -128,15 +128,18 @@ Notes:
      create has no payouts setting); it assumes Stripe turns them on for an Express-dashboard account with the merchant
      and recipient configurations. In the Stripe Dashboard, open the connected account: **Payouts** must show as
      enabled (`payouts_enabled: true` on the account, e.g. `stripe accounts retrieve <the account id>`). Daybell's
-     Settings › Payouts shows a next payout date only when it is. If payouts stay off after onboarding is complete,
-     stop and tell the developers: account creation needs another configuration.
+     `GET /api/v1/studio/payouts` (open it in the signed-in browser) gives a `nextPayoutDate` only when it is. If
+     payouts stay off after onboarding is complete, stop and tell the developers: account creation needs another
+     configuration.
    - **Check the default schedule.** The connected account's payout schedule should be weekly on Friday, and its
      metadata should include `daybell_schedule_set: true` (Daybell sets the schedule just after recording the account;
      if that failed, refresh or the next webhook sets it).
 5. Change the schedule to monthly and save. In the Stripe Dashboard, the connected account's payout schedule should
    match.
 6. Trigger a payout event for the connected account with the Stripe CLI, e.g.
-   `stripe trigger payout.paid --stripe-account <the account id>`, and check **Recent payouts**.
+   `stripe trigger payout.paid --stripe-account <the account id>`, and check it reached Daybell: it is in the
+   `payouts` list of `GET /api/v1/studio/payouts` (Settings › Stripe no longer lists payouts; they move to Analytics,
+   D150), and the Stripe Dashboard shows the connected account's payout.
 7. In **Developers › Webhooks**, both destinations' deliveries should show 200s. A 404 means the account isn't in
    staging's database yet (Stripe retries). A 500 means processing failed (Stripe retries; the inbox row keeps the
    error's code).

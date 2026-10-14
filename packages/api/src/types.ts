@@ -1940,7 +1940,7 @@ export type StudioTaxesResponse = z.infer<typeof studioTaxesResponse>;
 
 /** Why a taxes request was refused with 409, in the error's `fields.form`. */
 export const TAX_CONFLICTS = {
-  /** Taxes need the studio's Stripe account first (Settings › Payouts). */
+  /** Taxes need the studio's Stripe account first (Settings › Stripe). */
   notConnected: "taxes.notConnected",
   /** Registrations need the business address first. */
   headOfficeRequired: "taxes.headOfficeRequired",

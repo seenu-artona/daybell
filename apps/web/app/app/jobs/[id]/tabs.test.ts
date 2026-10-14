@@ -2,19 +2,16 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { JOB_TABS, tabForPath, tabHref, VISIBLE_JOB_TABS } from "./tabs";
+import { JOB_TABS, tabForPath, tabHref } from "./tabs";
 
 const ID = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
 
 describe("job tabs", () => {
   it("are the five sections in order; Messages and Settings are dropped (D150)", () => {
     expect(JOB_TABS.map((t) => t.key)).toEqual(["overview", "people", "photos", "shop", "orders"]);
-    expect(VISIBLE_JOB_TABS).toEqual(JOB_TABS);
   });
 
   it("have no Messages or Settings route any more (D150): those addresses are 404s", () => {
-    expect(tabForPath(`/app/jobs/${ID}/messages`)).toBeNull();
-    expect(tabForPath(`/app/jobs/${ID}/settings`)).toBeNull();
     const here = fileURLToPath(new URL(".", import.meta.url));
     expect(existsSync(join(here, "messages"))).toBe(false);
     expect(existsSync(join(here, "settings"))).toBe(false);

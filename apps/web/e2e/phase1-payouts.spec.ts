@@ -1,18 +1,20 @@
 import { expect, test } from "@playwright/test";
 import { joinAs, signUpOwner } from "./helpers";
 
-// Phase 1 step 7 "Payouts with Stripe Connect" (D56, D98, D106, D143, D96, D113; Seenu's answers 1–4 and Q1–Q6,
-// Claude's calls of Oct 12 2026; ADR 0020), against the fake Stripe (STRIPE_DRIVER=fake: no real Stripe call in CI,
-// Claude's call Q12): the owner goes from Not started through Stripe's (fake) hosted onboarding, leaving it unfinished
-// (Needs info) then finishing it (Active, by the signed webhook and the return check); "Set up payouts" and the Start
-// selling dialog's "Payouts connected" tick; an expired Stripe link asks the owner to continue; the schedule changes to
-// monthly, and a failed save's problem goes once a save works; a paid payout is recorded in CAD; an admin sees it read-only; a photographer has no Stripe link and is refused; another studio sees nothing; and it all works from
-// the keyboard. The local stack is the Canadian database (D122). Desktop only (D136).
+// Settings › Stripe (D150; ADR 0027), first built as Phase 1 step 7 "Payouts with Stripe Connect" (D56, D98, D106,
+// D143, D96, D113; Seenu's answers 1–4 and Q1–Q6, Claude's calls of Oct 12 2026; ADR 0020), against the fake Stripe
+// (STRIPE_DRIVER=fake: no real Stripe call in CI, Claude's call Q12): the owner goes from Not started through Stripe's
+// (fake) hosted onboarding, leaving it unfinished (Needs info) then finishing it (Active, by the signed webhook and the
+// return check); "Set up payouts" and the Start selling dialog's "Payouts connected" tick; an expired Stripe link asks
+// the owner to continue; the schedule changes to monthly, and a failed save's problem goes once a save works; the fees
+// are stated, the next and recent payouts wait for Analytics; a paid payout is recorded in CAD; an admin sees it
+// read-only; a photographer has no Stripe link and is refused; another studio sees nothing; and it all works from the
+// keyboard. The local stack is the Canadian database (D122). Desktop only (D136).
 const run = `${Date.now()}`;
 /** A whole-text match: the status line says exactly this, not something that merely contains it. */
 const whole = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 
-test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and separation", async ({
+test("settings › stripe: onboarding on (fake) Stripe, status, schedule, fees, roles and separation", async ({
   page: firstTab,
   browser,
 }, info) => {
@@ -42,8 +44,19 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   await expect(
     connection.getByText("You’ll go to Stripe to finish, then come back here.", { exact: true }),
   ).toBeVisible();
-  // Only the Stripe connection and its schedule (D150; Seenu, 2026-10-14): payouts and fees wait for Analytics.
-  for (const name of ["Fees", "Next payout", "Recent payouts"])
+  const fees = main.getByRole("region", { name: "Fees", exact: true });
+  await expect(
+    fees.getByText(
+      "Daybell: 3% of product sales. Nothing if nothing sells, and never on shipping or tax.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    fees.getByText(/^Stripe payout fees: .* passed on at Stripe’s rates\.$/),
+  ).toBeVisible();
+  await expect(fees.getByText(/^Instant payouts: .*coming later\.$/)).toBeVisible();
+  // Connection, schedule and fees only (D150; Seenu, 2026-10-14): the next and recent payouts wait for Analytics.
+  for (const name of ["Next payout", "Recent payouts"])
     await expect(main.getByRole("region", { name, exact: true })).toHaveCount(0);
   await expect(
     main
@@ -92,6 +105,8 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   await expect(
     connection.getByRole("button", { name: "Manage on Stripe", exact: true }),
   ).toBeVisible();
+  // Active, yet no next payout here: it waits for Analytics (D150).
+  await expect(main.getByRole("region", { name: "Next payout", exact: true })).toHaveCount(0);
 
   // The onboarding task ticks (Seenu, Q5)...
   await page.goto("/app");
@@ -165,6 +180,9 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   // 6. Stripe pays a payout (the fake's signed payout.paid): the API has it in CAD (its list moves to Analytics, D150).
   const paid = await page.request.post("/api/dev-stripe", { data: { action: "payoutPaid" } });
   expect(paid.status()).toBe(200);
+  await page.reload();
+  await expect(main.getByRole("region", { name: "Connection", exact: true })).toBeVisible();
+  await expect(main.getByRole("region", { name: "Recent payouts", exact: true })).toHaveCount(0);
   const mine = await (await page.request.get("/api/v1/studio/payouts")).json();
   expect(mine.payouts[0].amount).toEqual({ cents: 12345, currency: "CAD" });
 
@@ -186,6 +204,9 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
     await expect(
       adminMain.getByRole("region", { name, exact: true }).getByRole("button"),
     ).toHaveCount(0);
+  await expect(adminMain.getByRole("region", { name: "Fees", exact: true })).toBeVisible();
+  for (const name of ["Next payout", "Recent payouts"])
+    await expect(adminMain.getByRole("region", { name, exact: true })).toHaveCount(0);
   expect(
     (
       await admin.request.put("/api/v1/studio/payouts/schedule", { data: { interval: "daily" } })
@@ -209,7 +230,7 @@ test("payouts: onboarding on (fake) Stripe, status, schedule, payouts, roles and
   ).toHaveCount(0);
   await photographer.goto("/app/settings/payouts");
   await expect(
-    photoMain.getByText("Only the studio’s owner and admins can see payouts.", { exact: true }),
+    photoMain.getByText("Only the studio’s owner and admins can see this.", { exact: true }),
   ).toBeVisible();
   expect((await photographer.request.get("/api/v1/studio/payouts")).status()).toBe(403);
 

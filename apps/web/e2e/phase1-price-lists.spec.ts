@@ -24,9 +24,9 @@ test("price lists: starter list, edits, a copy as default, and a job's Shop tab"
   });
   const main = page.getByRole("main");
 
-  // 1. Products is built: it opens the Price lists page, with the starter list as the default.
+  // 1. The menu's Price lists (D150; the route stays /app/products) opens with the starter list as the default.
   const menu = page.getByRole("navigation", { name: "Main" });
-  await menu.getByRole("link", { name: "Products", exact: true }).click();
+  await menu.getByRole("link", { name: "Price lists", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/products$/);
   await expect(main.getByRole("heading", { name: "Price lists", level: 1 })).toBeVisible();
   await expect(main.getByText("Prices before tax", { exact: true })).toBeVisible();

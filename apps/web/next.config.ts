@@ -28,10 +28,10 @@ const config: NextConfig = {
   serverExternalPackages: ["pdfkit", "fontkit", "sharp", "zxing-wasm"],
   // The fonts the QR card PDF embeds, read from disk by the route that builds it.
   outputFileTracingIncludes: { "/api/v1/jobs/[id]/qr-cards": ["./assets/fonts/*.ttf"] },
-  // Contacts became People (D150); old links and bookmarks still land on the same page, query string and all.
+  // Contacts became People (D150); old links and bookmarks still land on the same page, query string and all. ":path*"
+  // matches zero segments too, so /app/contacts itself is covered. Removable after one release (ADR 0027).
   async redirects() {
     return [
-      { source: "/app/contacts", destination: "/app/people", permanent: false },
       { source: "/app/contacts/:path*", destination: "/app/people/:path*", permanent: false },
     ];
   },

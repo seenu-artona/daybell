@@ -12,7 +12,7 @@ each region that should have it.
 | `card_fee_recovery` | `per_sale` | `per_sale` only until monthly recovery is built | New orders, fixed on each order |
 
 An order keeps the rate and method it was created with, so a change never alters an order already made, paid or not.
-Settings › Payouts shows owners the current rate. `DAYBELL_FEE_BASIS_POINTS` in `packages/config` is only the launch
+Settings › Stripe shows owners the current rate. `DAYBELL_FEE_BASIS_POINTS` in `packages/config` is only the launch
 value now; changing it does nothing to orders.
 
 Daybell's fee is taken on products only (never shipping or tax), rounded half up to the cent:

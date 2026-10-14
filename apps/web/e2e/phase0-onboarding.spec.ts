@@ -74,6 +74,34 @@ test("owner signs up, invites a photographer, and studios stay separate", async 
   await expect(page.getByRole("banner")).toHaveCount(0);
   await menu.getByRole("link", { name: /Analytics/ }).click();
   await expect(page.getByRole("heading", { name: "Analytics is coming soon" })).toBeVisible();
+  // The section links in D150's order ("Soon" is part of an unbuilt one's name); the old labels are gone.
+  const sectionLinks = menu.getByRole("link");
+  const order = [
+    "Home",
+    "Jobs",
+    "Orders",
+    "Price lists",
+    "People",
+    "Shop",
+    "Analytics",
+    "Settings",
+  ];
+  await expect(sectionLinks).toHaveCount(order.length);
+  for (const [i, label] of order.entries())
+    await expect(sectionLinks.nth(i)).toHaveAccessibleName(new RegExp(`^${label}( Soon)?$`));
+  for (const old of ["Clients", "Products"])
+    await expect(menu.getByRole("link", { name: old, exact: true })).toHaveCount(0);
+  await menu.getByRole("link", { name: "Shop Soon", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Shop is coming soon" })).toBeVisible();
+  // "View my shop" (the profile menu) is the parent-shop preview, under Shop since D150, so Shop stays highlighted.
+  await page.getByRole("button", { name: owner }).click();
+  await page.getByRole("link", { name: "View my shop", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/shop\/preview$/);
+  await expect(page.getByRole("heading", { name: "View my shop is coming soon" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Shop Soon", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
 
   // 3. Goes to Settings and invites a photographer.
   await menu.getByRole("link", { name: "Settings", exact: true }).click();

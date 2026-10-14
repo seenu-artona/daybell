@@ -15,7 +15,7 @@ import {
   scheduleFormKey,
 } from "./payout-cards";
 
-// Settings › Payouts and the Start selling dialog (ADR 0020; code review N3, N7, N9, N10): rendered to HTML with the
+// Settings › Stripe and the Start selling dialog (ADR 0020; code review N3, N7, N9, N10): rendered to HTML with the
 // real Canadian English words. What admins are told, the buttons' descriptions, the neutral "Manual payouts", the
 // schedule form's identity, and "Checking…" before the payout account has been read.
 const render = (element: ReactElement) =>
