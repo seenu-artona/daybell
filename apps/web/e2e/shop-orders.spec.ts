@@ -11,6 +11,15 @@ test.use({ reducedMotion: "reduce" });
 
 const run = `${Date.now()}`;
 
+// This spec makes many shop requests in a few minutes (pages, Download all retries, two checkouts). CI trusts
+// x-forwarded-for (SHOP_TRUST_XFF=1), so the parent gets a network of its own and doesn't share the 120-a-minute
+// budget with the specs before it; each retry gets a fresh one.
+test.beforeEach(async ({ page }, info) => {
+  const octet =
+    (Number(run.slice(-3)) + info.retry * 7 + (info.project.name === "phone" ? 101 : 0)) % 250;
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${octet + 1}` });
+});
+
 async function enterCode(page: Page, code: string) {
   const main = page.getByRole("main");
   await main.getByLabel("Access code", { exact: true }).fill(code);
