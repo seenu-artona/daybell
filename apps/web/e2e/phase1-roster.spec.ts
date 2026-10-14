@@ -7,8 +7,9 @@ import { signUpOwner } from "./helpers";
 // child by hand (adding a class from the combobox's last option), opens and edits them in the floating panel, imports
 // a CSV (an update by student ID, duplicates flagged, a bad row left out) and an Excel file, searches, and uses the
 // chips (D147): Possible duplicates, a class added from "+ Add filter" (saved, kept after a reload, removed with its own
-// button), a grade (this browser only), No photos and Not ordered, with Photos and Ordered columns; then removes
-// children from the panel and from the form, and the API refuses what it should. Desktop only (D136). The 5,000-row import is in phase1-roster-load.
+// button), a grade (this browser only), No photos and Not ordered, with Photos and Ordered columns; renames a class from
+// the Classes row's panel; then removes children from the panel and from the form, and the API refuses what it should.
+// Desktop only (D136). The 5,000-row import is in phase1-roster-load.
 // Adding and importing write codes through the server-only path (the app's SUPABASE_SECRET_KEY_CA, which CI takes
 // from the local Supabase stack).
 // The CI database is Canadian (D122), so every access code starts with a symbol from the Canadian set.
@@ -336,10 +337,17 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(page).toHaveURL(people);
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
-  // Nobody in Room 5 is opted out.
+  // One chip at a time (D147): Do not photograph replaces the grade, and lists the children opted out (Ava Patel, from
+  // the CSV's "Photo Opt Out"), not those in grade 4 or Room 5.
   await addFilter.click();
   await main.getByRole("button", { name: "Do not photograph", exact: true }).click();
-  await expect(main.getByText("No children match.", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\?show=doNotPhotograph$/);
+  await expect(chips.getByRole("button", { name: "Grade 4", exact: true })).not.toHaveAttribute(
+    "aria-current",
+  );
+  await expect(main.getByRole("link", { name: "Ava Patel", exact: true })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("link", { name: "Sophia Wilson", exact: true })).toHaveCount(0);
 
   // An added chip's own remove button takes it away (back to All when it was selected); built-in chips have none.
   await main.getByRole("button", { name: "Remove filter: Do not photograph", exact: true }).click();
@@ -351,6 +359,24 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(chips.getByRole("link", { name: "Room 5", exact: true })).toHaveCount(0);
   await expect(chips.getByRole("button", { name: "Grade 4", exact: true })).toHaveCount(0);
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toBeVisible();
+
+  // 7. Rename a class from the Classes row under the list (D147: Group by is gone): it opens the job's classes in the
+  // panel, each with Rename; focus comes back to the class's Rename button.
+  const classesRow = main.getByRole("button", { name: /^Classes ?\d+$/ });
+  await classesRow.click();
+  await expect(classesRow).toHaveAttribute("aria-expanded", "true");
+  const classesPanel = page.getByRole("complementary", { name: "This job's classes" });
+  await classesPanel.getByRole("button", { name: "Rename class 4C", exact: true }).click();
+  const rename = page.getByRole("dialog", { name: "Rename class" });
+  await rename.getByLabel("Name", { exact: true }).fill("Room 4C");
+  await rename.getByRole("button", { name: "Save changes" }).click();
+  await expect(rename).toBeHidden();
+  await expect(
+    classesPanel.getByRole("button", { name: "Rename class Room 4C", exact: true }),
+  ).toBeFocused();
+  await expect(classOf("Olivia Brown")).toHaveText("Room 4C");
+  await page.keyboard.press("Escape");
+  await expect(classesRow).toBeFocused();
 
   // 8. Remove children while the job is a draft: one from the panel's ⋯ menu, one from the child form.
   await row("Noah Garcia").getByRole("cell").nth(1).click();
