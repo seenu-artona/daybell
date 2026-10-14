@@ -548,7 +548,8 @@
         "pictureDay": "Picture day",
         "subjects": "Subjects",
         "status": "Status",
-        "progress": "Progress"
+        "progress": "Progress",
+        "shopCloses": "Shop closes"
       },
       "none": "–",
       "loadMore": "Show more",
@@ -591,7 +592,29 @@
         "edit": "Edit job",
         "saved": "Saved.",
         "notFound": "We couldn't find that job."
-      }
+      },
+      "sections": {
+        "label": "Jobs pages",
+        "list": "List",
+        "calendar": "Calendar"
+      },
+      "chips": {
+        "label": "Show jobs",
+        "closingThisWeek": "Shop closes this week",
+        "pictureDayThisMonth": "Picture day this month",
+        "clientMenu": "Client…",
+        "client": "Client",
+        "clientPlaceholder": "Search clients…",
+        "clientList": "Clients"
+      },
+      "shopCloses": {
+        "notSelling": "Not selling yet",
+        "closed": "Closed",
+        "none": "No closing date",
+        "soon": "{date} · {days, plural, =0 {today} one {in # day} other {in # days}}"
+      },
+      "searchLabel": "Search jobs",
+      "emptyFiltered": "No jobs match."
     },
     "contacts": {
       "title": "Clients",
@@ -606,7 +629,8 @@
           "contact": "Contact person",
           "city": "City"
         },
-        "loadMore": "Show more"
+        "loadMore": "Show more",
+        "chipsLabel": "Show clients"
       },
       "form": {
         "addTitle": "Add client",
@@ -780,7 +804,8 @@
         "digital": "Digital download"
       },
       "currency": "Amount in {currency}",
-      "symbol": "$"
+      "symbol": "$",
+      "chipsLabel": "Show price lists"
     },
     "optionalLabel": "{label} (optional)",
     "roster": {
@@ -1069,6 +1094,24 @@
         "none": "–",
         "printCard": "Print QR card",
         "noCard": "No QR card: marked Do not photograph"
+      },
+      "chips": {
+        "label": "Show subjects",
+        "notOrdered": "Not ordered",
+        "noPhotos": "No photos",
+        "gradeMenu": "Grade…",
+        "grade": "Grade",
+        "gradeChip": "Grade {grade}",
+        "gradePlaceholder": "Search grades…",
+        "gradeList": "Grades"
+      },
+      "columns": {
+        "photos": "Photos",
+        "ordered": "Ordered"
+      },
+      "ordered": {
+        "yes": "Ordered",
+        "no": "Not yet"
       }
     },
     "qrCards": {
@@ -1796,7 +1839,29 @@
           "checked": "Checked on {date}. Printing and shipping can go on.",
           "saved": "Marked as checked."
         }
+      },
+      "chips": {
+        "label": "Show orders",
+        "toPrint": "To print",
+        "toShip": "To ship",
+        "toSchool": "To take to school",
+        "done": "Done",
+        "deliveryHome": "Delivery: Home",
+        "deliverySchool": "Delivery: School",
+        "jobMenu": "Job…",
+        "job": "Job",
+        "jobPlaceholder": "Search jobs…",
+        "jobList": "Jobs"
       }
+    },
+    "chips": {
+      "addFilter": "Add filter",
+      "showOnly": "Show only",
+      "back": "Back",
+      "remove": "Remove filter: {name}",
+      "unnamed": "Filter",
+      "saveFailed": "We couldn’t save your filters. Try again in a moment.",
+      "all": "All"
     }
   },
   "invite": {
