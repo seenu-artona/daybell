@@ -48,8 +48,10 @@ grant select on public.list_filter_chips to authenticated;
 
 -- Replaces the signed-in person's chips on one list (and job) with p_chips, an array of {"key": text, "value": uuid or
 -- null}, in order. SECURITY DEFINER (there is no write grant) with its own checks: a member of the studio, the job in
--- that studio for a job's tab, at most 8 chips, well-formed keys and ids. Refusals carry fixed messages, never the
--- values sent. Writes one event with the page and the count only.
+-- that studio for a job's tab, at most 8 chips, well-formed keys and ids, each key one the page takes (with an id
+-- exactly when the key names a record), and every id the studio's own record of the right kind (a client or job of the
+-- studio, a class of this job). The API checks the same first; this is the backstop for direct calls. Refusals carry
+-- fixed messages, never the values sent. Writes one event with the page and the count only.
 create function public.save_list_filters(p_studio_id uuid, p_page public.list_page, p_job_id uuid, p_chips jsonb)
 returns void
 language plpgsql security definer
@@ -91,6 +93,34 @@ begin
       from jsonb_array_elements(p_chips) e (chip)) <> v_count then
     raise exception 'list_filters_duplicate' using errcode = '22023';
   end if;
+  -- The keys each page takes, and which name a record (the same list as the API's LIST_FILTER_KEYS).
+  if exists (
+    select 1 from jsonb_array_elements(p_chips) e (chip)
+    left join (values
+      ('jobs', 'closingThisWeek', false), ('jobs', 'pictureDayThisMonth', false), ('jobs', 'client', true),
+      ('orders', 'deliveryHome', false), ('orders', 'deliverySchool', false), ('orders', 'job', true),
+      ('job_orders', 'deliveryHome', false), ('job_orders', 'deliverySchool', false),
+      ('job_subjects', 'class', true), ('job_subjects', 'noClass', false),
+      ('job_subjects', 'doNotPhotograph', false), ('job_subjects', 'doNotPublish', false)
+    ) k (page, key, takes_id) on k.page = p_page::text and k.key = e.chip ->> 'key'
+    where k.key is null or k.takes_id <> coalesce(jsonb_typeof(e.chip -> 'value') = 'string', false)) then
+    raise exception 'list_filters_invalid' using errcode = '22023';
+  end if;
+  -- Every id is the studio's own record of the key's kind.
+  if exists (
+    select 1 from jsonb_array_elements(p_chips) e (chip)
+    where jsonb_typeof(e.chip -> 'value') = 'string'
+      and not case e.chip ->> 'key'
+        when 'client' then exists (select 1 from public.clients c
+          where c.studio_id = p_studio_id and c.id = (e.chip ->> 'value')::uuid)
+        when 'job' then exists (select 1 from public.jobs j
+          where j.studio_id = p_studio_id and j.id = (e.chip ->> 'value')::uuid)
+        when 'class' then exists (select 1 from public.job_groups g
+          where g.studio_id = p_studio_id and g.job_id = p_job_id and g.id = (e.chip ->> 'value')::uuid)
+        else false
+      end) then
+    raise exception 'list_filters_record' using errcode = '22023';
+  end if;
 
   delete from public.list_filter_chips c
   where c.studio_id = p_studio_id and c.user_id = v_user and c.page = p_page
@@ -110,8 +140,9 @@ grant execute on function public.save_list_filters(uuid, public.list_page, uuid,
 -- ── Roster list: photos and orders per child ──────────────────────────────────────────────────────────────────────
 -- As in 20261011070000, plus for each child: photo_count, the photos tagged to them that are ready and not in the bin
 -- (flagged ones count: they are the child's, waiting for a check at review); and has_paid_order, whether a paid order
--- that is neither canceled nor refunded in full has a line for them in this job. has_paid_order is null for anyone
--- who doesn't see orders (photographers: Q4 of ADR 0024), so Subjects hides its Ordered column and Not ordered chip.
+-- that is neither canceled nor refunded in full has a line for them in this job (an order refunded only in part
+-- still counts, even if the part given back was this child's line). has_paid_order is null for anyone who doesn't
+-- see orders (photographers: Q4 of ADR 0024), so Subjects hides its Ordered column and Not ordered chip.
 -- Still SECURITY INVOKER: row-level security decides what is read.
 drop function public.list_children(uuid, uuid, uuid, int, boolean);
 create function public.list_children(
@@ -161,23 +192,26 @@ as $$
       and p.status = 'ready' and p.binned_at is null
     group by t.child_id
   ),
+  -- Only the orders with a line for a child on this page, in this job (the roster loads 500 at a time).
   paid_orders as (
-    select o.id, o.studio_id
-    from public.orders o
+    select distinct o.id
+    from public.order_lines ol
+    join public.orders o on o.studio_id = ol.studio_id and o.id = ol.order_id
     where (select sees_orders from job)
-      and o.studio_id = (select studio_id from job) and o.status = 'paid' and o.fulfilment_status <> 'canceled'
-      and exists (select 1 from public.order_lines ol
-                  where ol.studio_id = o.studio_id and ol.order_id = o.id and ol.job_id = p_job_id)
+      and ol.studio_id = (select studio_id from job) and ol.job_id = p_job_id
+      and ol.child_id in (select id from page)
+      and o.status = 'paid' and o.fulfilment_status <> 'canceled'
   ),
   live_orders as (
-    select po.id, po.studio_id from paid_orders po
+    select po.id from paid_orders po
     where not coalesce((app.studio_order_refund_state(po.id) ->> 'fully_refunded')::boolean, false)
   ),
   ordered as (
     select distinct ol.child_id
     from public.order_lines ol
-    join live_orders lo on lo.studio_id = ol.studio_id and lo.id = ol.order_id
-    where ol.job_id = p_job_id and ol.child_id is not null
+    join live_orders lo on lo.id = ol.order_id
+    where ol.studio_id = (select studio_id from job) and ol.job_id = p_job_id
+      and ol.child_id in (select id from page)
   )
   select jsonb_build_object(
     'children', coalesce((

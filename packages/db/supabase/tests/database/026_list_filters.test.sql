@@ -4,7 +4,7 @@
 -- chips go with their job and with their person's membership; the event holds the page and the count only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(32);
+select plan(40);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -23,12 +23,22 @@ insert into public.studio_members (studio_id, user_id, role) values
 insert into public.jobs (id, studio_id, name, type, picture_day, internal_number) values
   ('a0000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Fall', 'school', '2026-10-01', 'JOB00001'),
   ('a0000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Spring', 'school', '2027-04-01', 'JOB00002'),
+  ('a0000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A Winter', 'school', '2027-01-10', 'JOB00003'),
   ('b0000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Fall', 'school', '2026-10-01', 'JOB00001');
+-- Nine clients of studio A (c…01 to c…09) and one of B; a class in job A1 and one in job A3.
+insert into public.clients (id, studio_id, name)
+select ('c0000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Client ' || n
+from generate_series(1, 9) n;
+insert into public.clients (id, studio_id, name) values
+  ('cb000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Client');
+insert into public.job_groups (id, studio_id, job_id, name) values
+  ('d0000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'Room 1'),
+  ('d0000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000003', 'Room 3');
 
 create function pg_temp.as_user(p_user uuid) returns boolean language sql as $$
   select set_config('request.jwt.claims', jsonb_build_object('sub', p_user, 'role', 'authenticated')::text, true)
     is not null $$;
--- A client id stands in for any record id a chip names (the API checks it is the studio's own).
+-- Client chips for Jobs, naming studio A's clients 1 to n.
 create function pg_temp.chips(p_n int) returns jsonb language sql as $$
   select coalesce(jsonb_agg(jsonb_build_object('key', 'client',
     'value', ('c0000000-0000-4000-8000-' || lpad(n::text, 12, '0')))), '[]'::jsonb)
@@ -67,23 +77,45 @@ select results_eq($$ select filter_key from public.list_filter_chips where page 
   $$ values ('pictureDayThisMonth') $$, 'only the new chip is left');
 select lives_ok($$
   select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_subjects',
-    'a0000000-0000-4000-8000-000000000001', '[{"key": "doNotPhotograph"}]') $$,
-  'a job tab''s chips belong to that job');
+    'a0000000-0000-4000-8000-000000000001',
+  '[{"key": "doNotPhotograph"}, {"key": "class", "value": "d0000000-0000-4000-8000-000000000001"}]') $$,
+  'a job tab''s chips belong to that job, with its own classes');
 select lives_ok($$
   select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_subjects',
     'a0000000-0000-4000-8000-000000000002', '[{"key": "noClass"}, {"key": "doNotPublish"}]') $$,
   'and another job''s tab keeps its own');
 select is((select count(*) from public.list_filter_chips
-  where page = 'job_subjects' and job_id = 'a0000000-0000-4000-8000-000000000001'), 1::bigint,
+  where page = 'job_subjects' and job_id = 'a0000000-0000-4000-8000-000000000001'), 2::bigint,
   'saving one job''s chips doesn''t touch another job''s');
 select lives_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'orders', null, '[]') $$,
   'an empty list clears a page');
 select lives_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'orders', null,
+  '[{"key": "deliveryHome"}, {"key": "job", "value": "a0000000-0000-4000-8000-000000000002"}]') $$,
+  'Orders takes a delivery and one of the studio''s jobs');
+select lives_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_orders',
+  'a0000000-0000-4000-8000-000000000003', '[{"key": "deliverySchool"}]') $$, 'a job''s Orders takes a delivery');
+select lives_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'jobs', null,
   pg_temp.chips(8)) $$, 'eight chips are allowed');
 
 -- ── Refusals: fixed messages, never the value sent ────────────────────────────────────────────────────────────────
-select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'orders', null,
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'jobs', null,
   pg_temp.chips(9)) $$, '22023', 'list_filters_too_many', 'nine are not');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'jobs', null,
+  '[{"key": "deliveryHome"}]') $$, '22023', 'list_filters_invalid', 'a key another list takes is refused');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'jobs', null,
+  '[{"key": "closingThisWeek", "value": "c0000000-0000-4000-8000-000000000001"}]') $$, '22023',
+  'list_filters_invalid', 'so is an id on a key that takes none');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'jobs', null,
+  '[{"key": "client"}]') $$, '22023', 'list_filters_invalid', 'and a client chip without its client');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'jobs', null,
+  '[{"key": "client", "value": "cb000000-0000-4000-8000-000000000001"}]') $$, '22023', 'list_filters_record',
+  'another studio''s client is refused, even called directly');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'orders', null,
+  '[{"key": "job", "value": "b0000000-0000-4000-8000-000000000001"}]') $$, '22023', 'list_filters_record',
+  'so is another studio''s job');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_subjects',
+  'a0000000-0000-4000-8000-000000000001', '[{"key": "class", "value": "d0000000-0000-4000-8000-000000000003"}]') $$,
+  '22023', 'list_filters_record', 'and another job''s class');
 select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'jobs', null,
   '[{"key": "client", "value": "Maya Johnson"}]') $$, '22023', 'list_filters_invalid',
   'a value that isn''t an id is refused, and the message doesn''t repeat it');
@@ -129,7 +161,7 @@ where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and user_id = '55555555
 select is((select count(*) from public.list_filter_chips where user_id = '55555555-5555-4555-8555-555555555555'),
   0::bigint, 'and a person who leaves the studio takes theirs');
 select is((select count(*) from public.list_filter_chips where user_id = '11111111-1111-4111-8111-111111111111'),
-  10::bigint, 'the owner''s other chips stay (Jobs 1, the job''s Subjects 1, Orders 8)');
+  13::bigint, 'the owner''s other chips stay (Jobs 8, job A1''s Subjects 2, Orders 2, job A3''s Orders 1)');
 
 -- ── Events ────────────────────────────────────────────────────────────────────────────────────────────────────────
 select results_eq($$
@@ -138,7 +170,7 @@ select results_eq($$
     ('11111111-1111-4111-8111-111111111111'::uuid, null::uuid, '{"page": "jobs", "count": 2}'::jsonb),
     ('11111111-1111-4111-8111-111111111111'::uuid, null::uuid, '{"page": "jobs", "count": 1}'::jsonb),
     ('11111111-1111-4111-8111-111111111111'::uuid, 'a0000000-0000-4000-8000-000000000001'::uuid,
-     '{"page": "job_subjects", "count": 1}'::jsonb) $$,
+     '{"page": "job_subjects", "count": 2}'::jsonb) $$,
   'each save writes one event: who, the job for a job''s tab, the page and how many chips');
 select is((select count(*) from public.events
   where type = 'list_filters.saved' and (data::text ~ 'c0000000' or data::text ~* '(closing|client|maya|key|value)')),

@@ -11,7 +11,7 @@
 -- amounts, names or tracking numbers.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(232);
+select plan(234);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -768,12 +768,16 @@ select pg_temp.as_user('33333333-3333-4333-8333-333333333333');
 select is((select count(*) from public.orders) + (select count(*) from public.order_refunds), 0::bigint,
   'a photographer reads no orders or refunds');
 select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), '[]'::jsonb, 'nor through the list');
+select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{shipped,delivered,complete}'), '[]'::jsonb,
+  'nor through the list asked for several statuses (D147)');
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222');
 select is((select count(*) from public.orders o where o.studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
   + (select count(*) from public.order_refunds) + (select count(*) from public.order_refund_lines)
   + (select count(*) from public.order_refund_recoveries) + (select count(*) from public.order_shipping_addresses),
   0::bigint, 'studio B''s owner sees none of A''s orders, refunds, refund lines, recoveries or addresses');
 select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), '[]'::jsonb, 'nor A''s list');
+select is(public.studio_orders('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', null, '{paid,printed,shipped,delivered,complete}'),
+  '[]'::jsonb, 'nor A''s list asked for several statuses (D147)');
 select is(public.studio_order('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pg_temp.v('oH')), null, 'nor an order of A''s');
 select is(public.studio_order_todo('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
   '{"to_ship": 0, "to_print": 0, "to_deliver": 0}'::jsonb, 'nor A''s to-do');

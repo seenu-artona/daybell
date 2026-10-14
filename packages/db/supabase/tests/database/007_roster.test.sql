@@ -4,7 +4,7 @@
 -- the import RPC, the roster list with duplicate flags, and events without personal data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(97);
+select plan(99);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -451,6 +451,30 @@ update public.orders set status = 'paid', paid_at = now(), tax_cents = 0, total_
   payment_intent_id = 'pi_B' || right(id::text, 1)
 where studio_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 update public.orders set fulfilment_status = 'canceled' where id = 'bc000000-0000-4000-8000-000000000002';
+-- Quinn also has a paid order in another of B's jobs (a line for Quinn, but not in this job), and a paid order in this
+-- job that was refunded in full: neither counts as ordered here.
+insert into public.jobs (id, studio_id, name, type, picture_day, internal_number) values
+  ('b0000000-0000-4000-8000-000000000006', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Spring', 'school', '2027-04-01', 'JOB00002');
+insert into public.orders (id, studio_id, reference, currency, shipping_method, products_cents, shipping_cents,
+  daybell_fee_bps, daybell_fee_cents, card_fee_recovery, tax_enabled, payout_account_id, stripe_account_id,
+  bag_fingerprint)
+select ('bc000000-0000-4000-8000-00000000000' || n)::uuid, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  '7KQ2M9X' || case n when 3 then 'C' else 'D' end, 'USD', 'home', 2000, 0, 300, 60, 'per_sale', false,
+  'bd000000-0000-4000-8000-000000000001', 'acct_B7', repeat(n::text, 64)
+from generate_series(3, 4) n;
+insert into public.order_lines (studio_id, order_id, position, job_id, child_id, price_list_id, price_list_item_id,
+  kind, name, unit_price_cents, quantity, line_total_cents)
+select 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ('bc000000-0000-4000-8000-00000000000' || n)::uuid, 1,
+  (case n when 3 then 'b0000000-0000-4000-8000-000000000006' else 'b0000000-0000-4000-8000-000000000002' end)::uuid,
+  'b0000000-0000-4000-8000-000000000005', gen_random_uuid(), gen_random_uuid(), 'print', 'Print', 2000, 1, 2000
+from generate_series(3, 4) n;
+update public.orders set status = 'paid', paid_at = now(), tax_cents = 0, total_cents = 2000,
+  payment_intent_id = 'pi_B' || right(id::text, 1)
+where id in ('bc000000-0000-4000-8000-000000000003', 'bc000000-0000-4000-8000-000000000004');
+insert into public.order_refunds (studio_id, order_id, request_id, kind, reason, products_cents, shipping_cents,
+  tax_cents, amount_cents, daybell_fee_cents, currency)
+values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'bc000000-0000-4000-8000-000000000004', gen_random_uuid(), 'custom',
+  'other', 2000, 0, 0, 2000, 60, 'USD');
 create function pg_temp.roster_columns() returns table (name text, photos int, ordered boolean)
 language sql as $$
   select c ->> 'first_name', (c ->> 'photo_count')::int, (c ->> 'has_paid_order')::boolean
@@ -464,6 +488,13 @@ select results_eq($$ select * from pg_temp.roster_columns() $$,
   $$ values ('Bianca', 3, true), ('Quinn', 0, false) $$,
   'the roster counts each child''s ready photos outside the bin (flagged ones too) and says who has a paid order; '
   'a canceled order doesn''t count');
+select ok((select count(*) from public.order_lines where child_id = 'b0000000-0000-4000-8000-000000000005'
+    and job_id = 'b0000000-0000-4000-8000-000000000006') = 1
+  and not (select o from pg_temp.roster_columns() r (n, p, o) where n = 'Quinn'),
+  'a paid order line for the child in another job of the same studio doesn''t make them ordered in this one');
+select ok(coalesce((app.studio_order_refund_state('bc000000-0000-4000-8000-000000000004') ->> 'fully_refunded')::boolean, false)
+  and not (select o from pg_temp.roster_columns() r (n, p, o) where n = 'Quinn'),
+  'nor does a paid order in this job that was refunded in full');
 select pg_temp.as_user('77777777-7777-4777-8777-777777777777') as signed_in;
 select results_eq($$ select * from pg_temp.roster_columns() $$,
   $$ values ('Bianca', 3, true), ('Quinn', 0, false) $$, 'staff see the order column too (they fulfil orders)');
