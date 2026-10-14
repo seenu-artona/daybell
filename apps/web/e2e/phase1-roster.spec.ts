@@ -362,7 +362,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
 
   // 7. Rename a class from the Classes row under the list (D147: Group by is gone): it opens the job's classes in the
   // panel, each with Rename; focus comes back to the class's Rename button.
-  const classesRow = main.getByRole("button", { name: /^Classes ?\d+$/ });
+  const classesRow = main.getByRole("button", { name: /^Classes \d+$/ });
   await classesRow.click();
   await expect(classesRow).toHaveAttribute("aria-expanded", "true");
   const classesPanel = page.getByRole("complementary", { name: "This job's classes" });

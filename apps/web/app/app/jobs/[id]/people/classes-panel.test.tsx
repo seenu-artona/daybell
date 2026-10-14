@@ -34,13 +34,13 @@ describe("Subjects' classes", () => {
     const onOpen = vi.fn();
     await render(<ClassesRow count={3} word="class" open={false} onOpen={onOpen} />);
     const row = container.querySelector("button") as HTMLButtonElement;
-    expect(row.textContent).toBe("Classes3");
+    expect(row.textContent).toBe("Classes 3");
     expect(row.getAttribute("aria-expanded")).toBe("false");
     expect(row.className).toMatch(/\bmin-h-14\b/);
     await act(async () => row.click());
     expect(onOpen).toHaveBeenCalledOnce();
     await render(<ClassesRow count={1} word="team" open onOpen={onOpen} />);
-    expect(container.querySelector("button")?.textContent).toBe("Teams1");
+    expect(container.querySelector("button")?.textContent).toBe("Teams 1");
   });
 
   it("the panel lists each class with its children and a Rename button named for it", async () => {

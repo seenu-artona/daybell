@@ -30,6 +30,8 @@ export const ClassesRow = forwardRef<
         className="group flex min-h-14 w-full items-center gap-3 px-6 text-left text-body-lg text-ink hover:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
       >
         <span className="flex-1 font-semibold">{t("row", { group: word })}</span>
+        {/* Visually hidden, so the button's name reads "Classes 3" rather than "Classes3". */}
+        <span className="sr-only"> </span>
         <span className="text-muted">{t("count", { count })}</span>
         <ChevronRight aria-hidden="true" className="size-5 text-line-strong group-hover:text-ink" />
       </button>
