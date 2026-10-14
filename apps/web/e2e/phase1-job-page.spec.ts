@@ -4,7 +4,8 @@ import { signUpOwner } from "./helpers";
 // Phase 1 step 2b "Job page layout" (D136, D137, D138; ADR 0013), restyled in step 2c (D140; ADR 0014), with one
 // checklist since step 2d (D143; ADR 0017): the one dark menu (fold, search, notifications, profile), the job's title
 // row and pill tabs (with a section's actions at the tab row's right end, also when it sticks: D147), Overview's hero,
-// checklist and activity, the coming-soon tabs, and that search and job activity never cross studios. Desktop only (D136).
+// checklist and activity, the tabs D150 kept (Messages and Settings are gone), and that search and job activity never
+// cross studios. Desktop only (D136).
 const run = `${Date.now()}`;
 
 test("job page layout, menu search and studio separation", async ({
@@ -100,7 +101,7 @@ test("job page layout, menu search and studio separation", async ({
   await expect(results.getByRole("option", { name: new RegExp(clientName) })).toBeVisible();
   await expect(results.getByRole("option")).toHaveCount(1);
   await box.press("Enter");
-  await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
+  await expect(page).toHaveURL(/\/app\/people\/clients$/);
   const clientDialog = page.getByRole("dialog", { name: "Edit client" });
   await expect(clientDialog.getByLabel("Client name", { exact: true })).toHaveValue(clientName);
   await page.keyboard.press("Escape");
@@ -247,8 +248,8 @@ test("job page layout, menu search and studio separation", async ({
   await expect(jobRow.getByText("2 of 7", { exact: true })).toHaveCount(0);
   await page.goto(`/app/jobs/${job.id}`);
 
-  // 6. Photos is real since step 4 (ADR 0016), Shop since step 6 (ADR 0019) and Orders since step 11 (ADR 0024); the
-  // other tabs show coming soon inside the job's frame; an unknown tab is a 404.
+  // 6. Photos is real since step 4 (ADR 0016), Shop since step 6 (ADR 0019) and Orders since step 11 (ADR 0024); an
+  // unknown tab is a 404.
   await main
     .getByRole("navigation", { name: "Job sections" })
     .getByRole("link", { name: "Photos", exact: true })
@@ -269,7 +270,7 @@ test("job page layout, menu search and studio separation", async ({
     .getByRole("link", { name: "Orders", exact: true })
     .click();
   await expect(main.getByText("No orders yet.", { exact: true })).toBeVisible();
-  // Messages and Settings aren't built: they leave the tab row (D144) but still open by their address.
+  // Messages and Settings are dropped (D150): not in the tab row, and their addresses are 404s like any unknown tab.
   for (const [name, segment] of [
     ["Messages", "messages"],
     ["Settings", "settings"],
@@ -279,11 +280,7 @@ test("job page layout, menu search and studio separation", async ({
         .getByRole("navigation", { name: "Job sections" })
         .getByRole("link", { name, exact: true }),
     ).toHaveCount(0);
-    await page.goto(`/app/jobs/${job.id}/${segment}`);
-    await expect(
-      main.getByRole("heading", { name: `${name} is coming soon`, level: 2 }),
-    ).toBeVisible();
-    await expect(main.getByRole("heading", { name: jobName, level: 1 })).toBeVisible();
+    expect((await page.goto(`/app/jobs/${job.id}/${segment}`))?.status()).toBe(404);
   }
   const unknown = await page.goto(`/app/jobs/${job.id}/nope`);
   expect(unknown?.status()).toBe(404);

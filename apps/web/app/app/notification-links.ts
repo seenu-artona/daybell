@@ -8,7 +8,7 @@ export function orderHref(orderId: string): string {
 
 /**
  * Where a bell row leads (ADR 0021, 0024): the job's Overview, its Photos (failed photos show there, as for the
- * checklist's "Check failed photos"), Photos' Review, Settings › Payouts, or the order's page. Null when a job or order
+ * checklist's "Check failed photos"), Photos' Review, Settings › Stripe, or the order's page. Null when a job or order
  * notification has none (it can't happen; the database deletes them with it).
  */
 export function notificationHref(

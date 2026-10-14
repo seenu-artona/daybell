@@ -34,7 +34,7 @@ const LINK =
   "inline-flex min-h-11 items-center font-bold text-ink no-underline hover:underline group-hover:underline focus-visible:outline-2 focus-visible:outline-primary";
 
 /**
- * Products › Price lists (ADR 0019, D144; the menu item stays "Products", Claude's call 5). Every member sees the
+ * Price lists (ADR 0019, D144): the menu's Price lists (D150); the route and key stay products. Every member sees the
  * studio's lists, the default first, with what they hold and how many jobs use them, in a white list card; a click on a
  * row opens the list; the card's toolbar has the All chip only (D147). Owners and admins add a list (blank or a copy)
  * from the green button in the title row, and make one the default or delete one that isn't the default and that no

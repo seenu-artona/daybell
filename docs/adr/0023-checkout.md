@@ -72,7 +72,7 @@ page to check before staging is trusted:
 - `app.platform_settings_changes`: every change with its old and new value and a note. Append-only.
 - `set_platform_fee(bps, note)` and `set_card_fee_recovery(method, note)`: the database owner only (Seenu, in the SQL
   editor); revoked from the service role so no API bug can change a fee (security review S1). Each change keeps
-  `changed_by` (the database role). Runbook: `docs/platform-fee.md`. `platform_fee_settings()` reads the current values (Settings › Payouts shows the
+  `changed_by` (the database role). Runbook: `docs/platform-fee.md`. `platform_fee_settings()` reads the current values (Settings › Stripe shows the
   rate from it; `packages/config` `DAYBELL_FEE_BASIS_POINTS` is only the launch value now).
 
 ## 4. Data model (forward migration `20261013000000_checkout.sql`)

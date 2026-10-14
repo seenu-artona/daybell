@@ -1,5 +1,5 @@
 /**
- * The fees Settings › Payouts explains (D98, D59; ADR 0020, Claude's call Q8). Not secrets: shared constants.
+ * The fees Settings › Stripe explains (D98, D59; ADR 0020, Claude's call Q8). Not secrets: shared constants.
  *
  * Daybell's own fee is 3% of product sales, nothing if nothing sells (D59: product value only, never shipping or tax).
  * Stripe's card fees and Connect payout fees (per payout and per monthly active account) are passed on to studios at
@@ -36,7 +36,7 @@ export interface PayoutFeeTable {
 
 /**
  * The launch rate (D59), which each regional database's platform setting starts at. Not authoritative since step 10:
- * orders use, and Settings › Payouts shows, the database's setting (Seenu, answer 1; ADR 0023, docs/platform-fee.md).
+ * orders use, and Settings › Stripe shows, the database's setting (Seenu, answer 1; ADR 0023, docs/platform-fee.md).
  */
 export const DAYBELL_FEE_BASIS_POINTS = 300;
 

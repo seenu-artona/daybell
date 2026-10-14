@@ -12,9 +12,9 @@ const TAB =
   "inline-flex min-h-11 items-center rounded-full px-4 font-semibold no-underline text-muted hover:bg-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary aria-[current=page]:bg-ink aria-[current=page]:text-white";
 
 /**
- * Settings (ADR 0020): the heading and its sections, Team for everyone, and Payouts and Taxes (ADR 0023) for owners
- * and admins only (Seenu, answer 1: photographers and staff don't see them). The current section is marked with aria-current, not
- * colour alone (D91).
+ * Settings (ADR 0020): the heading and its sections, Team for everyone, and Stripe (formerly Payouts, D150; ADR 0027)
+ * and Taxes (ADR 0023) for owners and admins only (Seenu, answer 1: photographers and staff don't see them). The
+ * current section is marked with aria-current, not colour alone (D91).
  */
 export default function SettingsLayout({ children }: { children: ReactNode }) {
   const t = useTranslations("app.settings");

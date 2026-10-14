@@ -1,11 +1,11 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { signUpOwner } from "./helpers";
 
-// Phase 1 step 1 "Jobs and clients" (ADR 0008–0010): an owner adds a client in Contacts, creates a job in the
-// one-form dialog picking that client in the combobox, then creates a second job adding a new client from the
+// Phase 1 step 1 "Jobs and clients" (ADR 0008–0010): an owner adds a client in People › Clients (D150), creates a job
+// in the one-form dialog picking that client in the combobox, then creates a second job adding a new client from the
 // combobox's last option. Then the Jobs list (D147): its columns, the chips, a client chip added from "+ Add filter"
-// (saved, kept after a reload, removed with its own button), the search, and Calendar coming soon.
-// The CI database is Canadian (D122), so address labels read Province / Postal code.
+// (saved, kept after a reload, removed with its own button), the search, Calendar coming soon, and an old Contacts link
+// to a client opening it in People. The CI database is Canadian (D122), so address labels read Province / Postal code.
 const run = `${Date.now()}`;
 
 /** Fills the client form inside `dialog`. */
@@ -43,9 +43,10 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   // Look inside the page's main area (the menu has its own links and search).
   const main = page.getByRole("main");
 
-  // 1. Contacts opens on Clients (labelled Clients, D144). Add a client with New client; Quebec is refused (D131).
+  // 1. People opens on Clients (D150); the old Contacts address still lands there. Add a client with New client;
+  // Quebec is refused (D131).
   await page.goto("/app/contacts");
-  await expect(page).toHaveURL(/\/app\/contacts\/clients$/);
+  await expect(page).toHaveURL(/\/app\/people\/clients$/);
   await expect(main.getByRole("heading", { name: "Clients", level: 1 })).toBeVisible();
   await main.getByRole("button", { name: "New client", exact: true }).click();
   const addClient = page.getByRole("dialog", { name: "Add client" });
@@ -177,6 +178,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
     .getByRole("option", { name: client })
     .click();
   await expect(page).toHaveURL(/\/app\/jobs\?client=[0-9a-f-]{36}$/);
+  const clientId = new URL(page.url()).searchParams.get("client") as string;
   await expect(chips.getByRole("link", { name: client, exact: true })).toHaveAttribute(
     "aria-current",
     "true",
@@ -202,6 +204,12 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(
     main.getByRole("heading", { name: "Calendar is coming soon", level: 2, exact: true }),
   ).toBeVisible();
+
+  // An old Contacts link to a client (a menu search result before D150) lands on People › Clients with it open.
+  await page.goto(`/app/contacts/clients?client=${clientId}`);
+  await expect(page).toHaveURL(/\/app\/people\/clients$/);
+  const editClient = page.getByRole("dialog", { name: "Edit client" });
+  await expect(editClient.getByLabel("Client name", { exact: true })).toHaveValue(client);
 
   // Home's "Create job" link opens the same dialog.
   await page.goto("/app/jobs?new=1");

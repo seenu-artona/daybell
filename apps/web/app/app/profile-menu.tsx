@@ -59,7 +59,7 @@ export function ProfileMenu({
             <Settings aria-hidden="true" />
             {t("nav.settings")}
           </Link>
-          <Link href="/app/shop" onClick={close} className={MENU_ROW}>
+          <Link href="/app/shop/preview" onClick={close} className={MENU_ROW}>
             <ExternalLink aria-hidden="true" />
             {t("top.viewShop")}
           </Link>
