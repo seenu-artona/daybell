@@ -240,6 +240,37 @@ describe("PUT /me/list-filters", () => {
     });
   });
 
+  it("saves the People lists' chips (ADR 0028): a client on Contacts, a job or a client on Subjects", async () => {
+    const db = signIn();
+    expect(
+      (
+        await put({
+          page: "people_subjects",
+          chips: [
+            { key: "job", value: JOB_A },
+            { key: "client", value: CLIENT_A },
+          ],
+        })
+      ).status,
+    ).toBe(204);
+    expect(db.calls).toContainEqual(["jobs", "eq", "studio_id", A]);
+    expect(db.calls).toContainEqual(["clients", "eq", "studio_id", A]);
+    expect(db.rpc).toHaveBeenCalledWith(
+      "save_list_filters",
+      expect.objectContaining({ p_studio_id: A, p_page: "people_subjects", p_job_id: null }),
+    );
+    expect(
+      (await put({ page: "people_contacts", chips: [{ key: "client", value: CLIENT_A }] })).status,
+    ).toBe(204);
+    // Another studio's records are refused; Clients takes no chips.
+    for (const body of [
+      { page: "people_subjects", chips: [{ key: "job", value: JOB_B }] },
+      { page: "people_contacts", chips: [{ key: "client", value: CLIENT_B }] },
+      { page: "people_clients", chips: [{ key: "client", value: CLIENT_A }] },
+    ])
+      expect((await put(body)).status).toBe(400);
+  });
+
   it("refuses another studio's client or job, and another job's class, without saying which", async () => {
     for (const body of [
       { page: "jobs", chips: [{ key: "client", value: CLIENT_B }] },

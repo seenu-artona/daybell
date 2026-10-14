@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 // GET /clients?q= (D96 studio separation, CLAUDE.md rule 4): the list is scoped to the caller's studio (studio_id from
 // studioScope), and ?q= narrows it by name only (ilike on "name", nothing else). Studio B searching for a name only
 // studio A has gets nothing. The scope and the database are faked: the fake table answers with the rows that pass the
-// filters the route applied, so a missing studio filter would leak studio A's client here.
+// filters the route applied, so a missing studio filter would leak studio A's client here. People › Clients (D150,
+// ADR 0028): the count and the main contact, job count and latest job come for the caller's studio and page only.
 vi.mock("server-only", () => ({}));
 const { scope } = vi.hoisted(() => ({ scope: vi.fn() }));
 vi.mock("@/lib/studio", async (original) => ({
@@ -47,16 +48,58 @@ function like(pattern: string): RegExp {
   return new RegExp(`^${body}$`, "i");
 }
 
+/** client_list_details' answer per client, as the database would give it to each studio. */
+const DETAILS: Record<string, { studio: string; row: Record<string, unknown> }> = {
+  "c0000000-0000-4000-8000-00000000000a": {
+    studio: A,
+    row: {
+      client_id: "c0000000-0000-4000-8000-00000000000a",
+      job_count: 3,
+      latest_job: {
+        id: "a0000000-0000-4000-8000-000000000001",
+        name: "Fall 2026",
+        picture_day: "2026-10-01",
+      },
+      main_contact: {
+        id: "e0000000-0000-4000-8000-000000000001",
+        first_name: "Dana",
+        last_name: "Ruiz",
+        role: "Office",
+        email: "office@zebulon.example",
+      },
+    },
+  },
+  "c0000000-0000-4000-8000-00000000000b": {
+    studio: B,
+    row: {
+      client_id: "c0000000-0000-4000-8000-00000000000b",
+      job_count: 0,
+      latest_job: null,
+      main_contact: null,
+    },
+  },
+};
+
 /** A chainable fake of the Supabase query builder over TABLE, recording every filter the route applies. */
 function fakeDatabase() {
   const calls: unknown[][] = [];
+  const rpc = (name: string, args: { p_studio_id: string; p_client_ids: string[] }) => {
+    calls.push(["rpc", name, args]);
+    const data = args.p_client_ids
+      .map((id) => DETAILS[id])
+      .filter((d) => d?.studio === args.p_studio_id)
+      .map((d) => d?.row);
+    return Promise.resolve({ data, error: null });
+  };
   const from = (table: string) => {
     calls.push(["from", table]);
     const filters: ((row: Record<string, unknown>) => boolean)[] = [];
     const rows = () => TABLE.filter((row) => filters.every((f) => f(row)));
+    let head = false;
     const builder = {
-      select: (columns: string) => {
-        calls.push(["select", columns]);
+      select: (columns: string, options?: { count?: string; head?: boolean }) => {
+        calls.push(["select", columns, ...(options ? [options] : [])]);
+        head = options?.head === true;
         return builder;
       },
       eq: (column: string, value: unknown) => {
@@ -78,11 +121,15 @@ function fakeDatabase() {
       maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
       // biome-ignore lint/suspicious/noThenProperty: the Supabase builder is awaited like a promise.
       then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-        Promise.resolve({ data: rows(), error: null }).then(resolve, reject),
+        Promise.resolve(
+          head
+            ? { data: null, count: rows().length, error: null }
+            : { data: rows(), count: null, error: null },
+        ).then(resolve, reject),
     };
     return builder;
   };
-  return { supabase: { from }, calls };
+  return { supabase: { from, rpc }, calls };
 }
 
 async function list(studioId: string, query: string) {
@@ -107,7 +154,11 @@ describe("GET /clients?q= (leak test)", () => {
 
   it("applies ?q= as an ilike on the name only", async () => {
     const { body, calls } = await list(A, "?q=zebu");
-    expect(calls.filter((c) => c[0] === "ilike")).toEqual([["ilike", "name", "%zebu%"]]);
+    // The list and its count: both by name only.
+    expect(calls.filter((c) => c[0] === "ilike")).toEqual([
+      ["ilike", "name", "%zebu%"],
+      ["ilike", "name", "%zebu%"],
+    ]);
     expect(calls.filter((c) => c[0] === "or")).toEqual([]);
     expect(body.clients.map((c: { name: string }) => c.name)).toEqual(["Zebulon Academy"]);
   });
@@ -117,6 +168,59 @@ describe("GET /clients?q= (leak test)", () => {
     expect(res.status).toBe(200);
     expect(calls).toContainEqual(["eq", "studio_id", B]);
     expect(calls).not.toContainEqual(["eq", "studio_id", A]);
-    expect(body).toEqual({ clients: [], nextCursor: null });
+    expect(body).toEqual({ clients: [], nextCursor: null, total: 0 });
+    // No page, no details asked for.
+    expect(calls.filter((c) => c[0] === "rpc")).toEqual([]);
+  });
+});
+
+describe("GET /clients: People › Clients' columns (D150)", () => {
+  it("adds the main contact, job count, latest job and the total, for the caller's studio and page", async () => {
+    const { body, calls } = await list(A, "");
+    expect(body.total).toBe(1);
+    expect(body.clients).toEqual([
+      expect.objectContaining({
+        name: "Zebulon Academy",
+        mainContact: {
+          id: "e0000000-0000-4000-8000-000000000001",
+          firstName: "Dana",
+          lastName: "Ruiz",
+          role: "Office",
+          email: "office@zebulon.example",
+        },
+        jobCount: 3,
+        latestJob: {
+          id: "a0000000-0000-4000-8000-000000000001",
+          name: "Fall 2026",
+          pictureDay: "2026-10-01",
+        },
+      }),
+    ]);
+    expect(calls).toContainEqual([
+      "rpc",
+      "client_list_details",
+      { p_studio_id: A, p_client_ids: ["c0000000-0000-4000-8000-00000000000a"] },
+    ]);
+    // The count is the studio's too.
+    const counts = calls.filter((c) => c[0] === "select" && c[2]);
+    expect(counts).toEqual([["select", "id", { count: "exact", head: true }]]);
+  });
+
+  it("gives studio B its own client with no contact and no jobs, never studio A's details", async () => {
+    const { body, calls } = await list(B, "");
+    expect(body.clients).toEqual([
+      expect.objectContaining({
+        name: "Lincoln Elementary",
+        mainContact: null,
+        jobCount: 0,
+        latestJob: null,
+      }),
+    ]);
+    expect(calls).toContainEqual([
+      "rpc",
+      "client_list_details",
+      { p_studio_id: B, p_client_ids: ["c0000000-0000-4000-8000-00000000000b"] },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("Dana");
   });
 });

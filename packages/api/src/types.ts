@@ -250,9 +250,97 @@ export type JobResponse = z.infer<typeof jobResponse>;
 export const nextJobNumberResponse = z.object({
   internalNumber: z.string().meta({ description: "The next free JOBnnnnn number." }),
 });
-export const clientsResponse = z.object({ clients: z.array(client), nextCursor });
+// ── People (D150, ADR 0028) ───────────────────────────────────────────────────────────────────────────────────────
+export const clientListItem = client
+  .extend({
+    mainContact: z
+      .object({
+        id: z.uuid(),
+        firstName: z.string().nullable(),
+        lastName: z.string().nullable(),
+        role: z.string().nullable(),
+        email: z.string().nullable().meta({ description: "Shown when the contact has no name." }),
+      })
+      .nullable()
+      .meta({ description: "The client's main contact, if it has one." }),
+    jobCount: z.number().int().meta({ description: "How many jobs are for this client." }),
+    latestJob: z
+      .object({ id: z.uuid(), name: z.string(), pictureDay: z.iso.date() })
+      .nullable()
+      .meta({ description: "The client's job with the latest picture day, if any." }),
+  })
+  .meta({
+    id: "ClientListItem",
+    description: "A client in the clients list, with its main contact and jobs. No money (D150).",
+  });
+export type ClientListItem = z.infer<typeof clientListItem>;
+export const clientsResponse = z.object({
+  clients: z.array(clientListItem),
+  nextCursor,
+  total: z.number().int().meta({ description: "Clients matching ?q=." }),
+});
 export type ClientsResponse = z.infer<typeof clientsResponse>;
 export const clientResponse = z.object({ client });
+
+export const contact = z
+  .object({
+    id: z.uuid(),
+    clientId: z.uuid(),
+    clientName: z.string().meta({ description: "The client's current name." }),
+    firstName: z.string().nullable(),
+    lastName: z.string().nullable(),
+    role: z.string().nullable().meta({ description: "Their role at the client." }),
+    email: z.string().nullable(),
+    phone: z.string().nullable(),
+    isMain: z.boolean().meta({
+      description:
+        "The client's main contact: its name, phone and email are the client's contactFirstName, contactLastName, contactPhone and contactEmail.",
+    }),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({
+    id: "Contact",
+    description:
+      "Someone the studio works with at a client. Personal data. Has a name, an email or a phone.",
+  });
+export type Contact = z.infer<typeof contact>;
+export const contactsResponse = z.object({
+  contacts: z.array(contact),
+  nextCursor,
+  total: z.number().int().meta({ description: "Contacts matching the filters." }),
+});
+export type ContactsResponse = z.infer<typeof contactsResponse>;
+export const contactResponse = z.object({ contact });
+export type ContactResponse = z.infer<typeof contactResponse>;
+
+export const subject = z
+  .object({
+    id: z.uuid().meta({ description: "The child's id in their job's roster." }),
+    firstName: z.string(),
+    lastName: z.string(),
+    className: z
+      .string()
+      .nullable()
+      .meta({ description: "Their class, team or group in the job." }),
+    job: z.object({ id: z.uuid(), name: z.string() }),
+    hasPaidOrder: z.boolean().nullable().meta({
+      description:
+        "A paid order, neither canceled nor refunded in full, has a line of the child's own that wasn't given back in full (D148). Null for people who don't see orders (photographers).",
+    }),
+  })
+  .meta({
+    id: "Subject",
+    description: "A child in one of the studio's jobs: one row per child per job.",
+  });
+export type Subject = z.infer<typeof subject>;
+export const subjectsResponse = z.object({
+  subjects: z.array(subject),
+  nextCursor,
+  total: z.number().int().meta({ description: "Children matching the filters." }),
+  jobs: z.number().int().meta({ description: "How many jobs those children are in." }),
+});
+export type SubjectsResponse = z.infer<typeof subjectsResponse>;
 
 // ── Search (Phase 1 step 2b, ADR 0013) ────────────────────────────────────────────────────────────────────────────
 export const searchJob = job

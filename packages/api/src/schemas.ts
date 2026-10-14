@@ -304,6 +304,108 @@ export const clientListQuery = listQuery.extend({
     .meta({ description: "Only clients whose name contains this." }),
 });
 
+// ── People: contacts and subjects (D150, ADR 0028) ────────────────────────────────────────────────────────────────
+// Contacts and children are people: their names and emails are searched only from a POST body, never a URL (D113,
+// as the menu search, ADR 0013).
+
+/** A client's contact (Seenu's answer 3). The limits are the client's own contact fields'. Personal data. */
+const contactFields = {
+  firstName: optionalText(60),
+  lastName: optionalText(60),
+  role: optionalText(60).meta({ description: "Their role at the client, e.g. Office manager." }),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(254)
+    .pipe(z.email({ error: "validation.email" }))
+    .nullable()
+    .optional(),
+  phone: optionalText(30).meta({ description: "Free text, up to 30 characters." }),
+  isMain: z.boolean({ error: "validation.invalid" }).optional().meta({
+    description:
+      "The client's main contact (at most one). Making one main makes the previous one an ordinary contact. The client's contact fields always show its main contact.",
+  }),
+};
+
+type ContactParts = { firstName?: unknown; lastName?: unknown; email?: unknown; phone?: unknown };
+/** A contact is someone: a name, an email or a phone (the database checks the same). */
+export function contactIsEmpty(value: ContactParts): boolean {
+  return [value.firstName, value.lastName, value.email, value.phone].every(
+    (v) => v === undefined || v === null,
+  );
+}
+
+export const contactInput = z
+  .object({
+    clientId: z.uuid({ error: "validation.client" }).meta({
+      description: "One of the studio's clients. A contact never moves to another client.",
+    }),
+    ...contactFields,
+  })
+  .superRefine((value, ctx) => {
+    if (contactIsEmpty(value))
+      ctx.addIssue({ code: "custom", path: ["firstName"], message: "validation.contactEmpty" });
+  });
+export type ContactInput = z.infer<typeof contactInput>;
+
+/** Change some fields of a contact. The merged result must still name someone. */
+export const contactPatch = z
+  .strictObject(z.object(contactFields).partial().shape, { error: "validation.unknownField" })
+  .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
+export type ContactPatch = z.infer<typeof contactPatch>;
+
+/** Contacts' built-in chip after All (D147 chips): only each client's main contact. */
+export const CONTACT_SHOW_FILTERS = ["main"] as const;
+export type ContactShowFilter = (typeof CONTACT_SHOW_FILTERS)[number];
+
+export const contactListQuery = listQuery.extend({
+  show: z
+    .enum(CONTACT_SHOW_FILTERS, { error: "validation.invalid" })
+    .optional()
+    .meta({ description: "main: only each client's main contact." }),
+  clientId: z
+    .uuid({ error: "validation.client" })
+    .optional()
+    .meta({ description: "Only this client's contacts." }),
+});
+export type ContactListQuery = z.infer<typeof contactListQuery>;
+
+/** Text a person typed to find people: sent in a POST body only. */
+const peopleSearchText = z
+  .string({ error: "validation.invalid" })
+  .trim()
+  .min(1, { error: "validation.invalid" })
+  .max(120, { error: "validation.tooLong" });
+
+export const contactSearchInput = contactListQuery.extend({
+  q: peopleSearchText.meta({ description: "Part of a contact's name or email." }),
+});
+
+/** Subjects' built-in chips after All (D148): who has ordered, and who hasn't. Order data: not for photographers. */
+export const SUBJECT_SHOW_FILTERS = ["ordered", "notOrdered"] as const;
+export type SubjectShowFilter = (typeof SUBJECT_SHOW_FILTERS)[number];
+
+export const subjectListQuery = listQuery.extend({
+  show: z.enum(SUBJECT_SHOW_FILTERS, { error: "validation.invalid" }).optional().meta({
+    description:
+      "ordered: a paid order, neither canceled nor refunded in full, has a line of the child's own that wasn't given back in full (D148). notOrdered: the others. Owners, admins and staff only.",
+  }),
+  jobId: z
+    .uuid({ error: "validation.invalid" })
+    .optional()
+    .meta({ description: "Only this job's children." }),
+  clientId: z
+    .uuid({ error: "validation.client" })
+    .optional()
+    .meta({ description: "Only the children of this client's jobs." }),
+});
+export type SubjectListQuery = z.infer<typeof subjectListQuery>;
+
+export const subjectSearchInput = subjectListQuery.extend({
+  q: peopleSearchText.meta({ description: "Part of a child's first and last name." }),
+});
+
 // ── Roster (Phase 1 step 2, ADR 0011) ─────────────────────────────────────────────────────────────────────────────
 // Every limit is at least as strict as the database's check constraints, so Postgres never rejects (and logs) a row
 // with names or emails in it.
@@ -1120,8 +1222,20 @@ export type OrderListQuery = z.infer<typeof orderListQuery>;
 
 // ── Saved filter chips (D147, ADR 0026) ───────────────────────────────────────────────────────────────────────────
 
-/** The lists whose "+ Add filter" chips are saved, per person: two studio-wide ones and three of a job's tabs. */
-export const LIST_PAGES = ["jobs", "orders", "job_subjects", "job_orders", "job_photos"] as const;
+/**
+ * The lists whose "+ Add filter" chips are saved, per person: the studio-wide ones (Jobs, Orders, and People's Clients,
+ * Contacts and Subjects, ADR 0028) and three of a job's tabs.
+ */
+export const LIST_PAGES = [
+  "jobs",
+  "orders",
+  "job_subjects",
+  "job_orders",
+  "job_photos",
+  "people_clients",
+  "people_contacts",
+  "people_subjects",
+] as const;
 export type ListPage = (typeof LIST_PAGES)[number];
 /** The lists that belong to one job: their chips are that job's only. */
 export const JOB_LIST_PAGES = ["job_subjects", "job_orders", "job_photos"] as const;
@@ -1140,6 +1254,9 @@ export const LIST_FILTER_KEYS = {
   job_orders: { deliveryHome: false, deliverySchool: false },
   job_subjects: { class: true, noClass: false, doNotPhotograph: false, doNotPublish: false },
   job_photos: {},
+  people_clients: {},
+  people_contacts: { client: true },
+  people_subjects: { job: true, client: true },
 } as const satisfies Record<ListPage, Record<string, boolean>>;
 
 /** Whether `key` is one of `page`'s chips, and if so whether it takes an id. */

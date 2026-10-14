@@ -2,9 +2,13 @@ import { clientInput, clientListQuery } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { check, filterValue, handle, likePattern, parseBody, parseQuery } from "@/lib/api";
 import { CLIENT_COLUMNS, type ClientRow, clientColumns, page, toClient } from "@/lib/jobs";
+import { withClientDetails } from "@/lib/people";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
-/** GET /api/v1/clients — the studio's clients by name, in pages; ?q= filters by name. */
+/**
+ * GET /api/v1/clients — the studio's clients by name, in pages; ?q= filters by name. Each with its main contact, job
+ * count and latest job (People › Clients, D150), and how many clients match in all.
+ */
 export const GET = handle(async (request: Request) => {
   const { limit, cursor, q } = parseQuery(request, clientListQuery);
   const { supabase, studio } = await studioScope();
@@ -26,13 +30,20 @@ export const GET = handle(async (request: Request) => {
         .eq("id", cursor)
         .maybeSingle(),
     ) as { name: string } | null;
-    if (!anchor) return NextResponse.json({ clients: [], nextCursor: null });
+    if (!anchor) return NextResponse.json({ clients: [], nextCursor: null, total: 0 });
     const name = filterValue(anchor.name);
     query = query.or(`name.gt.${name},and(name.eq.${name},id.gt.${cursor})`);
   }
-  const rows = (check(await query) ?? []) as ClientRow[];
-  const { items, nextCursor } = page(rows, limit);
-  return NextResponse.json({ clients: items.map(toClient), nextCursor });
+  let counting = supabase
+    .from("clients")
+    .select("id", { count: "exact", head: true })
+    .eq("studio_id", studio.id);
+  if (q) counting = counting.ilike("name", likePattern(q));
+  const [rows, counted] = await Promise.all([query, counting]);
+  const { items, nextCursor } = page((check(rows) ?? []) as ClientRow[], limit);
+  check(counted);
+  const clients = await withClientDetails(supabase, studio.id, items.map(toClient));
+  return NextResponse.json({ clients, nextCursor, total: counted.count ?? 0 });
 });
 
 /** POST /api/v1/clients — owners and admins add a client. */
