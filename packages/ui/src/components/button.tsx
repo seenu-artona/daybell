@@ -14,6 +14,8 @@ const variants = cva(
         danger: "bg-danger text-on-primary hover:brightness-95",
         /** A white pill action on the canvas, no border (D140). Use with shape="pill". */
         white: "bg-surface text-ink hover:bg-subtle",
+        /** A quiet text action in a view bar or a list row (D144): no fill until hovered. */
+        quiet: "bg-transparent text-ink hover:bg-surface",
       },
       size: {
         md: "min-h-11 px-[18px] text-sm",
