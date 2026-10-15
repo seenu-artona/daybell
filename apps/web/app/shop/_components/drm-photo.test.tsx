@@ -9,11 +9,13 @@ import messages from "@/messages/en-US.json";
 import { DrmPhoto } from "./drm-photo";
 import { DrmProvider } from "./drm-provider";
 
-// The large view (D158; ADR 0034, C2, C7) with a fake Shaka: a protected photo plays once a frame is ready, named like
-// the image it replaces, with its proof standing in and "Loading photo" said once after half a second; anything else
-// falls back to the watermarked WebP, silently: no protection, no hardware DRM, 8 seconds without a frame, or two
-// failures in a row (then the rest of the tab); a shown photo never falls back; one player per open viewer; the browser
-// is only asked about DRM when a large view opens, and only a plan and a count are kept in the tab.
+// The large view (D158; ADR 0034, C2, C7; review #2–#9) with a fake Shaka: a protected photo plays once a frame is
+// ready, named like the image it replaces, with its proof standing in and "Loading photo" said once after half a
+// second (never for a photo shown sooner); anything else falls back to the watermarked WebP, silently: no protection,
+// no hardware DRM, the gallery's setup failing, or 8 seconds in all from opening the photo; after a fallback nothing more
+// is asked; after two failures in a row the tab shows the WebP at once; while swiping a photo must stay 300 ms before
+// its clip is asked for; a shown photo never falls back; one player per open viewer; the browser is only asked about DRM
+// when a large view opens, and only a plan and a count are kept in the tab.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const CHILD = "c0000000-0000-4000-8000-000000000001";
@@ -40,6 +42,7 @@ type Behaviour = "frame" | "never" | "error";
 let behaviour: (url: string) => Behaviour;
 let players: FakePlayer[];
 let frame: { ready: number; width: number };
+let video: HTMLVideoElement | null;
 
 class FakePlayer extends EventTarget {
   loads: string[] = [];
@@ -49,9 +52,10 @@ class FakePlayer extends EventTarget {
     super();
     players.push(this);
   }
-  async attach(video: HTMLVideoElement) {
-    Object.defineProperty(video, "readyState", { configurable: true, get: () => frame.ready });
-    Object.defineProperty(video, "videoWidth", { configurable: true, get: () => frame.width });
+  async attach(element: HTMLVideoElement) {
+    video = element;
+    Object.defineProperty(element, "readyState", { configurable: true, get: () => frame.ready });
+    Object.defineProperty(element, "videoWidth", { configurable: true, get: () => frame.width });
   }
   configure() {
     return true;
@@ -71,7 +75,10 @@ class FakePlayer extends EventTarget {
     frame = { ready: 0, width: 0 };
     const b = behaviour(url);
     if (b === "error") throw Object.assign(new Error("shaka"), { code: 6007 });
-    if (b === "frame") frame = { ready: 4, width: 1600 };
+    if (b === "never") await new Promise(() => {});
+    // jsdom has no requestVideoFrameCallback: a decoded frame with a size, announced by the element, is shown.
+    frame = { ready: 4, width: 1600 };
+    setTimeout(() => video?.dispatchEvent(new Event("loadeddata")), 1);
   }
   async destroy() {
     this.destroyed = true;
@@ -87,15 +94,6 @@ const shaka = {
   drm: { FairPlay: { commonFairPlayResponse: () => {} } },
 } as unknown as ShakaLike;
 
-let loadShaka: ReturnType<typeof vi.fn<() => Promise<ShakaLike>>>;
-let probe: ReturnType<typeof vi.fn>;
-let api: {
-  drm: ReturnType<typeof vi.fn>;
-  drmToken: ReturnType<typeof vi.fn>;
-};
-let root: Root;
-let host: HTMLDivElement;
-
 const enabled = {
   ok: true,
   data: {
@@ -105,6 +103,19 @@ const enabled = {
     codec: "avc1.640028",
   },
 };
+/** Never answers until its signal gives up (a hung network). */
+const hang = (signal?: AbortSignal) =>
+  new Promise((resolve) =>
+    signal?.addEventListener("abort", () => resolve({ ok: false, code: "aborted" }), {
+      once: true,
+    }),
+  );
+
+let loadShaka: ReturnType<typeof vi.fn<() => Promise<ShakaLike>>>;
+let probe: ReturnType<typeof vi.fn>;
+let api: { drm: ReturnType<typeof vi.fn>; drmToken: ReturnType<typeof vi.fn> };
+let root: Root;
+let host: HTMLDivElement;
 
 async function view(
   p: ShopPhoto,
@@ -120,16 +131,18 @@ async function view(
     ),
   );
 }
-const settle = () => act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
 const webp = () => host.querySelector('img[src$="/proof.webp"]') as HTMLImageElement | null;
+const stand = () => host.querySelector('img[src$="/proof-thumb.webp"]');
 const drmView = () => host.querySelector('[role="img"]');
-const video = () => host.querySelector("video") as HTMLVideoElement;
+const videoEl = () => host.querySelector("video") as HTMLVideoElement;
 const status = () => host.querySelector('[role="status"]')?.textContent ?? "";
 
 beforeEach(() => {
   vi.useFakeTimers();
   sessionStorage.clear();
   players = [];
+  video = null;
   frame = { ready: 0, width: 0 };
   behaviour = () => "frame";
   loadShaka = vi.fn(async () => shaka);
@@ -157,10 +170,10 @@ afterEach(async () => {
 describe("a protected photo", () => {
   it("plays once a frame is ready, named like the image it replaces; the video is hidden from assistive tech", async () => {
     await view(photo(1));
-    await settle();
+    await advance(5);
     expect(drmView()?.getAttribute("aria-label")).toBe("Ava, photo 1 of 3");
     expect(drmView()?.getAttribute("data-drm-photo")).toBe("shown");
-    const v = video();
+    const v = videoEl();
     expect(v.getAttribute("aria-hidden")).toBe("true");
     expect(v.muted).toBe(true);
     expect(v.hasAttribute("playsinline")).toBe(true);
@@ -176,46 +189,98 @@ describe("a protected photo", () => {
     expect(sessionStorage.getItem("daybell.shop.drmFailures")).toBe("0");
   });
 
-  it("shows its proof while loading, and says 'Loading photo' after half a second, once", async () => {
-    behaviour = () => "never";
+  it("shown within half a second: no 'Loading photo', ever (#2)", async () => {
     await view(photo(1));
-    await settle();
-    expect(host.querySelector('img[src$="/proof-thumb.webp"]')).not.toBeNull();
+    await advance(5);
+    expect(drmView()?.getAttribute("data-drm-photo")).toBe("shown");
+    await advance(2_000);
     expect(host.textContent).not.toContain("Loading photo");
-    await act(async () => void (await vi.advanceTimersByTimeAsync(500)));
-    expect(status()).toBe("Loading photo");
-    expect(drmView()?.textContent).toContain("Loading photo");
-    // The next photo loading slowly shows the words again but doesn't announce them again.
-    await act(async () => void (await vi.advanceTimersByTimeAsync(7_500)));
-    await view(photo(2));
-    await act(async () => void (await vi.advanceTimersByTimeAsync(600)));
     expect(status()).toBe("");
   });
 
-  it("falls back to the WebP, silently, when nothing is shown within 8 seconds", async () => {
+  it("shows its proof while loading, and says 'Loading photo' after half a second, once per viewer", async () => {
+    behaviour = (url) => (url.includes(photo(1).id) ? "never" : "frame");
+    await view(photo(1));
+    await advance(1);
+    expect(stand()).not.toBeNull();
+    expect(host.textContent).not.toContain("Loading photo");
+    await advance(500);
+    expect(status()).toBe("Loading photo");
+    expect(drmView()?.textContent).toContain("Loading photo");
+    // It falls back at 8 s: the words go with it.
+    await advance(7_500);
+    expect(webp()).not.toBeNull();
+    expect(host.textContent).toBe("");
+    // The next slow photo shows the words again but doesn't announce them again.
+    behaviour = () => "never";
+    await view(photo(2));
+    await advance(1_000);
+    expect(drmView()?.textContent).toContain("Loading photo");
+    expect(status()).toBe("");
+  });
+
+  it("falls back to the WebP, silently, 8 seconds after opening, whatever is slow (#4)", async () => {
     behaviour = () => "never";
     await view(photo(1));
-    await act(async () => void (await vi.advanceTimersByTimeAsync(7_999)));
+    await advance(7_999);
     expect(webp()).toBeNull();
-    await act(async () => void (await vi.advanceTimersByTimeAsync(1)));
+    await advance(1);
     expect(webp()?.alt).toBe("Ava, photo 1 of 3");
     expect(drmView()).toBeNull();
     expect(host.textContent).toBe("");
     expect(sessionStorage.getItem("daybell.shop.drmFailures")).toBe("1");
   });
 
-  it("after two failures in a row, the rest of the tab gets the WebP without trying", async () => {
+  it("counts GET /shop/drm in those 8 seconds: a setup that never answers falls back in time (#4)", async () => {
+    api.drm.mockImplementation((_g: string, signal?: AbortSignal) => hang(signal));
+    await view(photo(1));
+    await advance(8_000);
+    expect(webp()).not.toBeNull();
+    expect(loadShaka).not.toHaveBeenCalled();
+    // The request itself was given up.
+    const signal = api.drm.mock.calls[0]?.[1] as AbortSignal;
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("counts the probe and loading Shaka in them too (#4)", async () => {
+    probe.mockImplementation(() => new Promise(() => {}));
+    await view(photo(1));
+    await advance(8_000);
+    expect(webp()).not.toBeNull();
+    sessionStorage.clear();
+    probe.mockResolvedValue(SUPPORTED);
+    loadShaka.mockImplementation(() => new Promise(() => {}));
+    await view(photo(2));
+    await advance(8_000);
+    expect(webp()?.src).toContain("/2/proof.webp");
+  });
+
+  it("asks for nothing after falling back: no token, no license, its player gone (#5)", async () => {
+    behaviour = () => "never";
+    await view(photo(1));
+    await advance(8_000);
+    expect(webp()).not.toBeNull();
+    expect(players[0]?.destroyed).toBe(true);
+    // A license request Shaka might still make is refused without asking the API.
+    await expect(players[0]?.filters[0]?.(2, { headers: {} })).rejects.toThrow();
+    expect(api.drmToken).not.toHaveBeenCalled();
+  });
+
+  it("after two failures in a row, the rest of the tab gets the WebP at once, with no stand-in (C2, #9)", async () => {
     behaviour = () => "error";
     await view(photo(1));
-    await settle();
+    await advance(5);
     expect(webp()).not.toBeNull();
     await view(photo(2));
-    await settle();
-    expect(players[0]?.loads).toHaveLength(2);
+    await advance(400);
+    expect(webp()?.src).toContain("/2/proof.webp");
+    const loads = players.reduce((n, p) => n + p.loads.length, 0);
+    expect(loads).toBe(2);
     await view(photo(3));
-    await settle();
-    expect(players[0]?.loads).toHaveLength(2);
+    expect(stand()).toBeNull();
     expect(webp()?.src).toContain("/3/proof.webp");
+    await advance(1_000);
+    expect(players.reduce((n, p) => n + p.loads.length, 0)).toBe(2);
     expect([...Object.keys(sessionStorage)].sort()).toEqual([
       "daybell.shop.drmFailures",
       "daybell.shop.drmPlan",
@@ -224,7 +289,7 @@ describe("a protected photo", () => {
 
   it("never falls back once shown, whatever happens after", async () => {
     await view(photo(1));
-    await settle();
+    await advance(5);
     expect(drmView()?.getAttribute("data-drm-photo")).toBe("shown");
     await act(async () => {
       players[0]?.dispatchEvent(new CustomEvent("error", { detail: { code: 6007 } }));
@@ -234,18 +299,31 @@ describe("a protected photo", () => {
     expect(webp()).toBeNull();
   });
 
-  it("uses one player while the viewer is open, a fresh token per license request for the photo shown, and destroys it on close", async () => {
+  it("while swiping, waits 300 ms on a photo before asking for its clip (#7)", async () => {
     await view(photo(1));
-    await settle();
+    await advance(5);
     await view(photo(2));
-    await settle();
+    await advance(100);
+    await view(photo(3));
+    await advance(299);
+    expect(players[0]?.loads).toHaveLength(1);
+    await advance(10);
+    expect(players[0]?.loads.map((u) => u.includes(photo(3).id))).toEqual([false, true]);
+    expect(players).toHaveLength(1);
+  });
+
+  it("uses one player while open, a token per license request for the photo shown, and destroys it on close", async () => {
+    await view(photo(1));
+    await advance(5);
+    await view(photo(2));
+    await advance(310);
     expect(players).toHaveLength(1);
     const license = { headers: {} as Record<string, string> };
     await players[0]?.filters[0]?.(2, license);
     expect(license.headers["X-AxDRM-Message"]).toBe(`t-${photo(2).id}`);
-    expect(api.drmToken).toHaveBeenCalledWith(GALLERY, CHILD, photo(2).id);
+    expect(api.drmToken).toHaveBeenCalledWith(GALLERY, CHILD, photo(2).id, expect.any(AbortSignal));
     await act(async () => root.unmount());
-    await settle();
+    await advance(1);
     expect(players[0]?.destroyed).toBe(true);
     root = createRoot(host);
   });
@@ -254,39 +332,65 @@ describe("a protected photo", () => {
 describe("the WebP, as before", () => {
   it("for a photo that isn't protected, without asking the API or loading Shaka", async () => {
     await view(photo(1, false));
-    await settle();
+    await advance(5);
     expect(webp()?.alt).toBe("Ava, photo 1 of 3");
     expect(api.drm).not.toHaveBeenCalled();
     expect(probe).not.toHaveBeenCalled();
     expect(loadShaka).not.toHaveBeenCalled();
   });
 
-  it("where DRM is off for the gallery", async () => {
+  it("where DRM isn't on for the gallery: remembered for the tab, so later photos open as the WebP at once (#9)", async () => {
     api.drm.mockResolvedValue({
       ok: true,
       data: { ...enabled.data, enabled: false, licenseUrls: null },
     });
     await view(photo(1));
-    await settle();
+    await advance(5);
     expect(webp()).not.toBeNull();
     expect(loadShaka).not.toHaveBeenCalled();
+    await view(photo(2));
+    expect(stand()).toBeNull();
+    expect(webp()?.src).toContain("/2/proof.webp");
+    expect(api.drm).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem("daybell.shop.drmFailures")).toBeNull();
   });
 
-  it("where the browser has no hardware DRM: the plan is kept for the tab and Shaka never loads", async () => {
+  it("where the gallery's setup couldn't be read: a failure, asked again next time (#8)", async () => {
+    api.drm.mockResolvedValueOnce({ ok: false, code: "network" });
+    await view(photo(1));
+    await advance(5);
+    expect(webp()).not.toBeNull();
+    expect(sessionStorage.getItem("daybell.shop.drmFailures")).toBe("1");
+    await view(photo(2));
+    await advance(310);
+    expect(api.drm).toHaveBeenCalledTimes(2);
+    expect(drmView()?.getAttribute("data-drm-photo")).toBe("shown");
+  });
+
+  it("where the browser has no hardware DRM: the plan is kept for the tab, Shaka never loads, later photos at once (#9)", async () => {
     probe.mockResolvedValue({ ...SUPPORTED, widevineHwAll: "notSupported" });
     await view(photo(1));
-    await settle();
+    await advance(5);
     expect(webp()).not.toBeNull();
     expect(sessionStorage.getItem("daybell.shop.drmPlan")).toBe("none");
     await view(photo(2));
-    await settle();
+    expect(stand()).toBeNull();
+    expect(webp()?.src).toContain("/2/proof.webp");
     expect(probe).toHaveBeenCalledTimes(1);
     expect(loadShaka).not.toHaveBeenCalled();
   });
 
+  it("opens at once when the tab already knows there's no hardware DRM (no stand-in)", async () => {
+    sessionStorage.setItem("daybell.shop.drmPlan", "none");
+    await view(photo(1));
+    expect(stand()).toBeNull();
+    expect(webp()).not.toBeNull();
+    expect(api.drm).not.toHaveBeenCalled();
+  });
+
   it("without a gallery to ask for", async () => {
     await view(photo(1), null);
-    await settle();
+    await advance(5);
     expect(webp()).not.toBeNull();
     expect(api.drm).not.toHaveBeenCalled();
   });
@@ -301,7 +405,7 @@ describe("DrmProvider (C7)", () => {
         </DrmProvider>,
       ),
     );
-    await settle();
+    await advance(5);
     expect(probe).not.toHaveBeenCalled();
     expect(api.drm).not.toHaveBeenCalled();
     expect(sessionStorage.length).toBe(0);

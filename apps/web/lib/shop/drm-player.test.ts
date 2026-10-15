@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DrmProbeId, ProbeResult } from "../drm-capabilities";
 import {
   createShopDrmPlayer,
   DRM_FAILURES_KEY,
@@ -17,6 +16,7 @@ import {
   storedPlan,
   storePlan,
 } from "./drm-player";
+import type { DrmProbeId, ProbeResult } from "./drm-probes";
 
 // The shop's large view under DRM, apart from React (D158; ADR 0034, C2, C7): the plan from hardware probes only, the
 // tab's memory (a plan and a count, nothing else), the manifest address, Shaka's hardware-only configuration, and one
@@ -146,30 +146,42 @@ describe("addresses and configuration", () => {
 
 // ── A fake Shaka (Shaka itself needs a real browser) ─────────────────────────────────────────────────────────────────
 
-type Behaviour = "frame" | "error" | "never";
+type Behaviour = "frame" | "decodedOnly" | "error" | "never" | "playRefused" | "errorDuringLoad";
 class FakeVideo extends EventTarget {
   readyState = 0;
   videoWidth = 0;
   currentTime = 0;
   muted = false;
   error = null;
-  play = vi.fn(() => Promise.resolve());
+  frameCallbacks: (() => void)[] = [];
+  behaviour: Behaviour = "frame";
+  play = vi.fn(() => {
+    if (this.behaviour === "playRefused")
+      return Promise.reject(new DOMException("autoplay", "NotAllowedError"));
+    if (this.behaviour === "frame")
+      // A frame is presented a moment after play().
+      setTimeout(() => {
+        for (const cb of this.frameCallbacks.splice(0)) cb();
+      }, 10);
+    return Promise.resolve();
+  });
   pause = vi.fn();
+  requestVideoFrameCallback: ((cb: () => void) => number) | undefined = (cb) =>
+    this.frameCallbacks.push(cb);
+  cancelVideoFrameCallback = () => {};
 }
 function fakeShaka(video: FakeVideo, behave: (url: string) => Behaviour) {
   const made: FakePlayer[] = [];
   class FakePlayer extends EventTarget implements ShakaPlayerLike {
     loads: string[] = [];
     filters: ((type: number, request: { headers: Record<string, string> }) => Promise<void>)[] = [];
-    config: object | null = null;
     destroyed = false;
     constructor() {
       super();
       made.push(this);
     }
     async attach() {}
-    configure(config: object) {
-      this.config = config;
+    configure() {
       return true;
     }
     getConfiguration() {
@@ -186,11 +198,18 @@ function fakeShaka(video: FakeVideo, behave: (url: string) => Behaviour) {
       this.loads.push(url);
       video.readyState = 0;
       video.videoWidth = 0;
-      const b = behave(url);
-      if (b === "error") throw Object.assign(new Error("shaka"), { code: 6007 });
-      if (b === "frame") {
+      video.behaviour = behave(url);
+      if (video.behaviour === "error") throw Object.assign(new Error("shaka"), { code: 6007 });
+      if (video.behaviour === "errorDuringLoad") {
+        // Shaka reports an error while load() is still running (listeners were attached before load).
+        this.dispatchEvent(new CustomEvent("error", { detail: { code: 6012 } }));
+        await new Promise(() => {});
+      }
+      if (video.behaviour === "never") await new Promise(() => {});
+      if (video.behaviour === "frame" || video.behaviour === "decodedOnly") {
         video.readyState = 4;
         video.videoWidth = 1600;
+        setTimeout(() => video.dispatchEvent(new Event("loadeddata")), 1);
       }
     }
     async destroy() {
@@ -209,75 +228,57 @@ function fakeShaka(video: FakeVideo, behave: (url: string) => Behaviour) {
   return { shaka, made };
 }
 
-describe("createShopDrmPlayer: one player per open viewer", () => {
+describe("createShopDrmPlayer: one player per open viewer (review #3, #4, #5)", () => {
   const setup = {
     licenseUrls: { widevine: "https://w", playready: "https://p", fairplay: null },
     fairplayCertificateUrl: null,
   };
   const target = (n: number) => ({ childId: "c1", photoId: `p${n}`, galleryId: "g" });
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  it("loads each photo in the same player, shows it once a frame is ready, plays muted and pauses after", async () => {
-    const video = new FakeVideo();
-    const { shaka, made } = fakeShaka(video, () => "frame");
-    const player = await createShopDrmPlayer({
-      shaka,
-      video: video as unknown as HTMLVideoElement,
-      plan: "dash",
-      setup,
-      token: async () => "t",
-    });
-    expect(await player?.show(target(1))).toBe("shown");
-    expect(await player?.show(target(2))).toBe("shown");
-    expect(made).toHaveLength(1);
-    expect(made[0]?.loads).toEqual([
-      manifestUrl(target(1), "dash"),
-      manifestUrl(target(2), "dash"),
-    ]);
-    expect(video.muted).toBe(true);
-    expect(video.play).toHaveBeenCalledTimes(2);
-    video.currentTime = 0.2;
-    video.dispatchEvent(new Event("timeupdate"));
-    expect(video.pause).toHaveBeenCalled();
-    await player?.destroy();
-    expect(made[0]?.destroyed).toBe(true);
-  });
-
-  it("gives each license request, and nothing else, a fresh token for the photo being shown", async () => {
-    const video = new FakeVideo();
-    const { shaka, made } = fakeShaka(video, () => "frame");
-    const token = vi.fn(async (t: { photoId: string }) => `token-for-${t.photoId}`);
-    const player = await createShopDrmPlayer({
+  const budget = () => {
+    const controller = new AbortController();
+    return { controller, options: { signal: controller.signal, deadline: Date.now() + 8000 } };
+  };
+  const make = (
+    video: FakeVideo,
+    shaka: ShakaLike,
+    token: (t: { photoId: string }) => Promise<string> = async () => "t",
+  ) =>
+    createShopDrmPlayer({
       shaka,
       video: video as unknown as HTMLVideoElement,
       plan: "dash",
       setup,
       token,
     });
-    await player?.show(target(7));
-    const filter = made[0]?.filters[0];
-    const license = { headers: {} as Record<string, string> };
-    const segment = { headers: {} as Record<string, string> };
-    await filter?.(2, license);
-    await filter?.(1, segment);
-    expect(license.headers).toEqual({ "X-AxDRM-Message": "token-for-p7" });
-    expect(segment.headers).toEqual({});
-    expect(token).toHaveBeenCalledTimes(1);
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("loads each photo in the same player and shows it once a frame was presented; plays muted, then pauses", async () => {
+    const video = new FakeVideo();
+    const { shaka, made } = fakeShaka(video, () => "frame");
+    const player = await make(video, shaka);
+    const first = player?.show(target(1), budget().options);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await first).toBe("shown");
+    expect(video.pause).toHaveBeenCalledTimes(1);
+    const second = player?.show(target(2), budget().options);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await second).toBe("shown");
+    expect(made).toHaveLength(1);
+    expect(made[0]?.loads).toEqual([
+      manifestUrl(target(1), "dash"),
+      manifestUrl(target(2), "dash"),
+    ]);
+    expect(video.muted).toBe(true);
+    await player?.destroy();
+    expect(made[0]?.destroyed).toBe(true);
   });
 
-  it("fails when loading fails, or when no frame comes within 8 seconds (C2)", async () => {
+  it("where the browser can say a frame was presented, a decoded frame alone isn't shown (#3)", async () => {
     const video = new FakeVideo();
-    const { shaka } = fakeShaka(video, (url) => (url.includes("/p1/") ? "error" : "never"));
-    const player = await createShopDrmPlayer({
-      shaka,
-      video: video as unknown as HTMLVideoElement,
-      plan: "dash",
-      setup,
-      token: async () => "t",
-    });
-    expect(await player?.show(target(1))).toBe("failed");
-    const pending = player?.show(target(2));
+    const { shaka } = fakeShaka(video, () => "decodedOnly");
+    const player = await make(video, shaka);
+    const pending = player?.show(target(1), budget().options);
     await vi.advanceTimersByTimeAsync(7_999);
     let settled = false;
     void pending?.then(() => {
@@ -289,20 +290,81 @@ describe("createShopDrmPlayer: one player per open viewer", () => {
     expect(await pending).toBe("failed");
   });
 
+  it("without the callback, a decoded frame with a size is shown", async () => {
+    const video = new FakeVideo();
+    video.requestVideoFrameCallback = undefined;
+    const { shaka } = fakeShaka(video, () => "decodedOnly");
+    const player = await make(video, shaka);
+    const pending = player?.show(target(1), budget().options);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(await pending).toBe("shown");
+  });
+
+  it("a refused play() with nothing presented is a failure (#3)", async () => {
+    const video = new FakeVideo();
+    const { shaka } = fakeShaka(video, () => "playRefused");
+    const player = await make(video, shaka);
+    const pending = player?.show(target(1), budget().options);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(await pending).toBe("failed");
+  });
+
+  it("hears an error during load(): it listens before loading (#3)", async () => {
+    const video = new FakeVideo();
+    const { shaka } = fakeShaka(video, () => "errorDuringLoad");
+    const player = await make(video, shaka);
+    const pending = player?.show(target(1), budget().options);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toBe("failed");
+  });
+
+  it("fails when loading fails, at the photo's deadline, or as soon as it is given up (#4)", async () => {
+    const video = new FakeVideo();
+    const { shaka } = fakeShaka(video, (url) => (url.includes("/p1/") ? "error" : "never"));
+    const player = await make(video, shaka);
+    expect(await player?.show(target(1), budget().options)).toBe("failed");
+    const late = player?.show(target(2), {
+      signal: new AbortController().signal,
+      deadline: Date.now() + 3000,
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await late).toBe("failed");
+    const { controller, options } = budget();
+    const aborted = player?.show(target(3), options);
+    controller.abort();
+    expect(await aborted).toBe("failed");
+  });
+
+  it("gives each license request a fresh token for the photo shown, and none once it was given up (#5)", async () => {
+    const video = new FakeVideo();
+    const { shaka, made } = fakeShaka(video, () => "never");
+    const token = vi.fn(async (t: { photoId: string }) => `token-for-${t.photoId}`);
+    const player = await make(video, shaka, token);
+    const { controller, options } = budget();
+    void player?.show(target(7), options);
+    const filter = made[0]?.filters[0];
+    const license = { headers: {} as Record<string, string> };
+    const segment = { headers: {} as Record<string, string> };
+    await filter?.(2, license);
+    await filter?.(1, segment);
+    expect(license.headers).toEqual({ "X-AxDRM-Message": "token-for-p7" });
+    expect(segment.headers).toEqual({});
+    expect(token).toHaveBeenCalledTimes(1);
+    controller.abort();
+    await expect(filter?.(2, { headers: {} })).rejects.toThrow("drm_given_up");
+    expect(token).toHaveBeenCalledTimes(1);
+  });
+
   it("a photo superseded by the next one settles as not shown", async () => {
     const video = new FakeVideo();
     const { shaka } = fakeShaka(video, (url) => (url.includes("/p1/") ? "never" : "frame"));
-    const player = await createShopDrmPlayer({
-      shaka,
-      video: video as unknown as HTMLVideoElement,
-      plan: "dash",
-      setup,
-      token: async () => "t",
-    });
-    const first = player?.show(target(1));
+    const player = await make(video, shaka);
+    const first = player?.show(target(1), budget().options);
     await vi.advanceTimersByTimeAsync(10);
-    expect(await player?.show(target(2))).toBe("shown");
+    const second = player?.show(target(2), budget().options);
     expect(await first).toBe("failed");
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await second).toBe("shown");
   });
 
   it("is null where Shaka says the browser can't play", async () => {
@@ -310,14 +372,6 @@ describe("createShopDrmPlayer: one player per open viewer", () => {
     const { shaka } = fakeShaka(video, () => "frame");
     (shaka.Player as unknown as { isBrowserSupported: () => boolean }).isBrowserSupported = () =>
       false;
-    expect(
-      await createShopDrmPlayer({
-        shaka,
-        video: video as unknown as HTMLVideoElement,
-        plan: "dash",
-        setup,
-        token: async () => "t",
-      }),
-    ).toBeNull();
+    expect(await make(video, shaka)).toBeNull();
   });
 });

@@ -20,21 +20,33 @@ import { shopApi } from "@/lib/shop-client";
  * once per gallery, whether DRM is on there (GET /shop/drm), and once per tab, which hardware DRM this browser has
  * (C7: kept in sessionStorage as a plan, nothing personal). Shaka Player is only loaded when a plan exists. Two failures
  * in a row turn DRM off for the rest of the tab (C2); fallback is silent.
+ *
+ * Review fixes: a gallery that says DRM isn't on (or this browser's plan of "none") is remembered for the tab, so its
+ * photos open as the WebP at once (#9); a GET /shop/drm that failed (network, server, timeout) is not remembered and is
+ * asked again next time, counting as a failure (#8). Every step can be given up (the viewer's signal; #4, #5).
  */
-export type DrmReady = { plan: Exclude<DrmPlan, "none">; setup: DrmSetup } | null;
+export type DrmReady =
+  | { kind: "ready"; plan: Exclude<DrmPlan, "none">; setup: DrmSetup }
+  /** Not protected here: no switch or setup for the gallery, or no hardware DRM. Not a failure. */
+  | { kind: "off" }
+  /** Couldn't find out (network, server, timeout, given up): a failure, asked again next time. */
+  | { kind: "failed" };
 
 export interface DrmContextValue {
-  /** For a gallery: how to play its protected large views here, or null to show the watermarked WebP. */
-  prepare(galleryId: string): Promise<DrmReady>;
-  loadShaka(): Promise<ShakaLike>;
-  /** A fresh license token for the photo being shown. */
-  token(target: DrmTarget): Promise<string>;
+  /** Whether a gallery's large views are known to be the WebP for this tab: shown at once, nothing asked. */
+  knownOff(galleryId: string): boolean;
+  /** For a gallery: how to play its protected large views here. */
+  prepare(galleryId: string, signal: AbortSignal): Promise<DrmReady>;
+  loadShaka(signal: AbortSignal): Promise<ShakaLike>;
+  /** A fresh license token for the photo being shown; never once its signal is aborted. */
+  token(target: DrmTarget, signal: AbortSignal): Promise<string>;
   /** A large view was shown under DRM, or fell back. */
   report(shown: boolean): void;
 }
 
 const off: DrmContextValue = {
-  prepare: async () => null,
+  knownOff: () => true,
+  prepare: async () => ({ kind: "off" }),
   loadShaka: () => Promise.reject(new Error("drm_off")),
   token: () => Promise.reject(new Error("drm_off")),
   report: () => {},
@@ -45,6 +57,25 @@ const DrmContext = createContext<DrmContextValue>(off);
 /** Shaka Player 5.2.12, compiled, imported only when a protected large view is about to play. */
 const importShaka = async (): Promise<ShakaLike> =>
   (await import("shaka-player/dist/shaka-player.compiled")).default as unknown as ShakaLike;
+
+/** A promise that gives up with the signal. */
+function withSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error("aborted"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error("aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
 
 export function DrmProvider({
   children,
@@ -57,24 +88,28 @@ export function DrmProvider({
   probe?: typeof probeShopDrm;
   api?: Pick<typeof shopApi, "drm" | "drmToken">;
 }) {
-  const configs = useRef(new Map<string, Promise<DrmSetup | null>>());
+  /** Galleries whose setup is known: enabled (with it) or not (null). Failed reads are never kept (#8). */
+  const setups = useRef(new Map<string, DrmSetup | null>());
   const planning = useRef<Promise<DrmPlan> | null>(null);
 
   const value = useMemo<DrmContextValue>(() => {
-    const setupFor = (galleryId: string) => {
-      let made = configs.current.get(galleryId);
-      if (!made) {
-        made = api.drm(galleryId).then((res) =>
-          res.ok && res.data.enabled && res.data.licenseUrls
-            ? {
-                licenseUrls: res.data.licenseUrls,
-                fairplayCertificateUrl: res.data.fairplayCertificateUrl,
-              }
-            : null,
-        );
-        configs.current.set(galleryId, made);
-      }
-      return made;
+    const setupFor = async (
+      galleryId: string,
+      signal: AbortSignal,
+    ): Promise<DrmSetup | null | "failed"> => {
+      const known = setups.current.get(galleryId);
+      if (known !== undefined) return known;
+      const res = await api.drm(galleryId, signal);
+      if (!res.ok) return "failed";
+      const setup =
+        res.data.enabled && res.data.licenseUrls
+          ? {
+              licenseUrls: res.data.licenseUrls,
+              fairplayCertificateUrl: res.data.fairplayCertificateUrl,
+            }
+          : null;
+      setups.current.set(galleryId, setup);
+      return setup;
     };
     const plan = () => {
       const stored = storedPlan();
@@ -88,19 +123,26 @@ export function DrmProvider({
       return planning.current;
     };
     return {
-      async prepare(galleryId) {
-        if (drmOffForTab()) return null;
-        const setup = await setupFor(galleryId).catch(() => null);
-        if (!setup) return null;
-        const chosen = await plan().catch((): DrmPlan => "none");
-        if (chosen === "none") return null;
+      knownOff: (galleryId) =>
+        drmOffForTab() || storedPlan() === "none" || setups.current.get(galleryId) === null,
+      async prepare(galleryId, signal) {
+        if (drmOffForTab()) return { kind: "off" };
+        const setup = await withSignal(setupFor(galleryId, signal), signal).catch(
+          () => "failed" as const,
+        );
+        if (setup === "failed") return { kind: "failed" };
+        if (!setup) return { kind: "off" };
+        const chosen = await withSignal(plan(), signal).catch(() => "failed" as const);
+        if (chosen === "failed") return { kind: "failed" };
+        if (chosen === "none") return { kind: "off" };
         if (chosen === "fairplay" && (!setup.licenseUrls.fairplay || !setup.fairplayCertificateUrl))
-          return null;
-        return { plan: chosen, setup };
+          return { kind: "off" };
+        return { kind: "ready", plan: chosen, setup };
       },
-      loadShaka,
-      async token(target) {
-        const res = await api.drmToken(target.galleryId, target.childId, target.photoId);
+      loadShaka: (signal) => withSignal(loadShaka(), signal),
+      async token(target, signal) {
+        if (signal.aborted) throw new Error("aborted");
+        const res = await api.drmToken(target.galleryId, target.childId, target.photoId, signal);
         if (!res.ok) throw new Error(res.code);
         return res.data.token;
       },

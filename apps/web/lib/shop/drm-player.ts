@@ -1,9 +1,5 @@
-import {
-  DRM_FAILURES_BEFORE_WEBP,
-  DRM_FALLBACK_TIMEOUT_MS,
-  type DrmManifestFormat,
-} from "@daybell/core";
-import { DRM_PROBES, type DrmProbeId, type ProbeResult, probeConfig } from "../drm-capabilities";
+import { DRM_FAILURES_BEFORE_WEBP, type DrmManifestFormat } from "@daybell/core";
+import type { DrmPlan } from "./drm-probes";
 
 /**
  * The parent shop's large view under DRM (D158; ADR 0034), apart from React so it can be tested with a fake Shaka:
@@ -69,8 +65,17 @@ export function watchPlayback(args: {
   keyStatuses: () => Record<string, string>;
   onOutcome: (outcome: Outcome) => void;
   timeoutMs: number;
+  /**
+   * Only a presented frame (requestVideoFrameCallback) counts as shown, never a decoded one (the shop where the
+   * browser has the callback; review #3). Without the callback this is ignored.
+   */
+  presentedOnly?: boolean;
+  /** Look at the element at once (the test page). The shop starts watching before load(), so it doesn't. */
+  initialCheck?: boolean;
 }): () => void {
   const { player, video, keyStatuses, onOutcome } = args;
+  const presentedOnly =
+    args.presentedOnly === true && typeof video.requestVideoFrameCallback === "function";
   let failed = false;
   let playing = false;
   let frameHandle: number | null = null;
@@ -95,7 +100,7 @@ export function watchPlayback(args: {
   };
   const checkFrame = () => {
     checkKeys();
-    if (!failed && frameReady(video)) show();
+    if (!failed && !presentedOnly && frameReady(video)) show();
   };
   const onPlayerError = (event: Event) => {
     const detail = (event as CustomEvent<{ code?: number } | undefined>).detail;
@@ -126,7 +131,7 @@ export function watchPlayback(args: {
     if (frameHandle !== null) video.cancelVideoFrameCallback?.(frameHandle);
     frameHandle = null;
   }
-  checkFrame();
+  if (args.initialCheck !== false) checkFrame();
   return stop;
 }
 
@@ -138,59 +143,14 @@ export function safeDiagnostic(text: string): string {
     .slice(0, 300);
 }
 
-// ── Which way this browser plays (C7) ─────────────────────────────────────────────────────────────────────────────
+// ── Which way this browser plays (C7): lib/shop/drm-probes.ts ──────────────────────────────────────────────────
 
-/** How the large view plays here: DASH with hardware Widevine or PlayReady, HLS with FairPlay, or not at all. */
-export type DrmPlan = "dash" | "fairplay" | "none";
-
-/** The spike's choice (drm-capabilities' playbackPlan), as a plan: hardware only; FairPlay only with its certificate. */
-export function planFromProbes(
-  results: Record<DrmProbeId, ProbeResult>,
-  fairplay: boolean,
-): DrmPlan {
-  const ok = (id: DrmProbeId) => results[id] === "supported";
-  if (ok("widevineHwAll") || ok("playready3000") || ok("playready3000KeySystem")) return "dash";
-  if (ok("fairplay") && fairplay) return "fairplay";
-  return "none";
-}
-
-/** Only the probes that can choose a plan (hardware Widevine, PlayReady SL3000, FairPlay): the others never matter. */
-export const SHOP_PROBES = DRM_PROBES.filter((p) =>
-  ["widevineHwAll", "playready3000", "playready3000KeySystem", "fairplay"].includes(p.id),
-);
-
-type RequestAccess = (
-  keySystem: string,
-  configs: MediaKeySystemConfiguration[],
-) => Promise<unknown>;
-
-/** Asks the browser, once, which hardware DRM it has for the clips' codec (no network, nothing personal). */
-export async function probeShopDrm(
-  request: RequestAccess | undefined = typeof navigator !== "undefined" &&
-  typeof navigator.requestMediaKeySystemAccess === "function"
-    ? navigator.requestMediaKeySystemAccess.bind(navigator)
-    : undefined,
-): Promise<Record<DrmProbeId, ProbeResult>> {
-  const results = Object.fromEntries(DRM_PROBES.map((p) => [p.id, "notSupported"])) as Record<
-    DrmProbeId,
-    ProbeResult
-  >;
-  await Promise.all(
-    SHOP_PROBES.map(async (probe) => {
-      if (!request) {
-        results[probe.id] = "noEme";
-        return;
-      }
-      try {
-        await request(probe.keySystem, [probeConfig(probe)]);
-        results[probe.id] = "supported";
-      } catch {
-        results[probe.id] = "notSupported";
-      }
-    }),
-  );
-  return results;
-}
+export {
+  type DrmPlan,
+  planFromProbes,
+  probeShopDrm,
+  SHOP_PROBES,
+} from "./drm-probes";
 
 // ── The tab's memory (C2, C7): sessionStorage, a plan and a count, nothing personal ──────────────────────────────
 
@@ -318,24 +278,33 @@ export function shakaConfig(
   };
 }
 
+export interface ShowOptions {
+  /** Aborted when the viewer gives up on this photo (its 8-second budget, a swipe, closing): nothing more is asked. */
+  signal: AbortSignal;
+  /** When the photo's whole budget runs out (ms since the epoch). */
+  deadline: number;
+}
+
 export interface ShopDrmPlayer {
-  /** Loads one photo; resolves "shown" once a frame is ready or presented, "failed" otherwise (8 s at most). */
-  show(target: DrmTarget): Promise<"shown" | "failed">;
+  /** Loads one photo; "shown" once a frame was presented, "failed" otherwise (at the deadline at the latest). */
+  show(target: DrmTarget, options: ShowOptions): Promise<"shown" | "failed">;
   destroy(): Promise<void>;
 }
 
 /**
- * One player for an open viewer: created on the first protected photo, load() per photo, destroyed on close. Each
- * license request (and nothing else) gets a fresh token for the photo being shown. The clip plays muted (play() never
- * awaited) and pauses once its first frame was presented, as the spike found Safari needs.
+ * One player for an open viewer: created on the first protected photo, load() per photo, destroyed on close or after a
+ * failure. Each license request (and nothing else) gets a fresh token for the photo being shown, and none once that
+ * photo was given up (its signal aborted; review #5). Listeners start before load() (as the spike's did), so no error
+ * or frame is missed; where the browser has requestVideoFrameCallback only a presented frame counts as shown (review
+ * #3). The clip plays muted (play() never awaited); a refused play() before any frame is shown is a failure. It pauses
+ * once its first frame was presented, as the spike found Safari needs.
  */
 export async function createShopDrmPlayer(args: {
   shaka: ShakaLike;
   video: HTMLVideoElement;
   plan: Exclude<DrmPlan, "none">;
   setup: DrmSetup;
-  token: (target: DrmTarget) => Promise<string>;
-  timeoutMs?: number;
+  token: (target: DrmTarget, signal: AbortSignal) => Promise<string>;
 }): Promise<ShopDrmPlayer | null> {
   const { shaka, video } = args;
   shaka.polyfill.installAll();
@@ -345,82 +314,94 @@ export async function createShopDrmPlayer(args: {
   player.configure(
     shakaConfig(args.plan, args.setup, player.getConfiguration().drm.keySystemsMapping),
   );
-  let current: DrmTarget | null = null;
+  let current: { target: DrmTarget; signal: AbortSignal } | null = null;
   const net = player.getNetworkingEngine();
   net?.registerRequestFilter(
     licenseRequestFilter(shaka.net.NetworkingEngine.RequestType.LICENSE, () => {
-      if (!current) return Promise.reject(new Error("no_photo"));
-      return args.token(current);
+      const now = current;
+      if (!now || now.signal.aborted) return Promise.reject(new Error("drm_given_up"));
+      return args.token(now.target, now.signal);
     }),
   );
   if (args.plan === "fairplay")
     net?.registerResponseFilter(shaka.drm.FairPlay.commonFairPlayResponse);
 
-  let generation = 0;
-  let stopWatching: (() => void) | null = null;
-  const timeoutMs = args.timeoutMs ?? DRM_FALLBACK_TIMEOUT_MS;
+  let settleCurrent: (() => void) | null = null;
+  let stopPausing: (() => void) | null = null;
 
   return {
-    async show(target) {
-      const mine = ++generation;
-      stopWatching?.();
-      stopWatching = null;
-      current = target;
-      const started = Date.now();
-      const expired = new Promise<"timeout">((ok) => setTimeout(() => ok("timeout"), timeoutMs));
-      const loaded = await Promise.race([
-        player.load(manifestUrl(target, args.plan)).then(
-          () => "loaded" as const,
-          () => "error" as const,
-        ),
-        expired,
-      ]);
-      if (mine !== generation) return "failed";
-      if (loaded !== "loaded") return "failed";
+    show(target, options) {
+      settleCurrent?.();
+      stopPausing?.();
+      current = { target, signal: options.signal };
       return new Promise((resolve) => {
+        let settled = false;
+        let stopWatching: () => void = () => {};
+        const settle = (outcome: "shown" | "failed") => {
+          if (settled) return;
+          settled = true;
+          stopWatching();
+          options.signal.removeEventListener("abort", onAbort);
+          if (settleCurrent === giveUp) settleCurrent = null;
+          resolve(outcome);
+        };
+        const giveUp = () => settle("failed");
+        const onAbort = () => settle("failed");
+        settleCurrent = giveUp;
+        if (options.signal.aborted) return settle("failed");
+        options.signal.addEventListener("abort", onAbort);
+
+        // Pause once the first frame was presented (or, without the callback, once time moved).
         let paused = false;
+        let frameHandle: number | null = null;
         const pauseOnce = () => {
           if (paused) return;
           paused = true;
           video.pause();
+          stopPausing?.();
         };
         const onTime = () => {
           if (video.currentTime > 0) pauseOnce();
         };
         video.addEventListener("timeupdate", onTime);
-        let frameHandle: number | null = null;
         if (typeof video.requestVideoFrameCallback === "function")
           frameHandle = video.requestVideoFrameCallback(() => {
             frameHandle = null;
             pauseOnce();
           });
-        const stopPlayback = watchPlayback({
+        stopPausing = () => {
+          video.removeEventListener("timeupdate", onTime);
+          if (frameHandle !== null) video.cancelVideoFrameCallback?.(frameHandle);
+          frameHandle = null;
+          stopPausing = null;
+        };
+
+        // Watching starts before load(), so no error or presented frame is missed.
+        stopWatching = watchPlayback({
           player,
           video,
           keyStatuses: () => player.getKeyStatuses(),
-          timeoutMs: Math.max(0, timeoutMs - (Date.now() - started)),
-          onOutcome: (outcome) => {
-            if (mine !== generation) return;
-            // A photo already shown never falls back (C2): later failures are ignored.
-            resolve(outcome.kind === "playing" ? "shown" : "failed");
-          },
+          timeoutMs: Math.max(0, options.deadline - Date.now()),
+          presentedOnly: true,
+          initialCheck: false,
+          // A photo once shown never falls back (C2): only the first outcome counts.
+          onOutcome: (outcome) => settle(outcome.kind === "playing" ? "shown" : "failed"),
         });
-        stopWatching = () => {
-          stopPlayback();
-          video.removeEventListener("timeupdate", onTime);
-          if (frameHandle !== null) video.cancelVideoFrameCallback?.(frameHandle);
-          // Superseded by the next photo (or closed): this one settles as not shown.
-          resolve("failed");
-        };
-        video.muted = true;
-        // Not awaited: the outcome comes from watchPlayback, never from play()'s promise.
-        const playing = video.play() as Promise<void> | undefined;
-        playing?.catch?.(() => {});
+        player.load(manifestUrl(target, args.plan)).then(
+          () => {
+            if (settled) return;
+            video.muted = true;
+            // Not awaited: the outcome comes from watchPlayback. A refused play() before any frame is a failure.
+            const playing = video.play() as Promise<void> | undefined;
+            playing?.catch?.(() => settle("failed"));
+          },
+          () => settle("failed"),
+        );
       });
     },
     async destroy() {
-      generation++;
-      stopWatching?.();
+      settleCurrent?.();
+      stopPausing?.();
       current = null;
       await player.destroy().catch(() => {});
     },

@@ -1,11 +1,6 @@
+import { DRM_CODEC_MIME } from "@daybell/core";
 import { describe, expect, it, vi } from "vitest";
-import {
-  DRM_PROBES,
-  playbackPlan,
-  probeConfig,
-  probeDrm,
-  TEST_CLIP_CODEC,
-} from "./drm-capabilities";
+import { DRM_PROBES, playbackPlan, probeConfig, probeDrm } from "./drm-capabilities";
 
 // The DRM test page's capability panel (D158; ADR 0032).
 describe("probeDrm", () => {
@@ -37,7 +32,7 @@ describe("probeDrm", () => {
     const wv = probeConfig(DRM_PROBES[0]);
     expect(wv.initDataTypes).toEqual(["cenc"]);
     expect(wv.videoCapabilities?.[0]).toMatchObject({
-      contentType: TEST_CLIP_CODEC,
+      contentType: DRM_CODEC_MIME,
       robustness: "HW_SECURE_ALL",
       encryptionScheme: "cbcs",
     });
