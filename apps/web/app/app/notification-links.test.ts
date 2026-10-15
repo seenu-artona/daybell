@@ -13,7 +13,7 @@ describe("notificationHref", () => {
       "/app/settings/payouts",
       "/app/settings/payouts",
       `/app/jobs/${JOB}/photos`,
-      `/app/jobs/${JOB}/photos/review`,
+      `/app/jobs/${JOB}/photos?show=review`,
       // Orders (ADR 0024): the order's page.
       `/app/orders/${ORDER}`,
       `/app/orders/${ORDER}`,

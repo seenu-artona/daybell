@@ -1408,7 +1408,8 @@
           "sendForEditing": "Send for editing",
           "downloadOriginal": "Download original"
         },
-        "given": "{count, plural, =0 {Nothing changed.} other {Gave this photo to {name}.}}"
+        "given": "{count, plural, =0 {Nothing changed.} other {Gave this photo to {name}.}}",
+        "photo": "The photo"
       },
       "views": {
         "label": "Show photos",
@@ -1553,7 +1554,8 @@
         "qrCard": "QR card",
         "showMore": "Show more people",
         "footer": "{shown, number} of {total, plural, one {# person} other {# people}} with photos",
-        "hint": "Drag photos onto a person, or tick them and use Give to a person."
+        "hint": "Drag photos onto a person, or tick them and use Give to a person.",
+        "showMorePhotos": "Show more photos"
       },
       "groups": {
         "heading": "{count, plural, =0 {No groups} one {# group} other {# groups}}",

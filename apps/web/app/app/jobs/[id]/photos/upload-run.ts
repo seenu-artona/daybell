@@ -63,6 +63,20 @@ export const HASHING_IN_PARALLEL = 3;
 /** Tries per request before a file is counted as failed. */
 const TRIES = 8;
 
+/** What an upload holds (D156): individual photos (optionally adding everyone to a group) or one group's photos. */
+export type UploadChoice =
+  | { kind: "individual"; addToGroupId?: string | null }
+  | { kind: "group"; groupId: string };
+
+/** The request that starts an upload: no body for plain individual photos, as before. Ids only. */
+export function uploadBatchRequest(choice: UploadChoice): { method: "POST"; body?: unknown } {
+  if (choice.kind === "group")
+    return { method: "POST", body: { kind: "group", groupId: choice.groupId } };
+  return choice.addToGroupId
+    ? { method: "POST", body: { kind: "individual", addToGroupId: choice.addToGroupId } }
+    : { method: "POST" };
+}
+
 /** Growing pauses between tries: 1 s, 2 s, 4 s … up to 30 s. */
 export function retryDelay(attempt: number): number {
   return Math.min(30_000, 1000 * 2 ** Math.max(0, attempt - 1));
@@ -97,8 +111,11 @@ export class UploadRun {
     files: readonly DropFile[],
     private readonly deps: UploadDeps,
     private readonly onProgress: (progress: UploadProgress) => void,
-    /** A class-photo upload (ADR 0018): every photo goes to this class's Class photo set. */
-    private readonly options: { groupId?: string | null } = {},
+    /**
+     * What the photos are (D156; ADR 0030): group photos for one group (linked to it as they are registered), or
+     * individual photos, optionally adding everyone they are given to to a group (C7). Individual by default.
+     */
+    private readonly options: UploadChoice = { kind: "individual" },
   ) {
     const { accepted, skipped } = filterUploadFiles(
       files.map((f) => ({ name: f.path, size: f.file.size, drop: f })),
@@ -188,9 +205,7 @@ export class UploadRun {
     }
     const batch = await this.call<UploadBatchResponse>(
       `/jobs/${encodeURIComponent(this.jobId)}/upload-batches`,
-      this.options.groupId
-        ? { method: "POST", body: { groupId: this.options.groupId } }
-        : { method: "POST" },
+      uploadBatchRequest(this.options),
     );
     if (!batch.ok) return this.fail(batch.fields.form ?? batch.code);
     this.batchId = batch.data.batchId;

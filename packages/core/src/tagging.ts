@@ -408,6 +408,7 @@ export interface ReviewActions {
  * - a photo that may be a card (unreadableCard) must be confirmed, either way, before it can be moved;
  * - a photo a person marked a card photo can be unmarked (owners and admins; Seenu, answer 12);
  * - a group photo never becomes a person's photo (D156, C8): it is confirmed or marked a card photo, never moved;
+ * - a photo in Leftovers is given to a person or binned, not confirmed where it is (C9), unless it may be a card;
  * - photos still processing or failed have nothing to do.
  */
 export function reviewActions(p: ReviewPhoto): ReviewActions {
@@ -418,6 +419,9 @@ export function reviewActions(p: ReviewPhoto): ReviewActions {
     return { ...none, markCard: true };
   if (p.flag === "unreadableCard") return { ...none, confirm: true, markCard: true };
   if (p.place === "groupPhoto") return { ...none, confirm: true, markCard: true };
+  // Leftovers are given to someone or binned, never "Looks right" where they are (D156, C9).
+  if (p.place === "leftovers")
+    return { move: true, confirm: false, markCard: true, undoCard: false };
   return { move: true, confirm: true, markCard: true, undoCard: false };
 }
 
@@ -475,5 +479,3 @@ export function notReviewableReason(f: TaggingFacts): NotReviewableReason | null
 
 /** Photos moved or confirmed per request. */
 export const MAX_PHOTOS_PER_MOVE = 500;
-/** Photos in each child's strip on the review screen before "Show all". */
-export const REVIEW_STRIP_PHOTOS = 12;

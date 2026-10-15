@@ -3,7 +3,7 @@
 import {
   type BlankCardGroup,
   type Child,
-  type GroupsResponse,
+  type ClassesResponse,
   QR_CARD_CONFLICTS,
   TAGGING_CONFLICTS,
 } from "@daybell/api";
@@ -19,8 +19,8 @@ import { allPlacePhotos, usePlacePhotos, useReview } from "./review-context";
  * New children from blank cards (Seenu, answer 2; plan answer 6): for each blank card in the photos, the card's photo,
  * the photos waiting for its child, and a form to name the child (first and last name, one of the job's classes). The
  * child joins the roster with the card's own access code. For a child already on the roster, "Give photos to an
- * existing child" opens Move to… with every one of the card's photos (all pages, code review S4), and the card's code
- * stays unused.
+ * existing child" opens Give to a person with every one of the card's photos (all pages, code review S4), and the
+ * card's code stays unused. Part of Photos' To review (ADR 0030).
  */
 export function BlankCards({
   groups,
@@ -36,8 +36,8 @@ export function BlankCards({
   const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     let live = true;
-    void api<GroupsResponse>(`/jobs/${encodeURIComponent(jobId)}/groups`).then((res) => {
-      if (live && res.ok) setClasses(res.data.groups);
+    void api<ClassesResponse>(`/jobs/${encodeURIComponent(jobId)}/classes`).then((res) => {
+      if (live && res.ok) setClasses(res.data.classes);
     });
     return () => {
       live = false;
@@ -81,7 +81,7 @@ function BlankCard({
 }) {
   const t = useTranslations("app.photos.review.blankCards");
   const text = useApiText();
-  const { jobId, canEdit, version, openMove } = useReview();
+  const { jobId, canEdit, version, openGive } = useReview();
   const where = t("card", { n });
   const query = `place=blankCard&id=${encodeURIComponent(group.cardId)}`;
   const { photos } = usePlacePhotos(jobId, query, version);
@@ -89,7 +89,7 @@ function BlankCard({
   const [gathering, setGathering] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
-  const [groupId, setGroupId] = useState("");
+  const [classChoice, setClassChoice] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
@@ -101,7 +101,7 @@ function BlankCard({
     setProblem("");
     const res = await api<{ child: Child }>(
       `/jobs/${encodeURIComponent(jobId)}/qr-cards/${encodeURIComponent(group.cardId)}/child`,
-      { method: "POST", body: { firstName: first, lastName: last, groupId: groupId || null } },
+      { method: "POST", body: { firstName: first, lastName: last, classId: classChoice || null } },
     );
     setBusy(false);
     if (res.ok) {
@@ -127,7 +127,7 @@ function BlankCard({
       return;
     }
     const ids = all.filter((p) => p.place === "blankCard" && p.actions.move).map((p) => p.id);
-    if (ids.length) openMove(ids);
+    if (ids.length) openGive(ids);
   }
 
   const fieldError = (key: string) => text.field(errors[key]);
@@ -181,8 +181,8 @@ function BlankCard({
                 </label>
                 <select
                   id={classId}
-                  value={groupId}
-                  onChange={(e) => setGroupId(e.target.value)}
+                  value={classChoice}
+                  onChange={(e) => setClassChoice(e.target.value)}
                   className="min-h-11 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
                   <option value="">{t("noClass")}</option>

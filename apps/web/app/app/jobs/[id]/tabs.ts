@@ -12,9 +12,19 @@ export const JOB_TABS = [
 
 export type JobTabKey = (typeof JOB_TABS)[number]["key"];
 
-/** Photos' Review (ADR 0018): QR tagging, fixed by hand. Part of the Photos tab. */
+/** Photos' To review (ADR 0018, 0030): what the QR cards couldn't place, fixed by hand. A chip of People. */
 export function reviewHref(jobId: string): string {
-  return `${tabHref(jobId, "photos")}/review`;
+  return `${tabHref(jobId, "photos")}?show=review`;
+}
+
+/** Photos' Groups (D156; ADR 0030). */
+export function groupsHref(jobId: string): string {
+  return `${tabHref(jobId, "photos")}/groups`;
+}
+
+/** One group's page, or "none" for the group photos in no group (C2). Ids only (D113). */
+export function groupHref(jobId: string, groupId: string | "none"): string {
+  return `${groupsHref(jobId)}/${groupId}`;
 }
 
 export function tabHref(jobId: string, tab: JobTabKey): string {

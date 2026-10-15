@@ -624,7 +624,14 @@ describe("reviewActions (security review 3-4, code review M1)", () => {
   it("lets a plain photo be moved, confirmed or marked a card photo", () => {
     expect(reviewActions(ready)).toEqual(all);
     expect(reviewActions({ ...ready, flag: "afterUnreadable" })).toEqual(all);
-    expect(reviewActions({ ...ready, qrKind: null, place: "leftovers" })).toEqual(all);
+    // Leftovers: given to someone or binned, never "Looks right" where they are (C9).
+    expect(reviewActions({ ...ready, qrKind: null, place: "leftovers" })).toEqual({
+      ...all,
+      confirm: false,
+    });
+    expect(
+      reviewActions({ ...ready, place: "leftovers", qrKind: "unreadable", flag: "unreadableCard" }),
+    ).toEqual({ move: false, confirm: true, markCard: true, undoCard: false });
   });
 
   it("never moves or confirms a card photo, read or marked by a person", () => {

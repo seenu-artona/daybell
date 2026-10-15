@@ -2,7 +2,7 @@
 
 import type {
   ChildrenResponse,
-  GroupsResponse,
+  ClassesResponse,
   Job,
   JobDetailResponse,
   PhotoCountsResponse,
@@ -56,7 +56,7 @@ export function JobShell({ children }: { children: ReactNode }) {
     const jobId = encodeURIComponent(id);
     void Promise.all([
       api<ChildrenResponse>(`/jobs/${jobId}/children?limit=1`),
-      api<GroupsResponse>(`/jobs/${jobId}/groups`),
+      api<ClassesResponse>(`/jobs/${jobId}/classes`),
       api<QrCardStatusResponse>(`/jobs/${jobId}/qr-cards`),
       api<PhotoCountsResponse>(`/jobs/${jobId}/photos/summary`),
     ]).then(([kids, groups, cards, photos]) => {
@@ -67,7 +67,7 @@ export function JobShell({ children }: { children: ReactNode }) {
         setSummary({
           children: kids.data.total,
           duplicates: kids.data.duplicates,
-          groups: groups.data.groups.length,
+          groups: groups.data.classes.length,
           qrCards: cards.ok ? cards.data.qrCards : null,
           photos: photos.ok ? photos.data.counts : null,
         });

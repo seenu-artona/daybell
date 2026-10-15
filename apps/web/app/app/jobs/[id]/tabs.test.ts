@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { JOB_TABS, tabForPath, tabHref } from "./tabs";
+import { groupHref, groupsHref, JOB_TABS, reviewHref, tabForPath, tabHref } from "./tabs";
 
 const ID = "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e";
 
@@ -21,6 +21,13 @@ describe("job tabs", () => {
     expect(tabHref(ID, "overview")).toBe(`/app/jobs/${ID}`);
     expect(tabHref(ID, "people")).toBe(`/app/jobs/${ID}/people`);
     expect(tabHref(ID, "orders")).toBe(`/app/jobs/${ID}/orders`);
+  });
+
+  it("link Photos' To review chip, Groups and a group's page by id (ADR 0030)", () => {
+    expect(reviewHref(ID)).toBe(`/app/jobs/${ID}/photos?show=review`);
+    expect(groupsHref(ID)).toBe(`/app/jobs/${ID}/photos/groups`);
+    expect(groupHref(ID, "none")).toBe(`/app/jobs/${ID}/photos/groups/none`);
+    expect(tabForPath(`/app/jobs/${ID}/photos/groups/none`)).toBe("photos");
   });
 
   it("know which tab a path is on; import belongs to People", () => {
