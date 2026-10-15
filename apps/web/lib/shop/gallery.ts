@@ -124,7 +124,7 @@ interface DbGallery {
   studio_id?: string;
   job_id?: string;
   portraits?: DbPhoto[];
-  class_photos?: DbPhoto[];
+  group_photos?: DbPhoto[];
 }
 
 export async function toShopGallery(
@@ -132,25 +132,25 @@ export async function toShopGallery(
   row: DbGallery,
 ): Promise<ShopGalleryResponse> {
   const portraits = row.portraits ?? [];
-  const classes = row.class_photos ?? [];
+  const groups = row.group_photos ?? [];
   if (
     row.state !== "open" ||
     !row.studio_id ||
     !row.job_id ||
-    (portraits.length === 0 && classes.length === 0)
+    (portraits.length === 0 && groups.length === 0)
   )
-    return { state: row.state, cover: null, portraits: [], classPhotos: [] };
+    return { state: row.state, cover: null, portraits: [], groupPhotos: [] };
   assertStorageRegion(region);
   const storage = photoStorage(region);
-  const [signedPortraits, classPhotos] = await Promise.all([
+  const [signedPortraits, groupPhotos] = await Promise.all([
     signPhotos(storage, row.studio_id, row.job_id, portraits),
-    signPhotos(storage, row.studio_id, row.job_id, classes),
+    signPhotos(storage, row.studio_id, row.job_id, groups),
   ]);
   return {
     state: row.state,
     cover: pickCoverPhoto(signedPortraits),
     portraits: signedPortraits,
-    classPhotos,
+    groupPhotos,
   };
 }
 

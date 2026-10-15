@@ -37,11 +37,12 @@ export interface BlankCard {
 
 /** The database's arguments for a print, from the validated request. */
 export function prepareArgs(jobId: string, input: QrCardsInput, blanks: readonly BlankCard[]) {
-  const groupIds = input.groupIds?.filter((id) => id !== "none") ?? null;
+  // Classes are job_groups in the database (ADR 0030's naming map).
+  const classIds = input.classIds?.filter((id) => id !== "none") ?? null;
   return {
     p_job_id: jobId,
-    p_group_ids: input.groupIds ? groupIds : null,
-    p_no_group: input.groupIds?.includes("none") ?? false,
+    p_group_ids: input.classIds ? classIds : null,
+    p_no_group: input.classIds?.includes("none") ?? false,
     p_child_id: input.childId ?? null,
     p_blanks: blanks.map((b) => ({
       id: b.id,
@@ -170,10 +171,10 @@ export async function printCards(options: {
   prepared: PreparedCards;
   blanks: readonly BlankCard[];
   children: readonly CardChildRow[];
-  groups: readonly { id: string; name: string }[];
+  classes: readonly { id: string; name: string }[];
   keys: AccessCodeCryptoKeys;
 }): Promise<{ cards: PrintCard[]; skipped: number }> {
-  const groupNames = new Map(options.groups.map((g) => [g.id, g.name]));
+  const classNames = new Map(options.classes.map((g) => [g.id, g.name]));
   const rows = new Map(options.children.map((c) => [c.id, c]));
   const cardCodes = new Map(options.prepared.cards.map((c) => [c.child_id, c.card_code]));
   const people: (CardPerson & { row: CardChildRow })[] = [];
@@ -181,12 +182,12 @@ export async function printCards(options: {
     const row = rows.get(childId);
     // Marked Do not photograph after the cards were prepared: still no card (D138).
     if (!row || row.do_not_photograph) continue;
-    const groupName = row.group_id ? groupNames.get(row.group_id) : undefined;
+    const className = row.group_id ? classNames.get(row.group_id) : undefined;
     people.push({
       id: row.id,
       firstName: row.first_name,
       lastName: row.last_name,
-      group: row.group_id && groupName !== undefined ? { id: row.group_id, name: groupName } : null,
+      class: row.group_id && className !== undefined ? { id: row.group_id, name: className } : null,
       doNotPhotograph: row.do_not_photograph,
       row,
     });
@@ -211,7 +212,7 @@ export async function printCards(options: {
       child: {
         firstName: person.firstName,
         lastName: person.lastName,
-        group: person.group?.name ?? null,
+        group: person.class?.name ?? null,
       },
       qrPayload: cardQrPayload(cardCodes.get(person.id) as string),
       accessCode: formatAccessCode(code),

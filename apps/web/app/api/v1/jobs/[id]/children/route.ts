@@ -7,7 +7,7 @@ import { page } from "@/lib/jobs";
 import { assertFunctionRegion } from "@/lib/region-guard";
 import {
   addChildWithRetries,
-  assertGroupInJob,
+  assertClassInJob,
   CHILD_COLUMNS,
   type ChildRow,
   childColumns,
@@ -29,21 +29,23 @@ type Ctx = { params: Promise<{ id: string }> };
 /**
  * GET /api/v1/jobs/:id/children — the roster, by last and first name, in pages. Read through the list_children RPC so
  * names never appear in a URL; the cursor and filter are IDs (D96). Each child has their photo count and, for people
- * who see orders, whether a paid order has a line for them (D147; null for photographers, here and in the database).
+ * who see orders, whether a paid order has a line for them (D147; null for photographers, here and in the database),
+ * and the photo groups they are in (D156).
  */
 export const GET = handle(async (request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
-  const { limit, cursor, groupId } = parseQuery(request, rosterQuery);
+  const { limit, cursor, classId } = parseQuery(request, rosterQuery);
   const { supabase, studio } = await studioScope();
   assertFunctionRegion(studio.region);
   await loadRosterJob(supabase, studio.id, jobId);
   const list = check(
     await supabase.rpc("list_children", {
       p_job_id: jobId,
-      p_group_id: groupId && groupId !== "none" ? groupId : null,
+      // Classes are job_groups in the database (ADR 0030's naming map).
+      p_group_id: classId && classId !== "none" ? classId : null,
       p_after: cursor ?? null,
       p_limit: limit + 1,
-      p_no_group: groupId === "none",
+      p_no_group: classId === "none",
     }),
   ) as { children: ChildRow[]; total: number; duplicates: number };
   const { items, nextCursor } = page(list.children, limit);
@@ -54,6 +56,7 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
       ...(await toChild(row, keys)),
       photoCount: row.photo_count ?? 0,
       hasPaidOrder: seesOrders ? (row.has_paid_order ?? null) : null,
+      groups: row.photo_groups ?? [],
     })),
   );
   return NextResponse.json({
@@ -78,7 +81,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   assertCanEditRoster(studio);
   const input = await parseBody(request, childInput);
   await loadRosterJob(supabase, studio.id, jobId);
-  const group = await assertGroupInJob(supabase, studio.id, jobId, input.groupId);
+  const klass = await assertClassInJob(supabase, studio.id, jobId, input.classId);
   const keys = await accessCodeCryptoKeys();
   let id = "";
   check(
@@ -107,7 +110,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   ) as ChildRow;
   const roster = await loadRoster(supabase, studio.id, jobId);
   const child = await toChild(
-    { ...row, group_name: group?.name ?? null, duplicate: isDuplicate(roster.children, id) },
+    { ...row, group_name: klass?.name ?? null, duplicate: isDuplicate(roster.children, id) },
     keys,
   );
   return NextResponse.json({ child }, { status: 201 });

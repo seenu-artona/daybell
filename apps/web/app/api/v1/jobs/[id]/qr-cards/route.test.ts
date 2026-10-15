@@ -75,9 +75,9 @@ describe("POST /jobs/:id/qr-cards", () => {
   it("refuses classes that aren't the job's", async () => {
     const supabase = fakeDatabase({ jobs: JOB_ROW, job_groups: [] });
     scope.mockResolvedValue({ supabase, studio: OWNER, userId: "u" });
-    const res = await print({ groupIds: [CHILD] });
+    const res = await print({ classIds: [CHILD] });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.fields).toEqual({ groupIds: "validation.group" });
+    expect((await res.json()).error.fields).toEqual({ classIds: "validation.class" });
     expect(rpc).not.toHaveBeenCalled();
   });
 

@@ -18,7 +18,7 @@ import {
 } from "@/lib/qr-cards";
 import { loadFonts, renderQrCardsPdf } from "@/lib/qr-cards-pdf";
 import { assertFunctionRegion } from "@/lib/region-guard";
-import { loadGroups, loadRosterJob, pathId } from "@/lib/roster";
+import { loadClasses, loadRosterJob, pathId } from "@/lib/roster";
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
 import { codeWriteRpc } from "@/lib/supabase/service";
 import messages from "@/messages/en-US.json";
@@ -90,11 +90,11 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
     if (!child) throw new ApiError("not_found", "Child not found.");
     if (child.do_not_photograph) throw DO_NOT_PHOTOGRAPH;
   }
-  const groups = await loadGroups(supabase, studio.id, jobId);
-  const known = new Set(groups.map((g) => g.id));
-  if (input.groupIds?.some((id) => id !== "none" && !known.has(id)))
+  const classes = await loadClasses(supabase, studio.id, jobId);
+  const known = new Set(classes.map((g) => g.id));
+  if (input.classIds?.some((id) => id !== "none" && !known.has(id)))
     throw new ApiError("invalid_input", "Please check the highlighted fields.", {
-      groupIds: "validation.group",
+      classIds: "validation.class",
     });
 
   // Settings and fonts first: a misconfiguration fails before any blank card is made or a print is recorded.
@@ -125,7 +125,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
     jobId,
     prepared.cards.map((c) => c.child_id),
   );
-  const { cards, skipped } = await printCards({ prepared, blanks, children, groups, keys });
+  const { cards, skipped } = await printCards({ prepared, blanks, children, classes, keys });
   if (cards.length === 0)
     // Every card's code is unreadable: say why, and how many (counts only).
     return NextResponse.json(CODES_UNREADABLE.toBody(), {

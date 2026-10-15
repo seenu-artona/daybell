@@ -157,19 +157,17 @@ describe("tagging writes check the person and their role before anything else (S
     for (const mod of [
       await import("./jobs/[id]/tagging/route"),
       await import("./jobs/[id]/tagging/photos/route"),
-      await import("./jobs/[id]/tagging/children/route"),
       await import("./jobs/[id]/photos/move/route"),
       await import("./jobs/[id]/photos/confirm/route"),
       await import("./jobs/[id]/tagging/undo-card/route"),
       await import("./jobs/[id]/qr-cards/[cardId]/child/route"),
       // Database only, but in Montréal like their siblings (security review 12, code review nice 7).
       await import("./jobs/[id]/tagging/review/route"),
-      await import("./jobs/[id]/tagging/no-photos/route"),
     ])
       expect(mod.preferredRegion).toBe("yul1");
   });
 
-  it("Mark reviewed and the no-photos list refuse a Canadian studio outside Montréal", async () => {
+  it("Mark reviewed refuses a Canadian studio outside Montréal", async () => {
     vi.stubEnv("VERCEL_REGION", "iad1");
     vi.spyOn(console, "error").mockImplementation(() => {});
     scope.mockResolvedValue({
@@ -178,9 +176,7 @@ describe("tagging writes check the person and their role before anything else (S
       userId: "u",
     });
     const review = (await import("./jobs/[id]/tagging/review/route")).POST;
-    const noPhotos = (await import("./jobs/[id]/tagging/no-photos/route")).GET;
     expect((await review(json({}), ctx(JOB))).status).toBe(422);
-    expect((await noPhotos(new Request("http://localhost/x"), ctx(JOB))).status).toBe(422);
     expect(writeRpc).not.toHaveBeenCalled();
   });
 });
@@ -202,11 +198,6 @@ describe("another studio's job is not found, and nothing is written or signed (l
         async () => (await import("./jobs/[id]/tagging/photos/route")).GET,
         "tagging/photos?place=leftovers",
       ],
-      [
-        async () => (await import("./jobs/[id]/tagging/children/route")).GET,
-        "tagging/children?noGroup=true",
-      ],
-      [async () => (await import("./jobs/[id]/tagging/no-photos/route")).GET, "tagging/no-photos"],
     ] as const)
       expect((await (await load())(get(url), ctx(JOB))).status).toBe(404);
     expect(storage.presignGet).not.toHaveBeenCalled();
@@ -262,6 +253,32 @@ describe("moving and confirming", () => {
     const res = await move(json({ photoIds: [PHOTO], target: { kind: "leftovers" } }), ctx(JOB));
     expect(res.status).toBe(409);
     expect((await res.json()).error.fields).toEqual({ form: "tagging.cardPhoto" });
+  });
+
+  it("never gives a group photo to a person (C8), and takes no class photo set as a target", async () => {
+    writeRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "P0001", message: "group_photo" },
+    });
+    const move = (await import("./jobs/[id]/photos/move/route")).POST;
+    const res = await move(
+      json({ photoIds: [PHOTO], target: { kind: "child", childId: CHILD } }),
+      ctx(JOB),
+    );
+    expect([res.status, (await res.json()).error.fields]).toEqual([
+      409,
+      { form: "tagging.groupPhoto" },
+    ]);
+    writeRpc.mockClear();
+    expect(
+      (
+        await move(
+          json({ photoIds: [PHOTO], target: { kind: "classSet", groupId: CHILD } }),
+          ctx(JOB),
+        )
+      ).status,
+    ).toBe(400);
+    expect(writeRpc).not.toHaveBeenCalled();
   });
 
   it("refuses more than 500 photos, or a target that isn't one", async () => {
@@ -492,18 +509,6 @@ describe("the review's summary", () => {
         blank_cards: 1,
         card_photos: 3,
         reviewed_at: null,
-        no_photos: 4,
-        albums: [
-          {
-            group_id: "g1",
-            name: "Room 4",
-            children: 3,
-            children_with_photos: 2,
-            photos: 5,
-            class_photos: 1,
-          },
-        ],
-        no_group: { children: 1, children_with_photos: 0, photos: 0 },
       },
       tagging_blank_cards: [{ card_id: CARD, photos: 2, card_photo_id: PHOTO }],
     });
@@ -519,9 +524,10 @@ describe("the review's summary", () => {
       canMarkReviewed: false,
       notReviewable: "leftovers",
       done: false,
-      noPhotos: 4,
     });
-    expect(tagging.albums.map((a: { groupId: string | null }) => a.groupId)).toEqual(["g1", null]);
+    // Class albums and No photos yet left Photos (C17).
+    expect(tagging).not.toHaveProperty("albums");
+    expect(tagging).not.toHaveProperty("noPhotos");
     expect(tagging.blankCardGroups[0].cardPhotoUrl).toContain(`/${PHOTO}/thumb.webp`);
   });
 });
@@ -556,20 +562,51 @@ describe("starting an upload (code review S1)", () => {
     writeRpc.mockResolvedValue({ data: PHOTO, error: null });
   });
 
-  it("keeps a class-photo upload's class when the body has no content-length", async () => {
-    const req = chunked(JSON.stringify({ groupId: GROUP }));
+  it("keeps a group upload's group when the body has no content-length (ADR 0030)", async () => {
+    const req = chunked(JSON.stringify({ kind: "group", groupId: GROUP }));
     expect(req.headers.get("content-length")).toBeNull();
     expect((await start(req)).status).toBe(201);
     expect(writeRpc).toHaveBeenCalledWith("ca", "create_upload_batch", "u", {
       p_job_id: JOB,
-      p_group_id: GROUP,
+      p_kind: "group",
+      p_photo_group_id: GROUP,
+      p_add_to_group_id: null,
+    });
+  });
+
+  it("passes an individual upload's add-to group (C7)", async () => {
+    expect((await start(json({ addToGroupId: GROUP }))).status).toBe(201);
+    expect(writeRpc).toHaveBeenCalledWith("ca", "create_upload_batch", "u", {
+      p_job_id: JOB,
+      p_kind: "individual",
+      p_photo_group_id: null,
+      p_add_to_group_id: GROUP,
     });
   });
 
   it("treats an empty body, sent either way, as an upload of individual photos", async () => {
     expect((await start(new Request("http://localhost/x", { method: "POST" }))).status).toBe(201);
     expect((await start(chunked(""))).status).toBe(201);
-    for (const call of writeRpc.mock.calls) expect(call[3]).toEqual({ p_job_id: JOB });
+    for (const call of writeRpc.mock.calls)
+      expect(call[3]).toEqual({
+        p_job_id: JOB,
+        p_kind: "individual",
+        p_photo_group_id: null,
+        p_add_to_group_id: null,
+      });
+  });
+
+  it("names another job's group a groups.notInJob conflict, and refuses an old class-photo body", async () => {
+    writeRpc.mockResolvedValue({
+      data: null,
+      error: { code: "P0001", message: "group_not_in_job" },
+    });
+    const res = await start(json({ kind: "group", groupId: GROUP }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.fields).toEqual({ form: "groups.notInJob" });
+    writeRpc.mockClear();
+    expect((await start(json({ groupId: GROUP }))).status).toBe(400);
+    expect(writeRpc).not.toHaveBeenCalled();
   });
 
   it("refuses a body that isn't JSON, however it was sent", async () => {

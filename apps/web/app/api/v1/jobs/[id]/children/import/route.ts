@@ -1,5 +1,5 @@
 import { rosterImportInput } from "@daybell/api";
-import { countNewGroups, planRosterImport } from "@daybell/core";
+import { countNewClasses, planRosterImport } from "@daybell/core";
 import { NextResponse } from "next/server";
 import { accessCodeCryptoKeys, newAccessCode } from "@/lib/access-codes";
 import { handle, parseBody } from "@/lib/api";
@@ -34,14 +34,14 @@ export const POST = handle(async (request: Request, ctx: { params: Promise<{ id:
     const roster = await loadRoster(supabase, studio.id, jobId);
     return {
       plan: planRosterImport(roster.children, drafts),
-      groupsAdded: countNewGroups(
-        roster.groups.map((g) => g.name),
+      classesAdded: countNewClasses(
+        roster.classes.map((g) => g.name),
         drafts,
       ),
     };
   };
   const first = await makePlan();
-  if (input.dryRun) return NextResponse.json(importSummary(first.plan, first.groupsAdded, true));
+  if (input.dryRun) return NextResponse.json(importSummary(first.plan, first.classesAdded, true));
 
   const keys = await accessCodeCryptoKeys();
   // Saved by the server-only import_roster, acting for the signed-in person (ADR 0011).

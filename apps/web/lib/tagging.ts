@@ -38,14 +38,14 @@ type DbError = { code?: string; message?: string } | null;
 
 const PLACE_FROM_DB: Record<string, PhotoPlace> = {
   child: "child",
-  class_set: "classSet",
+  group_photo: "groupPhoto",
   leftovers: "leftovers",
   card: "card",
   blank_card: "blankCard",
 };
 const PLACE_TO_DB: Record<PhotoPlace, string> = {
   child: "child",
-  classSet: "class_set",
+  groupPhoto: "group_photo",
   leftovers: "leftovers",
   card: "card",
   blankCard: "blank_card",
@@ -73,7 +73,6 @@ export const flagFromDb = (flag: string | null): PhotoFlag | null =>
 export interface TagRow {
   place: string;
   child_id: string | null;
-  group_id: string | null;
   card_id: string | null;
   flag: string | null;
   source: "auto" | "manual";
@@ -86,8 +85,8 @@ export function tagFromRow(row: TagRow): StoredTag {
     switch (place) {
       case "child":
         return { place, childId: row.child_id ?? "", flag };
-      case "classSet":
-        return { place, groupId: row.group_id ?? "", flag };
+      case "groupPhoto":
+        return { place, flag };
       case "card":
         return { place, cardId: row.card_id, flag };
       case "blankCard":
@@ -107,7 +106,6 @@ export function writeRow(write: TagWrite): Record<string, string | null> {
     photo_id: write.photoId,
     place: PLACE_TO_DB[t.place],
     child_id: t.place === "child" ? t.childId : null,
-    group_id: t.place === "classSet" ? t.groupId : null,
     card_id: t.place === "card" || t.place === "blankCard" ? t.cardId : null,
     flag: t.flag ? FLAG_TO_DB[t.flag] : null,
   };
@@ -118,7 +116,8 @@ export function writeRow(write: TagWrite): Record<string, string | null> {
 /** What tagging_inputs returns. */
 export interface TaggingInputs {
   batch_id: string;
-  group_id: string | null;
+  /** individual photos (split by QR card) or group photos (D156; ADR 0030). */
+  kind: "individual" | "group";
   tag_round: number;
   tagged_round: number;
   /** A purge left a step with no photo after it (Seenu, answer 13). */
@@ -193,7 +192,10 @@ export function planBatch(inputs: TaggingInputs): TagWrite[] {
   );
   return planTagWrites(
     current,
-    tagBatch(photos, { classGroupId: inputs.group_id, purgeTail: inputs.purge_tail === true }),
+    tagBatch(photos, {
+      groupPhotos: inputs.kind === "group",
+      purgeTail: inputs.purge_tail === true,
+    }),
   );
 }
 
@@ -293,7 +295,6 @@ export interface TaggedPhotoRow {
   place: string;
   flag: string | null;
   child_id?: string | null;
-  group_id?: string | null;
   card_id?: string | null;
   source: "auto" | "manual";
   qr_kind: string | null;
@@ -333,7 +334,6 @@ export async function toTaggedPhoto(
     place,
     flag,
     childId: row.child_id ?? null,
-    groupId: row.group_id ?? null,
     cardId: row.card_id ?? null,
     manual: row.source === "manual",
     cardRead: qrKind === "card",
@@ -346,13 +346,11 @@ export async function toTaggedPhoto(
   };
 }
 
-/** A move's target as move_photos takes it: ids only. */
+/** A move's target as move_photos takes it: ids only. A person, or Leftovers (never a group: C8). */
 export function targetRow(target: MoveTarget): { kind: string; id?: string } {
   switch (target.kind) {
     case "child":
       return { kind: "child", id: target.childId };
-    case "classSet":
-      return { kind: "class_set", id: target.groupId };
     case "leftovers":
       return { kind: "leftovers" };
   }
@@ -386,6 +384,11 @@ const NAMED: Record<string, () => ApiError> = {
     conflict(
       "Only photos a person marked as card photos can be unmarked.",
       TAGGING_CONFLICTS.notMarkedCard,
+    ),
+  group_photo: () =>
+    conflict(
+      "Group photos stay group photos: they are moved between groups, never given to a person.",
+      TAGGING_CONFLICTS.groupPhoto,
     ),
   tagging_not_ready: () =>
     conflict(

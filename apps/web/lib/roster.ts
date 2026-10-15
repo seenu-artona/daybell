@@ -3,9 +3,9 @@ import {
   ApiError,
   type Child,
   type ChildInput,
+  type Class,
   childInput,
   fieldErrors,
-  type Group,
   type RosterImportResponse,
   type RosterRow,
 } from "@daybell/api";
@@ -53,6 +53,8 @@ export interface ChildRow {
   photo_count?: number;
   /** From list_children (D147): null for people who don't see orders. */
   has_paid_order?: boolean | null;
+  /** From list_children (D156): the photo groups the child is in, by name. */
+  photo_groups?: { id: string; name: string }[];
   created_at: string;
   updated_at: string;
 }
@@ -76,7 +78,7 @@ export async function toChild(row: ChildRow, keys: AccessCodeCryptoKeys): Promis
   return {
     id: row.id,
     jobId: row.job_id,
-    group: row.group_id ? { id: row.group_id, name: row.group_name ?? "" } : null,
+    class: row.group_id ? { id: row.group_id, name: row.group_name ?? "" } : null,
     firstName: row.first_name,
     lastName: row.last_name,
     studentId: row.student_id,
@@ -95,7 +97,7 @@ export async function toChild(row: ChildRow, keys: AccessCodeCryptoKeys): Promis
 const CHILD_COLUMN_FOR: Record<keyof ChildInput, string> = {
   firstName: "first_name",
   lastName: "last_name",
-  groupId: "group_id",
+  classId: "group_id",
   studentId: "student_id",
   grade: "grade",
   parentEmail: "parent_email",
@@ -168,43 +170,43 @@ export function assertCanRemoveFrom(job: RosterJob): void {
 }
 
 /**
- * The group, which must be one of this job's. The composite FK enforces it too; checking first gives a field error
- * instead of a generic one.
+ * The class, which must be one of this job's (classes are job_groups in the database; ADR 0030's naming map). The
+ * composite FK enforces it too; checking first gives a field error instead of a generic one.
  */
-export async function assertGroupInJob(
+export async function assertClassInJob(
   supabase: SupabaseClient,
   studioId: string,
   jobId: string,
-  groupId: string | null | undefined,
+  classId: string | null | undefined,
 ): Promise<{ id: string; name: string } | null> {
-  if (!groupId) return null;
-  const group = check(
+  if (!classId) return null;
+  const found = check(
     await supabase
       .from("job_groups")
       .select("id, name")
       .eq("studio_id", studioId)
       .eq("job_id", jobId)
-      .eq("id", groupId)
+      .eq("id", classId)
       .maybeSingle(),
   ) as { id: string; name: string } | null;
-  if (!group)
+  if (!found)
     throw new ApiError("invalid_input", "Please check the highlighted fields.", {
-      groupId: "validation.group",
+      classId: "validation.class",
     });
-  return group;
+  return found;
 }
 
 type DbError = { code?: string; message?: string } | null;
 
-export function isGroupNameTaken(error: DbError): boolean {
+export function isClassNameTaken(error: DbError): boolean {
   return error?.code === "23505" && (error.message ?? "").includes("job_groups_job_name_key");
 }
 
-export const GROUP_NAME_TAKEN = new ApiError(
+export const CLASS_NAME_TAKEN = new ApiError(
   "invalid_input",
   "Please check the highlighted fields.",
   {
-    name: "validation.groupNameTaken",
+    name: "validation.classNameTaken",
   },
 );
 
@@ -229,8 +231,8 @@ export async function allRows<T>(
   }
 }
 
-/** A job's groups (id and name). */
-export async function loadGroups(
+/** A job's classes (id and name). */
+export async function loadClasses(
   supabase: SupabaseClient,
   studioId: string,
   jobId: string,
@@ -246,14 +248,14 @@ export async function loadGroups(
   );
 }
 
-/** Everything the import plan and duplicate checks need about a job's children, plus its groups. */
+/** Everything the import plan and duplicate checks need about a job's children, plus its classes. */
 export async function loadRoster(
   supabase: SupabaseClient,
   studioId: string,
   jobId: string,
-): Promise<{ children: ExistingChild[]; groups: { id: string; name: string }[] }> {
-  const [groups, rows] = await Promise.all([
-    loadGroups(supabase, studioId, jobId),
+): Promise<{ children: ExistingChild[]; classes: { id: string; name: string }[] }> {
+  const [classes, rows] = await Promise.all([
+    loadClasses(supabase, studioId, jobId),
     allRows<{
       id: string;
       student_id: string | null;
@@ -270,15 +272,15 @@ export async function loadRoster(
         .range(from, to),
     ),
   ]);
-  const names = new Map(groups.map((g) => [g.id, g.name]));
+  const names = new Map(classes.map((g) => [g.id, g.name]));
   return {
-    groups,
+    classes,
     children: rows.map((r) => ({
       id: r.id,
       studentId: r.student_id,
       firstName: r.first_name,
       lastName: r.last_name,
-      groupName: r.group_id ? (names.get(r.group_id) ?? null) : null,
+      className: r.group_id ? (names.get(r.group_id) ?? null) : null,
     })),
   };
 }
@@ -289,16 +291,16 @@ export function isDuplicate(children: readonly ExistingChild[], childId: string)
     firstName: c.firstName,
     lastName: c.lastName,
     studentId: c.studentId,
-    group: c.groupName,
+    class: c.className,
   }));
   const index = children.findIndex((c) => c.id === childId);
   return index >= 0 && findDuplicates(entries).has(index);
 }
 
-/** Groups sorted the way people read them: "Room 2" before "Room 10". */
-export function sortGroups<T extends Pick<Group, "name">>(groups: T[]): T[] {
+/** Classes sorted the way people read them: "Room 2" before "Room 10". */
+export function sortClasses<T extends Pick<Class, "name">>(classes: T[]): T[] {
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-  return [...groups].sort((a, b) => collator.compare(a.name, b.name));
+  return [...classes].sort((a, b) => collator.compare(a.name, b.name));
 }
 
 /** Validated request rows as core drafts (blank optional values become null). */
@@ -306,7 +308,7 @@ export function rosterDrafts(rows: readonly RosterRow[]): RosterRowDraft[] {
   return rows.map((r) => ({
     firstName: r.firstName,
     lastName: r.lastName,
-    group: r.group ?? null,
+    class: r.class ?? null,
     studentId: r.studentId ?? null,
     grade: r.grade ?? null,
     parentEmail: r.parentEmail ?? null,
@@ -318,14 +320,14 @@ export function rosterDrafts(rows: readonly RosterRow[]): RosterRowDraft[] {
 /** The import response: what a plan does (or did), row by row, in request order. */
 export function importSummary(
   plan: RosterPlan,
-  groupsAdded: number,
+  classesAdded: number,
   dryRun: boolean,
 ): RosterImportResponse {
   return {
     dryRun,
     added: plan.actions.filter((a) => a.kind === "add").length,
     updated: plan.actions.filter((a) => a.kind === "update").length,
-    groupsAdded,
+    classesAdded,
     duplicates: plan.duplicate.filter(Boolean).length,
     rows: plan.actions.map((a, i) => ({ action: a.kind, duplicate: plan.duplicate[i] ?? false })),
   };
@@ -345,7 +347,7 @@ export async function importRpcRows(
       const fields = {
         first_name: d.firstName,
         last_name: d.lastName,
-        group_name: d.group,
+        group_name: d.class,
         student_id: d.studentId,
         grade: d.grade,
         parent_email: d.parentEmail,

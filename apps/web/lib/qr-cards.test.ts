@@ -36,11 +36,11 @@ describe("prepareArgs", () => {
   });
 
   it('sends chosen classes and "no class" apart', () => {
-    expect(prepareArgs(JOB, { groupIds: [G1, "none"], blankCards: 0 }, [])).toMatchObject({
+    expect(prepareArgs(JOB, { classIds: [G1, "none"], blankCards: 0 }, [])).toMatchObject({
       p_group_ids: [G1],
       p_no_group: true,
     });
-    expect(prepareArgs(JOB, { groupIds: ["none"], blankCards: 0 }, [])).toMatchObject({
+    expect(prepareArgs(JOB, { classIds: ["none"], blankCards: 0 }, [])).toMatchObject({
       p_group_ids: [],
       p_no_group: true,
     });
@@ -129,7 +129,7 @@ describe("printCards", () => {
       },
       blanks: [{ id: "b1", code: "JKMNPQRS", hash: "h", ciphertext: "x" }],
       children,
-      groups: [
+      classes: [
         { id: "g10", name: "Room 10" },
         { id: "g2", name: "Room 2" },
       ],
@@ -177,7 +177,7 @@ describe("printCards and Do not photograph", () => {
           access_code_ciphertext: await encryptAccessCode("K7QM4XPA", "c1", keys.encryption),
         },
       ],
-      groups: [],
+      classes: [],
       keys,
     });
     expect(cards).toEqual([]);

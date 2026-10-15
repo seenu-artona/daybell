@@ -78,7 +78,7 @@ describe("toChild", () => {
       }),
       keys,
     );
-    expect(child.group).toEqual({ id: "2d8b9e3a-4c9f-4e77-9f2a-5b3c4d5e6f7a", name: "4B" });
+    expect(child.class).toEqual({ id: "2d8b9e3a-4c9f-4e77-9f2a-5b3c4d5e6f7a", name: "4B" });
     expect(child.duplicate).toBe(true);
   });
 });
@@ -86,10 +86,10 @@ describe("toChild", () => {
 describe("database error matchers", () => {
   it("recognise a taken class name and the named failures of add_child and import_roster", () => {
     expect(
-      roster.isGroupNameTaken({ code: "23505", message: 'constraint "job_groups_job_name_key"' }),
+      roster.isClassNameTaken({ code: "23505", message: 'constraint "job_groups_job_name_key"' }),
     ).toBe(true);
     expect(
-      roster.isGroupNameTaken({
+      roster.isClassNameTaken({
         code: "23505",
         message: 'duplicate key value violates unique constraint "children_access_code_hash_key"',
       }),
@@ -218,15 +218,15 @@ describe("childColumns", () => {
 describe("import helpers", () => {
   const drafts = roster.rosterDrafts([
     { firstName: "Maya", lastName: "Johnson-Lee", studentId: "S-1" },
-    { firstName: "Liam", lastName: "Chen", group: "4B", doNotPhotograph: true },
+    { firstName: "Liam", lastName: "Chen", class: "4B", doNotPhotograph: true },
   ]);
   const plan = planRosterImport(
-    [{ id: CHILD, studentId: "S-1", firstName: "Maya", lastName: "Johnson", groupName: null }],
+    [{ id: CHILD, studentId: "S-1", firstName: "Maya", lastName: "Johnson", className: null }],
     drafts,
   );
 
   it("fill blanks with null and keep unmapped opt-outs null", () => {
-    expect(drafts[0]).toMatchObject({ group: null, grade: null, doNotPhotograph: null });
+    expect(drafts[0]).toMatchObject({ class: null, grade: null, doNotPhotograph: null });
   });
 
   it("send updates without codes and adds with a fresh id, hash and encrypted copy", async () => {
@@ -262,7 +262,7 @@ describe("import helpers", () => {
       dryRun: true,
       added: 1,
       updated: 1,
-      groupsAdded: 1,
+      classesAdded: 1,
       duplicates: 0,
       rows: [
         { action: "update", duplicate: false },
@@ -273,9 +273,9 @@ describe("import helpers", () => {
 
   it("flag a child that duplicates another in the job", () => {
     const children = [
-      { id: "a", studentId: "S-1", firstName: "A", lastName: "B", groupName: null },
-      { id: "b", studentId: "s- 1", firstName: "C", lastName: "D", groupName: null },
-      { id: "c", studentId: null, firstName: "C", lastName: "D", groupName: null },
+      { id: "a", studentId: "S-1", firstName: "A", lastName: "B", className: null },
+      { id: "b", studentId: "s- 1", firstName: "C", lastName: "D", className: null },
+      { id: "c", studentId: null, firstName: "C", lastName: "D", className: null },
     ];
     expect(roster.isDuplicate(children, "b")).toBe(true);
     expect(roster.isDuplicate(children, "c")).toBe(false);
@@ -283,11 +283,11 @@ describe("import helpers", () => {
   });
 });
 
-describe("sortGroups", () => {
+describe("sortClasses", () => {
   it("puts Room 2 before Room 10", () => {
     expect(
       roster
-        .sortGroups([{ name: "Room 10" }, { name: "room 2" }, { name: "4B" }])
+        .sortClasses([{ name: "Room 10" }, { name: "room 2" }, { name: "4B" }])
         .map((g) => g.name),
     ).toEqual(["4B", "room 2", "Room 10"]);
   });

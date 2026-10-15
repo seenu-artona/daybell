@@ -33,8 +33,8 @@ const routes = [
     "POST",
   ],
   ["PATCH /children/:id", async () => (await import("./children/[id]/route")).PATCH, "PATCH"],
-  ["POST /jobs/:id/groups", async () => (await import("./jobs/[id]/groups/route")).POST, "POST"],
-  ["PATCH /groups/:id", async () => (await import("./groups/[id]/route")).PATCH, "PATCH"],
+  ["POST /jobs/:id/classes", async () => (await import("./jobs/[id]/classes/route")).POST, "POST"],
+  ["PATCH /classes/:id", async () => (await import("./classes/[id]/route")).PATCH, "PATCH"],
   [
     "POST /jobs/:id/qr-cards",
     async () => (await import("./jobs/[id]/qr-cards/route")).POST,

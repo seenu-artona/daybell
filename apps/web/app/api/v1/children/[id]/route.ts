@@ -4,7 +4,7 @@ import { accessCodeCryptoKeys } from "@/lib/access-codes";
 import { check, handle, parseBody } from "@/lib/api";
 import {
   assertCanRemoveFrom,
-  assertGroupInJob,
+  assertClassInJob,
   CHILD_COLUMNS,
   type ChildRow,
   childColumns,
@@ -38,7 +38,7 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const next = validChild({
     firstName: current.first_name,
     lastName: current.last_name,
-    groupId: current.group_id,
+    classId: current.group_id,
     studentId: current.student_id,
     grade: current.grade,
     parentEmail: current.parent_email,
@@ -46,7 +46,7 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
     doNotPublish: current.do_not_publish,
     ...patch,
   });
-  const group = await assertGroupInJob(supabase, studio.id, current.job_id, next.groupId);
+  const klass = await assertClassInJob(supabase, studio.id, current.job_id, next.classId);
   const row = check(
     await supabase
       .from("children")
@@ -62,7 +62,7 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
     loadRoster(supabase, studio.id, row.job_id),
   ]);
   const child = await toChild(
-    { ...row, group_name: group?.name ?? null, duplicate: isDuplicate(roster.children, id) },
+    { ...row, group_name: klass?.name ?? null, duplicate: isDuplicate(roster.children, id) },
     keys,
   );
   return NextResponse.json({ child });

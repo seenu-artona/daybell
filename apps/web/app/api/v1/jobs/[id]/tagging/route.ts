@@ -30,22 +30,12 @@ interface Overview {
   card_photos: number;
   unlinked_card_photos: number;
   reviewed_at: string | null;
-  no_photos: number;
-  albums: {
-    group_id: string;
-    name: string;
-    children: number;
-    children_with_photos: number;
-    photos: number;
-    class_photos: number;
-  }[];
-  no_group: { children: number; children_with_photos: number; photos: number };
 }
 
 /**
- * GET /api/v1/jobs/:id/tagging — the review screen's summary (ADR 0018): counts, whether Mark reviewed is possible and
- * why not (packages/core's rules), the review state, each class's album and the blank cards whose child is still to be
- * named, with a signed preview of each card's photo. Everyone on the team may look (staff read-only, plan answer 10);
+ * GET /api/v1/jobs/:id/tagging — Photos' To review (ADR 0018, 0030): counts, whether Mark reviewed is possible and why
+ * not (packages/core's rules), the review state and the blank cards whose child is still to be named, with a signed
+ * preview of each card's photo (class albums and No photos yet left Photos, C17). Everyone on the team may look (staff read-only, plan answer 10);
  * row-level security keeps it to the caller's studio. Ids and counts in the URL only.
  */
 export const GET = handle(async (_request: Request, ctx: Ctx) => {
@@ -87,33 +77,10 @@ export const GET = handle(async (_request: Request, ctx: Ctx) => {
       blankCards: facts.blankCardsPending,
       cardPhotos: Number(o.card_photos),
       unlinkedCardPhotos: Number(o.unlinked_card_photos ?? 0),
-      noPhotos: Number(o.no_photos),
       reviewedAt: o.reviewed_at,
       canMarkReviewed: canMarkReviewed(facts),
       notReviewable: notReviewableReason(facts),
       done: reviewTaggingDone(facts),
-      albums: [
-        ...o.albums.map((a) => ({
-          groupId: a.group_id,
-          name: a.name,
-          children: Number(a.children),
-          childrenWithPhotos: Number(a.children_with_photos),
-          photos: Number(a.photos),
-          classPhotos: Number(a.class_photos),
-        })),
-        ...(Number(o.no_group.children) > 0
-          ? [
-              {
-                groupId: null,
-                name: null,
-                children: Number(o.no_group.children),
-                childrenWithPhotos: Number(o.no_group.children_with_photos),
-                photos: Number(o.no_group.photos),
-                classPhotos: 0,
-              },
-            ]
-          : []),
-      ],
       blankCardGroups: await Promise.all(
         blankRows.map(async (b) => ({
           cardId: b.card_id,
