@@ -16,6 +16,11 @@ The current phase spec lives in the doc's Build phases tab. Short summaries are 
 5. The five roles review every PR: architect, developer, tester, code reviewer, security reviewer
    (`.claude/agents/`). The developer does not approve their own work.
 6. **Only Seenu releases.** Agents never merge to `main` without Seenu's approval and never deploy production.
+7. **No silent changes to decided behaviour.** Every part of a design or a build traces to a decision (D-number),
+   an ADR, or Seenu's own words. Anything new, or different from what was decided or built (an order, a grouping,
+   a default, a removed or moved control), is labelled "New: needs Seenu" on the design frame or listed under
+   "Calls for Seenu" in the PR, and is asked before it is treated as final. If unsure where something came from,
+   say so and ask; never present your own choice as decided.
 
 ## Non-negotiables
 
