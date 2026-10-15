@@ -72,6 +72,8 @@ function PeoplePage() {
   const [editing, setEditing] = useState<Child | "new" | null>(null);
   const [removing, setRemoving] = useState<Child | null>(null);
   const [printing, setPrinting] = useState(false);
+  // Counts prints of the job's cards, so an open record reads its card's Printed date again.
+  const [printedKey, setPrintedKey] = useState(0);
   // Set when the person opens a child, so focus moves to the panel; not on a refresh with ?child= in the URL.
   const [panelFocus, setPanelFocus] = useState<string | null>(null);
   const opener = useRef<string | null>(null);
@@ -294,6 +296,7 @@ function PeoplePage() {
                   canEdit={canEdit}
                   seesOrders={seesOrders}
                   focusKey={panelFocus === selected.id ? panelFocus : null}
+                  printedKey={printedKey}
                   onUnfold={closePanel}
                   onEdit={() => setEditing(selected)}
                   onRemove={() => setRemoving(selected)}
@@ -371,7 +374,10 @@ function PeoplePage() {
           roster={roster.rows}
           groups={roster.groups}
           word={word}
-          onPrinted={refreshSummary}
+          onPrinted={() => {
+            refreshSummary();
+            setPrintedKey((k) => k + 1);
+          }}
         />
       ) : null}
 

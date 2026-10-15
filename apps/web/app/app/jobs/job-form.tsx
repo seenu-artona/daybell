@@ -77,7 +77,7 @@ export function JobForm({
   const [internalNumber, setInternalNumber] = useState(job?.internalNumber ?? "");
   const [type, setType] = useState<JobType>(job?.type ?? "school");
   const [subjects, setSubjects] = useState(job?.subjectsExpected?.toString() ?? "");
-  const [templates, setTemplates] = useState<JobTemplate[] | null>(null);
+  const [templates, setTemplates] = useState<JobTemplate[] | null | "failed">(null);
   const [templateId, setTemplateId] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [newClientName, setNewClientName] = useState<string | null>(null);
@@ -93,14 +93,17 @@ export function JobForm({
   useEffect(() => {
     if (!isNew) return;
     void api<JobTemplatesResponse>("/job-templates").then((res) => {
-      if (!res.ok) return;
+      if (!res.ok) return setTemplates("failed");
       setTemplates(res.data.templates);
       setTemplateId(
         (current) => current || (res.data.templates.find((tp) => tp.isDefault)?.id ?? ""),
       );
     });
   }, [isNew]);
-  const template = templates?.find((tp) => tp.id === templateId) ?? null;
+  const template =
+    templates && templates !== "failed"
+      ? (templates.find((tp) => tp.id === templateId) ?? null)
+      : null;
 
   const suggest = useCallback(async (replace: boolean) => {
     const res = await api<{ internalNumber: string }>("/jobs/next-number");
@@ -188,13 +191,23 @@ export function JobForm({
         />
         {isNew ? (
           <div className="flex flex-col gap-2">
-            <SelectField
-              label={t("form.template")}
-              value={templateId}
-              onChange={setTemplateId}
-              options={(templates ?? []).map((tp) => ({ value: tp.id, label: tp.name }))}
-              error={text.field(errors.templateId)}
-            />
+            {templates === null || templates === "failed" ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-label text-ink">{t("form.template")}</span>
+                {/* Without the list, the job gets the studio's default template (the server's own default). */}
+                <span role="status" className="text-sm text-muted">
+                  {templates === null ? t("form.templatesLoading") : t("form.templatesFailed")}
+                </span>
+              </div>
+            ) : (
+              <SelectField
+                label={t("form.template")}
+                value={templateId}
+                onChange={setTemplateId}
+                options={templates.map((tp) => ({ value: tp.id, label: tp.name }))}
+                error={text.field(errors.templateId)}
+              />
+            )}
             {template ? (
               <p className="m-0 text-sm text-muted">
                 {t("form.templateSentence", templateSentenceValues(template.name, template.rules))}

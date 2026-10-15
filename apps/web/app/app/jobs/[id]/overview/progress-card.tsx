@@ -6,7 +6,7 @@ import { Button } from "@daybell/ui";
 import { Check, ChevronDown, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
 import { Dialog } from "../../../dialog";
@@ -49,7 +49,14 @@ export function ProgressCard({
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [dialog, setDialog] = useState<RuleKey | "closingDate" | null>(null);
   const [status, setStatus] = useState("");
+  const undoing = useRef(false);
   const role = me.studio.role;
+
+  /** Folds or opens a finished stage, then puts focus on the toggle that took the old one's place. */
+  function toggle(stage: string, opened: boolean) {
+    setOpen((o) => ({ ...o, [stage]: opened }));
+    setTimeout(() => document.getElementById(`${titleId}-${stage}-toggle`)?.focus(), 0);
+  }
 
   async function saveRules(patch: RulesPatch): Promise<string | null> {
     const res = await api<{ job: Job }>(`/jobs/${job.id}`, { method: "PATCH", body: patch });
@@ -63,11 +70,15 @@ export function ProgressCard({
   }
 
   async function undo(rule: RuleKey) {
+    // One Undo at a time (a second press waits for the first).
+    if (undoing.current) return;
+    undoing.current = true;
     setStatus("");
     const res = await api<{ job: Job }>(`/jobs/${job.id}/rules/reset`, {
       method: "POST",
       body: { rule },
     });
+    undoing.current = false;
     if (res.ok) return onChanged(res.data.job, t("undone"));
     if (res.fields.closesAt) return setStatus(t("undoPassed"));
     setStatus(res.fields.form === "jobs.noTemplate" ? t("noTemplate") : text.error(res.code));
@@ -98,15 +109,17 @@ export function ProgressCard({
           return (
             <FoldedStage
               key={stage.key}
+              id={`${titleId}-${stage.key}-toggle`}
               stage={stage}
-              onOpen={() => setOpen((o) => ({ ...o, [stage.key]: true }))}
+              onOpen={() => toggle(stage.key, true)}
             />
           );
         return (
           <StageBlock
             key={stage.key}
             stage={stage}
-            onFold={folded ? () => setOpen((o) => ({ ...o, [stage.key]: false })) : null}
+            toggleId={`${titleId}-${stage.key}-toggle`}
+            onFold={folded ? () => toggle(stage.key, false) : null}
             steps={views(stage)}
             onChange={setDialog}
             onUndo={(rule) => void undo(rule)}
@@ -149,12 +162,13 @@ export function ProgressCard({
   );
 }
 
-function FoldedStage({ stage, onOpen }: { stage: Stage; onOpen: () => void }) {
+function FoldedStage({ id, stage, onOpen }: { id: string; stage: Stage; onOpen: () => void }) {
   const t = useTranslations("app.progress");
   const when = useWhen();
   const doneOn = stageDoneOn(stage);
   return (
     <button
+      id={id}
       type="button"
       aria-expanded={false}
       onClick={onOpen}
@@ -173,6 +187,7 @@ function FoldedStage({ stage, onOpen }: { stage: Stage; onOpen: () => void }) {
 function StageBlock({
   stage,
   steps,
+  toggleId,
   onFold,
   onChange,
   onUndo,
@@ -180,6 +195,7 @@ function StageBlock({
 }: {
   stage: Stage;
   steps: { step: ProgressStepView; view: StepView }[];
+  toggleId: string;
   onFold: (() => void) | null;
   onChange: (rule: RuleKey) => void;
   onUndo: (rule: RuleKey) => void;
@@ -198,6 +214,7 @@ function StageBlock({
         </h3>
         {onFold ? (
           <button
+            id={toggleId}
             type="button"
             aria-expanded={true}
             onClick={onFold}

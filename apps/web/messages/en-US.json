@@ -589,7 +589,9 @@
         "template": "Template",
         "templateSentence": "{name} opens the shop {opens, select, days {{openDays, plural, =0 {on picture day} one {# day after picture day} other {# days after picture day}}} other {when photos are checked}} {closes, select, days {and closes it {closeDays, plural, one {# day} other {# days}} later} other {and you close it when you’re ready}}. You can change anything on the job.",
         "noTemplate": "None",
-        "templateFixed": "A job’s template is chosen when it’s made. Change its steps on the Overview."
+        "templateFixed": "A job’s template is chosen when it’s made. Change its steps on the Overview.",
+        "templatesLoading": "Loading templates…",
+        "templatesFailed": "Templates couldn’t be loaded: the job gets your default template."
       },
       "detail": {
         "back": "All jobs",
@@ -2113,7 +2115,7 @@
     },
     "jobOverview": {
       "loading": "Loading progress…",
-      "progressFailed": "Progress couldn’t be loaded. Reload the page to try again.",
+      "progressFailed": "Progress couldn’t be loaded.",
       "numbers": {
         "sales": "Sales",
         "ordersSince": "{count, plural, one {# order} other {# orders}} since {date}",
@@ -2131,7 +2133,9 @@
         "none": "None",
         "noTemplate": "None",
         "changes": "{count, plural, one {# change for this job} other {# changes for this job}}"
-      }
+      },
+      "retry": "Try again",
+      "numbersFailed": "This job’s numbers couldn’t be loaded right now."
     },
     "progress": {
       "title": "Progress",

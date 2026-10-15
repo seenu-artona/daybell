@@ -54,7 +54,7 @@ export function DetailsAside({ onEdit }: { onEdit: (() => void) | null }) {
               {job.template ? (
                 <Link
                   href={`/app/settings/templates/${job.template.id}`}
-                  className="inline-flex min-h-6 items-center text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                  className="inline-flex min-h-11 items-center text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary"
                 >
                   {job.template.name}
                 </Link>

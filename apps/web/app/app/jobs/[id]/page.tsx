@@ -2,7 +2,7 @@
 
 import type { Job, JobProgressResponse, JobProgressView, JobSalesResponse } from "@daybell/api";
 import { canSeeSales, localDay } from "@daybell/core";
-import { Banner } from "@daybell/ui";
+import { Banner, Button } from "@daybell/ui";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client-api";
@@ -29,6 +29,8 @@ export default function JobOverviewPage() {
   const [progress, setProgress] = useState<JobProgressView | null>(null);
   const [failed, setFailed] = useState(false);
   const [sales, setSales] = useState<JobSalesResponse["sales"] | null>(null);
+  const [salesFailed, setSalesFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [editing, setEditing] = useState(false);
   const [status, setStatus] = useState("");
   const today = localDay(new Date());
@@ -55,7 +57,7 @@ export default function JobOverviewPage() {
     return () => {
       live = false;
     };
-  }, [job.id, job.updatedAt, job.status, summary]);
+  }, [job.id, job.updatedAt, job.status, summary, retry]);
 
   useEffect(() => {
     if (!showNumbers) {
@@ -64,7 +66,9 @@ export default function JobOverviewPage() {
     }
     let live = true;
     api<JobSalesResponse>(`/jobs/${job.id}/sales`).then((res) => {
-      if (live && res.ok) setSales(res.data.sales);
+      if (!live) return;
+      setSalesFailed(!res.ok);
+      if (res.ok) setSales(res.data.sales);
     });
     return () => {
       live = false;
@@ -85,7 +89,22 @@ export default function JobOverviewPage() {
           {status}
         </p>
         {showNumbers && sales ? <NumberCards sales={sales} /> : null}
-        {failed ? <Banner tone="danger" title={t("progressFailed")} /> : null}
+        {showNumbers && salesFailed ? (
+          <p className="m-0 text-sm text-muted">{t("numbersFailed")}</p>
+        ) : null}
+        {failed ? (
+          <Banner
+            tone="danger"
+            title={
+              <span className="flex flex-wrap items-center gap-3">
+                <span>{t("progressFailed")}</span>
+                <Button variant="secondary" onClick={() => setRetry((r) => r + 1)}>
+                  {t("retry")}
+                </Button>
+              </span>
+            }
+          />
+        ) : null}
         {progress ? (
           <ProgressCard progress={progress} today={today} onChanged={changedHere} />
         ) : failed ? null : (

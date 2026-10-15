@@ -64,6 +64,7 @@ export function PersonRecord({
   canEdit,
   seesOrders,
   focusKey,
+  printedKey,
   onUnfold,
   onEdit,
   onRemove,
@@ -76,6 +77,8 @@ export function PersonRecord({
   seesOrders: boolean;
   /** Set when the person was just opened from the list: focus moves to their name. */
   focusKey: string | null;
+  /** Changes after a print of the job's cards (the Print dialog), so the card's Printed date is read again. */
+  printedKey: number;
   onUnfold: () => void;
   onEdit: () => void;
   onRemove: () => void;
@@ -90,6 +93,8 @@ export function PersonRecord({
   const [photos, setPhotos] = useState<TaggedPhoto[] | null | "failed">(null);
   const [orders, setOrders] = useState<StudioOrder[] | null | "failed">(null);
   const [printing, setPrinting] = useState(false);
+  // Read again after a print here (onPrintCard) or of the whole job (printedKey).
+  const [factsKey, setFactsKey] = useState(0);
   const draft = job.status === "draft";
   const day = (value: string) =>
     format.dateTime(
@@ -103,13 +108,21 @@ export function PersonRecord({
     if (focusKey) heading.current?.focus();
   }, [focusKey]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the keys and updatedAt say the facts may have changed.
+  useEffect(() => {
+    let live = true;
+    void api<ChildFactsResponse>(`/children/${encodeURIComponent(child.id)}/facts`).then((res) => {
+      if (live) setFacts(res.ok ? res.data.facts : null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [child.id, child.updatedAt, factsKey, printedKey]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: updatedAt and the photo count say the person changed.
   useEffect(() => {
     let live = true;
     const id = encodeURIComponent(child.id);
-    void api<ChildFactsResponse>(`/children/${id}/facts`).then((res) => {
-      if (live) setFacts(res.ok ? res.data.facts : null);
-    });
     void api<TaggedPhotosResponse>(
       `/jobs/${encodeURIComponent(job.id)}/tagging/photos?place=child&id=${id}&limit=12`,
     ).then((res) => {
@@ -284,8 +297,8 @@ export function PersonRecord({
                 label={t("parentEmail")}
                 value={child.parentEmail ? maskEmail(child.parentEmail) : t("none")}
               />
-              {facts?.photographedOn ? (
-                <Row label={t("photographed")} value={day(facts.photographedOn)} />
+              {facts?.photographedAt ? (
+                <Row label={t("photographed")} value={day(facts.photographedAt)} />
               ) : null}
             </dl>
           </Part>
@@ -303,6 +316,7 @@ export function PersonRecord({
                     setPrinting(true);
                     await onPrintCard();
                     setPrinting(false);
+                    setFactsKey((k) => k + 1);
                   }}
                 >
                   {facts?.cardPrintedAt ? t("printAgain") : t("printCard")}

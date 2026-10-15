@@ -69,6 +69,17 @@ export function stepView(
   let detail: StepDetail = null;
   let action: StepAction = null;
 
+  const sells = job.status === "selling";
+  const draft = job.status === "draft";
+  const closesDetail = (): StepDetail =>
+    step.closesAt
+      ? { type: "closes", at: step.closesAt, days: daysUntil(closingDay(step.closesAt), today) }
+      : sells
+        ? { type: "noClosingDate" }
+        : step.afterOpeningDays !== null
+          ? { type: "afterOpening", days: step.afterOpeningDays }
+          : { type: "byHand" };
+
   switch (step.state) {
     case "done":
       detail = {
@@ -83,23 +94,14 @@ export function stepView(
       break;
     case "now":
     case "next":
-      if (step.key === "pictureDay" && step.planned && step.state === "now")
+    case "automatic":
+      if (step.key === "shopCloses") detail = closesDetail();
+      else if (step.key === "pictureDay" && step.planned && step.state === "now")
         detail = { type: "pictureDay", day: step.planned, days: daysUntil(step.planned, today) };
-      else if (step.key === "shopCloses" && job.status === "selling")
-        detail = step.closesAt
-          ? {
-              type: "closes",
-              at: step.closesAt,
-              days: daysUntil(closingDay(step.closesAt), today),
-            }
-          : { type: "noClosingDate" };
-      else if (step.key === "shopCloses") detail = { type: "byHand" };
       else if (step.planned) detail = { type: "planned", day: step.planned };
       else if (step.whenPhotosChecked) detail = { type: "whenPhotosChecked" };
       if (step.state === "now") {
         if (step.key === "startSelling") action = manager ? { kind: "publish", href } : null;
-        else if (step.key === "shopCloses")
-          action = manager && job.status === "selling" ? { kind: "changeClosingDate" } : null;
         else if (task && can && step.key !== "createJob")
           action = {
             kind: "link",
@@ -108,13 +110,14 @@ export function stepView(
           };
       }
       break;
-    case "automatic":
-      if (step.afterOpeningDays !== null)
-        detail = { type: "afterOpening", days: step.afterOpeningDays };
-      break;
     case "soon":
       break;
   }
+  // The closing date is set, moved or removed on its own step (D152) whenever the shop is a draft or selling, whatever
+  // the step's state: a selling job whose photos need checking again still has a date to change (code review H1), and
+  // a draft can hold one (ADR 0021).
+  if (step.key === "shopCloses" && manager && (sells || draft))
+    action = { kind: "changeClosingDate" };
   const ahead = step.state === "next" || step.state === "automatic";
   // While the shop sells, Shop closes is changed with its date (the now action), not its rule.
   const change =

@@ -122,10 +122,15 @@ function TemplatePage() {
     [id, t, text],
   );
 
+  const makingDefault = useRef(false);
   async function makeDefault() {
+    // One at a time: a second press waits for the first.
+    if (makingDefault.current) return;
+    makingDefault.current = true;
     const res = await api<JobTemplateResponse>(`/job-templates/${encodeURIComponent(id)}/default`, {
       method: "POST",
     });
+    makingDefault.current = false;
     if (res.ok) {
       setTemplate(res.data.template);
       setStatus(t("madeDefault", { name: res.data.template.name }));
