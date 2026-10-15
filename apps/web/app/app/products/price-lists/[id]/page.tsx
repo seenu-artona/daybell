@@ -1,6 +1,11 @@
 "use client";
 
-import type { PriceList, PriceListItem, PriceListResponse } from "@daybell/api";
+import type {
+  PriceList,
+  PriceListItem,
+  PriceListItemResponse,
+  PriceListResponse,
+} from "@daybell/api";
 import {
   canEditPriceLists,
   moneyInputText,
@@ -239,15 +244,19 @@ export default function PriceListPage() {
         }
       >
         {editing ? (
-          <ItemForm
-            priceListId={list.id}
+          <ItemForm<PriceListItemResponse>
+            endpoint={
+              editing.item
+                ? { url: `/price-list-items/${editing.item.id}`, method: "PATCH" }
+                : { url: `/price-lists/${list.id}/items`, method: "POST" }
+            }
             kind={editing.kind}
             item={editing.item}
             currency={list.currency}
             onCancel={() => setEditing(null)}
             onSaved={(saved) => {
               setEditing(null);
-              setStatus(t("editor.itemSaved", { name: saved.name }));
+              setStatus(t("editor.itemSaved", { name: saved.item.name }));
               void load();
             }}
           />

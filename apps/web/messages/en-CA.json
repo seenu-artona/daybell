@@ -906,7 +906,8 @@
           "print": "One print of the pose the parent chooses.",
           "digital_single": "One photo the parent chooses, full resolution, no watermark.",
           "digital_all": "Every photo of the child in this job, full resolution, no watermark."
-        }
+        },
+        "remove": "Remove"
       },
       "sizes": {
         "4x6": "4×6",
@@ -1149,15 +1150,11 @@
       },
       "shop": {
         "priceList": "Price list",
-        "chooseLabel": "Price list for this job",
-        "saveList": "Save price list",
         "defaultOption": "{name} (default)",
-        "saved": "Price list saved.",
         "edit": "Edit this price list",
         "view": "View this price list",
-        "readOnly": "Only owners and admins can change the job's price list and delivery.",
-        "closed": "This job is closed, so its price list and delivery can't change.",
-        "items": "What parents can buy",
+        "readOnly": "Only owners and admins can change this job's shop.",
+        "closed": "This job is closed, so its shop can't change.",
         "loading": "Loading…",
         "delivery": "Delivery",
         "homeShipping": "Home shipping",
@@ -1165,7 +1162,66 @@
         "toSchool": "Free delivery to school",
         "toSchoolHelp": "Parents choose free delivery to the school or paid home shipping.",
         "toSchoolOn": "Free delivery to school is on.",
-        "toSchoolOff": "Free delivery to school is off."
+        "toSchoolOff": "Free delivery to school is off.",
+        "change": "Change",
+        "changeLabel": "Change price list",
+        "changes": "{count, plural, =0 {No changes for this job} one {# change for this job} other {# changes for this job}}",
+        "tableLabel": "What parents can buy",
+        "columns": {
+          "product": "Product",
+          "listPrice": "Price list",
+          "thisJob": "This job",
+          "sold": "Sold"
+        },
+        "notOnList": "Not on the price list",
+        "priceLabel": "Price for this job: {name}",
+        "soldLabel": "Sold: {name}",
+        "on": "On",
+        "off": "Off",
+        "saving": "Saving…",
+        "savedChanges": "Saved. {changes}",
+        "undone": "Back to the list's price. {changes}",
+        "add": "Add a product",
+        "addTitle": "Add a product for this job",
+        "kindLegend": "What kind of product?",
+        "kinds": {
+          "package": "Package",
+          "print": "Print"
+        },
+        "next": "Next",
+        "cancel": "Cancel",
+        "jobOnlyNote": "Only this job sells it. The price list doesn't change.",
+        "editProduct": "Edit {name}",
+        "editTitle": "Edit {name}",
+        "added": "{name} added. {changes}",
+        "productSaved": "{name} saved. {changes}",
+        "removeTitle": "Remove {name}?",
+        "removeBody": "Only this job sells it. Orders already placed keep it.",
+        "removeYes": "Remove product",
+        "removed": "{name} removed. {changes}",
+        "changeDialog": {
+          "title": "Change price list",
+          "label": "Price list for this job",
+          "warning": "{count, plural, one {# change for this job will be removed.} other {# changes for this job will be removed.}}",
+          "keep": "Products only this job sells stay.",
+          "submit": "Change price list"
+        },
+        "listChanged": "Price list changed to {name}.",
+        "more": {
+          "title": "More for this job",
+          "earlyBird": "Early bird and coupons",
+          "prepay": "Prepay",
+          "yearbook": "Yearbook pose",
+          "reorders": "Reorders",
+          "soon": "Soon"
+        },
+        "conflicts": {
+          "jobClosed": "This job is closed, so its shop can't change.",
+          "notOnList": "That item isn't on this job's price list any more. The list has been reloaded.",
+          "itemLimit": "A job can have up to 100 products of its own."
+        },
+        "loadFailed": "We couldn't load this job's shop.",
+        "retry": "Try again"
       },
       "publishShop": "Publish shop",
       "viewShop": "View shop",

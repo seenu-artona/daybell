@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { JOB_CONFLICTS, SHOP_CODE_NOT_FOUND, SHOP_CONFLICTS, SHOP_LOCKED } from "@daybell/api";
+import {
+  JOB_CONFLICTS,
+  JOB_SHOP_CONFLICTS,
+  SHOP_CODE_NOT_FOUND,
+  SHOP_CONFLICTS,
+  SHOP_LOCKED,
+} from "@daybell/api";
 import { MILESTONES, ONBOARDING_TASKS, TASK_KEYS, UP_NEXT_REASONS } from "@daybell/core";
 import { describe, expect, it } from "vitest";
 import enCA from "../messages/en-CA.json";
@@ -44,6 +50,13 @@ describe("locale files", () => {
     expect(enUS.app.job.conflicts.closesAtPassed).toBe(
       "The closing date has passed. Change or remove it first.",
     );
+  });
+
+  it("have words for every refusal of Job › Shop (ADR 0033)", () => {
+    for (const messages of [enUS, enCA])
+      expect(Object.keys(messages.app.job.shop.conflicts).sort()).toEqual(
+        Object.keys(JOB_SHOP_CONFLICTS).sort(),
+      );
   });
 
   it("have words for every refusal of the parent shop (ADR 0022)", () => {
