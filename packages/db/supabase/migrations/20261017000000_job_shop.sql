@@ -43,9 +43,9 @@ create table public.job_shop_items (
   job_id uuid not null,
   kind public.price_item_kind not null check (kind in ('package', 'print')),
   -- The price list's text rules (20261012200000): no control characters, no bidi overrides or isolates.
-  name text not null check (char_length(name) between 1 and 80 and name = btrim(name) and name !~ '[\u0001-\u001F\u007F-\u009F‪-‮⁦-⁩]'),
+  name text not null check (char_length(name) between 1 and 80 and name = btrim(name) and name !~ '[\u0001-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]'),
   description text check (
-    char_length(description) between 1 and 500 and description = btrim(description) and description !~ '[\u0001-\u001F\u007F-\u009F‪-‮⁦-⁩]'),
+    char_length(description) between 1 and 500 and description = btrim(description) and description !~ '[\u0001-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]'),
   print_size public.print_size,
   price_cents bigint not null check (price_cents between 0 and 1000000),
   sold boolean not null default true,
@@ -456,7 +456,7 @@ $$;
 -- touching anything, in the same order as the guards, so a list swap and a change take turns without a deadlock.
 
 -- This job's price and Sold for one of its list's items (N4; D157: "type the list price back to undo"). Null leaves
--- that field as it is. The list's own price typed back clears the job's price; a row whose price and Sold then match
+-- that field as it is, read under a per-item lock so a concurrent change to the other field is kept. The list's own price typed back clears the job's price; a row whose price and Sold then match
 -- the list is deleted (it would say nothing). Named errors without values: job_closed, not_on_list.
 create function public.set_job_price(p_job_id uuid, p_item_id uuid, p_price_cents bigint, p_sold boolean)
 returns void
@@ -483,6 +483,9 @@ begin
   end if;
   select j.status, j.price_list_id into v_status, v_list
   from public.jobs j where j.id = p_job_id and j.studio_id = v_studio for share;
+  -- One change to an item at a time (code review H1): a price and a Sold switch sent together each read the row only
+  -- once the other has committed, so neither is lost. Taken after the job's share lock, as everywhere here.
+  perform pg_advisory_xact_lock(hashtextextended('job_price:' || p_job_id::text || ':' || p_item_id::text, 0));
   if v_status = 'closed' then
     raise exception 'job_closed' using errcode = 'P0001';
   end if;
@@ -530,6 +533,7 @@ begin
   if v_status = 'closed' then
     raise exception 'job_closed' using errcode = 'P0001';
   end if;
+  perform pg_advisory_xact_lock(hashtextextended('job_price:' || p_job_id::text || ':' || p_item_id::text, 0));
   delete from public.job_price_overrides o
   where o.job_id = p_job_id and o.price_list_item_id = p_item_id and o.studio_id = v_studio;
 end;

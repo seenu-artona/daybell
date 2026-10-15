@@ -37,17 +37,27 @@ alter table public.order_lines
 -- its item is sold by the job now (on the job's current list and not switched off, or the job's own product still
 -- sold), its child's shop is open, and its pose (if any) is still one the child's parents may see: a portrait of the
 -- child, or a group photo of a group the child is in (D156 C5). A child who leaves a group keeps the line, unavailable.
-create or replace function app.shop_line_available(p_line public.shop_cart_lines) returns boolean
+-- Callers that look at several lines resolve each job's offer once (security review L1) and pass whether the line's
+-- item is offered and sold (shop_line_available_with); one line alone asks the resolver here.
+create function app.shop_line_available_with(p_line public.shop_cart_lines, p_sold boolean) returns boolean
 language sql stable security definer
 set search_path = ''
 as $$
-  select exists (select 1 from app.job_offer(p_line.job_id) o
-                 where o.item_id = coalesce(p_line.item_id, p_line.job_item_id) and o.sold
-                   and o.source = case when p_line.item_id is null then 'job' else 'list' end)
+  select coalesce(p_sold, false)
     and app.shop_child_state(p_line.child_id) = 'open'
     and (p_line.photo_id is null or exists (
       select 1 from app.parent_visible_photos(p_line.job_id, p_line.child_id, true) p
       where p.id = p_line.photo_id and p.place in ('child', 'group_photo')));
+$$;
+
+create or replace function app.shop_line_available(p_line public.shop_cart_lines) returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select app.shop_line_available_with(p_line, exists (
+    select 1 from app.job_offer(p_line.job_id) o
+    where o.item_id = coalesce(p_line.item_id, p_line.job_item_id) and o.sold
+      and o.source = case when p_line.item_id is null then 'job' else 'list' end));
 $$;
 
 -- Whether a bag line needs delivery: a print, or a package holding prints (a list's or the job's own).
@@ -108,15 +118,20 @@ begin
     with kids as (
       select sc.child_id, sc.job_id, sc.added_at
       from public.shop_session_children sc where sc.session_id = v.id and sc.studio_id = v.studio_id
+    ), offers as (
+      -- Each job's offer once (security review L1), not once per line.
+      select x.job_id, o.item_id, o.source, o.name, o.print_size, o.price_cents, o.sold
+      from (select distinct l.job_id from public.shop_cart_lines l
+            where l.session_id = v.id and l.studio_id = v.studio_id) x
+      cross join lateral app.job_offer(x.job_id) o
     ), lines as (
       select l.*, k.added_at, coalesce(o.name, i.name) as name, coalesce(o.print_size, i.print_size) as print_size,
         coalesce(o.price_cents, i.price_cents) as price_cents, ph.width, ph.height,
-        app.shop_line_physical(l) as physical, app.shop_line_available(l) as available
+        app.shop_line_physical(l) as physical, app.shop_line_available_with(l, o.sold) as available
       from public.shop_cart_lines l
       join kids k on k.child_id = l.child_id
-      left join lateral (select * from app.job_offer(l.job_id) x
-                         where x.item_id = coalesce(l.item_id, l.job_item_id)
-                           and x.source = case when l.item_id is null then 'job' else 'list' end) o on true
+      left join offers o on o.job_id = l.job_id and o.item_id = coalesce(l.item_id, l.job_item_id)
+        and o.source = case when l.item_id is null then 'job' else 'list' end
       left join public.price_list_items i on i.id = l.item_id and i.studio_id = l.studio_id
       left join public.photos ph on ph.id = l.photo_id and ph.studio_id = l.studio_id
       where l.session_id = v.id and l.studio_id = v.studio_id
@@ -216,6 +231,7 @@ as $$
 declare
   v public.shop_sessions := app.shop_session_row(p_session_hash, true);
   v_line public.shop_cart_lines;
+  v_offered boolean;
 begin
   select * into v_line from public.shop_cart_lines l
   where l.id = p_line_id and l.session_id = v.id and l.studio_id = v.studio_id;
@@ -226,17 +242,55 @@ begin
      or (v_line.kind in ('digital_single', 'digital_all') and p_quantity <> 1) then
     raise exception 'A quantity is 1 to 99; a digital download once' using errcode = '22023';
   end if;
-  if not app.shop_line_available(v_line) then
+  v_offered := exists (select 1 from app.job_offer(v_line.job_id) o
+                       where o.item_id = coalesce(v_line.item_id, v_line.job_item_id) and o.sold
+                         and o.source = case when v_line.item_id is null then 'job' else 'list' end);
+  if not app.shop_line_available_with(v_line, v_offered) then
     if app.shop_child_state(v_line.child_id) = 'closed' then
       raise exception 'shop_closed' using errcode = 'P0001';
-    elsif not exists (select 1 from app.job_offer(v_line.job_id) o
-                      where o.item_id = coalesce(v_line.item_id, v_line.job_item_id) and o.sold
-                        and o.source = case when v_line.item_id is null then 'job' else 'list' end) then
+    elsif not v_offered then
       raise exception 'item_unavailable' using errcode = 'P0001';
     end if;
     raise exception 'photo_unavailable' using errcode = 'P0001';
   end if;
   update public.shop_cart_lines l set quantity = p_quantity where l.id = v_line.id and l.studio_id = v.studio_id;
+end;
+$$;
+
+-- Chooses delivery (as in 20261012700000), judging lines that can still be bought with each job's offer resolved once.
+create or replace function public.shop_set_shipping(p_session_hash text, p_method public.shop_shipping_method)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v public.shop_sessions := app.shop_session_row(p_session_hash, true);
+  v_any boolean;
+  v_blocked boolean;
+begin
+  if p_method is null then
+    raise exception 'Choose home or school' using errcode = '22023';
+  end if;
+  with offers as (
+    select x.job_id, o.item_id, o.source, o.sold
+    from (select distinct l.job_id from public.shop_cart_lines l
+          where l.session_id = v.id and l.studio_id = v.studio_id) x
+    cross join lateral app.job_offer(x.job_id) o
+  ), lines as (
+    select app.shop_line_physical(l) and app.shop_line_available_with(l, o.sold) as delivers, j.deliver_to_school
+    from public.shop_cart_lines l
+    join public.jobs j on j.id = l.job_id and j.studio_id = l.studio_id
+    left join offers o on o.job_id = l.job_id and o.item_id = coalesce(l.item_id, l.job_item_id)
+      and o.source = case when l.item_id is null then 'job' else 'list' end
+    where l.session_id = v.id and l.studio_id = v.studio_id
+  )
+  select coalesce(bool_or(x.delivers), false), coalesce(bool_or(x.delivers and not x.deliver_to_school), false)
+  into v_any, v_blocked
+  from lines x;
+  if p_method = 'school' and (not v_any or v_blocked) then
+    raise exception 'school_delivery_off' using errcode = 'P0001';
+  end if;
+  update public.shop_sessions s set shipping_method = p_method where s.id = v.id and s.studio_id = v.studio_id;
 end;
 $$;
 
@@ -272,12 +326,19 @@ begin
   select coalesce(jsonb_agg(x.line order by x.added_at, x.child_id, x.created_at, x.id), '[]'::jsonb)
   into v_lines
   from (
+    with offers as (
+      -- Each job's offer once (security review L1), not once per line.
+      select x.job_id, o.item_id, o.source, o.name, o.print_size, o.price_cents, o.sold
+      from (select distinct l.job_id from public.shop_cart_lines l
+            where l.session_id = v.id and l.studio_id = v.studio_id) x
+      cross join lateral app.job_offer(x.job_id) o
+    )
     select l.id, l.child_id, l.created_at, sc.added_at,
       jsonb_build_object('cart_line_id', l.id, 'job_id', l.job_id, 'child_id', l.child_id, 'photo_id', l.photo_id,
         'price_list_id', j.price_list_id, 'item_id', l.item_id, 'job_item_id', l.job_item_id, 'kind', l.kind,
         'name', o.name, 'print_size', o.print_size, 'unit_price_cents', o.price_cents, 'quantity', l.quantity,
         'physical', app.shop_line_physical(l),
-        'available', o.item_id is not null and pl.id is not null and app.shop_line_available(l),
+        'available', o.item_id is not null and pl.id is not null and app.shop_line_available_with(l, o.sold),
         'closed', app.shop_child_state(l.child_id) = 'closed',
         'home_shipping_cents', pl.home_shipping_cents, 'deliver_to_school', j.deliver_to_school) as line
     from public.shop_cart_lines l
@@ -286,9 +347,8 @@ begin
     -- Left joins: a line whose item, job or list is gone is refused as unavailable, never dropped silently.
     left join public.jobs j on j.id = l.job_id and j.studio_id = l.studio_id
     left join public.price_lists pl on pl.id = j.price_list_id and pl.studio_id = j.studio_id
-    left join lateral (select * from app.job_offer(l.job_id) x
-                       where x.item_id = coalesce(l.item_id, l.job_item_id) and x.sold
-                         and x.source = case when l.item_id is null then 'job' else 'list' end) o on true
+    left join offers o on o.job_id = l.job_id and o.item_id = coalesce(l.item_id, l.job_item_id) and o.sold
+      and o.source = case when l.item_id is null then 'job' else 'list' end
     where l.session_id = v.id and l.studio_id = v.studio_id) x;
 
   if jsonb_array_length(v_lines) = 0 then
@@ -521,5 +581,7 @@ begin
   return 'paid';
 end;
 $$;
+
+revoke all on function app.shop_line_available_with(public.shop_cart_lines, boolean) from public, anon, authenticated;
 
 notify pgrst, 'reload schema';

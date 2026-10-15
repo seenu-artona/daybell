@@ -8,7 +8,7 @@
 -- money in CAD.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(49);
+select plan(50);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -42,6 +42,7 @@ grant execute on all functions in schema pg_temp to authenticated;
 -- (group photo 71). Studio B: Bea, in B's group (group photo 76).
 insert into public.jobs (id, studio_id, name, type, picture_day, internal_number) values
   ('a0000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Fall 2026', 'school', '2026-10-13', 'JOB00001'),
+  ('a0000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Spring 2027', 'school', '2026-10-13', 'JOB00002'),
   ('b0000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B Fall', 'school', '2026-10-13', 'JOB00001');
 insert into public.children (id, studio_id, job_id, first_name, last_name, access_code_hash, access_code_ciphertext)
 values
@@ -102,6 +103,9 @@ where j.id = 'a0000000-0000-4000-8000-000000000001' and i.name in ('Package A', 
 insert into public.job_shop_items (id, studio_id, job_id, kind, name, print_size, price_cents) values
   ('a5000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'print', 'Panorama', '11x14', 4500),
   ('a5000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'package', 'Sibling package', null, 9900);
+-- Job 2 of the same studio has a product of its own; job 1's children can't buy it.
+insert into public.job_shop_items (id, studio_id, job_id, kind, name, print_size, price_cents) values
+  ('a5000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000002', 'print', 'Spring print', '5x7', 100);
 insert into public.job_shop_package_lines (studio_id, job_id, job_item_id, line_kind, print_size, quantity, position)
 values
   ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'a5000000-0000-4000-8000-000000000002', 'print', '8x10', 1, 1),
@@ -214,6 +218,9 @@ select is(pg_temp.add('sb', 'cb000000-0000-4000-8000-000000000001', '5×7 print'
 select is(pg_temp.try(format('select public.shop_cart_add(%L, %L, %L, %L, 1)', pg_temp.h('sb'),
   'cb000000-0000-4000-8000-000000000001', 'a5000000-0000-4000-8000-000000000001', pg_temp.pid(6))),
   'P0001 item_unavailable', 'nor A''s job''s own product');
+select is(pg_temp.try(format('select public.shop_cart_add(%L, %L, %L, %L, 1)', pg_temp.h('s1'),
+  'c0000000-0000-4000-8000-000000000001', 'a5000000-0000-4000-8000-000000000003', pg_temp.pid(1))),
+  'P0001 item_unavailable', 'nor another job''s own product, in the same studio (security review M1)');
 select is(pg_temp.add('sb', 'cb000000-0000-4000-8000-000000000001', '5×7 print', 76), 'ok',
   'Bea buys her own group''s photo');
 
