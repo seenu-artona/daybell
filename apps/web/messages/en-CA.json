@@ -165,16 +165,14 @@
     "subjectsExpected": "Enter a whole number from 1 to 100,000.",
     "firstName": "Enter a first name (up to 60 characters).",
     "lastName": "Enter a last name (up to 60 characters).",
-    "group": "Choose one of this job's classes, teams or groups.",
-    "groupName": "Enter a name (up to 60 characters).",
-    "groupNameTaken": "This job already has one with that name.",
+    "group": "Choose one of this job's groups.",
+    "groupName": "Enter a group name (up to 60 characters).",
     "studentId": "Use up to 40 characters.",
     "grade": "Use up to 20 characters.",
     "rosterEmpty": "There are no rows to import.",
     "rosterTooLarge": "Import up to 5,000 rows at a time.",
     "searchShort": "Type at least 2 characters.",
     "blankCards": "Enter a whole number of blank cards from 0 to 100.",
-    "qrCardsGroups": "Choose at least one.",
     "photoName": "Each photo needs its file's name, at most 255 characters.",
     "photoSize": "Photos must be JPEG files of at most 50 MB.",
     "photoHash": "A photo's fingerprint is missing or wrong. Choose the photos again.",
@@ -222,7 +220,11 @@
     "ruleDays": "Enter a whole number of days in the allowed range.",
     "shopOpensDays": "Enter the days after picture day, or choose “When photos are checked”.",
     "templateName": "Give the template a name.",
-    "template": "Choose one of your templates."
+    "template": "Choose one of your templates.",
+    "class": "Choose one of this job's classes or teams.",
+    "className": "Enter a name (up to 60 characters).",
+    "classNameTaken": "This job already has one with that name.",
+    "qrCardsClasses": "Choose at least one."
   },
   "errors": {
     "network": "We couldn't reach Silverback. Check your connection and try again.",
@@ -1010,7 +1012,7 @@
           "skip": "Don't import",
           "firstName": "First name",
           "lastName": "Last name",
-          "group": "{group, select, class {Class} team {Team} other {Group}}",
+          "class": "{group, select, class {Class} team {Team} other {Group}}",
           "studentId": "Student ID",
           "grade": "Grade",
           "parentEmail": "Parent email",
@@ -1038,7 +1040,7 @@
         "columns": {
           "row": "Row",
           "name": "Name",
-          "group": "{group, select, class {Class} team {Team} other {Group}}",
+          "class": "{group, select, class {Class} team {Team} other {Group}}",
           "studentId": "Student ID",
           "grade": "Grade",
           "parentEmail": "Parent email",
@@ -1206,11 +1208,16 @@
         "gradeChip": "Grade {grade}",
         "gradePlaceholder": "Search grades…",
         "gradeList": "Grades",
-        "notPhotographed": "Not photographed"
+        "notPhotographed": "Not photographed",
+        "groupMenu": "Group…",
+        "group": "Group",
+        "groupPlaceholder": "Search groups…",
+        "groupList": "Groups"
       },
       "columns": {
         "photos": "Photos",
-        "ordered": "Ordered"
+        "ordered": "Ordered",
+        "groups": "Groups"
       },
       "ordered": {
         "yes": "Ordered",
@@ -1254,8 +1261,12 @@
         "printCard": "Print QR card",
         "noCard": "No QR card: marked Do not photograph.",
         "none": "–",
-        "loading": "Loading…"
-      }
+        "loading": "Loading…",
+        "groups": "Groups",
+        "noGroups": "In no group yet.",
+        "groupsLink": "See groups"
+      },
+      "noGroups": "–"
     },
     "qrCards": {
       "button": "Print QR cards",
@@ -1340,14 +1351,26 @@
         "nothing": "No JPEG photos in what you dropped.",
         "announce": "{uploaded, number} of {total, number} photos uploaded",
         "stop": "Stop",
-        "chooseClassFirst": "Choose the class first.",
         "kind": {
           "legend": "What are these photos?",
           "individual": "Individual photos (read QR cards)",
-          "classPhoto": "Class photo for a class",
-          "noClasses": "Add classes in Subjects to upload class photos.",
-          "class": "Class",
-          "chooseClass": "Choose a class"
+          "individualHint": "Split by QR card as each upload finishes.",
+          "addToGroup": "Add everyone in this upload to a group",
+          "noGroup": "No group",
+          "group": "Group photos",
+          "groupHint": "Everyone in the group sees them.",
+          "groupSelect": "Group",
+          "chooseGroup": "Choose a group",
+          "noGroups": "Make a group in Groups to upload group photos."
+        },
+        "chooseGroupFirst": "Choose the group first.",
+        "tools": {
+          "label": "Other ways to upload",
+          "desktop": "Desktop uploader",
+          "ftp": "FTP",
+          "lightroom": "Lightroom",
+          "folderPerGroup": "A folder per group",
+          "soon": "Soon"
         }
       },
       "panel": {
@@ -1372,15 +1395,28 @@
         "retry": "Try again",
         "inBin": "In the bin",
         "megabytes": "{size} MB",
-        "pixels": "Pixels"
+        "pixels": "Pixels",
+        "giveToPerson": "Give to a person",
+        "soonLabel": "More for this photo",
+        "soon": "Soon",
+        "soonRows": {
+          "mainPhoto": "Make main photo",
+          "hide": "Hide from parents",
+          "rating": "Rate",
+          "versions": "Versions",
+          "composites": "Composites",
+          "sendForEditing": "Send for editing",
+          "downloadOriginal": "Download original"
+        },
+        "given": "{count, plural, =0 {Nothing changed.} other {Gave this photo to {name}.}}"
       },
       "views": {
-        "label": "Photos views",
+        "label": "Show photos",
         "all": "All",
-        "review": "Review"
+        "toReview": "To review"
       },
       "review": {
-        "title": "Review tagging",
+        "title": "To review",
         "subline": "{photos, plural, one {# photo} other {# photos}} · {leftovers, number} in Leftovers · {flagged, number} to check",
         "markReviewed": "Mark reviewed",
         "reviewed": "Reviewed {date}. New photos, Leftovers or flagged photos reopen the review.",
@@ -1388,35 +1424,26 @@
         "notReviewable": {
           "noPhotos": "Mark reviewed opens once photos are uploaded.",
           "pending": "Mark reviewed opens once every photo is processed and tagged.",
-          "leftovers": "Mark reviewed opens once Leftovers is empty: move each photo to a child, or put it in the bin.",
+          "leftovers": "Mark reviewed opens once Leftovers is empty: give each photo to a person, or put it in the bin.",
           "flagged": "Mark reviewed opens once every flagged photo is checked.",
           "blankCards": "Mark reviewed opens once every blank card's child is named."
         },
-        "hint": "Drag photos onto a child, a class or Leftovers, or tick them and use Move to…",
+        "hint": "Tick photos and use Give to a person, or drag them onto someone on People.",
         "readOnly": "Owners, admins and photographers fix tagging.",
         "loading": "Loading the review…",
         "loadFailed": "We couldn't load the review. Please try again.",
-        "empty": "No photos yet. Upload the photos from picture day in All photos.",
-        "noPhotos": {
-          "title": "No photos yet",
-          "count": "{count, plural, one {# child} other {# children}}",
-          "intro": "Children with no photos, for a retake day. It doesn't stop you selling.",
-          "loading": "Loading…",
-          "none": "Every child has photos.",
-          "childName": "{first} {last}",
-          "noClass": "No class"
-        },
+        "empty": "No photos yet. Upload the photos from picture day.",
         "pending": "{count, plural, =0 {Tagging the latest photos…} one {# photo is still being processed. Tags update when it's done.} other {# photos are still being processed. Tags update when they're done.}}",
         "selection": {
           "selected": "{count, plural, one {# photo selected} other {# photos selected}}",
-          "moveTo": "Move to…",
           "looksRight": "Looks right",
           "normalPhoto": "It's a normal photo",
-          "isCard": "This is a card photo",
+          "isCard": "It's a card photo",
           "undoCard": "Not a card photo after all",
           "bin": "Move to bin",
           "clear": "Clear",
-          "confirmFirst": "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be moved."
+          "confirmFirst": "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be given to a person.",
+          "giveTo": "Give to a person"
         },
         "announce": {
           "moved": "{count, plural, =0 {No photo was moved.} one {Moved # photo to {target}.} other {Moved # photos to {target}.}}",
@@ -1432,14 +1459,16 @@
           "notReady": "Tagging changed meanwhile and isn't clean yet. Check the counts above.",
           "confirmFirst": "Confirm photos that may be a card first: mark them card photos, or say they're normal photos. Then move them.",
           "otherCard": "A photo of another job's card can only be marked a card photo.",
-          "notMarkedCard": "Only photos someone marked as card photos can be undone. A photo whose card was read stays a card photo."
+          "notMarkedCard": "Only photos someone marked as card photos can be undone. A photo whose card was read stays a card photo.",
+          "groupPhoto": "Group photos stay group photos: move them between groups instead."
         },
         "tile": {
           "alt": "{where}, photo {n}",
           "select": "Select {where}, photo {n}",
           "processing": "Processing",
           "failed": "Couldn't process",
-          "card": "Card"
+          "card": "Card",
+          "open": "Open {where}, photo {n}"
         },
         "flags": {
           "unreadableCard": "Card unreadable",
@@ -1452,14 +1481,14 @@
         "flagged": {
           "title": "Flagged",
           "count": "{count, plural, one {# photo} other {# photos}}",
-          "intro": "Hidden from parents until you check them. Each stays where tagging guessed: confirm the ones that look right, mark card photos, or move them. A photo that may be a card is confirmed before it moves.",
+          "intro": "Hidden from parents until you check them. Each stays where tagging guessed: confirm the ones that look right, mark card photos, or give them to a person. A photo that may be a card is confirmed before it moves.",
           "where": "Flagged",
           "showMore": "Show more"
         },
         "leftovers": {
           "title": "Leftovers",
           "count": "{count, plural, one {# photo} other {# photos}}",
-          "intro": "Photos taken before the first card of an upload. Move them to a child or a class, or tick junk and move it to the bin.",
+          "intro": "Photos taken before the first card of an upload. Give each to a person, or tick junk and move it to the bin.",
           "empty": "Nothing in Leftovers.",
           "showMore": "Show more"
         },
@@ -1482,41 +1511,192 @@
         "unlinkedCards": {
           "title": "Other card photos",
           "count": "{count, plural, one {# photo} other {# photos}}",
-          "intro": "Photos marked card photos that aren't linked to a child's card, such as another job's card. Parents never see them.",
+          "intro": "Photos marked card photos that aren't linked to a child's card, such as another job's card. Parents never see them. They don't need reviewing.",
           "showMore": "Show more"
         },
-        "albums": {
-          "title": "Classes",
-          "empty": "No classes or children yet.",
+        "clean": "Nothing to review: the QR cards placed every photo.",
+        "giveDialog": {
+          "title": "{count, plural, one {Give # photo to a person} other {Give # photos to a person}}",
+          "search": "Find a person",
+          "hint": "Choose who is in the photos, then press Give.",
+          "loading": "Loading people…",
+          "loadFailed": "We couldn't load the people. Please try again.",
+          "noMatch": "No one matches.",
           "noClass": "No class",
-          "summary": "{withPhotos, number} of {children, plural, one {# child} other {# children}} with photos",
-          "classPhoto": "{name} class photo",
-          "classPhotos": "Class photo",
-          "noClassPhotos": "No class photo yet. Upload one as a class photo, or move photos here.",
-          "showMorePhotos": "Show more",
-          "loading": "Loading children…",
-          "loadFailed": "We couldn't load these children. Please try again.",
-          "noChildren": "No children in this class.",
-          "showMoreChildren": "Show more children",
-          "childName": "{first} {last}",
-          "childPhotos": "{count, plural, =0 {No photos} one {# photo} other {# photos}}",
-          "showAll": "Show all {count, number} photos",
-          "showFewer": "Show fewer"
+          "name": "{first} {last}",
+          "shown": "Showing the first {count, number}. Type to find someone else.",
+          "cancel": "Cancel",
+          "give": "Give"
+        }
+      },
+      "switch": {
+        "label": "Photos by",
+        "people": "People",
+        "groups": "Groups"
+      },
+      "chips": {
+        "groupMenu": "Group…",
+        "group": "Group",
+        "groupPlaceholder": "Search groups…",
+        "groupList": "Groups"
+      },
+      "people": {
+        "label": "People with photos",
+        "loading": "Loading people…",
+        "loadFailed": "We couldn't load the people. Please try again.",
+        "empty": "No one has photos yet. Photos the QR cards couldn't place wait in To review.",
+        "emptyGroup": "No one in this group has photos yet.",
+        "name": "{first} {last}",
+        "photos": "{count, plural, =0 {No photos} one {# photo} other {# photos}}",
+        "showAll": "Show all {count, number}",
+        "showFewer": "Show fewer",
+        "qrCard": "QR card",
+        "showMore": "Show more people",
+        "footer": "{shown, number} of {total, plural, one {# person} other {# people}} with photos",
+        "hint": "Drag photos onto a person, or tick them and use Give to a person."
+      },
+      "groups": {
+        "heading": "{count, plural, =0 {No groups} one {# group} other {# groups}}",
+        "label": "Groups",
+        "columns": {
+          "group": "Group",
+          "members": "Members",
+          "photos": "Group photos",
+          "ordered": "Ordered",
+          "actions": "Actions"
+        },
+        "notInGroup": "Not in a group",
+        "notInGroupCount": "{count, plural, one {# group photo} other {# group photos}}",
+        "notInGroupNote": "Parents don't see these until they're in a group.",
+        "members": "{count, plural, =0 {No members} one {# member} other {# members}}",
+        "membersLink": "{count, plural, =0 {No members} one {# member} other {# members}} of {name}, in Subjects",
+        "photoCount": "{count, number}",
+        "orderedCount": "{count, number}",
+        "more": "More actions for {name}",
+        "rename": "Rename",
+        "addRemove": "Add or remove people",
+        "delete": "Delete",
+        "newGroup": "New group",
+        "fromColumn": "Make groups from a column",
+        "empty": "No groups yet. Make one, or make one for each class or grade.",
+        "emptyReadOnly": "Owners, admins and photographers make groups.",
+        "loading": "Loading groups…",
+        "loadFailed": "We couldn't load the groups. Please try again.",
+        "closed": "This job is closed, so its groups don't change.",
+        "announce": {
+          "created": "Made the group {name}.",
+          "renamed": "Renamed the group to {name}.",
+          "deleted": "Deleted the group {name}.",
+          "members": "{added, plural, one {# person added} other {# people added}}, {removed, number} taken out.",
+          "made": "{made, plural, =0 {No group made} one {Made # group} other {Made # groups}}{skipped, plural, =0 {} one {, # skipped (a group has that name)} other {, # skipped (groups have those names)}}.",
+          "moved": "{count, plural, =0 {No photo moved.} one {Moved # photo to {name}.} other {Moved # photos to {name}.}}",
+          "shown": "{count, plural, =0 {Nothing changed: those groups already show them.} other {Now shown in the groups you ticked.}}"
+        },
+        "conflicts": {
+          "nameTaken": "This job already has a group with that name.",
+          "limit": "A job holds at most 500 groups.",
+          "photoSold": "A photo that has sold can't go to the bin. Move the group's photos to another group instead.",
+          "jobClosed": "This job is closed, so its groups don't change.",
+          "notInJob": "Some of those people, photos or groups aren't this job's any more. Reload the page and try again.",
+          "hasPhotos": "This group has photos now. Choose where they go."
+        },
+        "form": {
+          "newTitle": "New group",
+          "renameTitle": "Rename group",
+          "name": "Name",
+          "namePlaceholder": "e.g. Choir",
+          "create": "Make group",
+          "save": "Save",
+          "cancel": "Cancel",
+          "saving": "Saving…",
+          "nameEmpty": "Enter a name.",
+          "nameTooLong": "Use up to 60 characters.",
+          "nameTaken": "This job already has a group with that name."
+        },
+        "deleteDialog": {
+          "title": "Delete {name}?",
+          "body": "Its members stay on the roster and in their other groups.",
+          "noPhotos": "It has no photos.",
+          "photosLegend": "Its {count, plural, one {# photo goes} other {# photos go}} to",
+          "toGroup": "Another group",
+          "chooseGroup": "Choose a group",
+          "noOtherGroup": "There's no other group yet.",
+          "toBin": "The bin",
+          "toBinHint": "Photos also shown in another group stay there. Photos that have sold can't go to the bin.",
+          "confirm": "Delete group",
+          "cancel": "Cancel",
+          "deleting": "Deleting…"
+        },
+        "membersDialog": {
+          "title": "Add or remove people: {name}",
+          "search": "Find a person",
+          "hint": "Tick everyone in the group. Nothing changes until you save.",
+          "loading": "Loading people…",
+          "loadFailed": "We couldn't load the people. Please try again.",
+          "noMatch": "No one matches.",
+          "noClass": "No class",
+          "name": "{first} {last}",
+          "ticked": "{count, plural, one {# person ticked} other {# people ticked}}",
+          "shown": "Showing the first {count, number}. Type to find someone else.",
+          "save": "Save",
+          "saving": "Saving…",
+          "cancel": "Cancel"
+        },
+        "columnDialog": {
+          "title": "Make groups from a column",
+          "intro": "Makes one group for each value, with everyone who has it. It's done once: later roster changes don't change the groups.",
+          "legend": "Column",
+          "class": "Class",
+          "grade": "Grade",
+          "preview": "{count, plural, =0 {No new groups} one {Makes # group} other {Makes # groups}}: {names}",
+          "previewNone": "No new groups.",
+          "skipped": "{count, plural, one {# skipped: a group already has that name} other {# skipped: groups already have those names}}",
+          "noValues": "No one has a value in this column.",
+          "make": "Make groups",
+          "making": "Making…",
+          "cancel": "Cancel"
+        },
+        "page": {
+          "back": "Groups",
+          "members": "{count, plural, =0 {No members} one {# member} other {# members}}",
+          "seeInSubjects": "See them in Subjects",
+          "upload": "Upload group photos",
+          "more": "More actions for {name}",
+          "photos": "Group photos",
+          "empty": "No group photos yet. Upload them here, or move them from another group.",
+          "emptyNone": "Every group photo is in a group.",
+          "noneTitle": "Not in a group",
+          "noneIntro": "Group photos in no group, such as class photos from before groups. Parents don't see them until they're in a group.",
+          "loading": "Loading photos…",
+          "loadFailed": "We couldn't load these photos. Please try again.",
+          "showMore": "Show more",
+          "notFound": "This group isn't there any more.",
+          "selection": {
+            "selected": "{count, plural, one {# photo selected} other {# photos selected}}",
+            "moveTo": "Move to group",
+            "alsoShow": "Also show in…",
+            "bin": "Move to bin",
+            "clear": "Clear"
+          }
         },
         "moveDialog": {
-          "title": "{count, plural, one {Move # photo} other {Move # photos}}",
-          "search": "Find a child or class",
-          "hint": "Choose where the photos go, then press Move.",
-          "loading": "Loading children…",
-          "loadFailed": "We couldn't load the children. Please try again.",
-          "noMatch": "No child or class matches.",
-          "places": "Leftovers and class photos",
-          "leftovers": "Leftovers",
-          "classSet": "{name} class photo",
-          "noClass": "No class",
-          "childName": "{first} {last}",
-          "cancel": "Cancel",
-          "move": "Move"
+          "title": "{count, plural, one {Move # photo to a group} other {Move # photos to a group}}",
+          "search": "Find a group",
+          "hint": "They leave {from} and join the group you choose.",
+          "hintNone": "They join the group you choose.",
+          "noMatch": "No group matches.",
+          "noOther": "Make another group first.",
+          "move": "Move",
+          "cancel": "Cancel"
+        },
+        "alsoShowDialog": {
+          "title": "{count, plural, one {Also show # photo in…} other {Also show # photos in…}}",
+          "hint": "Tick the groups. The photos stay where they are too.",
+          "search": "Find a group",
+          "noMatch": "No group matches.",
+          "ticked": "{count, plural, =0 {No group ticked} one {# group ticked} other {# groups ticked}}",
+          "show": "Show in groups",
+          "cancel": "Cancel"
         }
       }
     },
@@ -2282,6 +2462,7 @@
       "Jobs": "Jobs",
       "Roster": "Roster",
       "Photos": "Photos",
+      "Groups": "Groups",
       "Products": "Products",
       "Payouts": "Payouts",
       "Contacts": "Contacts",
@@ -2388,18 +2569,18 @@
     "gallery": {
       "sets": "Photo sets",
       "portraits": "Portraits",
-      "classPhotos": "Class photo",
+      "groupPhotos": "Group photos",
       "orderBy": "<strong>Order by {date}</strong>",
       "schoolDelivery": "Free delivery to school",
       "choosePackage": "Choose a package",
       "photoAlt": "{name}, photo {n} of {total}",
-      "classAlt": "{name}’s class, photo {n} of {total}",
+      "groupAlt": "{name}’s group photo {n} of {total}",
       "protected": "Photos are protected and shown at low resolution with a watermark.",
       "closed": "This shop is closed. Contact {studio}.",
       "unavailable": "Photos aren’t available yet. Contact {studio}.",
       "orderAndDelivery": "<strong>Order by {date}</strong> · Free delivery to school",
       "portraitsGrid": "Photos of {name}",
-      "classGrid": "{name}’s class photos"
+      "groupGrid": "{name}’s group photos"
     },
     "viewer": {
       "label": "Photo {n} of {total}",
@@ -2407,7 +2588,7 @@
       "previous": "Previous photo",
       "next": "Next photo",
       "use": "Use this photo",
-      "viewOnly": "Class photos can be viewed here. They can’t be ordered yet."
+      "viewOnly": "Group photos can be viewed here. They can’t be ordered yet."
     },
     "buy": {
       "packagesTitle": "Choose a package",
