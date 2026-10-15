@@ -14,7 +14,10 @@ export interface PersonRow {
   studentId: string | null;
   grade: string | null;
   accessCode: string | null;
-  group: { id: string; name: string } | null;
+  /** Their class (a roster field; C1, ADR 0030). */
+  class: { id: string; name: string } | null;
+  /** The photo groups they are in (D156); left out where the list doesn't have them. */
+  groups?: readonly { id: string; name: string }[];
   doNotPhotograph: boolean;
   doNotPublish: boolean;
   duplicate: boolean;
@@ -54,8 +57,10 @@ export function matchesSearch(row: PersonRow, query: string): boolean {
 }
 
 export type PeopleFilter =
+  | { kind: "class"; id: string }
+  | { kind: "noClass" }
+  /** A photo group (D156): its members. */
   | { kind: "group"; id: string }
-  | { kind: "noGroup" }
   | { kind: "grade"; value: string }
   | { kind: "doNotPhotograph" }
   | { kind: "doNotPublish" }
@@ -67,11 +72,11 @@ export type PeopleFilterKind = PeopleFilter["kind"];
 
 /** The two class filters exclude each other: a child is either in a class or in none. */
 const EXCLUDES: Partial<Record<PeopleFilterKind, PeopleFilterKind>> = {
-  group: "noGroup",
-  noGroup: "group",
+  class: "noClass",
+  noClass: "class",
 };
 
-/** Adds a filter. Each kind holds one value, so a new one replaces the old; group and noGroup replace each other. */
+/** Adds a filter. Each kind holds one value, so a new one replaces the old; class and noClass replace each other. */
 export function addFilter(filters: readonly PeopleFilter[], next: PeopleFilter): PeopleFilter[] {
   const drop = new Set<PeopleFilterKind>([next.kind]);
   const other = EXCLUDES[next.kind];
@@ -88,10 +93,13 @@ export function removeFilter(
 
 function passes(row: PersonRow, filter: PeopleFilter): boolean {
   switch (filter.kind) {
+    case "class":
+      return row.class?.id === filter.id;
+    case "noClass":
+      return row.class === null;
+    // People in no group, or whose groups the list doesn't have, never match.
     case "group":
-      return row.group?.id === filter.id;
-    case "noGroup":
-      return row.group === null;
+      return row.groups?.some((g) => g.id === filter.id) ?? false;
     case "grade":
       return row.grade !== null && fold(row.grade) === fold(filter.value);
     case "doNotPhotograph":
@@ -132,51 +140,51 @@ export function gradeOptions(rows: readonly PersonRow[]): string[] {
 }
 
 export interface RosterSection<R> {
-  /** A group id, "none" for children without one, or "all" when not grouped. */
+  /** A class id, "none" for children without one, or "all" when not grouped. */
   key: string;
-  /** The group, or null for "No class" and the ungrouped list. */
-  group: { id: string; name: string } | null;
+  /** The class, or null for "No class" and the ungrouped list. */
+  class: { id: string; name: string } | null;
   rows: R[];
 }
 
 /**
- * Splits rows into sections. Groups follow the order of `groups` (the groups API, natural order), "No class" comes
- * last; rows keep their order (last name, first name). Empty groups are kept only with `includeEmptyGroups` (no search
- * or filter active), so a class can still be renamed before it has children.
+ * Splits rows into sections by class. Classes follow the order of `classes` (the classes API, natural order), "No
+ * class" comes last; rows keep their order (last name, first name). Empty classes are kept only with
+ * `includeEmptyClasses` (no search or filter active), so a class can still be renamed before it has children.
  */
 export function groupPeople<R extends PersonRow>(
   rows: readonly R[],
-  groups: readonly { id: string; name: string }[],
-  groupBy: "group" | "none",
-  { includeEmptyGroups }: { includeEmptyGroups: boolean },
+  classes: readonly { id: string; name: string }[],
+  groupBy: "class" | "none",
+  { includeEmptyClasses }: { includeEmptyClasses: boolean },
 ): RosterSection<R>[] {
-  if (groupBy === "none") return [{ key: "all", group: null, rows: [...rows] }];
-  const byGroup = new Map<string, R[]>();
+  if (groupBy === "none") return [{ key: "all", class: null, rows: [...rows] }];
+  const byClass = new Map<string, R[]>();
   const none: R[] = [];
   for (const row of rows) {
-    if (!row.group) {
+    if (!row.class) {
       none.push(row);
       continue;
     }
-    const list = byGroup.get(row.group.id);
+    const list = byClass.get(row.class.id);
     if (list) list.push(row);
-    else byGroup.set(row.group.id, [row]);
+    else byClass.set(row.class.id, [row]);
   }
   const sections: RosterSection<R>[] = [];
   const known = new Set<string>();
-  for (const g of groups) {
-    known.add(g.id);
-    const list = byGroup.get(g.id) ?? [];
-    if (list.length > 0 || includeEmptyGroups)
-      sections.push({ key: g.id, group: { id: g.id, name: g.name }, rows: list });
+  for (const c of classes) {
+    known.add(c.id);
+    const list = byClass.get(c.id) ?? [];
+    if (list.length > 0 || includeEmptyClasses)
+      sections.push({ key: c.id, class: { id: c.id, name: c.name }, rows: list });
   }
-  // A group the groups list didn't have (e.g. added meanwhile) still shows, after the known ones.
-  for (const [id, list] of byGroup) {
-    const group = list[0]?.group;
-    if (!known.has(id) && group)
-      sections.push({ key: id, group: { id, name: group.name }, rows: list });
+  // A class the classes list didn't have (e.g. added meanwhile) still shows, after the known ones.
+  for (const [id, list] of byClass) {
+    const first = list[0]?.class;
+    if (!known.has(id) && first)
+      sections.push({ key: id, class: { id, name: first.name }, rows: list });
   }
-  if (none.length > 0) sections.push({ key: "none", group: null, rows: none });
+  if (none.length > 0) sections.push({ key: "none", class: null, rows: none });
   return sections;
 }
 

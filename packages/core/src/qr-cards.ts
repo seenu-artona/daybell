@@ -48,14 +48,14 @@ export interface CardPerson {
   id: string;
   firstName: string;
   lastName: string;
-  group: { id: string; name: string } | null;
+  class: { id: string; name: string } | null;
   doNotPhotograph: boolean;
 }
 
 /** Which children a print covers (Seenu, answer 4): the whole job, chosen classes (and/or "no class"), or one child. */
 export type CardScope =
   | { kind: "job" }
-  | { kind: "groups"; groupIds: readonly string[]; noGroup: boolean }
+  | { kind: "classes"; classIds: readonly string[]; noClass: boolean }
   | { kind: "child"; childId: string };
 
 /** The children a print makes cards for. Children marked Do not photograph never get a card (D138). */
@@ -66,8 +66,8 @@ export function cardChildren<T extends CardPerson>(children: readonly T[], scope
         return true;
       case "child":
         return c.id === scope.childId;
-      case "groups":
-        return c.group ? scope.groupIds.includes(c.group.id) : scope.noGroup;
+      case "classes":
+        return c.class ? scope.classIds.includes(c.class.id) : scope.noClass;
     }
   };
   return children.filter((c) => !c.doNotPhotograph && inScope(c));
@@ -83,10 +83,10 @@ const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 export function sortCardChildren<T extends CardPerson>(children: readonly T[]): T[] {
   const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
   return [...children].sort((a, b) => {
-    if (!a.group !== !b.group) return a.group ? -1 : 1;
+    if (!a.class !== !b.class) return a.class ? -1 : 1;
     return (
-      (a.group && b.group
-        ? collator.compare(a.group.name, b.group.name) || byId(a.group.id, b.group.id)
+      (a.class && b.class
+        ? collator.compare(a.class.name, b.class.name) || byId(a.class.id, b.class.id)
         : 0) ||
       collator.compare(a.lastName, b.lastName) ||
       collator.compare(a.firstName, b.firstName) ||

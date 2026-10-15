@@ -11,6 +11,7 @@ export * from "./orders";
 export * from "./payouts";
 export * from "./people";
 export * from "./people-pages";
+export * from "./photo-groups";
 export * from "./photos";
 export * from "./price-lists";
 export * from "./progress";

@@ -32,7 +32,7 @@ const person = (
   id,
   firstName,
   lastName,
-  group: group ? { id: `g-${group}`, name: group } : null,
+  class: group ? { id: `g-${group}`, name: group } : null,
   doNotPhotograph,
 });
 
@@ -84,7 +84,9 @@ describe("which children get a card", () => {
 
   it("chosen classes, with or without the children who have none", () => {
     const ids = (groupIds: string[], noGroup: boolean) =>
-      cardChildren(roster, { kind: "groups", groupIds, noGroup }).map((c) => c.id);
+      cardChildren(roster, { kind: "classes", classIds: groupIds, noClass: noGroup }).map(
+        (c) => c.id,
+      );
     expect(ids(["g-Room 1"], false)).toEqual(["1"]);
     expect(ids(["g-Room 1"], true)).toEqual(["1", "3"]);
     expect(ids([], true)).toEqual(["3"]);
@@ -114,7 +116,7 @@ describe("card order (D138: sorted by class)", () => {
       id,
       firstName: "Amy",
       lastName: id,
-      group: { id: groupId, name: group },
+      class: { id: groupId, name: group },
       doNotPhotograph: false,
     });
     const sorted = sortCardChildren([

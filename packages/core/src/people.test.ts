@@ -22,7 +22,7 @@ const person = (over: Partial<PersonRow> = {}): PersonRow => ({
   studentId: null,
   grade: null,
   accessCode: "K7QM-4XPA",
-  group: null,
+  class: null,
   doNotPhotograph: false,
   doNotPublish: false,
   duplicate: false,
@@ -63,16 +63,16 @@ describe("matchesSearch", () => {
 
 describe("filters", () => {
   const rows = [
-    person({ group: G4B, grade: "4", doNotPhotograph: true }),
-    person({ group: G4B, grade: "4", duplicate: true }),
-    person({ group: G4C, grade: "5", doNotPublish: true, duplicate: true }),
-    person({ group: null, grade: "K" }),
+    person({ class: G4B, grade: "4", doNotPhotograph: true }),
+    person({ class: G4B, grade: "4", duplicate: true }),
+    person({ class: G4C, grade: "5", doNotPublish: true, duplicate: true }),
+    person({ class: null, grade: "K" }),
   ];
   const ids = (list: PersonRow[]) => list.map((r) => rows.indexOf(r));
 
   it("each filter keeps only its rows", () => {
-    expect(ids(applyFilters(rows, [{ kind: "group", id: G4B.id }]))).toEqual([0, 1]);
-    expect(ids(applyFilters(rows, [{ kind: "noGroup" }]))).toEqual([3]);
+    expect(ids(applyFilters(rows, [{ kind: "class", id: G4B.id }]))).toEqual([0, 1]);
+    expect(ids(applyFilters(rows, [{ kind: "noClass" }]))).toEqual([3]);
     expect(ids(applyFilters(rows, [{ kind: "grade", value: "5" }]))).toEqual([2]);
     expect(ids(applyFilters(rows, [{ kind: "grade", value: "k" }]))).toEqual([3]);
     expect(ids(applyFilters(rows, [{ kind: "doNotPhotograph" }]))).toEqual([0]);
@@ -115,20 +115,34 @@ describe("filters", () => {
   });
 
   it("different kinds combine with AND", () => {
-    const both: PeopleFilter[] = [{ kind: "group", id: G4B.id }, { kind: "duplicates" }];
+    const both: PeopleFilter[] = [{ kind: "class", id: G4B.id }, { kind: "duplicates" }];
     expect(ids(applyFilters(rows, both))).toEqual([1]);
   });
 
+  it("a group filter keeps the group's members; people whose groups aren't known never match (D156)", () => {
+    const choir = { id: "pg-choir", name: "Choir" };
+    const listed = [
+      person({ groups: [choir] }),
+      person({ groups: [{ id: "pg-band", name: "Band" }, choir] }),
+      person({ groups: [] }),
+      person({}),
+    ];
+    const at = (list: PersonRow[]) => list.map((r) => listed.indexOf(r));
+    expect(at(applyFilters(listed, [{ kind: "group", id: choir.id }]))).toEqual([0, 1]);
+    // A group is not a class: the class filter never reads groups.
+    expect(at(applyFilters(listed, [{ kind: "class", id: choir.id }]))).toEqual([]);
+  });
+
   it("each kind holds one value, and class and no class replace each other", () => {
-    let filters = addFilter([], { kind: "group", id: G4B.id });
-    filters = addFilter(filters, { kind: "group", id: G4C.id });
-    expect(filters).toEqual([{ kind: "group", id: G4C.id }]);
+    let filters = addFilter([], { kind: "class", id: G4B.id });
+    filters = addFilter(filters, { kind: "class", id: G4C.id });
+    expect(filters).toEqual([{ kind: "class", id: G4C.id }]);
     filters = addFilter(filters, { kind: "duplicates" });
-    filters = addFilter(filters, { kind: "noGroup" });
-    expect(filters).toEqual([{ kind: "duplicates" }, { kind: "noGroup" }]);
-    filters = addFilter(filters, { kind: "group", id: G4B.id });
-    expect(filters.map((f) => f.kind)).toEqual(["duplicates", "group"]);
-    expect(removeFilter(filters, "duplicates")).toEqual([{ kind: "group", id: G4B.id }]);
+    filters = addFilter(filters, { kind: "noClass" });
+    expect(filters).toEqual([{ kind: "duplicates" }, { kind: "noClass" }]);
+    filters = addFilter(filters, { kind: "class", id: G4B.id });
+    expect(filters.map((f) => f.kind)).toEqual(["duplicates", "class"]);
+    expect(removeFilter(filters, "duplicates")).toEqual([{ kind: "class", id: G4B.id }]);
   });
 });
 
@@ -139,41 +153,41 @@ describe("gradeOptions", () => {
   });
 });
 
-describe("groupPeople", () => {
+describe("groupPeople (by class)", () => {
   const groups = [G4B, G4C, { id: "g-empty", name: "Room 9" }];
   const rows = [
-    person({ lastName: "Adams", group: G4C }),
-    person({ lastName: "Brown", group: null }),
-    person({ lastName: "Chen", group: G4B }),
-    person({ lastName: "Diaz", group: G4C }),
+    person({ lastName: "Adams", class: G4C }),
+    person({ lastName: "Brown", class: null }),
+    person({ lastName: "Chen", class: G4B }),
+    person({ lastName: "Diaz", class: G4C }),
   ];
 
   it("follows the groups' order, keeps row order, and puts no class last", () => {
-    const sections = groupPeople(rows, groups, "group", { includeEmptyGroups: false });
+    const sections = groupPeople(rows, groups, "class", { includeEmptyClasses: false });
     expect(sections.map((s) => s.key)).toEqual(["g-4b", "g-4c", "none"]);
     expect(sections[1]?.rows.map((r) => r.lastName)).toEqual(["Adams", "Diaz"]);
-    expect(sections[2]?.group).toBeNull();
+    expect(sections[2]?.class).toBeNull();
   });
 
   it("shows empty groups only when asked (no search or filter)", () => {
-    const sections = groupPeople(rows, groups, "group", { includeEmptyGroups: true });
+    const sections = groupPeople(rows, groups, "class", { includeEmptyClasses: true });
     expect(sections.map((s) => s.key)).toEqual(["g-4b", "g-4c", "g-empty", "none"]);
     expect(sections[2]?.rows).toEqual([]);
   });
 
   it("has no 'no class' section when everyone is in a class", () => {
-    const sections = groupPeople(rows.slice(2), groups, "group", { includeEmptyGroups: false });
+    const sections = groupPeople(rows.slice(2), groups, "class", { includeEmptyClasses: false });
     expect(sections.map((s) => s.key)).toEqual(["g-4b", "g-4c"]);
   });
 
   it("keeps a group the groups list doesn't have yet", () => {
-    const late = person({ group: { id: "g-new", name: "New" } });
-    const sections = groupPeople([late], [G4B], "group", { includeEmptyGroups: false });
-    expect(sections).toEqual([{ key: "g-new", group: { id: "g-new", name: "New" }, rows: [late] }]);
+    const late = person({ class: { id: "g-new", name: "New" } });
+    const sections = groupPeople([late], [G4B], "class", { includeEmptyClasses: false });
+    expect(sections).toEqual([{ key: "g-new", class: { id: "g-new", name: "New" }, rows: [late] }]);
   });
 
   it("is one plain list when not grouped", () => {
-    const sections = groupPeople(rows, groups, "none", { includeEmptyGroups: true });
-    expect(sections).toEqual([{ key: "all", group: null, rows }]);
+    const sections = groupPeople(rows, groups, "none", { includeEmptyClasses: true });
+    expect(sections).toEqual([{ key: "all", class: null, rows }]);
   });
 });

@@ -9,7 +9,8 @@
  *   and the photos after it stay with the previous child but are flagged too, never silently mis-tagged (1, plan 1-2);
  * - a photo that failed (or isn't processed yet) flags the photos after it (plan 3);
  * - a card that reappears later (a retake) sends the photos after it back to that child (plan 8);
- * - class-photo uploads go to the class's set, and cards in them are hidden and otherwise ignored (3, plan 8);
+ * - group-photo uploads are group photos, and cards in them are hidden and otherwise ignored (3, plan 8; D156: class
+ *   photo sets became group photos, ADR 0030);
  * - each upload batch is tagged on its own, starting in Leftovers;
  * - manual moves are never overwritten when a batch is tagged again;
  * - where photos purged from the bin were can't always be known (the purged photos were last, a photo came or moved into
@@ -64,8 +65,11 @@ export function classifyQr(symbols: readonly QrSymbol[]): QrReading {
 
 // ── Tagging one upload batch ──────────────────────────────────────────────────────────────────────────────────────
 
-/** Where a photo is: a child, a class's "Class photo" set, Leftovers, a card photo, or waiting for a blank card's child. */
-export const PHOTO_PLACES = ["child", "classSet", "leftovers", "card", "blankCard"] as const;
+/**
+ * Where a photo is: a child, a group photo (shown through the groups it is linked to, never placed by tagging with a
+ * group: ADR 0030), Leftovers, a card photo, or waiting for a blank card's child.
+ */
+export const PHOTO_PLACES = ["child", "groupPhoto", "leftovers", "card", "blankCard"] as const;
 export type PhotoPlace = (typeof PHOTO_PLACES)[number];
 
 /**
@@ -88,7 +92,7 @@ export type PhotoFlag = (typeof PHOTO_FLAGS)[number];
 /** A photo's place, with the id that goes with it. */
 export type TagTarget =
   | { place: "child"; childId: string }
-  | { place: "classSet"; groupId: string }
+  | { place: "groupPhoto" }
   | { place: "leftovers" }
   | { place: "card"; cardId: string | null }
   | { place: "blankCard"; cardId: string };
@@ -214,9 +218,10 @@ function purgeGaps(
 
 /**
  * Tags one upload batch. `photos` must be in tagging order (compareTaggingOrder: capture time, then filename; D142 #7)
- * and include photos in the bin (marked binned: they get no tag but still count where they are). With `classGroupId`
- * the batch is a class-photo upload (Seenu, answer 3). `purgeTail`: a purge left a step with no photo after it. Results
- * are for the photos not in the bin.
+ * and include photos in the bin (marked binned: they get no tag but still count where they are). With `groupPhotos`
+ * the batch is a group-photo upload (D156; was a class-photo upload, Seenu answer 3): every photo is a group photo, and
+ * its groups are its links, written when it was registered, never by tagging. `purgeTail`: a purge left a step with
+ * no photo after it. Results are for the photos not in the bin.
  *
  * In a batch of individual photos the target starts at Leftovers. A readable card makes its own photo a card photo and
  * sends the photos after it to the card's child (or, for a blank card, to that card until the studio names the
@@ -232,21 +237,20 @@ function purgeGaps(
  */
 export function tagBatch(
   photos: readonly TaggingPhoto[],
-  options: { classGroupId: string | null; purgeTail?: boolean },
+  options: { groupPhotos: boolean; purgeTail?: boolean },
 ): TaggingResult[] {
   const legacy = isLegacyBatch(photos);
   const live = photos.filter((p) => !p.binned);
-  if (options.classGroupId) {
-    const groupId = options.classGroupId;
+  if (options.groupPhotos) {
     return live.map((photo) => {
       if (photo.status !== "ready") return { photoId: photo.id, tag: null };
       const k = kindOf(photo.qr, legacy);
-      // Cards inside class photos are hidden and otherwise ignored (Seenu, plan answer 8).
+      // Cards inside group photos are hidden and otherwise ignored (Seenu, plan answer 8).
       if (k.kind === "card")
         return { photoId: photo.id, tag: { place: "card", cardId: k.cardId, flag: null } };
       return {
         photoId: photo.id,
-        tag: { place: "classSet", groupId, flag: k.kind === "doubt" ? k.flag : null },
+        tag: { place: "groupPhoto", flag: k.kind === "doubt" ? k.flag : null },
       };
     });
   }
@@ -320,13 +324,7 @@ export interface TagWrite {
 }
 
 const idOf = (t: TagTarget): string | null =>
-  t.place === "child"
-    ? t.childId
-    : t.place === "classSet"
-      ? t.groupId
-      : t.place === "card" || t.place === "blankCard"
-        ? t.cardId
-        : null;
+  t.place === "child" ? t.childId : t.place === "card" || t.place === "blankCard" ? t.cardId : null;
 
 export function sameTag(a: Tag | null, b: Tag | null): boolean {
   if (a === null || b === null) return a === b;
@@ -390,7 +388,7 @@ export interface ReviewPhoto {
 }
 
 export interface ReviewActions {
-  /** Move to a child, a class's photo set or Leftovers (drag, or Move to…). */
+  /** Give to a person (or Leftovers): drag, or the Give to a person dialog. Never a group photo (C8). */
   move: boolean;
   /** "Looks right" / "It's a normal photo": keep it where it is, visible to parents once tagged to a child. */
   confirm: boolean;
@@ -409,6 +407,7 @@ export interface ReviewActions {
  * - a photo of another job's card (or a removed card) shows that card's child: it can only be marked a card photo;
  * - a photo that may be a card (unreadableCard) must be confirmed, either way, before it can be moved;
  * - a photo a person marked a card photo can be unmarked (owners and admins; Seenu, answer 12);
+ * - a group photo never becomes a person's photo (D156, C8): it is confirmed or marked a card photo, never moved;
  * - photos still processing or failed have nothing to do.
  */
 export function reviewActions(p: ReviewPhoto): ReviewActions {
@@ -418,6 +417,7 @@ export function reviewActions(p: ReviewPhoto): ReviewActions {
   if (p.qrKind === "otherCard" || p.qrKind === "removedCard" || p.flag === "otherCard")
     return { ...none, markCard: true };
   if (p.flag === "unreadableCard") return { ...none, confirm: true, markCard: true };
+  if (p.place === "groupPhoto") return { ...none, confirm: true, markCard: true };
   return { move: true, confirm: true, markCard: true, undoCard: false };
 }
 
