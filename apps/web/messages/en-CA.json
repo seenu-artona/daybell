@@ -2689,6 +2689,7 @@
       "photoAlt": "{name}, photo {n} of {total}",
       "groupAlt": "{name}’s group photo {n} of {total}",
       "protected": "Photos are protected and shown at low resolution with a watermark.",
+      "hiddenForScreenshot": "Photo hidden while a screenshot may be taken. It comes back in a moment.",
       "closed": "This shop is closed. Contact {studio}.",
       "unavailable": "Photos aren’t available yet. Contact {studio}.",
       "orderAndDelivery": "<strong>Order by {date}</strong> · Free delivery to school",

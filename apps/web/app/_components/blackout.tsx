@@ -149,17 +149,27 @@ export function useDesktopPointer(): boolean {
   return desktop;
 }
 
-/** Whether the photo is shown; listens to the window for screenshot signs while mounted. */
+/**
+ * Whether the photo is shown; listens to the window for screenshot signs while mounted (one set of listeners, however
+ * many photos read it: the shop's ProtectionProvider, ADR 0034 C1). `clearClipboard` (default on) can be turned off
+ * without re-listening: the shop turns it off on phones, which keep their blur (C1) and never clear the clipboard.
+ */
 export function useBlackout(
-  options: { write?: ((text: string) => Promise<void>) | undefined } = {},
+  options: { write?: ((text: string) => Promise<void>) | undefined; clearClipboard?: boolean } = {},
 ): { shown: boolean } {
   const [state, dispatch] = useReducer(blackoutReducer, undefined, initialBlackout);
   const writeRef = useRef(options.write);
   writeRef.current = options.write;
+  const clearRef = useRef(options.clearClipboard ?? true);
+  clearRef.current = options.clearClipboard ?? true;
 
   useEffect(() => {
     const clipboard = createClipboardClearer({
-      write: writeRef.current ?? browserClipboard(),
+      write: (text) => {
+        if (!clearRef.current) return Promise.resolve();
+        const write = writeRef.current ?? browserClipboard();
+        return write ? write(text) : Promise.resolve();
+      },
       hasFocus: () => document.hasFocus(),
     });
     let held = false;
