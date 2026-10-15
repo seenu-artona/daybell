@@ -257,6 +257,23 @@ describe("/shop (S5, S6)", () => {
     expect(nav.router.replace).toHaveBeenCalledWith(`/shop/c/${AVA}`);
   });
 
+  it("on a new device, reads the session once, takes its 401 as 'no galleries' and asks for nothing else", async () => {
+    // The one 401 the shop asks for on purpose: the DRM e2e allows exactly this read before the code (ADR 0034).
+    api.session.mockResolvedValue({
+      ok: false,
+      status: 401,
+      code: "shop_session_required",
+      form: null,
+      retryAfter: null,
+    });
+    await render(<ShopEntryPage />);
+    expect(container.querySelector('input[name="code"]')).not.toBeNull();
+    expect(api.session).toHaveBeenCalledTimes(1);
+    for (const [name, fn] of Object.entries(api))
+      if (name !== "session") expect(fn, name).not.toHaveBeenCalled();
+    expect(nav.router.replace).not.toHaveBeenCalled();
+  });
+
   it("offers Try again, never the code form, when the galleries couldn't be read (S5)", async () => {
     api.session.mockResolvedValue({
       ok: false,

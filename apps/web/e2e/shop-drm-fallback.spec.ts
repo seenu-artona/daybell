@@ -1,4 +1,4 @@
-import { devices, expect, type Page, test } from "@playwright/test";
+import { devices, expect, type Page, type Request, test } from "@playwright/test";
 import { studioSellingAva } from "./helpers";
 
 // The large view's DRM fallback (D158; ADR 0034, C1, C2), on a phone (Pixel 7, this project) and on a computer (a
@@ -7,7 +7,7 @@ import { studioSellingAva } from "./helpers";
 // manifest never answers. Each large view first tries DRM ("Loading photo" over the proof), then falls back to the
 // watermarked WebP within 8 seconds, silently, even when GET /shop/drm itself never answers; after two failures in a
 // row the tab shows the WebP at once; nothing breaks the shop's Content-Security-Policy and nothing is logged as an
-// error. On the computer the WebP is under Blackout (the window losing focus turns it dark, with words). One studio is
+// error or answered with an error status (but the new device's session read, a 401 by design: see watchErrors). On the computer the WebP is under Blackout (the window losing focus turns it dark, with words). One studio is
 // set up for all three. Locators are scoped to the viewer dialog and exact.
 test.use({ reducedMotion: "reduce" });
 
@@ -70,10 +70,14 @@ async function routeDrm(page: Page, options: { setupHangs?: boolean } = {}): Pro
   return manifests;
 }
 
-async function openGallery(page: Page, code: string) {
+async function openGallery(page: Page, code: string, watch: Watch) {
   const main = page.getByRole("main");
   await page.goto("/shop");
-  await main.getByLabel("Access code", { exact: true }).fill(code);
+  const field = main.getByLabel("Access code", { exact: true });
+  // The form shows only once the new device's session read has answered (the allowed 401).
+  await expect(field).toBeVisible();
+  watch.codeEntered = true;
+  await field.fill(code);
   await main.getByRole("button", { name: "View photos", exact: true }).click();
   await main.getByRole("button", { name: "See photos", exact: true }).click();
   return main.getByRole("list", { name: "Photos of Ava P.", exact: true });
@@ -107,21 +111,72 @@ async function fallsBackWithin8s(page: Page, n: number, announced: boolean) {
   return viewer;
 }
 
-/** Every console error and uncaught page error, collected to be checked at the end: there must be none (review). */
-function watchErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+/**
+ * Every console error, uncaught page error and failed (400 or more) response, checked at the end: there must be none
+ * (review), but one. A new device's /shop reads GET /api/v1/shop/session before any code is entered, and with no shop
+ * cookie that read is a 401 by design: the shop's answer for "no galleries here", which shows the code form (ADR 0022,
+ * S6; shop-pages.test.tsx). Chromium logs it as "Failed to load resource". Only that exact read, sent before the
+ * code, is allowed, matched by its URL; anything else is reported by method, path and status (never the query).
+ */
+type Watch = {
+  /** Requests sent before the access code was entered. */
+  beforeCode: WeakSet<Request>;
+  codeEntered: boolean;
+  /** URLs of the allowed new-device session reads that answered 401. */
+  allowed: Set<string>;
+  failed: string[];
+  errors: { text: string; url: string }[];
+};
+
+function watchErrors(page: Page): Watch {
+  const watch: Watch = {
+    beforeCode: new WeakSet(),
+    codeEntered: false,
+    allowed: new Set(),
+    failed: [],
+    errors: [],
+  };
+  page.on("request", (request) => {
+    if (!watch.codeEntered) watch.beforeCode.add(request);
   });
-  page.on("pageerror", (error) => errors.push(error.message));
-  return errors;
+  page.on("response", (response) => {
+    if (response.status() < 400) return;
+    const request = response.request();
+    const { pathname } = new URL(response.url());
+    const newDeviceSessionRead =
+      request.method() === "GET" &&
+      pathname === "/api/v1/shop/session" &&
+      response.status() === 401 &&
+      watch.beforeCode.has(request);
+    if (newDeviceSessionRead) watch.allowed.add(response.url());
+    else watch.failed.push(`${request.method()} ${pathname} ${response.status()}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error")
+      watch.errors.push({ text: message.text(), url: message.location().url });
+  });
+  page.on("pageerror", (error) => watch.errors.push({ text: error.message, url: "" }));
+  return watch;
 }
 
-async function cleanEnd(page: Page, errors: string[]) {
+async function cleanEnd(page: Page, watch: Watch) {
   expect(
     await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations),
   ).toEqual([]);
-  expect(errors).toEqual([]);
+  const unexpected = watch.errors
+    .filter(
+      (e) =>
+        !(
+          e.text ===
+            "Failed to load resource: the server responded with a status of 401 (Unauthorized)" &&
+          watch.allowed.has(e.url)
+        ),
+    )
+    .map((e) => `${e.text} (${e.url ? new URL(e.url).pathname : "page"})`);
+  expect({ consoleErrors: unexpected, failedResponses: watch.failed }).toEqual({
+    consoleErrors: [],
+    failedResponses: [],
+  });
 }
 
 // One studio for every test here (review: set up once, not per test).
@@ -144,10 +199,10 @@ test.describe
       page,
     }) => {
       test.setTimeout(120_000);
-      const errors = watchErrors(page);
+      const watch = watchErrors(page);
       await page.addInitScript(pretendHardwareDrm);
       const manifests = await routeDrm(page);
-      const grid = await openGallery(page, code);
+      const grid = await openGallery(page, code, watch);
 
       await grid.getByRole("button", { name: "Ava, photo 1 of 2", exact: true }).click();
       const first = await fallsBackWithin8s(page, 1, true);
@@ -171,21 +226,21 @@ test.describe
       await expect(page.getByText(HIDDEN, { exact: true })).toHaveCount(0);
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
       await expect(page.locator('[data-shop-protection="clear"]')).toHaveCount(1);
-      await cleanEnd(page, errors);
+      await cleanEnd(page, watch);
     });
 
     test("on a phone, a setup that never answers: the WebP within 8 s (review: tester #1)", async ({
       page,
     }) => {
       test.setTimeout(120_000);
-      const errors = watchErrors(page);
+      const watch = watchErrors(page);
       await page.addInitScript(pretendHardwareDrm);
       const manifests = await routeDrm(page, { setupHangs: true });
-      const grid = await openGallery(page, code);
+      const grid = await openGallery(page, code, watch);
       await grid.getByRole("button", { name: "Ava, photo 1 of 2", exact: true }).click();
       await fallsBackWithin8s(page, 1, true);
       expect(manifests).toHaveLength(0);
-      await cleanEnd(page, errors);
+      await cleanEnd(page, watch);
     });
 
     test("on a computer: the same fallback, under Blackout", async ({ browser }, info) => {
@@ -196,10 +251,10 @@ test.describe
         reducedMotion: "reduce",
       });
       const page = await context.newPage();
-      const errors = watchErrors(page);
+      const watch = watchErrors(page);
       await page.addInitScript(pretendHardwareDrm);
       const manifests = await routeDrm(page);
-      const grid = await openGallery(page, code);
+      const grid = await openGallery(page, code, watch);
 
       await grid.getByRole("button", { name: "Ava, photo 1 of 2", exact: true }).click();
       const viewer = await fallsBackWithin8s(page, 1, true);
@@ -219,7 +274,7 @@ test.describe
       await expect(viewer.locator("[data-blackout-panel]")).toHaveCount(0);
       await expect(heard).toHaveCount(0);
 
-      await cleanEnd(page, errors);
+      await cleanEnd(page, watch);
       await context.close();
     });
   });
