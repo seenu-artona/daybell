@@ -2,106 +2,140 @@
 
 import { cn } from "@daybell/ui";
 import { useTranslations } from "next-intl";
-import {
-  type FocusEvent,
-  type MouseEvent,
-  useCallback,
-  useEffect,
-  useId,
-  useReducer,
-  useState,
-} from "react";
+import { type MouseEvent, useEffect, useId, useReducer, useRef, useState } from "react";
 
 /**
- * Blackout mode (Seenu, Oct 14 2026; D158; ADR 0032): for desktops without hardware DRM. The photo shows only while the
- * page has focus and the pointer is over it (or, for keyboard users, while it has focus). It turns to an ink panel
- * with words at once on any sign of a screenshot: the window losing focus, the page being hidden, the pointer leaving,
- * Cmd/Win+Shift held, Print Screen, Cmd/Ctrl+P or printing, the context menu. After a shortcut, printing or the context
- * menu it stays dark until the pointer comes back onto the photo or the photo gets focus again, because the capture
- * itself happens after the keys are let go. Deterrent only: no browser can stop a screenshot. Nothing is logged or
- * sent anywhere.
+ * Blackout mode (Seenu, Oct 14 2026; D158; ADR 0032): for computers without hardware DRM. The photo is shown normally
+ * and turns to an ink panel with words at once on a sign of a screenshot, coming back when the sign ends:
+ * - the window losing focus, or the page being hidden: until focus or visibility returns;
+ * - Shift with Cmd, Ctrl or Win held (Cmd+Shift+3/4/5, Cmd+Ctrl+Shift+3/4, Win+Shift+S, Ctrl+Shift+…): while held, and
+ *   for BRIEF_MS after they are let go, because the capture happens after the keys are released;
+ * - Print Screen, Cmd/Ctrl+P or printing, the context menu: for BRIEF_MS.
+ * After a keyboard screenshot sign (the Shift combinations on release, Print Screen) it also overwrites the clipboard
+ * with an empty string, best effort (Seenu, Oct 14): see createClipboardClearer. Deterrent only: no browser can stop a
+ * screenshot. Nothing is logged or sent, and the clipboard is never read.
  *
- * Phones and tablets (no hovering, fine pointer) don't use it: they get the shop's usual blur (no split reveal).
- * Written for the parent shop to reuse.
+ * Phones and tablets (no hovering, fine pointer) don't use it: they get the shop's usual blur. Written for the parent
+ * shop to reuse.
  */
+
+/** How long the photo stays dark after a sign ends. */
+export const BRIEF_MS = 1500;
+
 export interface BlackoutState {
-  /** The window has focus and the page is visible. */
-  active: boolean;
-  pointerInside: boolean;
-  focusInside: boolean;
-  /** Cmd/Win+Shift is being held. */
+  /** The window has lost focus (until it gets it back). */
+  blurred: boolean;
+  /** The page is hidden (until it is visible again). */
+  pageHidden: boolean;
+  /** Shift with Cmd, Ctrl or Win is being held. */
   keysHeld: boolean;
-  /** A shortcut, print or the context menu happened; cleared when the pointer or focus comes back to the photo. */
-  tripped: boolean;
-  /** The photo has been shown at least once (only the words differ). */
-  seen: boolean;
+  /** A short blackout after a sign ended (BRIEF_MS). */
+  brief: boolean;
 }
 
 export type BlackoutEvent =
   | { type: "windowBlur" }
   | { type: "windowFocus" }
-  | { type: "hidden" }
-  | { type: "pointerEnter" }
-  | { type: "pointerLeave" }
-  | { type: "focusIn" }
-  | { type: "focusOut" }
-  | { type: "keys"; held: boolean; trip: boolean }
-  | { type: "trip" };
+  | { type: "visibility"; hidden: boolean }
+  | { type: "keys"; held: boolean }
+  | { type: "brief"; on: boolean };
 
-export function initialBlackout(active: boolean): BlackoutState {
-  return {
-    active,
-    pointerInside: false,
-    focusInside: false,
-    keysHeld: false,
-    tripped: false,
-    seen: false,
-  };
+export function initialBlackout(): BlackoutState {
+  return { blurred: false, pageHidden: false, keysHeld: false, brief: false };
 }
 
 export function isShown(s: BlackoutState): boolean {
-  return s.active && (s.pointerInside || s.focusInside) && !s.keysHeld && !s.tripped;
+  return !s.blurred && !s.pageHidden && !s.keysHeld && !s.brief;
 }
 
 export function blackoutReducer(s: BlackoutState, e: BlackoutEvent): BlackoutState {
-  const next = ((): BlackoutState => {
-    switch (e.type) {
-      case "windowBlur":
-      case "hidden":
-        return { ...s, active: false };
-      case "windowFocus":
-        return { ...s, active: true };
-      case "pointerEnter":
-        return { ...s, pointerInside: true, tripped: false };
-      case "pointerLeave":
-        return { ...s, pointerInside: false };
-      case "focusIn":
-        return { ...s, focusInside: true, tripped: false };
-      case "focusOut":
-        return { ...s, focusInside: false };
-      case "keys":
-        return { ...s, keysHeld: e.held, tripped: s.tripped || e.trip };
-      case "trip":
-        return { ...s, tripped: true };
-    }
-  })();
-  return isShown(next) && !next.seen ? { ...next, seen: true } : next;
+  switch (e.type) {
+    case "windowBlur":
+      return { ...s, blurred: true };
+    case "windowFocus":
+      return { ...s, blurred: false };
+    case "visibility":
+      return { ...s, pageHidden: e.hidden };
+    case "keys":
+      return { ...s, keysHeld: e.held };
+    case "brief":
+      return { ...s, brief: e.on };
+  }
 }
 
-/** What a key event means: Cmd/Win+Shift held (the start of macOS and Windows screenshot shortcuts), Print Screen,
- * or Cmd/Ctrl+P (print). The key being released no longer counts as held. */
-export function keyEvent(
-  e: Pick<KeyboardEvent, "type" | "key" | "metaKey" | "shiftKey" | "ctrlKey">,
-): { held: boolean; trip: boolean } {
+type KeyLike = Pick<KeyboardEvent, "type" | "key" | "metaKey" | "shiftKey" | "ctrlKey">;
+
+/**
+ * What a key event means. `held`: Shift with Cmd/Win or Ctrl is down after this event (the key being released no
+ * longer counts). `flash`: a one-off sign, Print Screen or Cmd/Ctrl+P. `screenshotKey`: Print Screen, which on Windows
+ * copies the screen to the clipboard (and fires only on key-up).
+ */
+export function keyEvent(e: KeyLike): { held: boolean; flash: boolean; screenshotKey: boolean } {
   const down = e.type === "keydown";
-  const meta = e.metaKey && !(!down && e.key === "Meta");
-  const shift = e.shiftKey && !(!down && e.key === "Shift");
-  const held = meta && shift;
+  const released = (name: string) => !down && e.key === name;
+  const meta = e.metaKey && !released("Meta");
+  const ctrl = e.ctrlKey && !released("Control");
+  const shift = e.shiftKey && !released("Shift");
+  const printScreen = e.key === "PrintScreen";
   const print = down && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p";
-  return { held, trip: (down && held) || e.key === "PrintScreen" || print };
+  return { held: shift && (meta || ctrl), flash: printScreen || print, screenshotKey: printScreen };
 }
 
-/** True on a desktop: a pointer that can hover and point finely. False until mounted (no reveal while rendering). */
+/** The modifiers of any later event (a mouse move, a key) show whether the combination is still held. */
+export function comboHeld(e: Pick<KeyboardEvent, "metaKey" | "shiftKey" | "ctrlKey">): boolean {
+  return e.shiftKey && (e.metaKey || e.ctrlKey);
+}
+
+/**
+ * Overwrites the clipboard with an empty string after a keyboard screenshot sign (Seenu, Oct 14 2026; ADR 0032), so a
+ * screenshot copied to the clipboard (Cmd+Ctrl+Shift+3/4, Win+Shift+S, Print Screen) is less likely to be pasted
+ * anywhere. Best effort: only while the page has focus (browsers refuse otherwise), else once when focus returns, and
+ * one retry on the next focus if the browser refused; every failure is ignored, silently. It never reads the clipboard.
+ */
+export function createClipboardClearer(deps: {
+  write: ((text: string) => Promise<void>) | undefined;
+  hasFocus: () => boolean;
+}) {
+  let pending = false;
+  let retryLeft = 0;
+  const attempt = () => {
+    if (!deps.write) return;
+    deps.write("").then(
+      () => {
+        retryLeft = 0;
+      },
+      () => {
+        if (retryLeft > 0) {
+          retryLeft -= 1;
+          pending = true;
+        }
+      },
+    );
+  };
+  return {
+    /** A keyboard screenshot sign has ended. */
+    request() {
+      if (!deps.write) return;
+      retryLeft = 1;
+      if (deps.hasFocus()) attempt();
+      else pending = true;
+    },
+    /** The window has focus again: a waiting or refused clear gets its one more try. */
+    onFocus() {
+      if (!pending) return;
+      pending = false;
+      attempt();
+    },
+  };
+}
+
+function browserClipboard(): ((text: string) => Promise<void>) | undefined {
+  if (typeof navigator === "undefined" || typeof navigator.clipboard?.writeText !== "function")
+    return undefined;
+  return (text) => navigator.clipboard.writeText(text);
+}
+
+/** True on a desktop: a pointer that can hover and point finely. False until mounted. */
 export function useDesktopPointer(): boolean {
   const [desktop, setDesktop] = useState(false);
   useEffect(() => {
@@ -115,89 +149,108 @@ export function useDesktopPointer(): boolean {
   return desktop;
 }
 
-/** The blackout's state and the handlers for the photo's region. */
-export function useBlackout() {
-  const [state, dispatch] = useReducer(blackoutReducer, undefined, () => initialBlackout(false));
+/** Whether the photo is shown; listens to the window for screenshot signs while mounted. */
+export function useBlackout(
+  options: { write?: ((text: string) => Promise<void>) | undefined } = {},
+): { shown: boolean } {
+  const [state, dispatch] = useReducer(blackoutReducer, undefined, initialBlackout);
+  const writeRef = useRef(options.write);
+  writeRef.current = options.write;
 
   useEffect(() => {
-    if (document.visibilityState === "visible" && document.hasFocus())
-      dispatch({ type: "windowFocus" });
-    const onBlur = () => dispatch({ type: "windowBlur" });
-    const onFocus = () => dispatch({ type: "windowFocus" });
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") dispatch({ type: "hidden" });
+    const clipboard = createClipboardClearer({
+      write: writeRef.current ?? browserClipboard(),
+      hasFocus: () => document.hasFocus(),
+    });
+    let held = false;
+    let timer: number | undefined;
+    const flash = () => {
+      dispatch({ type: "brief", on: true });
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => dispatch({ type: "brief", on: false }), BRIEF_MS);
     };
-    const onKey = (e: KeyboardEvent) => dispatch({ type: "keys", ...keyEvent(e) });
-    const trip = () => dispatch({ type: "trip" });
+    const setHeld = (next: boolean) => {
+      if (next === held) return;
+      held = next;
+      dispatch({ type: "keys", held: next });
+      if (!next) {
+        // The combination was let go: the capture happens now. Stay dark a moment, then clear the clipboard.
+        flash();
+        clipboard.request();
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const k = keyEvent(e);
+      setHeld(k.held);
+      if (k.flash) flash();
+      if (k.screenshotKey && e.type === "keyup") clipboard.request();
+    };
+    // macOS may swallow the key-up while its screenshot tool runs: any later event's modifiers settle it.
+    const onMove = (e: globalThis.MouseEvent) => {
+      if (held) setHeld(comboHeld(e));
+    };
+    const onBlur = () => dispatch({ type: "windowBlur" });
+    const onFocus = () => {
+      dispatch({ type: "windowFocus" });
+      setHeld(false);
+      clipboard.onFocus();
+    };
+    const onVisibility = () =>
+      dispatch({ type: "visibility", hidden: document.visibilityState === "hidden" });
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKey, true);
+    window.addEventListener("mousemove", onMove, true);
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("keyup", onKey, true);
-    window.addEventListener("beforeprint", trip);
-    window.addEventListener("contextmenu", trip, true);
+    window.addEventListener("beforeprint", flash);
+    window.addEventListener("contextmenu", flash, true);
     return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKey, true);
+      window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("keyup", onKey, true);
-      window.removeEventListener("beforeprint", trip);
-      window.removeEventListener("contextmenu", trip, true);
+      window.removeEventListener("beforeprint", flash);
+      window.removeEventListener("contextmenu", flash, true);
+      window.clearTimeout(timer);
     };
   }, []);
 
-  const regionProps = {
-    tabIndex: 0,
-    onPointerEnter: useCallback(() => dispatch({ type: "pointerEnter" }), []),
-    onPointerLeave: useCallback(() => dispatch({ type: "pointerLeave" }), []),
-    onFocus: useCallback((e: FocusEvent) => {
-      if (e.target === e.currentTarget) dispatch({ type: "focusIn" });
-    }, []),
-    onBlur: useCallback((e: FocusEvent) => {
-      if (e.target === e.currentTarget) dispatch({ type: "focusOut" });
-    }, []),
-    onContextMenu: useCallback((e: MouseEvent) => e.preventDefault(), []),
-    // A mouse press never focuses the photo: only keyboard focus may keep it shown once the pointer has left.
-    onMouseDown: useCallback((e: MouseEvent) => e.preventDefault(), []),
-  };
-  return { shown: isShown(state), seen: state.seen, regionProps };
+  return { shown: isShown(state) };
 }
 
 /**
- * A photo in blackout mode. `label` names the photo for screen readers. The dark panel's words are repeated in a
- * status region that is always rendered (only the panel is toggled), so going dark is announced and never shown by
- * color alone. A mouse press doesn't focus it. Not draggable, not selectable, never printed.
+ * A photo in blackout mode, shown normally until a screenshot sign. The ink panel's words are repeated in a status
+ * region that is always rendered (only the panel is toggled), so going dark is announced and never shown by color
+ * alone. The context menu is blocked on it; not draggable, not selectable, never printed. `write` replaces the
+ * browser's clipboard (tests).
  */
 export function BlackoutPhoto({
   src,
   alt,
-  label,
   className,
+  write,
 }: {
   src: string;
   alt: string;
-  label: string;
   className?: string;
+  write?: (text: string) => Promise<void>;
 }) {
   const t = useTranslations("photoBlackout");
-  const { shown, seen, regionProps } = useBlackout();
+  const { shown } = useBlackout({ write });
   const statusId = useId();
-  const words = seen ? t("hidden") : t("start");
   return (
-    // A focusable group: keyboard users view the photo by focusing it.
     <div
-      role="group"
-      aria-label={label}
       aria-describedby={statusId}
       data-blackout={shown ? "shown" : "hidden"}
       className={cn(
         "relative block select-none overflow-hidden rounded-md bg-ink [-webkit-touch-callout:none] print:hidden",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
         className,
       )}
       onDragStart={(e) => e.preventDefault()}
-      {...regionProps}
+      onContextMenu={(e: MouseEvent) => e.preventDefault()}
     >
       {/* biome-ignore lint/performance/noImgElement: next/image would cache photos outside their region (D113). */}
       <img
@@ -217,12 +270,12 @@ export function BlackoutPhoto({
         )}
       >
         <p aria-hidden="true" className="m-0 text-body text-on-primary">
-          {words}
+          {t("hidden")}
         </p>
       </div>
       {/* Always rendered, so the change to hidden is announced; empty while the photo shows. */}
       <p id={statusId} role="status" className="sr-only">
-        {shown ? "" : words}
+        {shown ? "" : t("hidden")}
       </p>
     </div>
   );

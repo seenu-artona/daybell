@@ -85,22 +85,50 @@ This step only answers "does it work on real devices?":
 ## Blackout mode (the fallback on computers)
 
 `app/_components/blackout.tsx`, written for the parent shop to reuse: `useBlackout()` (a pure reducer plus window
-listeners), `useDesktopPointer()` and `BlackoutPhoto`.
+listeners), `createClipboardClearer()`, `useDesktopPointer()` and `BlackoutPhoto`.
 
-- The photo shows only while the page has focus and the pointer is over it; keyboard users view it by focusing it
-  (a focusable `role="group"` named from the locale files, with a visible focus ring). A mouse press never focuses it
-  (code review 3), so a click can't keep it shown after the pointer leaves.
-- It turns into an `ink` panel at once on: window blur, `visibilitychange` to hidden, the pointer leaving, Cmd/Win+
-  Shift held, Print Screen (down or up), Cmd/Ctrl+P, `beforeprint`, the context menu (blocked on the photo).
-- After a shortcut, print or the context menu it stays dark until the pointer comes back onto the photo (or the photo
-  is focused again), because the capture happens after the keys are let go. Window focus brings it back by itself.
-- The dark state says so in words ("Photo hidden — move back to view."; before the first view: how to view it), so it
-  is never color only. A screen-reader-only `role="status"` is always rendered and only the ink panel is toggled
-  (code review 4), so going dark is announced; the panel's own words are `aria-hidden` to avoid reading them twice. The
-  image's `alt` is empty while hidden.
+**Amended (Seenu, Oct 14, after trying the Preview on his Mac: Chrome had Widevine software only, so the fallback):**
+the photo is **shown normally**. The first version showed it only while the pointer was over it or it had keyboard
+focus, with a "move back to view" line; that requirement, the focusable region and the instruction are gone.
+
+- It turns into an `ink` panel at once on a screenshot sign, and comes back when the sign ends:
+  - the window losing focus: until it has focus again;
+  - the page hidden (`visibilitychange`): until it is visible again;
+  - Shift with Cmd/Win or Ctrl held, including Cmd+Ctrl+Shift (macOS Cmd+Shift+3/4/5 and Cmd+Ctrl+Shift+3/4, Windows
+    Win+Shift+S): while held and for 1.5 seconds after they are let go, because the capture happens after release;
+  - Print Screen, Cmd/Ctrl+P, `beforeprint`, the context menu (also blocked on the photo): for 1.5 seconds.
+- macOS can swallow the key-up while its screenshot tool runs, so "held" never sticks: focus coming back, or a mouse
+  move whose modifiers show the keys are up, counts as the release.
+- The dark state says so in words ("Photo hidden while a screenshot may be taken. It comes back in a moment."), never
+  by color alone: a screen-reader-only `role="status"` is always rendered and only the ink panel is toggled, so going
+  dark is announced; the panel's own words are `aria-hidden` to avoid reading them twice. The image's `alt` is empty
+  while hidden.
+- Ctrl+Shift is also an ordinary shortcut (e.g. Ctrl+Shift+T), so on Windows and Linux the photo will sometimes go dark
+  for a moment without a screenshot. Accepted: Seenu asked for Ctrl+Shift.
 - Only on a pointer that hovers and points finely (`(hover: hover) and (pointer: fine)`). Phones and tablets get the
-  shop's existing blur (`ProtectionProvider`), with no split reveal.
-- Nothing is logged or sent: a test checks no `console` call and no `fetch`.
+  shop's existing blur (`ProtectionProvider`).
+- Nothing is logged or sent: tests check no `console` call and no `fetch`.
+
+### Clearing the clipboard (Seenu's decision, Oct 14)
+
+After a keyboard screenshot sign ends (a Shift combination above is released, or Print Screen), and while the page
+has focus, Blackout overwrites the clipboard with an empty string (`navigator.clipboard.writeText("")`), so a
+screenshot taken to the clipboard (Cmd+Ctrl+Shift+3/4, Win+Shift+S, Print Screen) is harder to paste anywhere. If the
+page has no focus then, it tries when focus returns; if the browser refuses, it tries once more on the next focus, then
+gives up. Every failure is ignored silently. It **never reads** the clipboard.
+
+- Only keyboard signs clear it. The window losing focus, the page being hidden, printing and the context menu black the
+  photo out but leave the clipboard alone: otherwise every switch to another app would erase what a parent had copied
+  (Claude's reading of "when a sign is detected"; for Seenu to confirm).
+- Limits:
+  - **Browser support.** Chrome and Edge allow it while the page has focus. Safari and Firefox may refuse without a
+    click or key press in the page at that moment (a key-up isn't one), so there it often does nothing.
+  - **Files are untouched.** Screenshots saved as files (macOS Cmd+Shift+3/4/5 to the Desktop, Windows Win+Print
+    Screen to Pictures, the Snipping Tool's own window) are not affected; nor are phone screenshots or cameras.
+  - **It erases what the parent had copied**, whatever it was, on any of these key combinations, including a
+    Cmd+Shift or Ctrl+Shift shortcut that wasn't a screenshot.
+  - The OS may put the image on the clipboard after our write (the clipboard tools are asynchronous); the 1.5-second
+    blackout helps the capture miss the photo, not the clear.
 
 ## Settings (all server-only; `packages/config/src/server.ts`)
 
@@ -168,8 +196,11 @@ id. Our server talks to Axinom not at all; it signs tokens in Montréal.
 4. **Production — decided (Seenu, Oct 14):** test on Preview only. `drmTestPageEnabled()` is false when
    `VERCEL_ENV=production` and the build step refuses the same way, whatever the flag says.
 5. **Blackout's limits.** It can't see a phone's screenshot buttons, a second camera, or OS tools that don't move focus
-   (e.g. a timed capture). It deters; DRM is what actually blacks out.
+   (e.g. a timed capture), and since the Oct 14 amendment the photo is visible whenever no sign is seen. It deters;
+   DRM is what actually blacks out.
 6. **When the shop adopts D158:** the shop's Content-Security-Policy (ADR 0022) will need `media-src blob:` and
    `connect-src` for Axinom's license hosts.
 7. **The token budget for the shop.** Per-instance memory is fine here; parents' tokens will need a database count
    like `take_stripe_call`.
+8. **Which signs clear the clipboard.** Keyboard signs only (above). Should the window losing focus clear it too? That
+   would catch more screenshot tools but erase the parent's clipboard on every app switch.

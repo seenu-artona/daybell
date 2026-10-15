@@ -250,7 +250,6 @@ export function DrmTest() {
               <BlackoutPhoto
                 src={FALLBACK_SRC}
                 alt={t("fallback.alt")}
-                label={t("fallback.label")}
                 className="aspect-[3/2] w-full"
               />
             ) : (

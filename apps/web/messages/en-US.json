@@ -2579,8 +2579,7 @@
     }
   },
   "photoBlackout": {
-    "start": "Point at the photo, or move to it with Tab, to view it.",
-    "hidden": "Photo hidden — move back to view."
+    "hidden": "Photo hidden while a screenshot may be taken. It comes back in a moment."
   },
   "drmTest": {
     "metaTitle": "DRM screenshot test",
@@ -2624,9 +2623,8 @@
       "fairplayOff": "FairPlay isn’t set up yet, so Safari shows today’s watermarked photo instead.",
       "notConfigured": "The DRM test isn’t set up in this deployment yet: it needs the Axinom and test key settings, then a new deployment so the protected clip is built. Today’s watermarked photo is shown instead.",
       "failed": "The protected photo couldn’t be shown ({detail}), so this is today’s watermarked photo instead.",
-      "desktop": "On a computer the photo shows only while you point at it or move to it with Tab, and goes dark on signs of a screenshot.",
+      "desktop": "On a computer the photo goes dark on signs of a screenshot (the window losing focus, screenshot keys, printing, the context menu) and comes back a moment later. Screenshot keys also empty the clipboard where the browser allows it.",
       "phone": "On a phone or tablet the photo blurs when you leave the page.",
-      "label": "Fallback test photo",
       "alt": "Watermarked test photo: a color chart with the words DRM TEST"
     },
     "errors": {
