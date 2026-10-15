@@ -382,6 +382,197 @@ usual role (`daybell-staging-vercel`) must still never have, so a **second role*
 
 The lifecycle rule and the daily clean-up already cover `download.jpg` with the rest of the photo's files.
 
+## 14. DRM in the parent shop's large view (round 8; ADR 0034)
+
+Since round 8 the worker also packages each ready photo's **large view for DRM**: its watermarked `proof.webp` as a
+2-second encrypted clip (`drm.mp4`, `drm.mpd`, `drm.m3u8`, `drm-video.m3u8` beside the previews), one content key per
+photo made by **KMS in ca-central-1** and stored only wrapped. The shop shows it only while the database switch is on
+(off by default, step 14.9). Nothing here is needed for the rest of the app; do the steps in this order.
+
+### 14.1 The KMS key
+
+KMS (ca-central-1) › Customer managed keys › **Create key**:
+- Key type **Symmetric**; Key usage **Encrypt and decrypt**; Advanced options: Key material origin **KMS**,
+  **Single-Region key**. Next.
+- Alias **`daybell-staging-ca-drm`**; description "Wraps each photo's DRM content key (ADR 0034)". Next.
+- Key administrators: Seenu only; leave "Allow key administrators to delete this key" ticked. Next.
+- Key users: **none** (the two roles below get their rights from IAM policies, which the default key policy allows).
+  Next › Finish.
+- Open the key › copy its **ARN** (`arn:aws:kms:ca-central-1:<account-id>:key/<uuid>`). The alias ARN
+  (`…:alias/daybell-staging-ca-drm`) works for the settings too; the policies below name the **key** ARN.
+- Key rotation: tick **Automatically rotate this KMS key** (yearly). Old wrapped keys still unwrap.
+
+### 14.2 The worker: data keys, proofs and clips
+
+IAM › Roles › `daybell-staging-ca-image-worker` › Add permissions › Create inline policy › JSON, name it `drm`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DataKeysBoundToAPhoto",
+      "Effect": "Allow",
+      "Action": "kms:GenerateDataKey",
+      "Resource": "<the key ARN from 14.1>",
+      "Condition": {
+        "ForAllValues:StringEquals": { "kms:EncryptionContextKeys": ["studio", "photo", "key"] },
+        "Null": { "kms:EncryptionContextKeys": "false" }
+      }
+    },
+    {
+      "Sid": "ReadProofs",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::daybell-staging-ca-photos/*/proof.webp"
+    },
+    {
+      "Sid": "WriteClips",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::daybell-staging-ca-photos/*/drm*"
+    }
+  ]
+}
+```
+
+The worker never gets `kms:Decrypt`: it can make a key but never unwrap one.
+
+### 14.3 The tools layer, published by the deploy workflow
+
+IAM › Roles › `daybell-staging-github-image-worker-deploy` › its inline policy `deploy-image-worker` › Edit, replace
+with:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["lambda:UpdateFunctionCode", "lambda:GetFunction", "lambda:UpdateFunctionConfiguration"],
+      "Resource": "arn:aws:lambda:ca-central-1:<account-id>:function:daybell-staging-ca-image-worker"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "lambda:PublishLayerVersion",
+      "Resource": "arn:aws:lambda:ca-central-1:<account-id>:layer:daybell-staging-ca-drm-tools"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "lambda:GetLayerVersion",
+      "Resource": "arn:aws:lambda:ca-central-1:<account-id>:layer:daybell-staging-ca-drm-tools:*"
+    }
+  ]
+}
+```
+
+Then, after round 8 is merged: Actions › **Deploy image worker (staging)** › Run workflow (branch `main`) with
+**Publish the DRM tools layer** ticked, and approve. The `build` job makes the layer from its SHA-256 pins (ffmpeg
+7.0.2 and Shaka Packager 3.9.3 for arm64, about 61 MB unzipped) with no AWS access; `deploy` publishes it as a new
+version of `daybell-staging-ca-drm-tools`, attaches it to the function, then uploads the code. Later code-only deploys
+leave the box unticked; the layer stays attached.
+
+### 14.4 The worker's setting
+
+Lambda › `daybell-staging-ca-image-worker` › Configuration › Environment variables › Edit › add
+**`DRM_KMS_KEY_ARN`** = the key ARN (14.1). Save. Until it is set, DRM tasks fail back to the queue (and, after five,
+the dead-letter queue, whose alarm already exists: step 8).
+
+### 14.5 The DRM role for the shop's token route
+
+IAM › Roles › Create role › **Custom trust policy**: copy the trust policy of `daybell-staging-vercel` exactly (step 9).
+Next (no managed policies) › Name **`daybell-staging-ca-drm`** › Create. Add an inline policy `unwrap-photo-keys`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UnwrapPhotoKeysOnly",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "<the key ARN from 14.1>",
+      "Condition": {
+        "ForAllValues:StringEquals": { "kms:EncryptionContextKeys": ["studio", "photo", "key"] },
+        "Null": { "kms:EncryptionContextKeys": "false" }
+      }
+    }
+  ]
+}
+```
+
+Don't give `kms:Decrypt` to `daybell-staging-vercel` or `daybell-staging-ca-photo-downloads`: the app refuses to start
+DRM if `AWS_DRM_ROLE_ARN` equals either of their ARNs.
+
+### 14.6 The web app's role reads the manifests and signs the clips
+
+IAM › Roles › `daybell-staging-vercel` › its photo policy (step 9) › in **`ReadPreviewsOnly`**, add
+`"arn:aws:s3:::daybell-staging-ca-photos/*/drm*"` to `Resource`. The shop's manifest route reads `drm.mpd`/`drm*.m3u8`
+and signs 10-minute links to `drm.mp4`; it never needs a key. The `RetryPhotos` permission already sends the
+`{photoId, make: "drm"}` messages.
+
+### 14.7 CORS for the clip
+
+S3 › `daybell-staging-ca-photos` › Permissions › CORS › Edit, replace with (adds Range and the byte-range headers the
+players need; Safari plays the clip with `crossorigin="anonymous"`):
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://daybell-git-main-artona-tech-team.vercel.app",
+      "https://daybell-*-artona-tech-team.vercel.app"
+    ],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges"],
+    "MaxAgeSeconds": 3000
+  }
+]
+```
+
+### 14.8 Vercel
+
+Project › Settings › Environment Variables. For **Production** (staging today) and for **Preview** (the device matrix
+runs on this branch's Preview):
+
+| Name | What |
+|---|---|
+| `DRM_KMS_KEY_ARN_CA` | the key ARN (14.1). Set, it turns packaging requests on (new results and the daily backfill) |
+| `AWS_DRM_ROLE_ARN` | `daybell-staging-ca-drm`'s ARN (14.5) |
+| `SHOP_DRM_COM_KEY_ID` | the shop's Axinom communication key ID (a GUID) |
+| `SHOP_DRM_COM_KEY` | that communication key, base64 of 32 bytes. **Sensitive.** Never the test page's `AXINOM_COM_KEY` (refused) |
+| `SHOP_DRM_LICENSE_PREFIX` | the tenant part of `https://<prefix>.drm-widevine-licensing.axprod.net/AcquireLicense` |
+| `SHOP_DRM_FAIRPLAY_CERT` | optional: the FairPlay certificate's DER bytes as base64 (`base64 -w0 fairplay.der`); unset, Safari keeps the WebP |
+
+The Axinom values come from Axinom's portal (B3: the plan, price and DPA are Seenu's to settle first; a separate
+communication key from the spike's). Paste them straight into Vercel; never into a file, a commit or a chat. Redeploy.
+
+### 14.9 The switch (database owner only)
+
+Off by default. In the Canadian Supabase project's SQL editor:
+
+```sql
+select public.set_shop_drm(true, 'Staging: device matrix');   -- on
+select public.set_shop_drm(false, 'Staging: off again');        -- off
+select setting, old_value, new_value, note, changed_by, changed_at
+from app.platform_settings_changes where setting = 'shop_drm_enabled' order by changed_at;
+```
+
+The API can't run `set_shop_drm`. While off (or while any setting above is missing), every large view is the
+watermarked WebP, as before.
+
+### 14.10 Check
+
+1. Upload a few photos to a staging job (or wait for the daily backfill: up to 2,000 photos a day). In S3, each ready
+   photo's folder gains `drm.mp4`, `drm.mpd`, `drm.m3u8` and `drm-video.m3u8` with `Cache-Control: private,
+   max-age=3600`. The worker's log has `drm_ready <photo id>`.
+2. In SQL: `select drm_status, count(*) from public.photos group by 1;` shows `ready` growing.
+3. Turn the switch on (14.9) and run the device matrix (ADR 0034): the large view should be black in screenshots and
+   recordings on hardware-DRM devices and the watermarked WebP (Blackout on computers) everywhere else.
+4. Look for `drm_failed`, `drm_unavailable`, `shop_drm_misconfigured`, `shop_drm_unwrap_failed` and
+   `shop_drm_rate_limited` in the logs: each names a photo id, a reason or a variable only.
+
 ## Rotating the worker's secret
 
 1. Add the new secret to Vercel's `PHOTO_WORKER_SECRETS` after the old one (`old,new`) and redeploy.
