@@ -31,12 +31,17 @@ afterEach(() => {
   container.remove();
 });
 
-function render(onChange: (id: string) => void, value: string | null = photo(1).id) {
+function render(
+  onChange: (id: string) => void,
+  value: string | null = photo(1).id,
+  groupPhotos: ShopPhoto[] = [],
+) {
   act(() =>
     root.render(
       <NextIntlClientProvider locale="en-US" messages={messages}>
         <PosePicker
           portraits={[photo(1), photo(2)]}
+          groupPhotos={groupPhotos}
           value={value}
           onChange={onChange}
           onImageError={() => {}}
@@ -90,5 +95,31 @@ describe("the pose picker (D60, D91)", () => {
     });
     expect(menu.defaultPrevented).toBe(true);
     expect(drag.defaultPrevented).toBe(true);
+  });
+
+  it("puts the group photos after the portraits, in the same radio set, each set a labelled group", () => {
+    const onChange = vi.fn();
+    render(onChange, photo(1).id, [photo(7), photo(8)]);
+    expect(radios().map((r) => r.labels?.[0]?.querySelector("img")?.alt)).toEqual([
+      "Pose 1 of 2",
+      "Pose 2 of 2",
+      "Group photo 1 of 2",
+      "Group photo 2 of 2",
+    ]);
+    expect(new Set(radios().map((r) => r.name)).size).toBe(1);
+    const groups = [...container.querySelectorAll('[role="group"]')];
+    expect(
+      groups.map(
+        (g) => document.getElementById(g.getAttribute("aria-labelledby") ?? "")?.textContent,
+      ),
+    ).toEqual(["Portraits", "Group photos"]);
+    act(() => radios()[3]?.click());
+    expect(onChange).toHaveBeenLastCalledWith(photo(8).id);
+  });
+
+  it("shows no set titles when there are only portraits", () => {
+    render(() => {});
+    expect(container.querySelectorAll('[role="group"]')).toHaveLength(0);
+    expect(container.textContent).not.toContain("Group photos");
   });
 });

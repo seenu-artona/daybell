@@ -304,12 +304,21 @@ describe("the viewer (code review N5)", () => {
         onIndex={setIndex}
         onClose={() => setIndex(null)}
         alt={(n, total) => `Photo ${n} of ${total}`}
-        orderHref={null}
+        orderHref={(p) => `/shop/c/child/buy?photo=${p.id}`}
       />
     );
   }
   const button = (name: string) =>
     container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+
+  it("offers Use this photo for every photo, a group photo too (D156 C5)", async () => {
+    await render(<Viewer photos={[photo(1)]} />);
+    const use = [...container.querySelectorAll("a")].find(
+      (a) => a.textContent === "Use this photo",
+    );
+    expect(use?.getAttribute("href")).toBe(`/shop/c/child/buy?photo=${photo(1).id}`);
+    expect(container.textContent).not.toContain("can’t be ordered");
+  });
 
   it("moves focus to Previous when Next reaches the last photo, and back", async () => {
     await render(<Viewer photos={[photo(1), photo(2)]} />);

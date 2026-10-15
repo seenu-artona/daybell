@@ -1,7 +1,7 @@
 "use client";
 
 import type { ShopGalleryResponse, ShopPriceListResponse } from "@daybell/api";
-import { hasQuantity } from "@daybell/core";
+import { hasQuantity, initialPose, shopPoses } from "@daybell/core";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -18,15 +18,16 @@ import { ShopTitle } from "../../../../_components/shop-title";
 import { shopButton } from "../../../../_components/styles";
 import { useChildData } from "../../../../_components/use-child";
 
-/** What the pose page needs: the job's prices and the child's portraits. */
+/** What the pose page needs: the job's prices, and the child's portraits and group photos. */
 interface PoseData {
   prices: ShopPriceListResponse;
   gallery: ShopGalleryResponse;
 }
 
 /**
- * The pose (D24: package, then pose): the child's portraits as radio buttons shown as thumbnails, a big preview of the
- * one chosen, how many (prints and packages), and "Add to bag" docked with the price.
+ * The pose (D24: package, then pose): the child's portraits, then the group photos of their groups (D156 C5; N6), as
+ * radio buttons shown as thumbnails, a big preview of the one chosen, how many (prints and packages), and "Add to bag"
+ * docked with the price. A photo the parent came with (?photo=, from either set) is chosen first.
  */
 function Pose() {
   const t = useTranslations("shop");
@@ -49,15 +50,16 @@ function Pose() {
     useChildData<PoseData>(load);
   const item = data?.prices.priceList?.items.find((i) => i.id === itemId);
   const portraits = data?.gallery.portraits ?? [];
+  const groupPhotos = data?.gallery.groupPhotos ?? [];
   const [pose, setPose] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (pose || portraits.length === 0) return;
-    setPose(portraits.some((p) => p.id === wanted) ? wanted : (portraits[0]?.id ?? null));
-  }, [pose, portraits, wanted]);
+    if (pose) return;
+    setPose(initialPose(portraits, groupPhotos, wanted));
+  }, [pose, portraits, groupPhotos, wanted]);
 
   const add = async () => {
     if (!item || !pose || !galleryId) return;
@@ -95,7 +97,7 @@ function Pose() {
         )}
       </>
     );
-  const chosen = portraits.find((p) => p.id === pose);
+  const chosen = shopPoses(portraits, groupPhotos).find((p) => p.photo.id === pose);
   const closed = data.prices.state !== "open";
   // Back to the packages with the pose the parent came with (code review N9).
   const back = `/shop/c/${childId}/buy${wanted ? `?photo=${encodeURIComponent(wanted)}` : ""}`;
@@ -122,10 +124,10 @@ function Pose() {
             {chosen ? (
               <div className="mx-auto aspect-[4/5] w-3/4 overflow-hidden rounded-lg bg-subtle">
                 <ProtectedImage
-                  src={chosen.viewUrl}
-                  alt={t("pose.poseAlt", {
-                    n: portraits.indexOf(chosen) + 1,
-                    total: portraits.length,
+                  src={chosen.photo.viewUrl}
+                  alt={t(chosen.set === "portraits" ? "pose.poseAlt" : "pose.groupAlt", {
+                    n: chosen.n,
+                    total: chosen.total,
                   })}
                   onError={onImageError}
                   eager
@@ -134,6 +136,7 @@ function Pose() {
             ) : null}
             <PosePicker
               portraits={portraits}
+              groupPhotos={groupPhotos}
               value={pose}
               onChange={setPose}
               onImageError={onImageError}

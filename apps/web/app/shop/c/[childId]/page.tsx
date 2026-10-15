@@ -22,8 +22,9 @@ import { useChildData } from "../../_components/use-child";
 const strong = (chunks: ReactNode) => <strong>{chunks}</strong>;
 
 /**
- * A child's gallery (D119, D60): the full-screen cover first, then the grid of portraits, the class photo set as a
- * second tab, the children as links, the last day to order and delivery to school. Closed and unavailable shops say
+ * A child's gallery (D119, D60): the full-screen cover first, then the grid of portraits, the group photos of their
+ * groups as a second tab (each can be ordered, D156 C5), the children as links, the last day to order and delivery to
+ * school. Closed and unavailable shops say
  * so, naming the studio and never the child (answer 4, call 6; security review M1).
  */
 export default function GalleryPage() {
@@ -158,11 +159,7 @@ export default function GalleryPage() {
               onIndex={setViewer}
               onClose={() => setViewer(null)}
               alt={alt}
-              orderHref={
-                set === "portraits"
-                  ? (photo) => `/shop/c/${childId}/buy?photo=${encodeURIComponent(photo.id)}`
-                  : null
-              }
+              orderHref={(photo) => `/shop/c/${childId}/buy?photo=${encodeURIComponent(photo.id)}`}
             />
           </>
         )}

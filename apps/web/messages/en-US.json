@@ -2660,8 +2660,7 @@
       "close": "Close",
       "previous": "Previous photo",
       "next": "Next photo",
-      "use": "Use this photo",
-      "viewOnly": "Group photos can be viewed here. They can’t be ordered yet."
+      "use": "Use this photo"
     },
     "buy": {
       "packagesTitle": "Choose a package",
@@ -2693,7 +2692,10 @@
       "decrease": "One fewer",
       "increase": "One more",
       "add": "Add to bag",
-      "summary": "{count, plural, one {{name}} other {# × {name}}}"
+      "summary": "{count, plural, one {{name}} other {# × {name}}}",
+      "portraits": "Portraits",
+      "groupPhotos": "Group photos",
+      "groupAlt": "Group photo {n} of {total}"
     },
     "bag": {
       "title": "Bag",

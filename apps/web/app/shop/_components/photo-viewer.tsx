@@ -14,7 +14,7 @@ const SWIPE_PX = 50;
 
 /**
  * One photo, full screen. Swipe, or the Previous and Next buttons and the arrow keys (the non-swipe alternatives, WCAG
- * 2.5.7). "Use this photo" starts the package flow with that pose; class photos are to view only (call 8). At either
+ * 2.5.7). "Use this photo" starts the package flow with that pose, a portrait or a group photo (D156 C5). At either
  * end the button that can't go further is disabled and hidden, so focus moves to the other one, or to Close when
  * there is only one photo (code review N5).
  */
@@ -31,8 +31,8 @@ export function PhotoViewer({
   onIndex: (index: number) => void;
   onClose: () => void;
   alt: (n: number, total: number) => string;
-  /** Where "Use this photo" goes, or null for photos that can't be ordered. */
-  orderHref: ((photo: ShopPhoto) => string) | null;
+  /** Where "Use this photo" goes. */
+  orderHref: (photo: ShopPhoto) => string;
 }) {
   const t = useTranslations("shop.viewer");
   const counterId = useId();
@@ -135,19 +135,12 @@ export function PhotoViewer({
             </button>
           </div>
           <div className="px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            {orderHref ? (
-              <Link
-                href={orderHref(photo)}
-                className={cn(
-                  shopButton,
-                  "w-full bg-surface text-ink focus-visible:outline-surface",
-                )}
-              >
-                {t("use")}
-              </Link>
-            ) : (
-              <p className="m-0 text-center text-caption">{t("viewOnly")}</p>
-            )}
+            <Link
+              href={orderHref(photo)}
+              className={cn(shopButton, "w-full bg-surface text-ink focus-visible:outline-surface")}
+            >
+              {t("use")}
+            </Link>
           </div>
         </div>
       ) : null}
