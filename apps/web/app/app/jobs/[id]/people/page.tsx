@@ -30,6 +30,7 @@ import { ClassesPanel, ClassesRow, renameButtonId } from "./classes-panel";
 import { PeopleList, rowLinkId } from "./people-list";
 import { PersonRecord } from "./person-record";
 import { PrintQrCardsDialog } from "./print-qr-cards-dialog";
+import { useReturnFocus } from "./return-focus";
 import { useSubjectChips } from "./subject-chips";
 import { SubjectsActions } from "./subjects-actions";
 import { useRoster } from "./use-roster";
@@ -94,6 +95,8 @@ function PeoplePage() {
   });
   const { chip } = chips;
   const selectedId = useSearchParams().get("child");
+  // Unfolding puts focus back on the row once the full table is back (D153, WCAG 2.4.3).
+  const returnFocusTo = useReturnFocus(selectedId, rowLinkId);
   const selected = roster.rows?.find((c) => c.id === selectedId) ?? null;
   const childHref = (childId: string) => subjectsHref(base, chip, childId);
   // The list's own address: the chip stays, the open child goes.
@@ -182,10 +185,10 @@ function PeoplePage() {
   }
 
   function closePanel() {
-    const back = opener.current ?? selectedId;
+    // Back to the row of the person who was open (↑↓ may have moved from the one first opened).
+    returnFocusTo(selectedId ?? opener.current);
     router.replace(here, { scroll: false });
     setPanelFocus(null);
-    if (back) setTimeout(() => document.getElementById(rowLinkId(back))?.focus(), 0);
   }
 
   const empty = roster.rows !== null && roster.total === 0;

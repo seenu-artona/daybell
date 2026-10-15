@@ -68,7 +68,7 @@ test("QR cards: print from the API and from People, with the checklist task", as
   await page.goto(`/app/jobs/${job.id}`);
   const progress = main.getByRole("region", { name: "Progress", exact: true });
   const qrTodo = progress.getByRole("listitem").filter({ hasText: /^Now: Print QR cards/ });
-  await expect(qrTodo.getByRole("link", { name: "Print QR cards" })).toHaveAttribute(
+  await expect(qrTodo.getByRole("link", { name: "Print QR cards", exact: true })).toHaveAttribute(
     "href",
     `/app/jobs/${job.id}/people?print=qr`,
   );
@@ -110,7 +110,7 @@ test("QR cards: print from the API and from People, with the checklist task", as
   await progress.getByRole("button", { name: /^Prepare\s*Done/ }).click();
   const qrDone = progress.getByRole("listitem").filter({ hasText: /^Done: QR cards printed/ });
   await expect(qrDone).toContainText(owner);
-  await expect(qrDone.getByRole("link", { name: "Print again" })).toHaveAttribute(
+  await expect(qrDone.getByRole("link", { name: "Print again", exact: true })).toHaveAttribute(
     "href",
     `/app/jobs/${job.id}/people?print=qr`,
   );
@@ -127,7 +127,7 @@ test("QR cards: print from the API and from People, with the checklist task", as
   await page.reload();
   // The header line, not the step to do now (whose screen-reader word also reads "Now:").
   await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Prepare");
-  await qrTodo.getByRole("link", { name: "Print QR cards" }).click();
+  await qrTodo.getByRole("link", { name: "Print QR cards", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
   const dialog = page.getByRole("dialog", { name: "Print QR cards" });
   await expect(dialog).toBeVisible();

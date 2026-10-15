@@ -27,7 +27,7 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   await page.goto("/app/settings/templates");
   const sections = main.getByRole("navigation", { name: "Settings sections", exact: true });
   await expect(sections.getByRole("link")).toHaveText(["Team", "Stripe", "Taxes", "Templates"]);
-  await expect(sections.getByRole("link", { name: "Templates" })).toHaveAttribute(
+  await expect(sections.getByRole("link", { name: "Templates", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );
@@ -168,11 +168,11 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   await expect(
     photoMain.getByRole("navigation", { name: "Settings sections" }).getByRole("link"),
   ).toHaveText(["Team", "Templates"]);
-  await expect(photoMain.getByRole("link", { name: "New template" })).toHaveCount(0);
+  await expect(photoMain.getByRole("link", { name: "New template", exact: true })).toHaveCount(0);
   await photographer.goto(templateUrl);
   await expect(photoMain.getByText("Only owners and admins change templates.")).toBeVisible();
   await expect(photoMain.getByRole("button", { name: /^QR cards ready/ })).toHaveCount(0);
-  await expect(photoMain.getByRole("button", { name: "More actions" })).toHaveCount(0);
+  await expect(photoMain.getByRole("button", { name: "More actions", exact: true })).toHaveCount(0);
   expect(
     (
       await photographer.request.patch(`/api/v1/job-templates/${templateId}`, {

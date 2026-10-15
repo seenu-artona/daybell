@@ -156,7 +156,7 @@ test("job page layout, menu search and studio separation", async ({
   ]);
   await expect(step(/^Done: Job created/)).toBeVisible();
   await expect(
-    step(/^Now: Add subjects/).getByRole("link", { name: "Add subjects" }),
+    step(/^Now: Add subjects/).getByRole("link", { name: "Add subjects", exact: true }),
   ).toHaveAttribute("href", `/app/jobs/${job.id}/people`);
   await expect(step(/^Next: Picture day/)).toContainText("May 1, 2030");
   await expect(step(/^Next: Publish shop/)).toContainText("When photos are checked");
@@ -199,7 +199,7 @@ test("job page layout, menu search and studio separation", async ({
   );
   await sell.getByRole("button", { name: "Close" }).last().click();
   await step(/^Now: Add subjects/)
-    .getByRole("link", { name: "Add subjects" })
+    .getByRole("link", { name: "Add subjects", exact: true })
     .click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
 
@@ -237,7 +237,7 @@ test("job page layout, menu search and studio separation", async ({
   await main.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(step(/^Done: Subjects added/)).toBeVisible();
   await expect(
-    step(/^Now: Print QR cards/).getByRole("link", { name: "Print QR cards" }),
+    step(/^Now: Print QR cards/).getByRole("link", { name: "Print QR cards", exact: true }),
   ).toHaveAttribute("href", `/app/jobs/${job.id}/people?print=qr`);
 
   // The Jobs list no longer shows the checklist (D147): a draft's row says "Not selling yet" where the shop closes.

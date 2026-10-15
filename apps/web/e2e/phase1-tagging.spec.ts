@@ -231,7 +231,7 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
     progress
       .getByRole("listitem")
       .filter({ hasText: /^Now: Check photos/ })
-      .getByRole("link", { name: "Check photos" }),
+      .getByRole("link", { name: "Check photos", exact: true }),
   ).toHaveAttribute("href", `/app/jobs/${jobId}/photos/review`);
   await page.goto(`/app/jobs/${jobId}/photos/review`);
   await expect(

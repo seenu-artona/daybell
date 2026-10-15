@@ -109,8 +109,8 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(main.getByRole("button", { name: "Publish shop", exact: true })).toBeVisible();
 
   // Editing uses the same form, from More actions.
-  await main.getByRole("button", { name: "More actions" }).click();
-  await main.getByRole("button", { name: "Edit job" }).click();
+  await main.getByRole("button", { name: "More actions", exact: true }).click();
+  await main.getByRole("button", { name: "Edit job", exact: true }).click();
   const edit = page.getByRole("dialog", { name: "Edit job" });
   await edit.getByLabel("Job name").fill(`${job} (edited)`);
   await edit.getByRole("button", { name: "Save changes" }).click();

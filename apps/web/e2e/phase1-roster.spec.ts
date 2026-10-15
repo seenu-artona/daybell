@@ -155,7 +155,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   // 4. Upload a CSV list: a full page in the job's frame (no phone notice, D136). Columns are guessed, rows checked on
   // the server, then imported together; it lands back on Subjects.
   await main.getByRole("button", { name: "Add subjects", exact: true }).click();
-  await main.getByRole("link", { name: "Upload a list" }).click();
+  await main.getByRole("link", { name: "Upload a list", exact: true }).click();
   await expect(main.getByRole("heading", { name: "Import roster", level: 2 })).toBeVisible();
   await expect(main.getByRole("heading", { name: jobName, level: 1 })).toBeVisible();
   await expect(main.getByRole("link", { name: "Subjects", exact: true })).toHaveAttribute(
@@ -206,7 +206,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
 
   // 5. Import an Excel file.
   await main.getByRole("button", { name: "Add subjects", exact: true }).click();
-  await main.getByRole("link", { name: "Upload a list" }).click();
+  await main.getByRole("link", { name: "Upload a list", exact: true }).click();
   await main.getByLabel("Roster file (CSV or Excel)").setInputFiles(XLSX);
   await expect(main.getByLabel("Import “Student ID” as")).toHaveValue("studentId");
   await main.getByRole("button", { name: "Check rows" }).click();
@@ -277,10 +277,9 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   // The duplicates notice switches to the Possible duplicates chip.
   await main.getByRole("button", { name: "Show them" }).click();
   await expect(page).toHaveURL(/\?show=duplicates$/);
-  await expect(chips.getByRole("link", { name: "Possible duplicates" })).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
+  await expect(
+    chips.getByRole("link", { name: "Possible duplicates", exact: true }),
+  ).toHaveAttribute("aria-current", "true");
   await expect(main.getByRole("link", { name: "Ava Patel", exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "Olivia Brown", exact: true })).toHaveCount(0);
   await chips.getByRole("link", { name: "All", exact: true }).click();
@@ -386,7 +385,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await row("Noah Garcia").getByRole("cell").nth(1).click();
   await expect(main.getByRole("heading", { name: "Noah Garcia", level: 2 })).toBeFocused();
   await main.getByRole("button", { name: "More actions for Noah Garcia" }).click();
-  await main.getByRole("button", { name: "Remove child" }).click();
+  await main.getByRole("button", { name: "Remove child", exact: true }).click();
   let confirm = page.getByRole("dialog", { name: "Remove child?" });
   await expect(confirm).toContainText(
     "Noah Garcia and their access code will be deleted. This can't be undone.",
