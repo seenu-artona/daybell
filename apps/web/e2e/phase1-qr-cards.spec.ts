@@ -133,7 +133,7 @@ test("QR cards: print from the API and from People, with the checklist task", as
   await expect(dialog).toBeVisible();
 
   // 5. The dialog: choose a class, add blank cards, download the PDF.
-  await dialog.getByLabel("Choose classes", { exact: true }).check();
+  await dialog.getByLabel("Choose by Class", { exact: true }).check();
   await dialog.getByLabel("5A (2 cards)", { exact: true }).check();
   await dialog.getByLabel("Blank cards", { exact: true }).fill("3");
   await expect(dialog.getByText("5 cards on 2 sheets of US Letter", { exact: true })).toBeVisible();

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  type ColumnPerson,
   cardFirst,
   chunk,
   cleanGroupName,
   columnGroupsPreview,
+  columnValue,
   deleteNeedsDestination,
+  GROUP_COLUMNS,
   groupNameProblem,
   MAX_GROUP_CHANGE,
   membersChange,
@@ -81,13 +84,20 @@ describe("deleting a group (C4)", () => {
 });
 
 describe("columnGroupsPreview (C3)", () => {
+  const person = (
+    klass: string | null,
+    grade: string | null,
+    firstName = "Maya",
+    lastName = "Johnson",
+    studentId: string | null = null,
+  ) => ({ class: klass === null ? null : { name: klass }, grade, firstName, lastName, studentId });
   const people = [
-    { class: { name: "4B" }, grade: "3" },
-    { class: { name: "4b " }, grade: " 3" },
-    { class: { name: "Choir" }, grade: "K" },
-    { class: null, grade: null },
-    { class: { name: "Room 10" }, grade: "" },
-    { class: { name: "Room 2" }, grade: "4" },
+    person("4B", "3", "Maya", "Johnson", "S-1"),
+    person("4b ", " 3", "Liam", "Chen", "s-1"),
+    person("Choir", "K", "Ava", "Johnson"),
+    person(null, null, "Noah", "brown"),
+    person("Room 10", ""),
+    person("Room 2", "4"),
   ];
 
   it("makes one group per value, skips names already used, and none for blanks", () => {
@@ -101,6 +111,28 @@ describe("columnGroupsPreview (C3)", () => {
       "Room 2",
       "Room 10",
     ]);
+  });
+
+  it("reads any roster column: names and student IDs too (C3)", () => {
+    expect(GROUP_COLUMNS).toEqual(["class", "grade", "firstName", "lastName", "studentId"]);
+    expect(columnGroupsPreview(people, "lastName", [{ name: "chen" }])).toEqual({
+      make: [
+        { name: "brown", people: 1 },
+        { name: "Johnson", people: 4 },
+      ],
+      skipped: ["Chen"],
+    });
+    expect(columnGroupsPreview(people, "firstName", []).make.map((g) => g.name)).toEqual([
+      "Ava",
+      "Liam",
+      "Maya",
+      "Noah",
+    ]);
+    expect(columnGroupsPreview(people, "studentId", [])).toEqual({
+      make: [{ name: "S-1", people: 2 }],
+      skipped: [],
+    });
+    expect(columnValue(people[3] as ColumnPerson, "class")).toBeNull();
   });
 
   it("reads grades too", () => {

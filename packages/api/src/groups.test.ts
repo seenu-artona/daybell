@@ -35,7 +35,11 @@ describe("groups (D156, ADR 0030)", () => {
   it("are made from Class or Grade only (C3)", () => {
     expect(groupsFromColumnInput.parse({ column: "class" }).column).toBe("class");
     expect(groupsFromColumnInput.parse({ column: "grade" }).column).toBe("grade");
-    expect(groupsFromColumnInput.safeParse({ column: "teacher" }).success).toBe(false);
+    for (const column of ["firstName", "lastName", "studentId"])
+      expect(groupsFromColumnInput.parse({ column }).column).toBe(column);
+    // No Teacher field on the roster; never the parent's email or a yes/no flag (ADR 0030, call 9).
+    for (const column of ["teacher", "parentEmail", "doNotPhotograph", "doNotPublish"])
+      expect(groupsFromColumnInput.safeParse({ column }).success).toBe(false);
   });
 
   it("change members 500 at a time, nobody added and removed at once", () => {

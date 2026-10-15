@@ -1,7 +1,6 @@
 "use client";
 
 import type { Class, ListFilterChip } from "@daybell/api";
-import type { GroupLabel } from "@daybell/core";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
@@ -48,7 +47,7 @@ export function useSubjectChips({
   grades: readonly string[];
   /** The roster and its classes have loaded (so a class missing from them is really gone). */
   loaded: boolean;
-  word: GroupLabel;
+  word: string;
   seesOrders: boolean;
 }): {
   chip: SubjectChip;

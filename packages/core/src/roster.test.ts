@@ -40,6 +40,16 @@ describe("guessing columns", () => {
     expect(normalizeHeader("  First_Name ")).toBe("first name");
   });
 
+  it("reads the job's own name for the class field as the class column (ADR 0030, call 29)", () => {
+    expect(guessColumns(["First name", "Cohort"])).toEqual({ 0: "firstName", 1: null });
+    expect(guessColumns(["First name", "Cohort"], "Cohort")).toEqual({
+      0: "firstName",
+      1: "class",
+    });
+    // The job's word wins over another column that only looks like a class.
+    expect(guessColumns(["Teacher", "Pod"], "Pod")).toEqual({ 0: null, 1: "class" });
+  });
+
   it("maps a typical export", () => {
     expect(
       guessColumns([

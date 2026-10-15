@@ -226,6 +226,10 @@ export const job = z
       description:
         "When the shop first opened; null while a draft and for shops opened before templates.",
     }),
+    classLabel: z.string().meta({
+      description:
+        "What this job calls the roster's class field (Class, Team, Homeroom…), from its template when it was made.",
+    }),
     template: z.object({ id: z.uuid(), name: z.string() }).nullable().meta({
       description:
         "The template the job was made from (D154); null for jobs made before templates, or when it was deleted.",
@@ -304,6 +308,9 @@ export const jobTemplate = z
       .nullable()
       .meta({ description: "The price list new jobs get; null: the studio's default." }),
     deliverToSchool: z.boolean(),
+    classLabel: z.string().meta({
+      description: "What new jobs call the roster's class field (Class, Team, Homeroom…).",
+    }),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
   })

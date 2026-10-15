@@ -5,7 +5,6 @@ import {
   applyFilters,
   canSeeOrders,
   gradeOptions,
-  groupLabel,
   matchesSearch,
   ROSTER_VIEW_MAX,
 } from "@daybell/core";
@@ -66,7 +65,8 @@ function PeoplePage() {
   const { me } = useStudio();
   const seesOrders = canSeeOrders(me.studio.role);
   const { job, summary, refreshSummary, canEditRoster: canEdit } = useJob();
-  const word = groupLabel(job.type);
+  // The job's own name for the class field, from its template (ADR 0030, call 29).
+  const word = job.classLabel;
   const base = tabHref(job.id, "people");
   const roster = useRoster(job.id);
   const photoGroups = usePhotoGroups(job.id);

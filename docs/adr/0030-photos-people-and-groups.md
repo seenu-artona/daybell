@@ -1,11 +1,11 @@
 # 0030 — Photos: People and Groups
 
-- Status: Proposed with UI round 6 (branch `ui/round6-photos`, stacked on `ui/round5-job-pages`). Every call under
+- Status: Proposed with UI round 6 (branch `ui/round6-photos`, on `main` after round 5's merge). Every call under
   "Calls for Seenu" is provisional until Seenu reviews it (CLAUDE.md rule 7: nothing decided is changed silently).
 - Decisions implemented: D156 (Job › Photos: People and Groups), with Seenu's answers of Oct 14, 2026 (below).
 - Decisions touched: D32 and F16 (QR tagging), D60 (what parents see), D96 (studio separation, events, words in files),
   D113 (Montréal; ids only in addresses, events and jobs), D91, D92, D147 and D148 (chips; "ordered"), D151 (the tab
-  row), D153 (Subjects).
+  row), D153 (Subjects), D154 (templates: the class field's label), D137 (its words by job type are replaced).
 - Amends: 0016 (an upload batch has a kind and may name a photo group), 0018 (class photo sets become group photos;
   the review moves into Photos' To review; albums and No photos yet leave Photos), 0022 (parents see group photos
   through group membership, not their class), 0026 (Photos' chips: All, To review and "+ Add filter › Group…"; Subjects
@@ -31,6 +31,13 @@ These override the architect's plan where they differ.
 - **C13** "Give to a person" is also in the open photo's panel (the same action as To review's).
 - **C15** People lists everyone with photos, by last name; people with no photos are not listed; their first card
   photo leads their line.
+- **C3, as built:** Make groups from a column offers every roster column that exists: the class (in the job's word
+  for it, so Team on a sports template), grade, first name, last name and student ID. The roster has no Teacher field
+  and no custom columns today, so neither is offered; when they exist they join the list.
+- **Call 29 answered (Oct 14): the class field's label comes from the job's template**, never "Group". A template's
+  Subjects and photos section names it (free text, 1 to 30 characters, "Class" unless changed); a new job copies it
+  like the template's other rules. Subjects' column, chips, record, the QR card text and the import mapping use the
+  job's label. This replaces D137's words by job type (class, team, group).
 
 ## Naming map
 
@@ -159,9 +166,11 @@ Calls made in this round:
 7. **Other card photos** (card photos linked to no card) stay listed at the end of To review, not blocking Mark
    reviewed, so owners and admins can still undo a card photo mark there.
 8. **Mark reviewed** sits on To review's own heading line, with the reason it is disabled in words, not in the tab row.
-9. **Make groups from a column** offers Class and Grade: the roster has no Teacher, Team or custom columns yet. A
-   group takes the value as its name ("4B", "3"). Values are compared ignoring case. All new groups and members land
-   at once or none (the 500-group limit is checked first).
+9. **Make groups from a column** (decided: C3, above). A group takes the value as its name ("4B", "3", "Johnson").
+   Values are compared ignoring case. All new groups and members land at once or none (the 500-group limit is checked
+   first). **New: needs Seenu:** parent email and the two yes/no flags are not offered. A group named by an email
+   would show the whole address, which Subjects masks (Seenu, Oct 14), and a yes/no flag has no value to name a group
+   by. Should they be offered, and how would a flag's group be named?
 10. **A tagging run that adds people to the upload's group** (C7) writes one `photo_group.members_changed` event,
     attributed to whoever started the upload.
 11. **Classes are renamed in the API's inputs too** (`classId`, `classIds`, an import row's `class`, the
@@ -194,8 +203,22 @@ Calls made in this round:
     first card photo and other read card photos can't.
 27. **C9 lives in core** (`reviewActions`): a Leftover's `confirm` is false, so every screen and the API agree.
 28. **A binned photo's detail** has `tagging: null` (no Give to a person from the bin).
-29. **Seniors and other non-school jobs** still say "Group" for the class field (D137's word), so their Subjects can show
-    a "Group" column (the class) beside "Groups" (photo groups). Should non-school jobs' class field get another word?
+29. **Answered by Seenu** (see Seenu's answers above): the class field's label comes from the template. How it was
+    built, each **New: needs Seenu**:
+    - **Free text** (1 to 30 characters, trimmed, no control characters), not a preset list plus custom: simpler, and
+      it covers Class, Team, Homeroom or anything else.
+    - **The label is used as written**, so the words around it don't need a plural or a lower-case form: "No Homeroom",
+      "Add Homeroom", "Homeroom list 3", the footer "12 children · Homeroom: 3 · no duplicates", an import's
+      "Homeroom: 1 new", QR cards' "Homeroom: 4B". A preset list could carry plurals later if Seenu prefers.
+    - **A job's label is fixed** when the job is made (the database refuses a change). It isn't one of the rules a job
+      can change for itself, and isn't shown under "Changed for this job".
+    - **Jobs made before this** keep the word they showed: Team for sports jobs, Class for every other (no job says
+      "Group" any more). Existing templates, and every studio's first template, say Class; a studio that photographs
+      sports changes its template to Team.
+    - **Import:** a column headed with the job's label (e.g. "Section") is guessed as the class column, ahead of the
+      usual names.
+    - **Photos' dialogs** that show people with their class (Give to a person, Add or remove people, a blank card's
+      class) and Make groups from a column use the job's label too.
 30. **Deleting a group whose photos go to the bin** tags the job's due uploads again before answering, as binning does,
     so To review's counts are right when the dialog closes.
 31. **Subjects' Group chip** (`?group=<id>`, saved as `group`) lists the group's members; a group that is deleted is
@@ -211,13 +234,15 @@ activity log.
 
 pgTAP: new `029_photo_groups` (row-level security and grants, studio and job leaks, links written only at
 registration, roster imports, new groups and tagging runs never changing links or members, add-to-group add only,
-delete to a group or the bin and sold photos refused, from a column, events with ids only, the C2 migration: class-set
+delete to a group or the bin and sold photos refused, from any roster column (never parent email or a flag), events with ids only, the C2 migration: class-set
 photos become group photos in no group that parents can't see, no `class_set` left in any function body); updated
 `012`, `021`, `022`, `026` and `007`. Core (tagging with group uploads, group rules, the Group filter), API contracts,
 route tests with cross-studio and cross-job leak tests, role and region tests and a console spy for names, the shop's
-`groupPhotos`. e2e: rewritten `phase1-tagging` (To review, People, a group upload), updated `phase1-photos`,
+`groupPhotos`. The class label: new `030_class_label` (templates set it, jobs copy it and never change it, owners
+and admins only, another studio none, events name the field only), core's label rules and header guessing, the
+template routes, Subjects' screens in the job's word. e2e: rewritten `phase1-tagging` (To review, People, a group upload), updated `phase1-photos`,
 `phase1-roster`, `phase1-roster-load`, `phase1-qr-cards`, `phase1-going-live`, `shop-gallery` and the helpers, new
-`phase1-photo-groups` (with its cross-studio checks). The e2e specs could not be run in this environment.
+`phase1-photo-groups` (with its cross-studio checks); `phase1-templates` sets a template's label and sees it on a new job. The e2e specs could not be run in this environment.
 
 ## Rejected
 

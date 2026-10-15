@@ -317,6 +317,24 @@ describe("groups", () => {
     expect(body.notInGroup).toBe(4);
   });
 
+  it("makes groups from any roster column (C3), never the parent's email or a flag (call 9)", async () => {
+    scope.mockResolvedValue({ supabase: db(), studio: photographer, userId: "u" });
+    const route = await load("jobs/[id]/groups/from-column", "POST")();
+    for (const column of ["class", "grade", "firstName", "lastName", "studentId"]) {
+      groupRpc.mockResolvedValueOnce({ data: { groups: 2, members: 5, skipped: 1 }, error: null });
+      const res = await route(json({ column }), ctx(JOB));
+      expect(await res.json()).toEqual({ made: 2, members: 5, skipped: 1 });
+      expect(groupRpc).toHaveBeenLastCalledWith("ca", "make_photo_groups_from_column", "u", {
+        p_job_id: JOB,
+        p_column: column,
+      });
+    }
+    groupRpc.mockClear();
+    for (const column of ["parentEmail", "doNotPhotograph", "teacher"])
+      expect((await route(json({ column }), ctx(JOB))).status).toBe(400);
+    expect(groupRpc).not.toHaveBeenCalled();
+  });
+
   it("makes a group for the person, with a cleaned name", async () => {
     groupRpc.mockResolvedValue({ data: GROUP, error: null });
     scope.mockResolvedValue({ supabase: db(), studio: photographer, userId: "u" });

@@ -1,7 +1,9 @@
 import { DATA_REGIONS } from "@daybell/config";
 import {
   CARRIERS,
+  classLabelValid,
   cleanGroupName,
+  DEFAULT_CLASS_LABEL,
   GROUP_COLUMNS,
   GROUP_PHOTOS_TO,
   HEAD_OFFICE_PROVINCES,
@@ -293,6 +295,16 @@ const templateName = z
   .max(80, { error: "validation.tooLong" })
   .meta({ description: "Only the studio sees it, e.g. School Fall." });
 
+/** What a template's jobs call the roster's class field (ADR 0030, call 29): free text, cleaned, 1 to 30 characters. */
+const classLabel = z
+  .string({ error: "validation.classLabel" })
+  .trim()
+  .refine(classLabelValid, { error: "validation.classLabel" })
+  .meta({
+    description:
+      "What new jobs call the roster's class field, e.g. Class, Team or Homeroom (1 to 30 characters). Copied onto each new job.",
+  });
+
 /** A new template: a name, and any rules (the rest start as today's defaults: nothing planned, closed by hand). */
 export const jobTemplateInput = z
   .strictObject(
@@ -309,6 +321,7 @@ export const jobTemplateInput = z
       deliverToSchool: z.boolean({ error: "validation.invalid" }).default(false).meta({
         description: "New jobs offer free delivery to the school as well as home shipping.",
       }),
+      classLabel: classLabel.default(DEFAULT_CLASS_LABEL),
     },
     { error: "validation.unknownField" },
   )
@@ -326,6 +339,7 @@ export const jobTemplatePatch = z
       shopClosesDays: ruleFields.shopClosesDays.optional(),
       priceListId: z.uuid({ error: "validation.priceList" }).nullable().optional(),
       deliverToSchool: z.boolean({ error: "validation.invalid" }).optional(),
+      classLabel: classLabel.optional(),
     },
     { error: "validation.unknownField" },
   )
@@ -1045,11 +1059,11 @@ export const photoGroupInput = z.object({ name: groupName });
 export type PhotoGroupInput = z.infer<typeof photoGroupInput>;
 export const photoGroupPatch = photoGroupInput;
 
-/** Make a group for each value of a roster column, once (C3): Class or Grade. */
+/** Make a group for each value of a roster column, once (C3: any roster column; ADR 0030, call 9). */
 export const groupsFromColumnInput = z.object({
   column: z.enum(GROUP_COLUMNS, { error: "validation.invalid" }).meta({
     description:
-      "class or grade. Names already used by a group are skipped; blank values make no group.",
+      "class (the job's classes, teams or groups), grade, firstName, lastName or studentId. Names already used by a group are skipped; blank values make no group. Parent email and the yes/no flags aren't columns groups are made from.",
   }),
 });
 export type GroupsFromColumnInput = z.infer<typeof groupsFromColumnInput>;

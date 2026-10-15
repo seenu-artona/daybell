@@ -15,7 +15,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * POST /api/v1/job-templates/:id/copy — owners and admins duplicate one of the studio's templates under a new name
- * (the screens send it from the locale files): the same rules, price list and delivery. Not the default.
+ * (the screens send it from the locale files): the same rules, price list, delivery and class label. Not the default.
  */
 export const POST = handle(async (request: Request, ctx: Ctx) => {
   const id = await pathId(ctx, "Template not found.");
@@ -31,6 +31,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
       name,
       price_list_id: source.priceListId,
       deliver_to_school: source.deliverToSchool,
+      class_label: source.classLabel,
       ...rulesToDb(source.rules),
     })
     .select("id")

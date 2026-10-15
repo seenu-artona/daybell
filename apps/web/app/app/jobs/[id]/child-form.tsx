@@ -1,7 +1,6 @@
 "use client";
 
 import type { Child, Class, ClassesResponse, ClassResponse, Job } from "@daybell/api";
-import type { GroupLabel } from "@daybell/core";
 import { Banner, Button, Field } from "@daybell/ui";
 import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -28,7 +27,7 @@ export function GroupForm({
 }: {
   jobId: string;
   group: GroupRef | null;
-  word: GroupLabel;
+  word: string;
   initialName?: string;
   onCancel: () => void;
   onSaved: (group: Class) => void;
@@ -102,7 +101,7 @@ export function ChildForm({
   onRemoved,
 }: {
   job: Pick<Job, "id" | "status">;
-  word: GroupLabel;
+  word: string;
   child: Child | null;
   onCancel: () => void;
   onSaved: (child: Child) => void;

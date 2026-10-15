@@ -1164,7 +1164,7 @@ end;
 $$;
 
 -- Makes a group for each value of a roster column, once (D156: a shortcut, not a switch; C3; ADR 0030, call 9):
--- p_column 'class' or 'grade'. Values are compared ignoring case; blank values make no group; a value whose name is
+-- p_column 'class', 'grade', 'firstName', 'lastName' or 'studentId'. Values are compared ignoring case; blank values make no group; a value whose name is
 -- already a group is skipped (its group is left alone). Each new group's members are the people with that value. All
 -- or nothing: the 500-group limit is checked first. Returns {groups, members, skipped}.
 create function public.make_photo_groups_from_column(p_actor uuid, p_job_id uuid, p_column text) returns jsonb
@@ -1186,15 +1186,23 @@ begin
   end if;
   v_previous := app.act_for(p_actor, v_studio);
   perform app.assert_job_open(p_job_id);
-  if coalesce(p_column, '') not in ('class', 'grade') then
-    raise exception 'The column is class or grade' using errcode = '22023';
+  -- Every roster column whose values name a group (C3; ADR 0030, call 9): the class (or team), grade, first name, last
+  -- name and student ID. The API's words. Parent email and the two yes/no flags aren't offered (call 9).
+  if coalesce(p_column, '') not in ('class', 'grade', 'firstName', 'lastName', 'studentId') then
+    raise exception 'The column is class, grade, firstName, lastName or studentId' using errcode = '22023';
   end if;
   perform pg_advisory_xact_lock(hashtextextended('photo_groups:' || p_job_id::text, 0));
 
   -- One row per distinct value (ignoring case), with its people and whether a group already has its name.
   for r in
     with vals as (
-      select c.id as child_id, btrim(case p_column when 'class' then k.name else c.grade end) as value
+      select c.id as child_id, btrim(case p_column
+          when 'class' then k.name
+          when 'grade' then c.grade
+          when 'firstName' then c.first_name
+          when 'lastName' then c.last_name
+          when 'studentId' then c.student_id
+        end) as value
       from public.children c
       left join public.job_groups k on k.id = c.group_id and k.studio_id = c.studio_id
       where c.job_id = p_job_id and c.studio_id = v_studio

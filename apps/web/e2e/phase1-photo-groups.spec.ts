@@ -5,12 +5,12 @@ import { expect, test } from "@playwright/test";
 import { cardCodes, photo, signUpOwner } from "./helpers";
 
 // Photos' Groups (D156; Seenu's answers C1-C6, C13, C15; ADR 0030) with STORAGE_DRIVER=local. A school job with classes
-// 4B (Maya, Liam) and 5A (Ava), and Noah without a class. The owner makes a group for each class from the Class column,
-// makes "Choir" by hand (a second "Choir" is refused) and adds Maya and Noah; an individual upload adds everyone it is
-// given to to Choir (add only, C7); group photos are uploaded into Choir; on Choir's page one is also shown in 4B and
-// another moved to 5A; Subjects shows the group's members (?group=<id>, an id only) and saves a Group chip; 5A is
-// deleted with its photo going to Choir. Another studio sees and changes none of it, and can't upload into it. Desktop
-// only (D136). Locators are scoped to main, a region or a dialog, and exact.
+// 4B (Maya, Liam) and 5A (Ava), and Noah without a class. The owner makes a group for each class from the Class column
+// (any roster column is offered), makes "Choir" by hand (a second "Choir" is refused) and adds Maya and Noah; an
+// individual upload adds everyone it is given to to Choir (add only, C7); group photos are uploaded into Choir; on
+// Choir's page one is also shown in 4B and another moved to 5A; Subjects shows the group's members (?group=<id>, an id
+// only) and saves a Group chip; 5A is deleted with its photo going to Choir. Another studio sees and changes none of
+// it, and can't upload into it. Desktop only (D136). Locators are scoped to main, a region or a dialog, and exact.
 const run = `${Date.now()}`;
 
 const pastDay = () => new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
@@ -68,6 +68,10 @@ test("Photo groups: from a column, by hand, by upload, moved and shown, in Subje
   // 2. Make groups from a column: Class, with what it makes said before anything is saved (C3).
   await main.getByRole("button", { name: "Make groups from a column", exact: true }).click();
   const column = page.getByRole("dialog", { name: "Make groups from a column", exact: true });
+  // Any roster column that names a group (C3): the class (in the job's word for it), grade, names and student ID.
+  await expect(column.getByRole("radio")).toHaveCount(5);
+  for (const name of ["Grade", "First name", "Last name", "Student ID"])
+    await expect(column.getByRole("radio", { name, exact: true })).not.toBeChecked();
   await expect(column.getByRole("radio", { name: "Class", exact: true })).toBeChecked();
   await expect(column.getByText(/^Makes 2 groups: /)).toBeVisible();
   await column.getByRole("button", { name: "Make groups", exact: true }).click();
@@ -107,7 +111,7 @@ test("Photo groups: from a column, by hand, by upload, moved and shown, in Subje
   const members = page.getByRole("dialog", { name: "Add or remove people: Choir", exact: true });
   // Each person is named with their class beside them.
   await members.getByRole("checkbox", { name: /^Maya Johnson\s*4B$/ }).check();
-  await members.getByRole("checkbox", { name: /^Noah Garcia\s*No class$/ }).check();
+  await members.getByRole("checkbox", { name: /^Noah Garcia\s*No Class$/ }).check();
   await expect(members.getByText("2 people ticked", { exact: true })).toBeVisible();
   await members.getByRole("button", { name: "Save", exact: true }).click();
   await expect(main.getByText("2 people added, 0 taken out.", { exact: true })).toBeVisible();

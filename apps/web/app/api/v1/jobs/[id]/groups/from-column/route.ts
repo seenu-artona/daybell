@@ -15,7 +15,7 @@ export const preferredRegion = "yul1";
 type Ctx = { params: Promise<{ id: string }> };
 
 /**
- * POST /api/v1/jobs/:id/groups/from-column — Make groups from a column (C3): one group per value of Class or Grade, its
+ * POST /api/v1/jobs/:id/groups/from-column — Make groups from a column (C3): one group per value of a roster column (class, grade, first or last name, student ID; ADR 0030, call 9), its
  * people as members, once (D156: a shortcut, not a switch). Names already used by a group are skipped; blank values make
  * no group; all or nothing (groups.limit). Owners, admins and photographers.
  */

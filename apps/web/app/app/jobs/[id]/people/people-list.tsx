@@ -1,7 +1,6 @@
 "use client";
 
 import type { RosterChild } from "@daybell/api";
-import type { GroupLabel } from "@daybell/core";
 import {
   Badge,
   ClickableRow,
@@ -107,7 +106,7 @@ export function PeopleList({
   onOpen: (childId: string) => void;
   /** The name link was used: it updates the address itself; the page only notes who opened the person. */
   onLinkOpen: (childId: string) => void;
-  word: GroupLabel;
+  word: string;
   busy: boolean;
   /** The card's footer: the roster's counts. */
   footer: string;

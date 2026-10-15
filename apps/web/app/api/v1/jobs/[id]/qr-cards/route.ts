@@ -1,6 +1,6 @@
 import { ApiError, QR_CARD_HEADERS, type QrCardStatus, qrCardsInput } from "@daybell/api";
 import { shopUrl } from "@daybell/config";
-import { groupLabel, type JobType, shopLinkText } from "@daybell/core";
+import { DEFAULT_CLASS_LABEL, shopLinkText } from "@daybell/core";
 import { NextResponse } from "next/server";
 import { createTranslator } from "next-intl";
 import { DEFAULT_LOCALE } from "@/i18n/request";
@@ -70,11 +70,11 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   const job = check(
     await supabase
       .from("jobs")
-      .select("id, type, internal_number")
+      .select("id, internal_number, class_label")
       .eq("studio_id", studio.id)
       .eq("id", jobId)
       .maybeSingle(),
-  ) as { id: string; type: JobType; internal_number: string } | null;
+  ) as { id: string; internal_number: string; class_label?: string } | null;
   if (!job) throw new ApiError("not_found", "Job not found.");
 
   if (input.childId) {
@@ -134,7 +134,8 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
     });
 
   const t = createTranslator({ locale: DEFAULT_LOCALE, messages, namespace: "pdf.qrCards" });
-  const group = groupLabel(job.type);
+  // The card says the class in the job's own word for it (ADR 0030, call 29).
+  const group = job.class_label ?? DEFAULT_CLASS_LABEL;
   let rendered: Awaited<ReturnType<typeof renderQrCardsPdf>>;
   try {
     rendered = await renderQrCardsPdf(cards, {

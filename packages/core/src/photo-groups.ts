@@ -16,8 +16,13 @@ export const PEOPLE_PAGE_SIZE = 50;
 /** Photos in a person's line before Show all (card photos included, the first card photo first). */
 export const PERSON_STRIP_PHOTOS = 12;
 
-/** The roster columns groups can be made from (C3; the roster has no Teacher, Team or custom columns yet: call 9). */
-export const GROUP_COLUMNS = ["class", "grade"] as const;
+/**
+ * The roster columns groups can be made from (C3: any roster column; ADR 0030, call 9): the class (a team or group on
+ * other job types), grade, first name, last name and student ID. The roster has no Teacher or custom columns yet. Parent
+ * email and the yes/no flags are left out (call 9: an email would show unmasked as a group's name; a flag has no value
+ * to name a group by).
+ */
+export const GROUP_COLUMNS = ["class", "grade", "firstName", "lastName", "studentId"] as const;
 export type GroupColumn = (typeof GROUP_COLUMNS)[number];
 
 /** Where a deleted group's photos go (C4): another group, or the bin. */
@@ -106,20 +111,45 @@ export interface ColumnGroupsPreview {
   skipped: string[];
 }
 
+/** The roster fields a column is read from. */
+export interface ColumnPerson {
+  class: { name: string } | null;
+  grade: string | null;
+  firstName: string;
+  lastName: string;
+  studentId: string | null;
+}
+
+/** A person's value in a roster column, or null when blank. */
+export function columnValue(person: ColumnPerson, column: GroupColumn): string | null {
+  switch (column) {
+    case "class":
+      return person.class?.name ?? null;
+    case "grade":
+      return person.grade;
+    case "firstName":
+      return person.firstName;
+    case "lastName":
+      return person.lastName;
+    case "studentId":
+      return person.studentId;
+  }
+}
+
 /**
  * The groups "Make groups from a column" would make, for the dialog to say before anything is saved: one per distinct
  * value (ignoring case and extra spaces), blank values none, a value whose name is already a group skipped. In natural
  * order. The database decides again when it runs.
  */
 export function columnGroupsPreview(
-  people: readonly { class: { name: string } | null; grade: string | null }[],
+  people: readonly ColumnPerson[],
   column: GroupColumn,
   groups: readonly { name: string }[],
 ): ColumnGroupsPreview {
   const taken = new Set(groups.map((g) => fold(g.name)));
   const values = new Map<string, { name: string; people: number }>();
   for (const person of people) {
-    const raw = column === "class" ? (person.class?.name ?? null) : person.grade;
+    const raw = columnValue(person, column);
     const name = raw === null ? "" : cleanGroupName(raw);
     if (name === "") continue;
     const key = fold(name);

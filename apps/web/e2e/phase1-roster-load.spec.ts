@@ -61,7 +61,7 @@ test(
     // People loads every page (10 × 500) and draws all 5,000 rows; grouped by class, they fall into 20 classes.
     await page.goto(`/app/jobs/${bigJob}/people`);
     // The roster's size is in the list card's footer (D144).
-    await expect(main.getByText(/^5,000 children · 20 classes · /)).toBeVisible({
+    await expect(main.getByText(/^5,000 children · Class: 20 · /)).toBeVisible({
       timeout: 60_000,
     });
     // The first page must be drawn before "Loading more…" can mean anything: before it, the text isn't there yet.

@@ -1,13 +1,7 @@
 "use client";
 
 import { fieldErrors, type RosterImportResponse, type RosterRow, rosterRow } from "@daybell/api";
-import {
-  buildRows,
-  groupLabel,
-  guessColumns,
-  ROSTER_TARGETS,
-  type RosterTarget,
-} from "@daybell/core";
+import { buildRows, guessColumns, ROSTER_TARGETS, type RosterTarget } from "@daybell/core";
 import { Badge, Banner, Button, Table, TableCell, TableHead, TableRow } from "@daybell/ui";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -76,7 +70,8 @@ export default function ImportRosterPage() {
   const [rowFilter, setRowFilter] = useState<RowFilter>("all");
   const [shown, setShown] = useState(PAGE);
 
-  const word = groupLabel(job.type);
+  // The job's own name for the class field, from its template (ADR 0030, call 29).
+  const word = job.classLabel;
   const targetLabel = (target: RosterTarget | null) =>
     target ? t(`targets.${target}`, { group: word }) : t("targets.skip", { group: word });
 
@@ -86,7 +81,7 @@ export default function ImportRosterPage() {
     try {
       const next = toTable(sheet.cells);
       setTable(next);
-      setMapping(guessColumns(next.headers));
+      setMapping(guessColumns(next.headers, word));
       setColumnsError(null);
       setProblem(null);
       setStep("columns");

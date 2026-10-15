@@ -7,7 +7,7 @@
 -- photos are group photos in no group that nobody sees (C2); events carry ids and counts only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(127);
+select plan(132);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -235,8 +235,35 @@ select is(public.make_photo_groups_from_column('33333333-3333-4333-8333-33333333
   'a0000000-0000-4000-8000-000000000001', 'grade'), '{"groups": 2, "members": 3, "skipped": 0}'::jsonb,
   'Grade makes 3 and 4; a blank grade makes no group');
 select is(pg_temp.try($$ select public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
-  'a0000000-0000-4000-8000-000000000001', 'teacher') $$), '22023 The column is class or grade',
-  'only the roster''s columns');
+  'a0000000-0000-4000-8000-000000000001', 'teacher') $$),
+  '22023 The column is class, grade, firstName, lastName or studentId', 'only the roster''s columns (no Teacher field)');
+-- The other roster columns that name a group (C3; ADR 0030, call 9), tried and then removed so the counts below stay.
+select is(public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'lastName'), '{"groups": 4, "members": 4, "skipped": 0}'::jsonb,
+  'Last name makes a group per family name');
+select is(public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'firstName'), '{"groups": 4, "members": 4, "skipped": 0}'::jsonb,
+  'First name too');
+reset role;
+update public.children set student_id = case first_name when 'Maya' then 'A-1' when 'Liam' then 'a-1' else null end
+  where job_id = 'a0000000-0000-4000-8000-000000000001';
+set local role service_role;
+select pg_temp.as_server() as server;
+select is(public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'studentId'), '{"groups": 1, "members": 2, "skipped": 0}'::jsonb,
+  'Student ID, values compared ignoring case; blank IDs make no group');
+select is(pg_temp.try($$ select public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'parentEmail') $$),
+  '22023 The column is class, grade, firstName, lastName or studentId', 'never the parent''s email (call 9)');
+select is(pg_temp.try($$ select public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'doNotPhotograph') $$),
+  '22023 The column is class, grade, firstName, lastName or studentId', 'nor a yes/no flag (call 9)');
+reset role;
+delete from public.photo_groups where job_id = 'a0000000-0000-4000-8000-000000000001'
+  and name in ('Johnson', 'Chen', 'Patel', 'Brown', 'Maya', 'Liam', 'Ava', 'Noah', 'A-1');
+update public.children set student_id = null where job_id = 'a0000000-0000-4000-8000-000000000001';
+set local role service_role;
+select pg_temp.as_server() as server;
 select is(pg_temp.try($$ select public.make_photo_groups_from_column('44444444-4444-4444-8444-444444444444',
   'a0000000-0000-4000-8000-000000000001', 'class') $$), '42501 Owners, admins and photographers only',
   'staff can''t');

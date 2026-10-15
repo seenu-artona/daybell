@@ -50,7 +50,7 @@ describe("PrintQrCardsDialog", () => {
             jobId="j1"
             roster={[1, 2, 3, 4, 5].map(child)}
             groups={[]}
-            word="class"
+            word="Class"
             onPrinted={() => {}}
           />
         </NextIntlClientProvider>,
@@ -58,9 +58,9 @@ describe("PrintQrCardsDialog", () => {
     });
     const text = container.textContent ?? "";
     expect(text).toContain("5 cards on 2 sheets of US Letter");
-    // Blank cards ask for the name and class (D138).
+    // Blank cards ask for the name and class, in the job's word for it (D138; ADR 0030, call 29).
     expect(text).toContain(
-      "Extra cards with lines for the name and class and their own access code",
+      "Extra cards with lines for the name and Class and their own access code",
     );
     const button = [...container.querySelectorAll("button")].find(
       (b) => b.textContent?.trim() === "Download PDF",

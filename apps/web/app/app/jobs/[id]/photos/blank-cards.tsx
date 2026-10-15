@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { useJob } from "../job-context";
 import { PhotoStrip } from "./photo-strip";
 import { allPlacePhotos, usePlacePhotos, useReview } from "./review-context";
 
@@ -32,6 +33,8 @@ export function BlankCards({
   onChanged: () => void;
 }) {
   const t = useTranslations("app.photos.review.blankCards");
+  // The job's own name for the class field (ADR 0030, call 29).
+  const classLabel = useJob().job.classLabel;
   const { jobId } = useReview();
   const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
@@ -50,7 +53,7 @@ export function BlankCards({
         <h3 id="review-blank-cards" className="m-0 text-h3">
           {t("title")}
         </h3>
-        <p className="m-0 text-sm text-muted">{t("intro")}</p>
+        <p className="m-0 text-sm text-muted">{t("intro", { group: classLabel })}</p>
       </div>
       {groups.map((g, i) => (
         <BlankCard
@@ -80,6 +83,8 @@ function BlankCard({
   onChanged: () => void;
 }) {
   const t = useTranslations("app.photos.review.blankCards");
+  // The job's own name for the class field (ADR 0030, call 29).
+  const classLabel = useJob().job.classLabel;
   const text = useApiText();
   const { jobId, canEdit, version, openGive } = useReview();
   const where = t("card", { n });
@@ -177,7 +182,7 @@ function BlankCard({
               />
               <div className="flex flex-col gap-1.5">
                 <label htmlFor={classId} className="text-label text-ink">
-                  {t("class")}
+                  {t("class", { group: classLabel })}
                 </label>
                 <select
                   id={classId}
@@ -185,7 +190,7 @@ function BlankCard({
                   onChange={(e) => setClassChoice(e.target.value)}
                   className="min-h-11 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 >
-                  <option value="">{t("noClass")}</option>
+                  <option value="">{t("noClass", { group: classLabel })}</option>
                   {classes.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}

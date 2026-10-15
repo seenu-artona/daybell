@@ -108,13 +108,22 @@ export function normalizeHeader(header: string): string {
     .trim();
 }
 
-/** For each column (by index), what it most likely holds, or null for "Don't import". */
-export function guessColumns(headers: readonly string[]): Record<number, RosterTarget | null> {
+/**
+ * For each column (by index), what it most likely holds, or null for "Don't import". `classLabel`, the job's own name
+ * for the class field (ADR 0030, call 29: e.g. Homeroom or Section), is the class column's first synonym.
+ */
+export function guessColumns(
+  headers: readonly string[],
+  classLabel?: string,
+): Record<number, RosterTarget | null> {
   const normalized = headers.map(normalizeHeader);
   const out: Record<number, RosterTarget | null> = {};
   for (let i = 0; i < headers.length; i++) out[i] = null;
+  const own = classLabel ? normalizeHeader(classLabel) : "";
   for (const target of ROSTER_TARGETS) {
-    for (const synonym of ROSTER_SYNONYMS[target]) {
+    const synonyms =
+      target === "class" && own !== "" ? [own, ...ROSTER_SYNONYMS.class] : ROSTER_SYNONYMS[target];
+    for (const synonym of synonyms) {
       const column = normalized.findIndex((h, i) => h === synonym && out[i] === null);
       if (column >= 0) {
         out[column] = target;

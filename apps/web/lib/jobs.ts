@@ -16,6 +16,7 @@ import type { DataRegion } from "@daybell/config";
 import {
   changedRules,
   closingDateAllowed,
+  DEFAULT_CLASS_LABEL,
   DEFAULT_RULES,
   type JobRules,
   type RulesPatch,
@@ -28,7 +29,7 @@ import { type JobStatusRpc, jobStatusRpc } from "./supabase/service";
 
 /** Columns the API reads; the client is embedded through the composite studio FK (ADR 0008). */
 export const JOB_COLUMNS =
-  "id, name, type, status, picture_day, internal_number, subjects_expected, price_list_id, deliver_to_school, closes_at, opened_at, qr_cards_days_before, shop_opens, shop_opens_days, shop_closes_days, template_rules, created_at, updated_at, client:clients (id, name, city), template:job_templates (id, name)";
+  "id, name, type, status, picture_day, internal_number, subjects_expected, price_list_id, deliver_to_school, closes_at, opened_at, qr_cards_days_before, shop_opens, shop_opens_days, shop_closes_days, template_rules, class_label, created_at, updated_at, client:clients (id, name, city), template:job_templates (id, name)";
 export const CLIENT_COLUMNS =
   "id, name, address_line1, address_line2, postal_code, city, region_code, country, contact_first_name, contact_last_name, contact_phone, contact_email, notes, created_at, updated_at";
 
@@ -51,6 +52,8 @@ export interface JobRow {
   shop_closes_days?: number | null;
   template_rules?: DbRules | null;
   template?: { id: string; name: string } | null;
+  /** The class field's label (ADR 0030, call 29); absent in rows read before it. */
+  class_label?: string;
   created_at: string;
   updated_at: string;
   client: { id: string; name: string; city: string | null } | null;
@@ -127,6 +130,7 @@ export function toJob(row: JobRow): Job {
     deliverToSchool: row.deliver_to_school,
     closesAt: row.closes_at ?? null,
     openedAt: row.opened_at ?? null,
+    classLabel: row.class_label ?? DEFAULT_CLASS_LABEL,
     template: row.template ?? null,
     rules: jobRulesOf(row),
     changedRules: changedRules(jobRulesOf(row), givenRulesOf(row), {

@@ -32,15 +32,15 @@ afterEach(async () => {
 describe("Subjects' classes", () => {
   it("the row says how many classes there are, opens the panel and says whether it is open", async () => {
     const onOpen = vi.fn();
-    await render(<ClassesRow count={3} word="class" open={false} onOpen={onOpen} />);
+    await render(<ClassesRow count={3} word="Class" open={false} onOpen={onOpen} />);
     const row = container.querySelector("button") as HTMLButtonElement;
-    expect(row.textContent).toBe("Classes 3");
+    expect(row.textContent).toBe("Class list 3");
     expect(row.getAttribute("aria-expanded")).toBe("false");
     expect(row.className).toMatch(/\bmin-h-14\b/);
     await act(async () => row.click());
     expect(onOpen).toHaveBeenCalledOnce();
-    await render(<ClassesRow count={1} word="team" open onOpen={onOpen} />);
-    expect(container.querySelector("button")?.textContent).toBe("Teams 1");
+    await render(<ClassesRow count={1} word="Team" open onOpen={onOpen} />);
+    expect(container.querySelector("button")?.textContent).toBe("Team list 1");
   });
 
   it("the panel lists each class with its children and a Rename button named for it", async () => {
@@ -52,16 +52,16 @@ describe("Subjects' classes", () => {
     await render(
       <ClassesPanel
         groups={groups}
-        word="class"
+        word="Class"
         focusKey="k"
         onClose={() => {}}
         onRename={onRename}
       />,
     );
-    expect(container.querySelector("h2")?.textContent).toBe("This job's classes");
+    expect(container.querySelector("h2")?.textContent).toBe("This job's Class list");
     expect(container.textContent).toContain("2 children");
     const rename = container.querySelector(`#${renameButtonId("g2")}`) as HTMLButtonElement;
-    expect(rename.getAttribute("aria-label")).toBe("Rename class Room 5");
+    expect(rename.getAttribute("aria-label")).toBe("Rename Class Room 5");
     await act(async () => rename.click());
     expect(onRename).toHaveBeenCalledWith(groups[1]);
   });

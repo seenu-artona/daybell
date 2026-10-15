@@ -13,6 +13,7 @@ import {
 import {
   cleanGroupName,
   columnGroupsPreview,
+  GROUP_COLUMNS,
   type GroupColumn,
   groupNameProblem,
   MAX_GROUP_NAME,
@@ -25,6 +26,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useState } from "react";
 import { type ApiResult, api } from "@/lib/client-api";
 import { Dialog } from "../../../../dialog";
+import { useJob } from "../../job-context";
 import { useProblem } from "../review-state";
 
 /** The job's roster for the members and column dialogs: every page of 500, up to 5,000 (as Subjects), once opened. */
@@ -304,6 +306,8 @@ export function MembersDialog({
   onSaved: (change: { added: number; removed: number; members: number }) => void;
 }) {
   const t = useTranslations("app.photos.groups.membersDialog");
+  // The job's own name for the class field (ADR 0030, call 29).
+  const classLabel = useJob().job.classLabel;
   const problem = useProblem();
   const { people, failed } = useRoster(jobId, open);
   const [search, setSearch] = useState("");
@@ -396,7 +400,9 @@ export function MembersDialog({
                     className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   />
                   <span className="flex-1">{name}</span>
-                  <span className="text-caption text-muted">{p.class?.name ?? t("noClass")}</span>
+                  <span className="text-caption text-muted">
+                    {p.class?.name ?? t("noClass", { group: classLabel })}
+                  </span>
                 </label>
               </li>
             );
@@ -427,8 +433,8 @@ export function MembersDialog({
 }
 
 /**
- * Make groups from a column (C3): Class or Grade (ADR 0030, call 9), with what it would make said before anything is
- * saved (core's columnGroupsPreview); the server decides again. Done once: later roster changes don't change groups.
+ * Make groups from a column (C3): any roster column that names a group, the class in the job's own word for it, grade,
+ * first name, last name and student ID (ADR 0030, call 9), with what it would make said before anything is saved (core's columnGroupsPreview); the server decides again. Done once: later roster changes don't change groups.
  */
 export function ColumnDialog({
   jobId,
@@ -444,6 +450,7 @@ export function ColumnDialog({
   onMade: (made: GroupsMadeResponse) => void;
 }) {
   const t = useTranslations("app.photos.groups.columnDialog");
+  const classLabel = useJob().job.classLabel;
   const problem = useProblem();
   const { people, failed } = useRoster(jobId, open);
   const [column, setColumn] = useState<GroupColumn>("class");
@@ -478,7 +485,7 @@ export function ColumnDialog({
         <p className="m-0 text-sm text-muted">{t("intro")}</p>
         <fieldset className="m-0 flex flex-col gap-1 border-0 p-0" aria-describedby={previewId}>
           <legend className="mb-1 p-0 text-sm font-semibold text-ink">{t("legend")}</legend>
-          {(["class", "grade"] as const).map((c) => (
+          {GROUP_COLUMNS.map((c) => (
             <label key={c} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
               <input
                 type="radio"
@@ -487,7 +494,7 @@ export function ColumnDialog({
                 onChange={() => setColumn(c)}
                 className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               />
-              {t(c)}
+              {c === "class" ? t("class", { group: classLabel }) : t(c)}
             </label>
           ))}
         </fieldset>

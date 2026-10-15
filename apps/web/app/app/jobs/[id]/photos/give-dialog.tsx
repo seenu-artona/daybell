@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useState } from "react";
 import { type ApiResult, api } from "@/lib/client-api";
 import { Dialog } from "../../../dialog";
+import { useJob } from "../job-context";
 
 interface Person {
   id: string;
@@ -78,6 +79,8 @@ export function GiveDialog({
   onGive: (photoIds: string[], target: MoveTarget, targetName: string) => Promise<void>;
 }) {
   const t = useTranslations("app.photos.review.giveDialog");
+  // The job's own name for the class field (ADR 0030, call 29).
+  const group = useJob().job.classLabel;
   const open = photoIds !== null;
   const { classes, people, failed } = usePeople(jobId, open);
   const [search, setSearch] = useState("");
@@ -108,10 +111,10 @@ export function GiveDialog({
         .map(({ p, label }) => ({ id: p.id, label }));
       shown += options.length;
       if (options.length)
-        out.push({ key: c?.id ?? "none", title: c?.name ?? t("noClass"), options });
+        out.push({ key: c?.id ?? "none", title: c?.name ?? t("noClass", { group }), options });
     }
     return { sections: out, shownAll: shown >= named.length };
-  }, [classes, people, search, t]);
+  }, [classes, people, search, t, group]);
 
   const options = sections.flatMap((s) => s.options);
   const chosen = options.find((o) => o.id === choice) ?? null;

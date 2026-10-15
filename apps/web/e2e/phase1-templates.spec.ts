@@ -94,6 +94,17 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   ).toBeVisible();
   await expect(main.getByText("Default", { exact: true })).toBeVisible();
 
+  // Subjects and photos: what new jobs call the roster's class field (Seenu, ADR 0030 call 29), "Class" until changed.
+  await tsections.getByRole("link", { name: "Subjects and photos", exact: true }).click();
+  const classLabel = main.getByRole("textbox", { name: "Class field's name", exact: true });
+  await expect(classLabel).toHaveValue("Class");
+  await classLabel.fill("");
+  await main.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(main.getByText("Use 1 to 30 characters.", { exact: true })).toBeVisible();
+  await classLabel.fill("Homeroom");
+  await main.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(main.getByText("Saved.", { exact: true })).toBeVisible();
+
   // 3. New job: the dialog has Name, Client, Picture day and Template, the new default chosen, with its sentence.
   await page.goto("/app/jobs");
   await main.getByRole("button", { name: "Create your first job", exact: true }).click();
@@ -109,6 +120,7 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   await dialog.getByLabel("Picture day").fill("2030-05-10");
   await dialog.getByRole("button", { name: "Create job", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/jobs\/[0-9a-f-]{36}$/);
+  const jobUrl = page.url();
 
   // 4. The Overview: Details names the template (no changes yet); Progress plans the cards for 5 days before picture
   // day and says the shop closes 10 days after it opens.
@@ -156,6 +168,21 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   await expect(closing).toBeHidden();
   await expect(step(/^Next: Shop closes/)).toContainText(/in (19|20) days/);
   await expect(step(/^Next: Shop closes/)).not.toContainText("after the shop opens");
+
+  // 5b. The job calls the class field Homeroom, as its template said: Subjects' add form asks for a Homeroom.
+  const jobId = jobUrl.split("/").pop() as string;
+  expect((await (await page.request.get(`/api/v1/jobs/${jobId}`)).json()).job.classLabel).toBe(
+    "Homeroom",
+  );
+  await page.goto(`${jobUrl}/people`);
+  await main.getByRole("button", { name: "Add subjects", exact: true }).click();
+  await main.getByRole("button", { name: "Add one by one", exact: true }).click();
+  await expect(
+    page
+      .getByRole("dialog", { name: "Add child" })
+      .getByRole("combobox", { name: "Homeroom (optional)", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // 6. The template counts the job; template changes reach new jobs only.
   await page.goto(templateUrl);

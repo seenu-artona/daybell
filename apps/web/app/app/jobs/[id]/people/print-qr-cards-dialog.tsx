@@ -1,13 +1,7 @@
 "use client";
 
 import { type Child, type Class, QR_CARD_HEADERS } from "@daybell/api";
-import {
-  CARDS_PER_PAGE,
-  type CardScope,
-  cardChildren,
-  type GroupLabel,
-  MAX_BLANK_CARDS,
-} from "@daybell/core";
+import { CARDS_PER_PAGE, type CardScope, cardChildren, MAX_BLANK_CARDS } from "@daybell/core";
 import { Banner, Button, Field } from "@daybell/ui";
 import { Download } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -47,7 +41,7 @@ export function PrintQrCardsDialog({
   jobId: string;
   roster: readonly Child[];
   groups: readonly Class[];
-  word: GroupLabel;
+  word: string;
   onPrinted: () => void;
 }) {
   const t = useTranslations("app.qrCards");

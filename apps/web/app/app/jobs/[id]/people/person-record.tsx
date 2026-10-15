@@ -9,7 +9,7 @@ import type {
   TaggedPhoto,
   TaggedPhotosResponse,
 } from "@daybell/api";
-import { closingDay, formatOrderReference, type GroupLabel, maskEmail } from "@daybell/core";
+import { closingDay, formatOrderReference, maskEmail } from "@daybell/core";
 import { Badge, IconButton, iconButtonVariants } from "@daybell/ui";
 import { Ellipsis, Maximize2, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -72,7 +72,7 @@ export function PersonRecord({
 }: {
   child: RosterChild;
   job: Job;
-  word: GroupLabel;
+  word: string;
   canEdit: boolean;
   seesOrders: boolean;
   /** Set when the person was just opened from the list: focus moves to their name. */

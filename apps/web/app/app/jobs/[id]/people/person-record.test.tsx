@@ -75,7 +75,7 @@ describe("a person's record (D153)", () => {
           <PersonRecord
             child={CHILD}
             job={JOB}
-            word="class"
+            word="Class"
             canEdit
             seesOrders
             focusKey={null}
@@ -114,7 +114,7 @@ describe("a person's record (D153)", () => {
           <PersonRecord
             child={{ ...CHILD, doNotPhotograph: true }}
             job={JOB}
-            word="class"
+            word="Class"
             canEdit
             seesOrders
             focusKey={null}
@@ -143,7 +143,7 @@ describe("a person's record (D153)", () => {
             <PersonRecord
               child={child}
               job={JOB}
-              word="class"
+              word="Homeroom"
               canEdit={false}
               seesOrders={false}
               focusKey={null}
@@ -165,7 +165,13 @@ describe("a person's record (D153)", () => {
     await render({ ...CHILD, groups: [{ id: GROUP, name: "Choir" }] });
     const link = [...groups().querySelectorAll("a")].find((a) => a.textContent === "Choir");
     expect(link?.getAttribute("href")).toBe(`/app/jobs/${JOB.id}/photos/groups/${GROUP}`);
-    // The record names the class too, as a class.
-    expect(container.textContent).toContain("Room 1");
+    // The record names the class in the job's own word for it (ADR 0030, call 29).
+    const details = [...container.querySelectorAll("section")].find((s) =>
+      s.textContent?.startsWith("Details"),
+    ) as HTMLElement;
+    expect(details.querySelector("dt")?.textContent).toBe("Homeroom");
+    expect(details.querySelector("dd")?.textContent).toBe("Room 1");
+    await render({ ...CHILD, class: null });
+    expect(container.textContent).toContain("No Homeroom");
   });
 });
