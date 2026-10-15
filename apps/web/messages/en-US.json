@@ -137,6 +137,11 @@
       "printQrCards": "Print QR cards",
       "done": "Done",
       "soon": "Soon"
+    },
+    "switch": {
+      "label": "Sold: Package A",
+      "on": "On",
+      "off": "Off"
     }
   },
   "validation": {

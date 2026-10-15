@@ -42,6 +42,7 @@ import {
   ShopFrame,
   SideMenu,
   SideMenuItem,
+  Switch,
   Table,
   TableCell,
   TableHead,
@@ -778,5 +779,66 @@ describe("RidgeMark (D155, D91, D112)", () => {
     };
     expect(arcs("light")).toEqual(["stroke-primary", "stroke-ink"]);
     expect(arcs("dark")).toEqual(["stroke-lime", "stroke-on-primary"]);
+  });
+});
+
+describe("Switch (D157, D91)", () => {
+  function Sold({ start = true }: { start?: boolean }) {
+    const [on, setOn] = useState(start);
+    return (
+      <main>
+        <Switch
+          checked={on}
+          onCheckedChange={setOn}
+          label="Sold: Package A"
+          onText="On"
+          offText="Off"
+        />
+      </main>
+    );
+  }
+
+  it("is a switch named by its label, its state read from aria-checked, with no violations", async () => {
+    const { container } = render(<Sold />);
+    const toggle = screen.getByRole("switch", { name: "Sold: Package A" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.getAttribute("type")).toBe("button");
+    await expectNoA11yViolations(container);
+  });
+
+  it("says its state in words, never colour alone, and flips on click, Enter or Space", () => {
+    render(<Sold />);
+    const toggle = screen.getByRole("switch", { name: "Sold: Package A" });
+    expect(toggle.textContent).toBe("On");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.textContent).toBe("Off");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("is a 44px target with a visible focus ring, and draws in tokens only", () => {
+    const { container } = render(<Sold start={false} />);
+    const toggle = screen.getByRole("switch");
+    expect(toggle.className).toMatch(/\bmin-h-11\b/);
+    expect(toggle.className).toMatch(/\bmin-w-11\b/);
+    expect(toggle.className).toMatch(/focus-visible:outline-primary/);
+    expect(container.innerHTML).not.toMatch(/#[0-9a-f]{3,6}/i);
+  });
+
+  it("a handler that prevents the click keeps the state", () => {
+    const change = vi.fn();
+    render(
+      <Switch
+        checked
+        onCheckedChange={change}
+        onClick={(e) => e.preventDefault()}
+        label="Sold: Package B"
+        onText="On"
+        offText="Off"
+      />,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Sold: Package B" }));
+    expect(change).not.toHaveBeenCalled();
   });
 });
