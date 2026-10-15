@@ -275,3 +275,8 @@ every route filters by `studio_id`.
 - Move `staging-photo-cleanup.yml` to the `staging` environment and `STAGING_ACTIONS_CRON_SECRET`, then delete the
   repository-wide `STAGING_CRON_SECRET` (docs/crons.md).
 - Hourly production closing once Seenu confirms the Vercel plan (§4).
+
+## Amendment (Oct 14, 2026; D157, ADR 0033)
+
+"Price list chosen" (A2) now means the job sells at least one item: the list's items not switched off for the job, or
+the job's own products. The row reads "Something to sell" (ADR 0033 call 17).

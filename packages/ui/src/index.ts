@@ -42,6 +42,7 @@ export {
 export { SearchToggle, type SearchToggleProps } from "./components/search-toggle";
 export { CodeInput, OptionCard, ShopFrame } from "./components/shop";
 export { SideMenu, SideMenuItem, type SideMenuProps } from "./components/side-menu";
+export { Switch, type SwitchProps } from "./components/switch";
 export {
   ClickableRow,
   type ClickableRowProps,

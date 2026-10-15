@@ -24,6 +24,7 @@ import {
   SideMenu,
   SideMenuItem,
   Stat,
+  Switch,
   Table,
   TableCell,
   TableHead,
@@ -78,6 +79,7 @@ export function Gallery() {
   const [confetti, setConfetti] = useState(0);
   const [code, setCode] = useState("LINC2");
   const [pose, setPose] = useState(1);
+  const [sold, setSold] = useState(true);
   const [pkg, setPkg] = useState("family");
   const prices: Record<string, number> = { basic: 2900, family: 5400, digital: 3500 };
 
@@ -111,6 +113,15 @@ export function Gallery() {
           <Badge tone="money">{t("badges.paidOut")}</Badge>
           <Badge tone="warning">{t("badges.closing")}</Badge>
           <Badge tone="danger">{t("badges.failed")}</Badge>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            checked={sold}
+            onCheckedChange={setSold}
+            label={t("switch.label")}
+            onText={t("switch.on")}
+            offText={t("switch.off")}
+          />
         </div>
       </Section>
 

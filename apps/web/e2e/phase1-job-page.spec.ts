@@ -193,8 +193,8 @@ test("job page layout, menu search and studio separation", async ({
   await expect(sell.getByRole("listitem").filter({ hasText: "Photos uploaded" })).toContainText(
     "To do",
   );
-  // Every job has a price list (the studio's default), so that item is done (ADR 0019).
-  await expect(sell.getByRole("listitem").filter({ hasText: "Price list chosen" })).toContainText(
+  // Every job sells its studio's default list, so that item is done (ADR 0019; renamed "Something to sell", ADR 0033).
+  await expect(sell.getByRole("listitem").filter({ hasText: "Something to sell" })).toContainText(
     "Done",
   );
   await sell.getByRole("button", { name: "Close" }).last().click();
@@ -259,11 +259,10 @@ test("job page layout, menu search and studio separation", async ({
     .getByRole("link", { name: "Shop", exact: true })
     .click();
   await expect(main.getByRole("heading", { name: "Shop", level: 2 })).toBeVisible();
+  // Job › Shop is one table of what parents can buy (D157; ADR 0033).
   await expect(
-    main
-      .getByRole("region", { name: "Price list", exact: true })
-      .getByLabel("Price list for this job", { exact: true }),
-  ).toHaveValue(job.priceListId);
+    main.getByRole("table", { name: "What parents can buy", exact: true }),
+  ).toBeVisible();
   await main
     .getByRole("navigation", { name: "Job sections" })
     .getByRole("link", { name: "Orders", exact: true })

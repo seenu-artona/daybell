@@ -26,7 +26,13 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   // Messages and Print, with the seeded default.
   await page.goto("/app/settings/templates");
   const sections = main.getByRole("navigation", { name: "Settings sections", exact: true });
-  await expect(sections.getByRole("link")).toHaveText(["Team", "Stripe", "Taxes", "Templates"]);
+  await expect(sections.getByRole("link")).toHaveText([
+    "Team",
+    "Stripe",
+    "Taxes",
+    "Templates",
+    "Shop",
+  ]);
   await expect(sections.getByRole("link", { name: "Templates", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
@@ -194,7 +200,7 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   const photoMain = photographer.getByRole("main");
   await expect(
     photoMain.getByRole("navigation", { name: "Settings sections" }).getByRole("link"),
-  ).toHaveText(["Team", "Templates"]);
+  ).toHaveText(["Team", "Templates", "Shop"]);
   await expect(photoMain.getByRole("link", { name: "New template", exact: true })).toHaveCount(0);
   await photographer.goto(templateUrl);
   await expect(photoMain.getByText("Only owners and admins change templates.")).toBeVisible();

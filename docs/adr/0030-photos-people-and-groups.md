@@ -268,3 +268,8 @@ template routes, Subjects' screens in the job's word. e2e: rewritten `phase1-tag
 - Groups kept in step with a roster column (D156: a shortcut, not a switch).
 - Linking group photos in tagging (a retag would move them; D156: nothing moves them by itself).
 - Backfilling groups from classes (C2).
+
+## Amendment (Oct 14, 2026, Seenu; D156 C5, ADR 0033)
+
+C5 is built: every member of a group can buy its photos (as a package, print or single download, and in All
+digitals). Groups' Ordered counts orders that hold any of the group's photos.

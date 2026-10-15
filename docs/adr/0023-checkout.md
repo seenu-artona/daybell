@@ -396,3 +396,8 @@ The step 10 code and security reviews' must-fix and should-fix items, as the orc
   publish, between the parent opening Stripe's checkout and paying is still sold (paid is paid; calls 11 and 17) and
   marked `sold_at`, so it can no longer be binned. The orchestrator accepted this; Seenu to confirm, especially for a
   binned photo.
+
+## Amendment (Oct 14, 2026, Seenu; D156 C5, D157, ADR 0033)
+
+An order line copies either `price_list_item_id` or `job_item_id` (exactly one), at the job's own price. "All
+digitals" (call 9) is fixed at payment to the child's portraits, then the group photos of their groups.

@@ -95,7 +95,7 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
     "Roster added",
     "Photos uploaded",
     "Tagging reviewed",
-    "Price list chosen",
+    "Something to sell",
     "Payouts connected",
   ])
     await expect(

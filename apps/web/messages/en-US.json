@@ -137,6 +137,11 @@
       "printQrCards": "Print QR cards",
       "done": "Done",
       "soon": "Soon"
+    },
+    "switch": {
+      "label": "Sold: Package A",
+      "on": "On",
+      "off": "Off"
     }
   },
   "validation": {
@@ -469,7 +474,48 @@
         "team": "Team",
         "payouts": "Stripe",
         "taxes": "Taxes",
-        "templates": "Templates"
+        "templates": "Templates",
+        "shop": "Shop"
+      },
+      "shop": {
+        "intro": "How parents find your shop, see it and pay. Everyone on the team can read this; most of it is set elsewhere.",
+        "soon": "Soon",
+        "look": {
+          "title": "Look",
+          "name": "Parents see your studio's name: {name}",
+          "onlyYours": "The shop shows only your studio, never Silverback's name or logo.",
+          "logo": "Logo upload"
+        },
+        "address": {
+          "title": "Shop address",
+          "body": "One address for every job. Parents type the code from their card there.",
+          "label": "Shop address",
+          "copy": "Copy",
+          "copyLabel": "Copy the shop address",
+          "copied": "Shop address copied.",
+          "copyFailed": "We couldn't copy it. Select the address and copy it yourself."
+        },
+        "checkout": {
+          "title": "Checkout",
+          "pay": "Parents pay on Stripe's secure page, by card, Apple Pay or Google Pay.",
+          "tax": "Prices are before tax. Tax is added at checkout once you have a tax registration.",
+          "shipping": "Home shipping is one fee per order, set on each price list. Delivery to school is free when the job allows it. Digital-only orders pay no shipping.",
+          "receipt": "Stripe emails the parent a receipt with your studio's name.",
+          "taxes": "Taxes",
+          "stripe": "Stripe and fees",
+          "priceLists": "Price lists"
+        },
+        "policies": {
+          "title": "Policies",
+          "cancel": "Parents can cancel an order for a full refund until it is marked Printed. Orders of downloads only can't be canceled by the parent; they ask you.",
+          "refund": "Owners and admins refund an order in full or in part from its page. The card fee isn't returned.",
+          "downloads": "Downloads a parent paid for stay available after the shop closes."
+        },
+        "more": {
+          "coupons": "Coupons",
+          "giftCards": "Gift cards",
+          "title": "Coupons and gift cards"
+        }
       }
     },
     "home": {
@@ -901,7 +947,8 @@
           "print": "One print of the pose the parent chooses.",
           "digital_single": "One photo the parent chooses, full resolution, no watermark.",
           "digital_all": "Every photo of the child in this job, full resolution, no watermark."
-        }
+        },
+        "remove": "Remove"
       },
       "sizes": {
         "4x6": "4×6",
@@ -1138,21 +1185,17 @@
           "roster": "Roster added",
           "photos": "Photos uploaded",
           "tagging": "Tagging reviewed",
-          "priceList": "Price list chosen",
+          "priceList": "Something to sell",
           "payouts": "Payouts connected"
         }
       },
       "shop": {
         "priceList": "Price list",
-        "chooseLabel": "Price list for this job",
-        "saveList": "Save price list",
         "defaultOption": "{name} (default)",
-        "saved": "Price list saved.",
         "edit": "Edit this price list",
         "view": "View this price list",
-        "readOnly": "Only owners and admins can change the job's price list and delivery.",
-        "closed": "This job is closed, so its price list and delivery can't change.",
-        "items": "What parents can buy",
+        "readOnly": "Only owners and admins can change this job's shop.",
+        "closed": "This job is closed, so its shop can't change.",
         "loading": "Loading…",
         "delivery": "Delivery",
         "homeShipping": "Home shipping",
@@ -1160,7 +1203,64 @@
         "toSchool": "Free delivery to school",
         "toSchoolHelp": "Parents choose free delivery to the school or paid home shipping.",
         "toSchoolOn": "Free delivery to school is on.",
-        "toSchoolOff": "Free delivery to school is off."
+        "toSchoolOff": "Free delivery to school is off.",
+        "change": "Change",
+        "changeLabel": "Change price list",
+        "changes": "{count, plural, =0 {No changes for this job} one {# change for this job} other {# changes for this job}}",
+        "tableLabel": "What parents can buy",
+        "columns": {
+          "product": "Product",
+          "listPrice": "Price list",
+          "thisJob": "This job",
+          "sold": "Sold"
+        },
+        "notOnList": "Not on the price list",
+        "priceLabel": "Price for this job: {name}",
+        "soldLabel": "Sold: {name}",
+        "on": "On",
+        "off": "Off",
+        "savedChanges": "Saved. {changes}",
+        "add": "Add a product",
+        "addTitle": "Add a product for this job",
+        "kindLegend": "What kind of product?",
+        "kinds": {
+          "package": "Package",
+          "print": "Print"
+        },
+        "next": "Next",
+        "cancel": "Cancel",
+        "jobOnlyNote": "Only this job sells it. The price list doesn't change.",
+        "editProduct": "Edit {name}",
+        "editTitle": "Edit {name}",
+        "added": "{name} added. {changes}",
+        "productSaved": "{name} saved. {changes}",
+        "removeTitle": "Remove {name}?",
+        "removeBody": "Only this job sells it. Orders already placed keep it.",
+        "removeYes": "Remove product",
+        "removed": "{name} removed. {changes}",
+        "changeDialog": {
+          "title": "Change price list",
+          "label": "Price list for this job",
+          "warning": "{count, plural, one {# change for this job will be removed.} other {# changes for this job will be removed.}}",
+          "keep": "Products only this job sells stay.",
+          "submit": "Change price list"
+        },
+        "listChanged": "Price list changed to {name}.",
+        "more": {
+          "title": "More for this job",
+          "earlyBird": "Early bird and coupons",
+          "prepay": "Prepay",
+          "yearbook": "Yearbook pose",
+          "reorders": "Reorders",
+          "soon": "Soon"
+        },
+        "conflicts": {
+          "jobClosed": "This job is closed, so its shop can't change.",
+          "notOnList": "That item isn't on this job's price list any more. The list has been reloaded.",
+          "itemLimit": "A job can have up to 100 products of its own."
+        },
+        "loadFailed": "We couldn't load this job's shop.",
+        "retry": "Try again"
       },
       "publishShop": "Publish shop",
       "viewShop": "View shop",
@@ -2599,8 +2699,7 @@
       "close": "Close",
       "previous": "Previous photo",
       "next": "Next photo",
-      "use": "Use this photo",
-      "viewOnly": "Group photos can be viewed here. They can’t be ordered yet."
+      "use": "Use this photo"
     },
     "buy": {
       "packagesTitle": "Choose a package",
@@ -2632,7 +2731,10 @@
       "decrease": "One fewer",
       "increase": "One more",
       "add": "Add to bag",
-      "summary": "{count, plural, one {{name}} other {# × {name}}}"
+      "summary": "{count, plural, one {{name}} other {# × {name}}}",
+      "portraits": "Portraits",
+      "groupPhotos": "Group photos",
+      "groupAlt": "Group photo {n} of {total}"
     },
     "bag": {
       "title": "Bag",

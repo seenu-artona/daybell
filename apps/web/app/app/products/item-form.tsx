@@ -1,6 +1,6 @@
 "use client";
 
-import type { PriceListItem, PriceListItemResponse } from "@daybell/api";
+import type { MoneyAmount, PackageLineOut } from "@daybell/api";
 import {
   type Currency,
   MAX_PACKAGE_LINES,
@@ -29,7 +29,23 @@ interface Line {
 
 let nextKey = 1;
 
-function linesOf(item: PriceListItem | null): Line[] {
+/** What the form edits: a price list item, or a product only one job sells (Job › Shop, ADR 0033). */
+export interface ItemFormValue {
+  id: string;
+  name: string;
+  description: string | null;
+  printSize: PrintSize | null;
+  price: MoneyAmount;
+  contents: readonly PackageLineOut[];
+}
+
+/** Where the form saves: a price list's items (the editor) or a job's own products (Job › Shop). */
+export interface ItemFormEndpoint {
+  url: string;
+  method: "POST" | "PATCH";
+}
+
+function linesOf(item: ItemFormValue | null): Line[] {
   if (!item) return [{ key: nextKey++, size: "8x10", quantity: "1" }];
   return item.contents
     .filter((l) => l.kind === "print" && l.printSize)
@@ -51,26 +67,36 @@ function quantityValue(text: string): number | string {
 }
 
 /**
- * Add or edit one price list item (ADR 0019): name, description, price, a print's size, and a package's contents
- * (prints by size and quantity, and whether it includes the digital download of the one pose the parent picks; answer
- * 3). Lines are added and removed with buttons. The price is read into whole cents here; the server checks everything
- * again.
+ * Add or edit one price list item (ADR 0019), or a product only one job sells (Job › Shop, ADR 0033; the same dialog,
+ * B2): name, description, price, a print's size, and a package's contents (prints by size and quantity, and whether
+ * it includes the digital download of the one pose the parent picks; answer 3). Lines are added and removed with
+ * buttons. The price is read into whole cents here; the server checks everything again. `endpoint` says where it
+ * saves; the answer goes to `onSaved` as the API gave it, with the saved name.
  */
-export function ItemForm({
-  priceListId,
+export function ItemForm<R>({
+  endpoint,
   kind,
   item,
   currency,
+  note,
+  conflict,
   onCancel,
   onSaved,
+  onRemove,
 }: {
-  priceListId: string;
+  endpoint: ItemFormEndpoint;
   kind: PriceItemKind;
   /** The item to edit, or null to add one of `kind`. */
-  item: PriceListItem | null;
+  item: ItemFormValue | null;
   currency: Currency;
+  /** A line under the kind's own, e.g. that only this job sells it. */
+  note?: string | undefined;
+  /** Words for a 409's `fields.form`; the price list's own by default. */
+  conflict?: ((form: string | undefined) => string | null) | undefined;
   onCancel: () => void;
-  onSaved: (item: PriceListItem) => void;
+  onSaved: (data: R, name: string) => void;
+  /** Shows Remove beside Cancel (a job's own product, B2). */
+  onRemove?: (() => void) | undefined;
 }) {
   const t = useTranslations("app.products.item");
   const tp = useTranslations("app.products");
@@ -127,16 +153,13 @@ export function ItemForm({
       ...(kind === "print" ? { printSize } : {}),
       ...(kind === "package" && !same ? { contents } : {}),
     };
-    const res = await api<PriceListItemResponse>(
-      item ? `/price-list-items/${item.id}` : `/price-lists/${priceListId}/items`,
-      { method: item ? "PATCH" : "POST", body },
-    );
+    const res = await api<R>(endpoint.url, { method: endpoint.method, body });
     setBusy(false);
-    if (res.ok) return onSaved(res.data.item);
+    if (res.ok) return onSaved(res.data, name.trim());
     setErrors(res.fields);
     const known = ["name", "description", "priceCents", "printSize", "contents"];
     if (!Object.keys(res.fields).some((k) => known.some((f) => k.startsWith(f))))
-      setProblem(price.conflict(res.fields.form) ?? text.error(res.code));
+      setProblem((conflict ?? price.conflict)(res.fields.form) ?? text.error(res.code));
   }
 
   const lineError = (index: number, field: "printSize" | "quantity") =>
@@ -146,6 +169,7 @@ export function ItemForm({
     <form onSubmit={save} noValidate className="flex flex-col gap-5">
       {problem ? <Banner tone="danger" title={problem} /> : null}
       <p className="m-0 text-muted">{t(`about.${kind}`)}</p>
+      {note ? <p className="m-0 text-muted">{note}</p> : null}
       <Field
         label={t("name")}
         name="name"
@@ -239,6 +263,11 @@ export function ItemForm({
         </fieldset>
       ) : null}
       <div className="flex justify-end gap-2">
+        {onRemove ? (
+          <Button variant="ghost" className="mr-auto" onClick={onRemove}>
+            {t("remove")}
+          </Button>
+        ) : null}
         <Button variant="secondary" onClick={onCancel}>
           {t("cancel")}
         </Button>

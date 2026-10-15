@@ -5,7 +5,7 @@ import { signUpOwner } from "./helpers";
 // Oct 12 2026; ADR 0019): the starter list every studio gets as its default (in CAD here: the local stack is the
 // Canadian database, D122), editing a price, a package's contents and the home shipping fee, keyboard-only
 // reordering and editing with visible focus, a copied list made the default, a new job getting it, the job's Shop
-// tab switching list and school delivery, the refusals for a list in use, and that another studio can't read or
+// tab switching list (Change, ADR 0033) and school delivery, the refusals for a list in use, and that another studio can't read or
 // change any of it. Desktop only (D136).
 const run = `${Date.now()}`;
 /** A whole-text match: the status line says exactly this, not something that merely contains it. */
@@ -175,23 +175,37 @@ test("price lists: starter list, edits, a copy as default, and a job's Shop tab"
   expect(job.priceListId).toBe(spring?.id);
   expect(job.deliverToSchool).toBe(false);
   await page.goto(`/app/jobs/${job.id}/shop`);
-  const listCard = main.getByRole("region", { name: "Price list", exact: true });
-  const choose = listCard.getByLabel("Price list for this job", { exact: true });
+  // The job's list is named by its card's heading (D157; ADR 0033); Change opens a dialog, so choosing in its select
+  // saves nothing until its button is pressed (D91).
+  await expect(main.getByRole("region", { name: `Spring ${tag}`, exact: true })).toBeVisible();
+  await main
+    .getByRole("region", { name: `Spring ${tag}`, exact: true })
+    .getByRole("button", { name: "Change price list", exact: true })
+    .click();
+  const change = page.getByRole("dialog", { name: "Change price list", exact: true });
+  const choose = change.getByLabel("Price list for this job", { exact: true });
   await expect(choose).toHaveValue(spring?.id ?? "");
-  // Picking a list saves nothing until Save (arrowing through the select must not save each step; D91).
   await choose.selectOption(starter?.id ?? "");
   await expect(
-    main.getByRole("status").filter({ hasText: whole("Price list saved.") }),
+    main
+      .getByRole("status")
+      .filter({ hasText: whole("Price list changed to Starter price list.") }),
   ).toHaveCount(0);
-  await listCard.getByRole("button", { name: "Save price list", exact: true }).click();
+  await change.getByRole("button", { name: "Change price list", exact: true }).click();
   await expect(
-    main.getByRole("status").filter({ hasText: whole("Price list saved.") }),
+    main
+      .getByRole("status")
+      .filter({ hasText: whole("Price list changed to Starter price list.") }),
   ).toBeVisible();
+  const listCard = main.getByRole("region", { name: "Starter price list", exact: true });
   await expect(
-    listCard.getByRole("listitem").filter({ hasText: "4×6 print" }).getByText("$12.00", {
-      exact: true,
-    }),
-  ).toBeVisible();
+    listCard
+      .getByRole("table", { name: "What parents can buy", exact: true })
+      .getByRole("row")
+      .filter({ hasText: "4×6 print" })
+      .getByRole("cell")
+      .nth(1),
+  ).toHaveText("$12.00");
   const delivery = main.getByRole("region", { name: "Delivery", exact: true });
   await expect(
     delivery.getByText(
@@ -199,27 +213,23 @@ test("price lists: starter list, edits, a copy as default, and a job's Shop tab"
       { exact: true },
     ),
   ).toBeVisible();
-  const toSchool = delivery.getByRole("checkbox", { name: "Free delivery to school", exact: true });
-  await expect(toSchool).not.toBeChecked();
-  // Keyboard: Space toggles it, and focus stays on the checkbox through the save (WCAG 2.4.3).
+  const toSchool = delivery.getByRole("switch", { name: "Free delivery to school", exact: true });
+  await expect(toSchool).toHaveAttribute("aria-checked", "false");
+  // Keyboard: Space toggles it, and focus stays on the switch through the save (WCAG 2.4.3).
   await toSchool.focus();
   await page.keyboard.press("Space");
   await expect(
     main.getByRole("status").filter({ hasText: whole("Free delivery to school is on.") }),
   ).toBeVisible();
-  await expect(toSchool).toBeChecked();
+  await expect(toSchool).toHaveAttribute("aria-checked", "true");
   await expect(toSchool).toBeFocused();
   await page.reload();
-  await expect(
-    main
-      .getByRole("region", { name: "Price list", exact: true })
-      .getByLabel("Price list for this job", { exact: true }),
-  ).toHaveValue(starter?.id ?? "");
+  await expect(main.getByRole("region", { name: "Starter price list", exact: true })).toBeVisible();
   await expect(
     main
       .getByRole("region", { name: "Delivery", exact: true })
-      .getByRole("checkbox", { name: "Free delivery to school", exact: true }),
-  ).toBeChecked();
+      .getByRole("switch", { name: "Free delivery to school", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
 
   // 9. A list a job uses can't be deleted: no Delete button, and the reason is said in words. (The API's 409 for the
   // race is covered by the route tests.)

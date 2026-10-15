@@ -9,6 +9,7 @@ import {
   formatShopCookie,
   formatShopCookies,
   hasQuantity,
+  initialPose,
   isLocked,
   keepsOwnAllowance,
   type LockoutKind,
@@ -23,6 +24,7 @@ import {
   retryAfterSeconds,
   SHOP_LOCK_TRIES,
   SHOP_NETWORK_LOCK_TRIES,
+  shopPoses,
 } from "./shop";
 
 const MIN = 60_000;
@@ -158,6 +160,27 @@ describe("pickCoverPhoto (call 3)", () => {
   it("is the first portrait in tagging order, or nothing", () => {
     expect(pickCoverPhoto([{ id: "a" }, { id: "b" }])).toEqual({ id: "a" });
     expect(pickCoverPhoto([])).toBeNull();
+  });
+});
+
+describe("poses (D156 C5; ADR 0033 N6)", () => {
+  const p = (id: string) => ({ id });
+  it("are the child's portraits, then their groups' photos, each counted in its own set", () => {
+    expect(shopPoses([p("a"), p("b")], [p("g")])).toEqual([
+      { photo: p("a"), set: "portraits", n: 1, total: 2 },
+      { photo: p("b"), set: "portraits", n: 2, total: 2 },
+      { photo: p("g"), set: "groupPhotos", n: 1, total: 1 },
+    ]);
+    expect(shopPoses([], [])).toEqual([]);
+  });
+
+  it("start on the photo the parent came with, a portrait or a group photo, else the first portrait", () => {
+    expect(initialPose([p("a"), p("b")], [p("g")], "g")).toBe("g");
+    expect(initialPose([p("a"), p("b")], [p("g")], "b")).toBe("b");
+    expect(initialPose([p("a")], [p("g")], "someone-else")).toBe("a");
+    expect(initialPose([p("a")], [p("g")], null)).toBe("a");
+    expect(initialPose([], [p("g")], null)).toBe("g");
+    expect(initialPose([], [], "g")).toBeNull();
   });
 });
 

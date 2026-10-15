@@ -6,8 +6,8 @@ import { useTranslations } from "next-intl";
 import type { SellItemState } from "./going-live";
 
 /**
- * "Before you can sell" (D138; ADR 0021): Roster added, Photos uploaded, Tagging reviewed, Price list chosen (a list
- * with an item) and Payouts connected, all real and all checked again by the server when the shop opens. The price
+ * "Before you can sell" (D138; ADR 0021): Roster added, Photos uploaded, Tagging reviewed, Something to sell (the job
+ * sells at least one item; once "Price list chosen", ADR 0033) and Payouts connected, all real and all checked again by the server when the shop opens. The price
  * list and payouts say "Checking…" until they have been read. The state is always written out, never shown by colour
  * alone (D91).
  */

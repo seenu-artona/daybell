@@ -1,7 +1,7 @@
 "use client";
 
-import type { Job, PriceListResponse, StudioPayoutsResponse } from "@daybell/api";
-import { payoutsConnected, type SellChecklistKey } from "@daybell/core";
+import type { Job, JobShopResponse, StudioPayoutsResponse } from "@daybell/api";
+import { payoutsConnected, type SellChecklistKey, sellsSomething } from "@daybell/core";
 import {
   Button,
   buttonVariants,
@@ -55,7 +55,7 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
   const { job, setJob, summary, canManage, taggingReviewed } = useJob();
   const [open, setOpen] = useState<Open>(null);
   const [announcement, setAnnouncement] = useState("");
-  // "Payouts connected" and "Price list chosen" (an item on the list, A2): read each time the dialog opens; undefined
+  // "Payouts connected" and "Something to sell" (once "Price list chosen"; something sold, A2 and ADR 0033 N3): read each time the dialog opens; undefined
   // while being checked, so the rows say "Checking…" rather than a state they may not be in.
   const [payouts, setPayouts] = useState<boolean | undefined>(undefined);
   const [hasItems, setHasItems] = useState<boolean | undefined>(undefined);
@@ -87,12 +87,11 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
       if (opening.current !== current) return;
       setPayouts(res.ok ? payoutsConnected(res.data.account?.status) : false);
     });
-    void api<PriceListResponse>(`/price-lists/${encodeURIComponent(job.priceListId)}`).then(
-      (res) => {
-        if (opening.current !== current) return;
-        setHasItems(res.ok ? res.data.priceList.items.length > 0 : false);
-      },
-    );
+    // "Something to sell" means the job sells something (ADR 0033 N3): its list's items not switched off, or its own.
+    void api<JobShopResponse>(`/jobs/${encodeURIComponent(job.id)}/shop`).then((res) => {
+      if (opening.current !== current) return;
+      setHasItems(res.ok ? sellsSomething(res.data.shop.rows) : false);
+    });
   }
 
   function closeDialog() {

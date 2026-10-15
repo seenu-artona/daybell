@@ -206,6 +206,50 @@ export function pickCoverPhoto<T>(portraits: readonly T[]): T | null {
   return portraits[0] ?? null;
 }
 
+// ── Poses (D156 C5; ADR 0033 N6) ──────────────────────────────────────────────────────────────────────────────────
+
+/** Which of a child's sets a pose comes from: their own portraits, or the group photos of their groups. */
+export type PoseSet = "portraits" | "groupPhotos";
+
+export interface Pose<T> {
+  photo: T;
+  set: PoseSet;
+  /** Its place in its set, from 1, and the set's size (for "Group photo 2 of 4"). */
+  n: number;
+  total: number;
+}
+
+/**
+ * Every photo a parent may choose as a pose: any product works with a group photo (D157), so the child's portraits
+ * come first, then the group photos of the groups they are in (N6), each in tagging order.
+ */
+export function shopPoses<T>(portraits: readonly T[], groupPhotos: readonly T[]): Pose<T>[] {
+  return [
+    ...portraits.map((photo, i) => ({
+      photo,
+      set: "portraits" as const,
+      n: i + 1,
+      total: portraits.length,
+    })),
+    ...groupPhotos.map((photo, i) => ({
+      photo,
+      set: "groupPhotos" as const,
+      n: i + 1,
+      total: groupPhotos.length,
+    })),
+  ];
+}
+
+/** The pose chosen at first: the one the parent came with (a portrait or a group photo), else the first portrait. */
+export function initialPose<T extends { id: string }>(
+  portraits: readonly T[],
+  groupPhotos: readonly T[],
+  wanted: string | null,
+): string | null {
+  const all = shopPoses(portraits, groupPhotos);
+  return all.find((p) => p.photo.id === wanted)?.photo.id ?? all[0]?.photo.id ?? null;
+}
+
 // ── The bag ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type ShopShippingMethod = "home" | "school";
