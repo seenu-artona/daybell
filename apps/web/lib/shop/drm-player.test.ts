@@ -1,4 +1,3 @@
-import { DRM_CODEC_MIME } from "@daybell/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createShopDrmPlayer,
@@ -95,7 +94,7 @@ describe("Apple's prefixed EME (iPhone Chrome and other in-app browsers)", () =>
     expect(probed.widevineHwAll).toBe("noEme");
     expect(planFromProbes(probed, true)).toBe("fairplay");
     expect(planFromProbes(probed, false)).toBe("none");
-    expect(keys.asked).toEqual([`com.apple.fps.1_0 ${DRM_CODEC_MIME}`]);
+    expect(keys.asked).toEqual(["com.apple.fps.1_0 video/mp4"]);
   });
 
   it("keeps the standard API's answer where it exists (desktop Safari has both): a refusal stands", async () => {
@@ -132,6 +131,8 @@ describe("Apple's prefixed EME (iPhone Chrome and other in-app browsers)", () =>
     expect(await fairplayNeedsLegacyEme(ok, legacy(["com.apple.fps.1_0"]))).toBe(false);
     expect(await fairplayNeedsLegacyEme(refuse, legacy([]))).toBe(false);
     expect(await fairplayNeedsLegacyEme(undefined, undefined)).toBe(false);
+    // The second viewer in a tab: the polyfill now is requestMediaKeySystemAccess, and is still the way (re-review #1).
+    expect(await fairplayNeedsLegacyEme(ok, legacy(["com.apple.fps.1_0"]), true)).toBe(true);
   });
 });
 

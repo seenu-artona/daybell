@@ -107,7 +107,8 @@ export function legacyFairplaySupported(legacy: AppleLegacyKeys | undefined): bo
   if (!legacy) return false;
   return LEGACY_FAIRPLAY_KEY_SYSTEMS.some((keySystem) => {
     try {
-      return legacy.isTypeSupported(keySystem, DRM_CODEC_MIME);
+      // A bare type, as Shaka's polyfill asks (it cuts the codecs off before calling the prefixed API).
+      return legacy.isTypeSupported(keySystem, "video/mp4");
     } catch {
       return false;
     }
@@ -122,8 +123,18 @@ export function legacyFairplaySupported(legacy: AppleLegacyKeys | undefined): bo
 export function fairplayNeedsLegacyEme(
   request: RequestAccess | undefined = browserRequest(),
   legacy: AppleLegacyKeys | undefined = browserLegacyKeys(),
+  polyfilled: boolean = applePolyfillInstalled(),
 ): Promise<boolean> {
-  return Promise.resolve(!request && legacyFairplaySupported(legacy));
+  // Once Shaka's Apple polyfill is in, it is the page's requestMediaKeySystemAccess: later viewers still play through it.
+  return Promise.resolve(polyfilled || (!request && legacyFairplaySupported(legacy)));
+}
+
+/** Whether Shaka's Apple polyfill already replaced the standard API in this page (it marks itself "apple"). */
+function applePolyfillInstalled(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    (window as unknown as { shakaMediaKeysPolyfill?: string }).shakaMediaKeysPolyfill === "apple"
+  );
 }
 
 /**
