@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/encrypt-drm-test.mjs && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -36,6 +36,7 @@
     "react-dom": "19.3.0",
     "read-excel-file": "9.3.10",
     "server-only": "0.0.1",
+    "shaka-player": "5.2.12",
     "stripe": "22.6.2",
     "zod": "4.6.5",
     "zxing-wasm": "3.1.4"
@@ -51,6 +52,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "jsdom": "27.4.0",
+    "shaka-packager": "3.9.3",
     "sharp": "0.35.5",
     "tailwindcss": "4.3.3",
     "vitest": "5.0.2"

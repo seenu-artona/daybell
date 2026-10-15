@@ -1,0 +1,60 @@
+import { ApiError, type DrmTestTokenResponse } from "@daybell/api";
+import { type DrmTestSettings, drmTestPageEnabled, drmTestSettings } from "@daybell/config/server";
+import { NextResponse } from "next/server";
+import { ApiErrorLater, handle } from "@/lib/api";
+import { licenseToken, licenseUrls } from "@/lib/drm-test";
+import { drmTokenBudget } from "@/lib/drm-test-throttle";
+import { assertCanManage, studioScope } from "@/lib/studio";
+
+// Signing runs in Montréal like the rest of Canada's work (D113). No studio data is read or sent: the token carries
+// only the test clip's key ID, its wrapped key and the policy.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const preferredRegion = "yul1";
+
+/** The conflict's field value when a setting is missing or malformed (the variable is named in the log only). */
+const DRM_TEST_NOT_CONFIGURED = "drmTest.notConfigured";
+
+function settings(): DrmTestSettings {
+  try {
+    return drmTestSettings();
+  } catch (err) {
+    // The message names the variable, never its value (packages/config).
+    console.error("drm_test_config", err instanceof Error ? err.message : "unknown");
+    // A named conflict, so the page can say "not set up" rather than "something went wrong".
+    throw new ApiError("conflict", "The DRM test isn't set up here.", {
+      setup: DRM_TEST_NOT_CONFIGURED,
+    });
+  }
+}
+
+/**
+ * POST /api/v1/dev/drm-test/token: a license token for /dev/drm-test (spike; D158; ADR 0032). Off unless
+ * DRM_TEST_PAGE_ENABLED is true, and then for owners and admins only. The flag is read before anything else, so a
+ * disabled environment answers like a route that doesn't exist. At most 30 tokens a minute per person (429 with
+ * Retry-After). The token and keys are never logged.
+ */
+export const POST = handle(async (_request: Request) => {
+  if (!drmTestPageEnabled()) throw new ApiError("not_found", "Not found.");
+  const { studio, userId } = await studioScope();
+  assertCanManage(studio);
+  const take = drmTokenBudget.take(userId);
+  if (!take.ok) {
+    // A fixed name only: never the person or the studio.
+    console.warn("drm_test_rate_limited");
+    throw new ApiErrorLater(
+      "rate_limited",
+      take.retryAfterSeconds,
+      "Too many token requests. Please wait a minute.",
+    );
+  }
+  const config = settings();
+  const { token, expiresAt } = licenseToken(config);
+  const body: DrmTestTokenResponse = {
+    token,
+    expiresAt,
+    licenseUrls: licenseUrls(config.licensePrefix, config.fairplayCertificateUrl !== null),
+    fairplayCertificateUrl: config.fairplayCertificateUrl,
+  };
+  return NextResponse.json(body, { headers: { "cache-control": "no-store" } });
+});

@@ -57,7 +57,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // Static files skip the session check: Next's own, the API (it checks sessions itself), icons and images, and the
+  // DRM test page's clip and fallback (/drm-test/…: public files, ADR 0032).
   matcher: [
-    "/((?!_next/static|_next/image|api/|favicon.ico|icon.svg|.*\\.(?:png|jpg|jpeg|svg|webp|woff2?)$).*)",
+    "/((?!_next/static|_next/image|api/|drm-test/|favicon.ico|icon.svg|.*\\.(?:png|jpg|jpeg|svg|webp|woff2?)$).*)",
   ],
 };
