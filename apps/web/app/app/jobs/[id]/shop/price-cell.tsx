@@ -57,7 +57,8 @@ export function PriceCell({
   useEffect(() => {
     saved.current = cents;
     if (editedWhileSaving.current) return;
-    show(moneyInputText(cents));
+    text.current = moneyInputText(cents);
+    setValue(text.current);
     setError(null);
     refused.current = null;
   }, [cents]);
