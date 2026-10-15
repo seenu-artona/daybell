@@ -82,9 +82,73 @@ export const SHOP_PROBES = DRM_PROBES.filter((p) =>
   ["widevineHwAll", "playready3000", "playready3000KeySystem", "fairplay"].includes(p.id),
 );
 
-/** Asks the browser, once, which hardware DRM it has for the clips' codec (no network, nothing personal). */
-export function probeShopDrm(request: RequestAccess | undefined = browserRequest()) {
-  return probeSome(SHOP_PROBES, request);
+/**
+ * Apple's older, prefixed EME (`WebKitMediaKeys`). Browsers inside iPhone and iPad apps (Chrome, Edge, Firefox on iOS)
+ * run Safari's engine in a web view, where WebKit has turned this on since 2019 (r245491) and FairPlay plays through it
+ * while the standard `requestMediaKeySystemAccess` may be missing. Shaka Player's PatchedMediaKeysApple polyfill plays
+ * through it; this only asks whether FairPlay is there.
+ */
+export interface AppleLegacyKeys {
+  isTypeSupported(keySystem: string, type?: string): boolean;
+}
+
+/** The FairPlay names Shaka asks the prefixed API for (drm_engine: "com.apple.fps.1_0", then "com.apple.fps"). */
+const LEGACY_FAIRPLAY_KEY_SYSTEMS = ["com.apple.fps.1_0", "com.apple.fps"] as const;
+
+const browserLegacyKeys = (): AppleLegacyKeys | undefined => {
+  if (typeof window === "undefined") return undefined;
+  const keys = (window as unknown as { WebKitMediaKeys?: Partial<AppleLegacyKeys> })
+    .WebKitMediaKeys;
+  return typeof keys?.isTypeSupported === "function" ? (keys as AppleLegacyKeys) : undefined;
+};
+
+/** Whether the prefixed API says it plays the clips with FairPlay. Never throws. */
+export function legacyFairplaySupported(legacy: AppleLegacyKeys | undefined): boolean {
+  if (!legacy) return false;
+  return LEGACY_FAIRPLAY_KEY_SYSTEMS.some((keySystem) => {
+    try {
+      // A bare type, as Shaka's polyfill asks (it cuts the codecs off before calling the prefixed API).
+      return legacy.isTypeSupported(keySystem, "video/mp4");
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Whether FairPlay plays here only through the prefixed API: the standard one is missing altogether and the prefixed
+ * one has FairPlay for the clips' codec. The player then installs Shaka's Apple polyfill before loading (iPhone
+ * Chrome). Where the standard API exists (Safari) its answer stands, even a refusal.
+ */
+export function fairplayNeedsLegacyEme(
+  request: RequestAccess | undefined = browserRequest(),
+  legacy: AppleLegacyKeys | undefined = browserLegacyKeys(),
+  polyfilled: boolean = applePolyfillInstalled(),
+): Promise<boolean> {
+  // Once Shaka's Apple polyfill is in, it is the page's requestMediaKeySystemAccess: later viewers still play through it.
+  return Promise.resolve(polyfilled || (!request && legacyFairplaySupported(legacy)));
+}
+
+/** Whether Shaka's Apple polyfill already replaced the standard API in this page (it marks itself "apple"). */
+function applePolyfillInstalled(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    (window as unknown as { shakaMediaKeysPolyfill?: string }).shakaMediaKeysPolyfill === "apple"
+  );
+}
+
+/**
+ * Asks the browser, once, which hardware DRM it has for the clips' codec (no network, nothing personal). Where the
+ * standard API is missing altogether (iPhone Chrome and other in-app browsers), FairPlay counts when Apple's prefixed
+ * API has it for the clips' codec; where the standard API exists, its answer stands.
+ */
+export async function probeShopDrm(
+  request: RequestAccess | undefined = browserRequest(),
+  legacy: AppleLegacyKeys | undefined = browserLegacyKeys(),
+) {
+  const results = await probeSome(SHOP_PROBES, request);
+  if (!request && legacyFairplaySupported(legacy)) results.fairplay = "supported";
+  return results;
 }
 
 /** How the large view plays here: DASH with hardware Widevine or PlayReady, HLS with FairPlay, or not at all. */

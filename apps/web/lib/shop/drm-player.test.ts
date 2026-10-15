@@ -16,7 +16,12 @@ import {
   storedPlan,
   storePlan,
 } from "./drm-player";
-import type { DrmProbeId, ProbeResult } from "./drm-probes";
+import {
+  type DrmProbeId,
+  fairplayNeedsLegacyEme,
+  legacyFairplaySupported,
+  type ProbeResult,
+} from "./drm-probes";
 
 // The shop's large view under DRM, apart from React (D158; ADR 0034, C2, C7): the plan from hardware probes only, the
 // tab's memory (a plan and a count, nothing else), the manifest address, Shaka's hardware-only configuration, and one
@@ -67,6 +72,67 @@ describe("the plan (C7)", () => {
     );
     expect(planFromProbes(probed, true)).toBe("fairplay");
     expect((await probeShopDrm(undefined)).widevineHwAll).toBe("noEme");
+  });
+});
+
+describe("Apple's prefixed EME (iPhone Chrome and other in-app browsers)", () => {
+  const legacy = (supported: string[]) => ({
+    asked: [] as string[],
+    isTypeSupported(keySystem: string, type?: string) {
+      this.asked.push(`${keySystem} ${type ?? ""}`.trim());
+      return supported.includes(keySystem);
+    },
+  });
+  const refuse = async () => {
+    throw new Error("no");
+  };
+
+  it("counts FairPlay when only WebKitMediaKeys has it (no standard EME at all)", async () => {
+    const keys = legacy(["com.apple.fps.1_0"]);
+    const probed = await probeShopDrm(undefined, keys);
+    expect(probed.fairplay).toBe("supported");
+    expect(probed.widevineHwAll).toBe("noEme");
+    expect(planFromProbes(probed, true)).toBe("fairplay");
+    expect(planFromProbes(probed, false)).toBe("none");
+    expect(keys.asked).toEqual(["com.apple.fps.1_0 video/mp4"]);
+  });
+
+  it("keeps the standard API's answer where it exists (desktop Safari has both): a refusal stands", async () => {
+    const keys = legacy(["com.apple.fps", "com.apple.fps.1_0"]);
+    const probed = await probeShopDrm(refuse, keys);
+    expect(probed.fairplay).toBe("notSupported");
+    expect(planFromProbes(probed, true)).toBe("none");
+    expect(keys.asked).toEqual([]);
+  });
+
+  it("changes nothing without WebKitMediaKeys, or when it says no or throws", async () => {
+    expect((await probeShopDrm(refuse, undefined)).fairplay).toBe("notSupported");
+    expect((await probeShopDrm(refuse, legacy([]))).fairplay).toBe("notSupported");
+    const throwing = {
+      isTypeSupported: () => {
+        throw new Error("boom");
+      },
+    };
+    expect(legacyFairplaySupported(throwing)).toBe(false);
+    expect((await probeShopDrm(undefined, throwing)).fairplay).toBe("noEme");
+  });
+
+  it("never turns software DRM into a plan: only FairPlay is asked of the prefixed API", async () => {
+    const keys = legacy(["com.widevine.alpha", "com.microsoft.playready.recommendation"]);
+    const probed = await probeShopDrm(undefined, keys);
+    expect(planFromProbes(probed, true)).toBe("none");
+    expect(keys.asked.every((a) => a.startsWith("com.apple.fps"))).toBe(true);
+  });
+
+  it("needs the polyfill only where the prefixed API has FairPlay and the standard one doesn't", async () => {
+    const ok = async () => ({});
+    expect(await fairplayNeedsLegacyEme(undefined, legacy(["com.apple.fps.1_0"]))).toBe(true);
+    expect(await fairplayNeedsLegacyEme(refuse, legacy(["com.apple.fps.1_0"]))).toBe(false);
+    expect(await fairplayNeedsLegacyEme(ok, legacy(["com.apple.fps.1_0"]))).toBe(false);
+    expect(await fairplayNeedsLegacyEme(refuse, legacy([]))).toBe(false);
+    expect(await fairplayNeedsLegacyEme(undefined, undefined)).toBe(false);
+    // The second viewer in a tab: the polyfill now is requestMediaKeySystemAccess, and is still the way (re-review #1).
+    expect(await fairplayNeedsLegacyEme(ok, legacy(["com.apple.fps.1_0"]), true)).toBe(true);
   });
 });
 
@@ -373,5 +439,50 @@ describe("createShopDrmPlayer: one player per open viewer (review #3, #4, #5)", 
     (shaka.Player as unknown as { isBrowserSupported: () => boolean }).isBrowserSupported = () =>
       false;
     expect(await make(video, shaka)).toBeNull();
+  });
+
+  it("installs Shaka's Apple polyfill first for FairPlay through the prefixed API, and never for DASH", async () => {
+    const order: string[] = [];
+    const video = new FakeVideo();
+    const { shaka } = fakeShaka(video, () => "frame");
+    shaka.polyfill.installAll = () => void order.push("installAll");
+    shaka.polyfill.PatchedMediaKeysApple = { install: () => void order.push("apple") };
+    const fairplaySetup = {
+      licenseUrls: { ...setup.licenseUrls, fairplay: "https://f" },
+      fairplayCertificateUrl: "https://c",
+    };
+    const create = (plan: "dash" | "fairplay", legacy: boolean) =>
+      createShopDrmPlayer({
+        shaka,
+        video: video as unknown as HTMLVideoElement,
+        plan,
+        setup: fairplaySetup,
+        token: async () => "t",
+        needsLegacyEme: async () => legacy,
+      });
+    await create("fairplay", true);
+    expect(order).toEqual(["apple", "installAll"]);
+    order.length = 0;
+    await create("fairplay", false);
+    await create("dash", true);
+    expect(order).toEqual(["installAll", "installAll"]);
+  });
+
+  it("names FairPlay com.apple.fps.1_0 through the polyfill, so Shaka attaches keys without waiting (review #1)", () => {
+    const fairplaySetup = {
+      licenseUrls: { widevine: "https://w", playready: "https://p", fairplay: "https://f" },
+      fairplayCertificateUrl: "https://c",
+    };
+    const legacyConfig = shakaConfig("fairplay", fairplaySetup, {}, true) as {
+      drm: { servers: Record<string, string>; advanced: Record<string, unknown> };
+    };
+    expect(legacyConfig.drm.servers).toEqual({ "com.apple.fps.1_0": "https://f" });
+    expect(legacyConfig.drm.advanced["com.apple.fps.1_0"]).toEqual({
+      serverCertificateUri: "https://c",
+    });
+    expect(legacyConfig.drm.advanced["com.apple.fps"]).toBeUndefined();
+    const standard = shakaConfig("fairplay", fairplaySetup, {}) as typeof legacyConfig;
+    expect(standard.drm.servers).toEqual({ "com.apple.fps": "https://f" });
+    expect(standard.drm.advanced["com.apple.fps.1_0"]).toBeUndefined();
   });
 });
