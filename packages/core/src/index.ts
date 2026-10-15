@@ -1,6 +1,7 @@
 export * from "./access-codes";
 export * from "./assert";
 export * from "./checklist";
+export * from "./drm";
 export * from "./fulfilment";
 export * from "./ids";
 export * from "./job-page";

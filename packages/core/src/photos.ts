@@ -5,6 +5,8 @@
  * Object keys and URLs hold IDs only, never a file's name (D96, D113).
  */
 
+import type { DrmVariant } from "./drm";
+
 /** Seenu, answer 1: JPEG only, at most 50 MB a photo (50 MiB, so a camera's "50 MB" file always fits). */
 export const MAX_PHOTO_BYTES = 52_428_800;
 /** Seenu, answer 1: at most 50,000 photos per job, the bin included. */
@@ -141,10 +143,15 @@ export const PHOTO_VARIANTS = [
   "proof-thumb.webp",
   "proof.webp",
   "download.jpg",
+  // The large view's DRM clip and its manifests (D158; ADR 0034), made from proof.webp: DRM_VARIANTS in ./drm.
+  "drm.mp4",
+  "drm.mpd",
+  "drm.m3u8",
+  "drm-video.m3u8",
 ] as const;
 export type PhotoVariant = (typeof PHOTO_VARIANTS)[number];
 /** The WebP previews (studio and parents). */
-export type DerivativeVariant = Exclude<PhotoVariant, "original" | "download.jpg">;
+export type DerivativeVariant = Exclude<PhotoVariant, "original" | "download.jpg" | DrmVariant>;
 /** The paid download's key's last part (ADR 0023). */
 export const DOWNLOAD_VARIANT = "download.jpg" satisfies PhotoVariant;
 
