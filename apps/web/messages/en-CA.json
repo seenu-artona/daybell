@@ -474,7 +474,48 @@
         "team": "Team",
         "payouts": "Stripe",
         "taxes": "Taxes",
-        "templates": "Templates"
+        "templates": "Templates",
+        "shop": "Shop"
+      },
+      "shop": {
+        "intro": "How parents find your shop, see it and pay. Everyone on the team can read this; most of it is set elsewhere.",
+        "soon": "Soon",
+        "look": {
+          "title": "Look",
+          "name": "Parents see your studio's name: {name}",
+          "onlyYours": "The shop shows only your studio, never Silverback's name or logo.",
+          "logo": "Logo upload"
+        },
+        "address": {
+          "title": "Shop address",
+          "body": "One address for every job. Parents type the code from their card there.",
+          "label": "Shop address",
+          "copy": "Copy",
+          "copyLabel": "Copy the shop address",
+          "copied": "Shop address copied.",
+          "copyFailed": "We couldn't copy it. Select the address and copy it yourself."
+        },
+        "checkout": {
+          "title": "Checkout",
+          "pay": "Parents pay on Stripe's secure page, by card, Apple Pay or Google Pay.",
+          "tax": "Prices are before tax. Tax is added at checkout once you have a tax registration.",
+          "shipping": "Home shipping is one fee per order, set on each price list. Delivery to school is free when the job allows it. Digital-only orders pay no shipping.",
+          "receipt": "Stripe emails the parent a receipt with your studio's name.",
+          "taxes": "Taxes",
+          "stripe": "Stripe and fees",
+          "priceLists": "Price lists"
+        },
+        "policies": {
+          "title": "Policies",
+          "cancel": "Parents can cancel an order for a full refund until it is marked Printed. Orders of downloads only can't be canceled by the parent; they ask you.",
+          "refund": "Owners and admins refund an order in full or in part from its page. The card fee isn't returned.",
+          "downloads": "Downloads a parent paid for stay available after the shop closes."
+        },
+        "more": {
+          "coupons": "Coupons",
+          "giftCards": "Gift cards",
+          "title": "Coupons and gift cards"
+        }
       }
     },
     "home": {

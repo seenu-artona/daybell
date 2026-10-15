@@ -1,7 +1,7 @@
 "use client";
 
 import { buttonVariants } from "@daybell/ui";
-import { ChevronRight, CreditCard, LayoutTemplate, Receipt, Users } from "lucide-react";
+import { ChevronRight, CreditCard, LayoutTemplate, Receipt, Store, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -19,11 +19,12 @@ const ICONS: Record<SettingsSection, typeof Users> = {
   payouts: CreditCard,
   taxes: Receipt,
   templates: LayoutTemplate,
+  shop: Store,
 };
 
 /**
  * Settings (D151, D154; ADR 0029): sections on the left (Team for everyone, Stripe and Taxes for owners and admins,
- * Templates for everyone; ADR 0020, 0023), each an icon tile, its name and a chevron, the current one white and marked
+ * Templates and Shop for everyone; ADR 0020, 0023, 0033), each an icon tile, its name and a chevron, the current one white and marked
  * with aria-current, not colour alone (D91); the section's content on the right as white cards. On Templates, owners
  * and admins get the green "New template" in the title row. A template's own page has its own header and frame.
  */
