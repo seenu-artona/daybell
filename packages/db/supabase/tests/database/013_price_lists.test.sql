@@ -71,7 +71,8 @@ select has_table('public', 'price_lists', 'price_lists exists');
 select has_table('public', 'price_list_items', 'price_list_items exists');
 select has_table('public', 'price_list_package_lines', 'price_list_package_lines exists');
 select col_not_null('public', 'jobs', 'price_list_id', 'every job has a price list');
-select col_default_is('public', 'jobs', 'deliver_to_school', 'false', 'free delivery to school is off by default');
+-- Off unless the job or its template turns it on: the template trigger fills a left-out value (ADR 0029; 028 tests it).
+select col_not_null('public', 'jobs', 'deliver_to_school', 'free delivery to school is always on or off, never unknown');
 select is((select data_type from information_schema.columns
   where table_name = 'price_list_items' and column_name = 'price_cents'), 'bigint', 'prices are whole cents (bigint)');
 select is((select data_type from information_schema.columns

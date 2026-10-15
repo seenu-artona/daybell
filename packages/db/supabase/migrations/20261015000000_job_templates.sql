@@ -130,8 +130,10 @@ as $$
 declare
   v_fields text[];
 begin
-  if pg_trigger_depth() > 1 then
-    return coalesce(new, old);
+  -- Only the seeding inside studio creation is silent; a change made by the database for someone (a deleted price list
+  -- leaving a template on the studio's default) still writes job_template.updated (D96).
+  if tg_op = 'INSERT' and pg_trigger_depth() > 1 then
+    return new;
   end if;
   if tg_op = 'INSERT' then
     perform app.emit(new.studio_id, 'job_template.created', new.id, '{}'::jsonb);
@@ -155,6 +157,24 @@ end;
 $$;
 create trigger job_templates_events after insert or update or delete on public.job_templates
 for each row execute function app.on_job_template_change();
+
+-- At most 50 templates per studio (ADR 0029, call 6), whoever writes. The studio's row is locked first, so two adds at
+-- the same moment are counted one after the other. A named error without values.
+create function app.guard_job_template_limit() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  perform 1 from public.studios s where s.id = new.studio_id for no key update;
+  if (select count(*) from public.job_templates t where t.studio_id = new.studio_id) >= 50 then
+    raise exception 'template_limit' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+create trigger job_templates_guard_limit before insert on public.job_templates
+for each row execute function app.guard_job_template_limit();
+revoke all on function app.guard_job_template_limit() from public;
 
 -- job_template.made_default: the studio's default changed (not the first one, set when the studio is created).
 create function app.on_default_job_template_change() returns trigger
@@ -196,6 +216,10 @@ comment on column public.jobs.template_rules is
   'The rules the job''s template gave it when it was made (D154): its own changes are the differences. Never changes.';
 comment on column public.jobs.opened_at is 'When the shop first opened (draft to selling). Set by the database.';
 
+-- School delivery left out of a new job is null until the template trigger below fills it in (the template's, else
+-- false), so an explicit false is told apart from "not given". NOT NULL is checked after the trigger.
+alter table public.jobs alter column deliver_to_school drop default;
+
 -- The template is chosen when the job is made; the rules are the job's own to change afterwards. The snapshot and the
 -- opening moment are the database's.
 grant insert (template_id) on public.jobs to authenticated;
@@ -219,6 +243,7 @@ begin
   if not found then
     -- A template of another studio (the composite key refuses it next), or a studio with none.
     new.template_rules := null;
+    new.deliver_to_school := coalesce(new.deliver_to_school, false);
     return new;
   end if;
   new.template_id := v_template.id;
@@ -234,7 +259,8 @@ begin
   if new.price_list_id is null then
     new.price_list_id := v_template.price_list_id;
   end if;
-  new.deliver_to_school := new.deliver_to_school or v_template.deliver_to_school;
+  -- The job's own choice wins, even false (code review M3); left out, the template's.
+  new.deliver_to_school := coalesce(new.deliver_to_school, v_template.deliver_to_school, false);
   return new;
 end;
 $$;
@@ -267,7 +293,10 @@ begin
   if old.status = 'draft' and new.status = 'selling' then
     new.opened_at := coalesce(old.opened_at, now());
     if new.closes_at is null and new.shop_closes_days is not null then
-      new.closes_at := new.opened_at + make_interval(days => new.shop_closes_days);
+      -- Whole days of 24 hours, counted in UTC, as core's closesAtByRule counts them: a daylight-saving change in the
+      -- session's time zone never moves the date by an hour.
+      new.closes_at := (new.opened_at at time zone 'UTC' + make_interval(days => new.shop_closes_days))
+        at time zone 'UTC';
     end if;
   elsif new.opened_at is distinct from old.opened_at then
     new.opened_at := old.opened_at;
@@ -422,8 +451,11 @@ begin
         and exists (select 1 from public.order_lines ol
                     where ol.studio_id = o.studio_id and ol.order_id = o.id and ol.job_id = p_job_id))
     select jsonb_build_object(
-      'currency', (select case s.data_region when 'us' then 'USD' else 'CAD' end from public.studios s
-                   where s.id = p_studio_id),
+      -- The orders' own currency (they are in one); with no orders yet, the region's (nothing to add up).
+      'currency', coalesce(
+        (select min(o.currency) from public.orders o where o.id in (select jo.id from job_orders jo)),
+        (select case s.data_region when 'us' then 'USD' else 'CAD' end from public.studios s
+         where s.id = p_studio_id)),
       'sales_cents', (select coalesce(sum(e.amount_cents), 0) from public.ledger_entries e
                       join public.ledger_transactions t on t.id = e.transaction_id and t.studio_id = e.studio_id
                       where e.studio_id = p_studio_id and e.account in ('parent_payments', 'refunds')
@@ -440,15 +472,16 @@ grant execute on function public.job_sales(uuid, uuid) to authenticated;
 
 -- ── A person on Subjects: their QR card's first print and when they were photographed (D153) ──────────────────────
 -- SECURITY INVOKER: row-level security decides (members read cards, photos and tags). The card's row is made at its
--- first print; "photographed" is the camera's day of the earliest ready photo tagged to them, outside the bin.
+-- first print; "photographed" is the camera's clock (no zone, as the camera wrote it) of the earliest ready photo
+-- tagged to them, outside the bin: the screen shows its day as it stands, never shifted through UTC.
 create function public.child_record_facts(p_studio_id uuid, p_child_id uuid)
-returns table (card_printed_at timestamptz, photographed_on date)
+returns table (card_printed_at timestamptz, photographed_at timestamp)
 language sql stable
 set search_path = ''
 as $$
   select
     (select q.created_at from public.qr_cards q where q.studio_id = c.studio_id and q.child_id = c.id),
-    (select min(p.captured_at)::date from public.photo_tags t
+    (select min(p.captured_at) from public.photo_tags t
      join public.photos p on p.studio_id = t.studio_id and p.job_id = t.job_id and p.id = t.photo_id
      where t.studio_id = c.studio_id and t.job_id = c.job_id and t.child_id = c.id and t.place = 'child'
        and p.status = 'ready' and p.binned_at is null)

@@ -6,7 +6,7 @@
 -- admins only and the numbers for owners and admins only; Subjects' new saved chips.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(66);
+select plan(71);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -195,9 +195,13 @@ select is((select count(*) from public.events where type = 'job_template.deleted
 reset role;
 select throws_ok($$ update public.jobs set template_rules = '{}' where id = pg_temp.v('lincoln') $$, '23514', null,
   'even the database refuses to change a job''s snapshot');
+-- A time zone with a daylight-saving change ahead (Nov 1): the rule still counts whole 24-hour days, as core does.
+set local timezone = 'America/Toronto';
 update public.jobs set status = 'selling' where id = pg_temp.v('lincoln');
-select ok((select opened_at is not null and closes_at = opened_at + interval '14 days' from public.jobs
-  where id = pg_temp.v('lincoln')), 'the shop''s first opening is kept, and closes 14 days later by the job''s rule');
+select ok((select opened_at is not null
+    and extract(epoch from closes_at) - extract(epoch from opened_at) = 14 * 86400 from public.jobs
+  where id = pg_temp.v('lincoln')),
+  'the shop''s first opening is kept, and closes 14 days of 24 hours later by the job''s rule, whatever the zone');
 select is((select count(*) from public.events where type = 'job.updated' and subject_id = pg_temp.v('lincoln')
   and data -> 'fields' ? 'closes_at'), 0::bigint, 'the rule''s closing date writes no job.updated (job.selling says it)');
 update public.jobs set status = 'closed', closes_at = null where id = pg_temp.v('lincoln');
@@ -205,9 +209,52 @@ create temp table first_open as select opened_at from public.jobs where id = pg_
 update public.jobs set status = 'selling' where id = pg_temp.v('lincoln');
 select ok((select j.opened_at = f.opened_at and j.closes_at is null from public.jobs j, first_open f
   where j.id = pg_temp.v('lincoln')), 'reopening keeps the first opening and sets no closing date');
+-- Core's changedRules reads this as no change once the rule's date has passed (code review M2): the snapshot and the
+-- job's own rule still agree, so nothing but the cleared date differs.
+select is((select (template_rules ->> 'shop_closes_days')::int from public.jobs where id = pg_temp.v('lincoln')),
+  10, 'a reopened job keeps its snapshot, which is what Undo would go back to');
 update public.jobs set status = 'selling' where id = pg_temp.v('hill');
 select is((select closes_at from public.jobs where id = pg_temp.v('hill')), null,
   'a job whose rule is "by hand" opens with no closing date');
+reset timezone;
+
+-- School delivery: the template's when the job doesn't say, the job's own when it does, even false (code review M3).
+insert into public.job_templates (id, studio_id, name, deliver_to_school) values
+  ('d1000000-0000-4000-8000-0000000000aa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'To school', true);
+insert into public.jobs (id, studio_id, name, type, picture_day, internal_number, template_id) values
+  ('a1000000-0000-4000-8000-0000000000a1', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Delivered', 'school', '2026-11-05',
+   'JOB00010', 'd1000000-0000-4000-8000-0000000000aa');
+insert into public.jobs (id, studio_id, name, type, picture_day, internal_number, template_id, deliver_to_school)
+values ('a1000000-0000-4000-8000-0000000000a2', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Not delivered', 'school',
+  '2026-11-05', 'JOB00011', 'd1000000-0000-4000-8000-0000000000aa', false);
+insert into public.jobs (id, studio_id, name, type, picture_day, internal_number) values
+  ('a1000000-0000-4000-8000-0000000000a3', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Plain', 'school', '2026-11-05',
+   'JOB00012');
+select results_eq($$ select name, deliver_to_school from public.jobs
+  where id::text like 'a1000000-0000-4000-8000-0000000000a%' order by internal_number $$,
+  $$ values ('Delivered'::text, true), ('Not delivered', false), ('Plain', false) $$,
+  'school delivery: the template''s when left out, the job''s own false wins, and false without either');
+
+-- A deleted price list leaves its templates on the studio's default, and that change is an event too (review 7).
+insert into public.price_lists (id, studio_id, name, currency) values
+  ('e2000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Spare list', 'CAD');
+update public.job_templates set price_list_id = 'e2000000-0000-4000-8000-000000000001'
+  where id = 'd1000000-0000-4000-8000-0000000000aa';
+delete from public.price_lists where id = 'e2000000-0000-4000-8000-000000000001';
+select is((select data from public.events where type = 'job_template.updated'
+    and subject_id = 'd1000000-0000-4000-8000-0000000000aa' order by id desc limit 1),
+  '{"fields": ["price_list_id"]}'::jsonb, 'a template left on the default by a deleted list writes job_template.updated');
+
+-- At most 50 templates a studio, counted by the database (review 9).
+insert into public.job_templates (studio_id, name)
+select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Filler ' || n
+from generate_series(1, 50 - (select count(*) from public.job_templates
+  where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')) n;
+select throws_ok($$ insert into public.job_templates (studio_id, name)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'One too many') $$, 'P0001', 'template_limit',
+  'a 51st template is refused, whoever writes');
+select lives_ok($$ insert into public.job_templates (studio_id, name)
+  values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'B''s second') $$, 'each studio has its own 50');
 
 -- ── Progress facts ────────────────────────────────────────────────────────────────────────────────────────────────
 insert into public.jobs (id, studio_id, name, type, picture_day, internal_number) values
@@ -334,13 +381,13 @@ select throws_ok($$ select public.job_sales('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa
 
 -- ── A person's card, photos and orders on Subjects ────────────────────────────────────────────────────────────────
 select pg_temp.as_user('33333333-3333-4333-8333-333333333333') as photographer;
-select results_eq($$ select card_printed_at, photographed_on from public.child_record_facts(
+select results_eq($$ select card_printed_at, photographed_at from public.child_record_facts(
     'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'c0000000-0000-4000-8000-000000000001') $$,
-  $$ values ('2026-10-03T10:00:00Z'::timestamptz, '2026-11-02'::date) $$,
-  'a person''s first card print and the camera''s day of their first photo');
-select results_eq($$ select card_printed_at, photographed_on from public.child_record_facts(
+  $$ values ('2026-10-03T10:00:00Z'::timestamptz, '2026-11-02 09:15:00'::timestamp) $$,
+  'a person''s first card print and the camera''s own clock at their first photo (no zone)');
+select results_eq($$ select card_printed_at, photographed_at from public.child_record_facts(
     'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'c0000000-0000-4000-8000-000000000003') $$,
-  $$ values (null::timestamptz, null::date) $$, 'nothing yet for someone without a card or photos');
+  $$ values (null::timestamptz, null::timestamp) $$, 'nothing yet for someone without a card or photos');
 select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as owner_b;
 select is((select count(*) from public.child_record_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   'c0000000-0000-4000-8000-000000000001')), 0::bigint, 'studio B''s owner gets nothing about studio A''s person');
