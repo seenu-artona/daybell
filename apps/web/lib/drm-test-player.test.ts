@@ -3,9 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiResult } from "./client-api";
 import type { DrmProbeId, ProbeResult } from "./drm-capabilities";
 import {
+  createTimeline,
+  describeVideo,
+  frameReady,
   licenseRequestFilter,
   PLAYBACK_TIMEOUT_MS,
   prepare,
+  safeDiagnostic,
   watchPlayback,
 } from "./drm-test-player";
 
@@ -155,15 +159,34 @@ describe("licenseRequestFilter", () => {
   });
 });
 
+describe("frameReady", () => {
+  it("needs a decoded current frame with a size", () => {
+    expect(frameReady({ readyState: 2, videoWidth: 1600 })).toBe(true);
+    expect(frameReady({ readyState: 4, videoWidth: 1600 })).toBe(true);
+    expect(frameReady({ readyState: 1, videoWidth: 1600 })).toBe(false);
+    expect(frameReady({ readyState: 2, videoWidth: 0 })).toBe(false);
+  });
+});
+
 describe("watchPlayback", () => {
   afterEach(() => vi.useRealTimers());
 
-  function setup(statuses: Record<string, string> = {}) {
+  function setup(
+    statuses: Record<string, string> = {},
+    frames: { callbacks: (() => void)[]; cancelled: number[] } | null = null,
+  ) {
     vi.useFakeTimers();
     const player = new EventTarget();
     const video = Object.assign(new EventTarget(), {
       readyState: 0,
+      videoWidth: 0,
       error: null as { code: number } | null,
+      ...(frames
+        ? {
+            requestVideoFrameCallback: (cb: () => void) => frames.callbacks.push(cb),
+            cancelVideoFrameCallback: (handle: number) => frames.cancelled.push(handle),
+          }
+        : {}),
     });
     const keys = { ...statuses };
     const onOutcome = vi.fn();
@@ -171,22 +194,41 @@ describe("watchPlayback", () => {
     return { player, video, keys, onOutcome, stop };
   }
 
-  it("is playing only once the first frame is decoded and a key is usable", () => {
-    const { player, video, keys, onOutcome } = setup();
+  it("is playing once a frame is decoded with a size, even with no key status at all (Safari)", () => {
+    const { video, onOutcome } = setup();
     video.readyState = 2;
     video.dispatchEvent(new Event("loadeddata"));
     expect(onOutcome).not.toHaveBeenCalled();
-    keys.k = "usable";
-    player.dispatchEvent(new Event("keystatuschanged"));
-    expect(onOutcome).toHaveBeenCalledTimes(1);
-    expect(onOutcome).toHaveBeenCalledWith({ kind: "playing" });
+    video.videoWidth = 1600;
+    video.dispatchEvent(new Event("resize"));
+    expect(onOutcome).toHaveBeenCalledExactlyOnceWith({ kind: "playing" });
   });
 
-  it("isn't playing with a usable key but no decoded frame", () => {
+  it.each(["loadeddata", "canplay", "playing", "timeupdate", "resize"])(
+    "checks for the frame on %s",
+    (type) => {
+      const { video, onOutcome } = setup();
+      video.readyState = 4;
+      video.videoWidth = 1600;
+      video.dispatchEvent(new Event(type));
+      expect(onOutcome).toHaveBeenCalledWith({ kind: "playing" });
+    },
+  );
+
+  it("is playing when a video frame callback fires (a frame was presented)", () => {
+    const frames = { callbacks: [] as (() => void)[], cancelled: [] as number[] };
+    const { onOutcome } = setup({}, frames);
+    expect(frames.callbacks).toHaveLength(1);
+    frames.callbacks[0]?.();
+    expect(onOutcome).toHaveBeenCalledExactlyOnceWith({ kind: "playing" });
+  });
+
+  it("isn't playing before a frame is ready, whatever the key says", () => {
     const { player, video, keys, onOutcome } = setup();
     keys.k = "usable";
     player.dispatchEvent(new Event("keystatuschanged"));
     video.readyState = 1;
+    video.videoWidth = 1600;
     video.dispatchEvent(new Event("loadeddata"));
     expect(onOutcome).not.toHaveBeenCalled();
   });
@@ -194,11 +236,15 @@ describe("watchPlayback", () => {
   it.each([
     ["output-restricted", "outputRestricted"],
     ["internal-error", "keyError"],
-  ])("fails when a key is %s", (status, reason) => {
-    const { player, keys, onOutcome } = setup();
+  ])("fails when a key is %s, even with a frame ready", (status, reason) => {
+    const { player, video, keys, onOutcome } = setup();
     keys.k = status;
     player.dispatchEvent(new Event("keystatuschanged"));
     expect(onOutcome).toHaveBeenCalledWith({ kind: "failed", reason, code: "" });
+    video.readyState = 4;
+    video.videoWidth = 1600;
+    video.dispatchEvent(new Event("loadeddata"));
+    expect(onOutcome).toHaveBeenCalledTimes(1);
   });
 
   it("fails on Shaka's error, with its code", () => {
@@ -225,8 +271,9 @@ describe("watchPlayback", () => {
   });
 
   it("doesn't time out once playing, but still reports a later restriction", () => {
-    const { player, video, keys, onOutcome } = setup({ k: "usable" });
+    const { player, video, keys, onOutcome } = setup();
     video.readyState = 4;
+    video.videoWidth = 1600;
     video.dispatchEvent(new Event("loadeddata"));
     vi.advanceTimersByTime(PLAYBACK_TIMEOUT_MS * 2);
     expect(onOutcome).toHaveBeenCalledTimes(1);
@@ -239,11 +286,52 @@ describe("watchPlayback", () => {
     });
   });
 
-  it("stops listening when cleaned up", () => {
-    const { player, onOutcome, stop } = setup();
+  it("stops listening when cleaned up, cancelling a waiting frame callback", () => {
+    const frames = { callbacks: [] as (() => void)[], cancelled: [] as number[] };
+    const { player, onOutcome, stop } = setup({}, frames);
     stop();
+    expect(frames.cancelled).toEqual([1]);
     player.dispatchEvent(new CustomEvent("error", { detail: { code: 1 } }));
     vi.advanceTimersByTime(PLAYBACK_TIMEOUT_MS);
     expect(onOutcome).not.toHaveBeenCalled();
+  });
+});
+
+describe("diagnostics", () => {
+  it("describes the video in numbers", () => {
+    expect(
+      describeVideo({
+        readyState: 2,
+        networkState: 1,
+        currentTime: 0.04,
+        videoWidth: 1600,
+        videoHeight: 1066,
+        paused: true,
+      }),
+    ).toBe("readyState=2 networkState=1 currentTime=0.040 size=1600x1066 paused=true");
+  });
+
+  it("never lets a token or a key-like value through", () => {
+    const jwt = ["eyJhbGciOiJIUzI1NiJ9", "eyJ2ZXJzaW9uIjoxfQ", "c2lnbmF0dXJl"].join(".");
+    expect(safeDiagnostic(`header X-AxDRM-Message: ${jwt}`)).toBe(
+      "header X-AxDRM-Message: <token>",
+    );
+    const b64 = Buffer.alloc(32, 7).toString("base64");
+    expect(safeDiagnostic(`key ${b64}`)).toBe("key <redacted>");
+    expect(safeDiagnostic("word ".repeat(100))).toHaveLength(300);
+    expect(safeDiagnostic("shaka error code=6007 category=6")).toBe(
+      "shaka error code=6007 category=6",
+    );
+  });
+
+  it("keeps a timeline with times since the start, cleaned, at most 200 lines", () => {
+    let t = 1000;
+    const timeline = createTimeline(() => t);
+    timeline.add("start");
+    t = 1250.4;
+    timeline.add("video loadeddata");
+    expect(timeline.text()).toBe("+0ms start\n+250ms video loadeddata");
+    for (let i = 0; i < 300; i++) timeline.add("x");
+    expect(timeline.size()).toBe(200);
   });
 });

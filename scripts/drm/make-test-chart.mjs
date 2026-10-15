@@ -2,7 +2,7 @@
 // Makes the DRM test page's clear picture (D158; ADR 0032). See scripts/drm/README.md. No key is involved here.
 //
 // 1. Draws a synthetic test chart (SMPTE colour bars, the words "DRM TEST"): never a real photo, never a child.
-// 2. Encodes it as a 2-frame, all-intra (every frame a keyframe) 1600 px H.264 clip:
+// 2. Encodes it as a 2-second, 10-frame, all-intra (every frame a keyframe) 1600 px H.264 clip:
 //    apps/web/assets/drm-test/clear.mp4. Outside public/, so it is never served; the web app's build encrypts it
 //    (apps/web/scripts/encrypt-drm-test.mjs) and publishes only the encrypted copy.
 // 3. Makes the fallback, the same chart as a watermarked JPEG: apps/web/public/drm-test/fallback.jpg.
@@ -20,8 +20,14 @@ const FONT = join(ROOT, "apps", "web", "assets", "fonts", "PlusJakartaSans-Bold.
 /** 3:2, 1600 px on the long side, like a parent's large view (D158). Even sizes for H.264 4:2:0. */
 const WIDTH = 1600;
 const HEIGHT = 1066;
-/** Two frames at 1 frame a second: one 2-second segment. */
-const FRAMES = 2;
+/**
+ * Two seconds (one 2-second segment) of the same picture at 5 frames a second: 10 frames, each a keyframe. The first
+ * version had 2 frames at 1 a second, and Safari never presented one (Oct 14); a few more frames give its pipeline
+ * something to show while the muted clip plays, before the page pauses it.
+ */
+const RATE = 5;
+const SECONDS = 2;
+const FRAMES = RATE * SECONDS;
 
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: a local tool path for this script, not an input of any turbo task.
 const ffmpeg = (process.env.FFMPEG ?? "ffmpeg").trim();
@@ -29,7 +35,7 @@ const ffmpeg = (process.env.FFMPEG ?? "ffmpeg").trim();
 // Text for ffmpeg's drawtext: the font file path needs ':' and '\' escaped inside the filter graph.
 const font = FONT.replaceAll("\\", "/").replaceAll(":", "\\:");
 const chart = [
-  `smptehdbars=s=${WIDTH}x${HEIGHT}:r=1:d=${FRAMES}`,
+  `smptehdbars=s=${WIDTH}x${HEIGHT}:r=${RATE}:d=${SECONDS}`,
   `drawtext=fontfile='${font}':text='DRM TEST':fontsize=220:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=48:x=(w-tw)/2:y=(h-th)/2-60`,
   `drawtext=fontfile='${font}':text='Synthetic test chart':fontsize=56:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=20:x=(w-tw)/2:y=(h/2)+150`,
 ].join(",");

@@ -19,7 +19,8 @@ This step only answers "does it work on real devices?":
 
 - **A test clip, encrypted at build time.** No key passes through the repo, a developer's machine or chat:
   - The repo holds the **clear** clip, `apps/web/assets/drm-test/clear.mp4`: a synthetic SMPTE chart ("DRM TEST";
-    never a real photo or a child), 2 all-intra frames of H.264 High 4.0 at 1600×1066, made by
+    never a real photo or a child), 2 seconds of H.264 High 4.0 at 1600×1066, 10 identical all-intra frames at 5 fps (2 frames at 1 fps
+    until the Safari fix below), made by
     `scripts/drm/make-test-chart.mjs` with ffmpeg. It sits outside `public/` and is never served (checked: 404 at
     every path). Beside it, the committed fallback `public/drm-test/fallback.jpg`, the same chart watermarked.
   - `apps/web/scripts/encrypt-drm-test.mjs` runs before `next build`; its decisions are in
@@ -71,13 +72,51 @@ This step only answers "does it work on real devices?":
      then whether the build made the clip (no manifest: not set up).
   3. The clip in Shaka Player 5.2.12 (npm, Sep 25, 2026), muted, `playsinline`, stopped on its picture, named from the
      locale files. Each license request, and no other request, gets a fresh token as `X-AxDRM-Message`.
-  4. **When it counts as shown** (code review 1): only once the first frame is decoded (`loadeddata`, `readyState` at
-     `HAVE_CURRENT_DATA` or more) **and** a key's status is `usable`. A failure, in words, on Shaka's `error`, the video
-     element's `error`, a key that becomes `output-restricted` or `internal-error` (even after showing), or nothing
-     within 15 seconds. `play()` is never awaited. Try again stays available while loading.
-  5. Otherwise the fallback (below). The instruction line: "Take a screenshot and a screen recording; note whether
+  4. **When it counts as shown** (code review 1, amended by the Safari fix below): once a frame is ready, meaning
+     `readyState` at `HAVE_CURRENT_DATA` or more **with a video width** (checked on `loadeddata`, `canplay`, `playing`,
+     `timeupdate`, `resize`), or a `requestVideoFrameCallback` firing (a frame was presented). A failure, in words, on
+     Shaka's `error`, the video element's `error`, a key that becomes `output-restricted` or `internal-error` (even
+     after showing), or nothing within 15 seconds. `play()` is never awaited. Try again stays available while loading.
+  5. **Diagnostics**: a disclosure under the player, opened by itself on failure, with a copyable timeline (below).
+  6. Otherwise the fallback (below). The instruction line: "Take a screenshot and a screen recording; note whether
      the photo is black."
 - **The proxy** (`apps/web/proxy.ts`) no longer runs its session check for `/drm-test/…` static files (code review 9).
+
+## Safari after the license (Oct 14)
+
+With the IV fix, Axinom issued FairPlay licenses to Safari 26.5 on macOS, but the page stayed on "Loading…" over a
+blank area and fell back after 15 seconds ("nothing was shown"). The problem is in the browser after the license:
+either Safari never presented a frame, or the page never saw the signals. Changed together:
+
+- **Readiness no longer waits for a "usable" key.** Shaka 5.2.12 plays FairPlay HLS on Safari natively (`src=`; its
+  `streaming.useNativeHlsForFairPlay` defaults to true, and the page now sets it explicitly so it is visible). On that
+  path Safari may never report key statuses through Shaka, so the old rule (frame decoded **and** key `usable`) could
+  time out with the picture there. Now a ready frame with a size, or a presented frame, is enough; a restricted or
+  failed key is still a failure. Tests cover both.
+- **Start and pause.** The page used to pause on `playing`, which can come before anything is painted, and Safari may
+  show nothing for a paused, never-presented frame. It now sets `muted` on the element before `play()`, and pauses only
+  after the first presented frame (`requestVideoFrameCallback`, or else the first `timeupdate` past 0).
+- **More frames.** The clip is now 10 frames at 5 fps (still one 2-second segment, one key, same IV) instead of 2 at
+  1 fps, giving Safari's pipeline frames to present while it plays. Remade with `scripts/drm/make-test-chart.mjs`;
+  the build encrypts it as before.
+- **FairPlay request and response.** Unchanged: Shaka sends the raw SPC body (its default) and the page registers
+  Shaka's `commonFairPlayResponse`, which passes a raw CKC through and unwraps `<ckc>…</ckc>` or JSON (`ckc`,
+  `CkcMessage`, `License`). Axinom issuing the licenses shows the request is accepted; whether Safari accepts the
+  response is exactly what the diagnostics will show (a `shaka error` in the 6000s, or a missing `video
+  loadeddata`).
+- **Diagnostics** (Seenu's request). A "Diagnostics" disclosure with a timeline, in milliseconds since the start, to
+  copy and paste back: the user agent; each probe's result; the plan (HLS + FairPlay or DASH) and manifest; Shaka's
+  version; whether `player.load()` resolved or was rejected (code, category), its load mode (`SRC_EQUALS` = native,
+  `MEDIA_SOURCE` = MSE) and key system; every video event (`loadstart`, `loadedmetadata`, `loadeddata`, `canplay`,
+  `canplaythrough`, `play`, `playing`, `pause`, `waiting`, `stalled`, `suspend`, `seeking`, `seeked`, `ended`, `resize`,
+  `encrypted` with its init data type, `waitingforkey`, `error` with its code and message), each with `readyState`,
+  `networkState`, `currentTime`, size and `paused`; each key status change (first 8 digits of the key ID and the
+  status); Shaka errors (code, category, severity); `play()` resolving or rejecting (name and message); the first
+  presented frame; when the page paused; the outcome. It never records a request, a header, a token or a key: every line
+  passes through `safeDiagnostic`, which also cuts anything token- or key-shaped (tested). At most 200 lines.
+- What the timeline will tell us: `waitingforkey` without a later `loadeddata` means Safari never got a key it could
+  use (the CKC); `loadeddata` with `size=0x0` or no presented frame means decoding or output; a `play() rejected` names
+  an autoplay refusal; a Shaka 6000s code points at the license exchange.
 
 ## Token lifetime and replay
 
@@ -191,8 +230,8 @@ id. Our server talks to Axinom not at all; it signs tokens in Montréal.
   address this code builds is `https://` (a test checks all three), and the player uses them as given; the `http` in
   Axinom's log is presumably its own record behind TLS, to be confirmed with Axinom if it matters.
 - Whether PlayReady SL3000 devices play `cbcs` (PlayReady 4+ does; older hardware may want `cenc`).
-- Whether every browser reports key statuses (the page waits for `usable`): if one doesn't, its playback would end in
-  the 15-second timeout, which the page reports in words.
+- Whether Safari now presents the frame: the Safari changes above were made without a Mac; the diagnostics will
+  show where it stops if it still doesn't.
 - Any real playback: only the packaging was checked here (the build's clip decodes with the key and not without it).
 - Vercel's build itself: the Linux x64 packager binary ran here, with the pinned hash; that the same runs in Vercel's
   build image is expected but untested until the first Preview deployment with the keys set.

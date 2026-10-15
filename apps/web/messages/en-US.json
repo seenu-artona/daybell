@@ -2635,6 +2635,15 @@
       "keyError": "the DRM system reported an internal error",
       "player": "player error {code}",
       "media": "the browser couldn’t decode it (media error {code})"
+    },
+    "diagnostics": {
+      "title": "Diagnostics",
+      "intro": "A timeline of what the browser and player did, to copy and send to the team. It holds no keys or tokens.",
+      "label": "Diagnostics timeline",
+      "empty": "Nothing recorded yet.",
+      "copy": "Copy diagnostics",
+      "copied": "Copied.",
+      "copyFailed": "Couldn’t copy. Select the text and copy it instead."
     }
   }
 }

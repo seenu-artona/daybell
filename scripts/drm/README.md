@@ -5,7 +5,7 @@ synthetic picture; the web app's build encrypts it with the key from Vercel's en
 
 | File | Committed? | Served? |
 |---|---|---|
-| `apps/web/assets/drm-test/clear.mp4`: the clear clip (2 frames, all-intra H.264 High 4.0, 1600×1066, BT.709) | yes | **never** (outside `public/`) |
+| `apps/web/assets/drm-test/clear.mp4`: the clear clip (2 s, 10 all-intra frames at 5 fps, H.264 High 4.0, 1600×1066, BT.709) | yes | **never** (outside `public/`) |
 | `apps/web/public/drm-test/fallback.jpg`: the same chart, watermarked, for devices without hardware DRM | yes | yes |
 | `apps/web/public/drm-test/manifest.mpd`, `master.m3u8`, `video.m3u8`, `video/`: the encrypted clip | no (git-ignored) | yes, made at build time |
 
