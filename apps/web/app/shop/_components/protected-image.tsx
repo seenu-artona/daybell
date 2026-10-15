@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@daybell/ui";
+import { EyeOff } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useProtection } from "./protection";
 
@@ -58,13 +59,17 @@ export function ProtectedImage({
       />
       <span aria-hidden="true" className="absolute inset-0" />
       {dark ? (
-        // For sight only: the provider's status says the same once for the page.
+        // For sight only: the provider's status says the same once for the page. Under about 120 px (bag and pose
+        // thumbnails) the words don't fit: an icon instead (review #18).
         <span
           aria-hidden="true"
           data-blackout-panel
-          className="absolute inset-0 flex items-center justify-center overflow-hidden bg-ink p-2 text-center text-caption text-on-primary"
+          className="@container absolute inset-0 flex items-center justify-center overflow-hidden bg-ink p-2 text-center text-caption text-on-primary"
         >
-          {t("hiddenForScreenshot")}
+          <EyeOff data-blackout-icon className="size-5 @[120px]:hidden" />
+          <span data-blackout-words className="hidden @[120px]:inline">
+            {t("hiddenForScreenshot")}
+          </span>
         </span>
       ) : null}
     </span>

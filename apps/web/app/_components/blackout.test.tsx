@@ -226,8 +226,9 @@ describe("BlackoutPhoto", () => {
     },
   );
 
-  it("handles Cmd+Ctrl+Shift+4 (to the clipboard) the same way", async () => {
-    await key("keydown", "4", { metaKey: true, ctrlKey: true, shiftKey: true });
+  it("handles Cmd+Ctrl+Shift(+4, swallowed by macOS; to the clipboard) the same way", async () => {
+    // macOS swallows the 4: the page sees the modifiers only (review #6a).
+    await key("keydown", "Shift", { metaKey: true, ctrlKey: true, shiftKey: true });
     expect(shown()).toBe(false);
     await key("keyup", "Meta", { ctrlKey: true, shiftKey: true });
     expect(shown()).toBe(false);
@@ -271,7 +272,8 @@ describe("BlackoutPhoto", () => {
   });
 
   it("isn't stuck when the key-up never arrives: focus coming back releases the keys", async () => {
-    await key("keydown", "4", { metaKey: true, ctrlKey: true, shiftKey: true });
+    // macOS swallows the 4: the page sees the modifiers only (review #6a).
+    await key("keydown", "Shift", { metaKey: true, ctrlKey: true, shiftKey: true });
     focused = false;
     await fire(window, new Event("blur"));
     focused = true;

@@ -72,9 +72,11 @@ describe("on a computer: Blackout (C1)", () => {
 
   it("listens once for the whole shop, however many photos", async () => {
     const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
     await render();
-    const keydowns = added.mock.calls.filter(([type]) => type === "keydown");
-    expect(keydowns).toHaveLength(1);
+    // The set is re-made once the pointer is known (phone first, then computer); one is listening at a time.
+    const count = (spy: typeof added) => spy.mock.calls.filter(([type]) => type === "keydown").length;
+    expect(count(added) - count(removed)).toBe(1);
   });
 
   it("turns every photo dark on Cmd+Shift, says so once, and clears the clipboard after the keys are let go", async () => {
@@ -116,13 +118,84 @@ describe("on a computer: Blackout (C1)", () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  it("goes dark on Print Screen and clears the clipboard; Ctrl+Shift counts too", async () => {
+  it("goes dark on Print Screen and clears the clipboard; a pure Ctrl+Shift counts too (Windows)", async () => {
     await render();
     await key("keyup", "PrintScreen");
     expect(panels()).toHaveLength(3);
     expect(write).toHaveBeenCalledTimes(1);
     await act(async () => void vi.advanceTimersByTime(BRIEF_MS));
-    await key("keydown", "S", { ctrlKey: true, shiftKey: true });
+    await key("keydown", "Shift", { ctrlKey: true, shiftKey: true });
+    expect(panels()).toHaveLength(3);
+  });
+});
+
+describe("on a computer: what counts as a sign (review #6)", () => {
+  beforeEach(() => pointer(true));
+
+  it("a chord with another key in it (Ctrl+Shift+V) is a shortcut: no lingering dark, no clipboard clear", async () => {
+    await render();
+    await key("keydown", "Shift", { ctrlKey: true, shiftKey: true });
+    expect(panels()).toHaveLength(3);
+    await key("keydown", "V", { ctrlKey: true, shiftKey: true });
+    expect(panels()).toHaveLength(0);
+    await key("keyup", "V", { ctrlKey: true, shiftKey: true });
+    expect(panels()).toHaveLength(0);
+    await key("keyup", "Shift", { ctrlKey: true });
+    await key("keyup", "Control");
+    expect(panels()).toHaveLength(0);
+    await act(async () => void vi.advanceTimersByTime(BRIEF_MS));
+    expect(write).not.toHaveBeenCalled();
+    // The next chord, a pure one, counts again.
+    await key("keydown", "Shift", { metaKey: true, shiftKey: true });
+    expect(panels()).toHaveLength(3);
+  });
+
+  it.each(["Home", "ArrowLeft", "z"])("Ctrl+Shift+%s is a shortcut too", async (k) => {
+    await render();
+    await key("keydown", "Shift", { ctrlKey: true, shiftKey: true });
+    await key("keydown", k, { ctrlKey: true, shiftKey: true });
+    await key("keyup", "Shift", { ctrlKey: true });
+    await act(async () => void vi.advanceTimersByTime(10));
+    expect(panels()).toHaveLength(0);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("chords typed in a field never count", async () => {
+    await render();
+    const field = document.createElement("input");
+    document.body.append(field);
+    const typed = (type: string, k: string, mods: KeyboardEventInit = {}) =>
+      act(
+        async () =>
+          void field.dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true, ...mods })),
+      );
+    await typed("keydown", "Shift", { metaKey: true, shiftKey: true });
+    expect(panels()).toHaveLength(0);
+    await typed("keyup", "Shift", { metaKey: true });
+    await act(async () => void vi.advanceTimersByTime(10));
+    expect(panels()).toHaveLength(0);
+    expect(write).not.toHaveBeenCalled();
+    field.remove();
+  });
+
+  it("small thumbnails show an icon only; the words are for sight on larger photos and the status (#18)", async () => {
+    await render();
+    await act(async () => void window.dispatchEvent(new Event("blur")));
+    const panel = panels()[0] as HTMLElement;
+    expect(panel.className).toContain("@container");
+    expect(panel.querySelector("[data-blackout-icon]")?.getAttribute("class")).toContain(
+      "@[120px]:hidden",
+    );
+    expect(panel.querySelector("[data-blackout-words]")?.className).toContain(
+      "hidden @[120px]:inline",
+    );
+    expect(statusWords()).toContain(HIDDEN);
+  });
+
+  it("stays on whatever the DRM switch says (#6d): it doesn't read it", async () => {
+    // ProtectionProvider has no DRM input at all; rendered here without any DrmProvider.
+    await render();
+    await act(async () => void window.dispatchEvent(new Event("blur")));
     expect(panels()).toHaveLength(3);
   });
 });
@@ -140,6 +213,26 @@ describe("on a phone: the blur, as before (C1)", () => {
     expect(imgs().every((img) => img.alt.startsWith("Ava"))).toBe(true);
     expect(panels()).toHaveLength(0);
     expect(statusWords()).not.toContain(HIDDEN);
+  });
+
+  it("is exactly round 7: no blur for the context menu, Ctrl+Shift or Cmd/Ctrl+P; a brief one for Cmd+Shift (#6c)", async () => {
+    await render();
+    const blurred = () => imgs().every((img) => img.className.includes("blur-2xl"));
+    await act(
+      async () => void window.dispatchEvent(new MouseEvent("contextmenu", { cancelable: true })),
+    );
+    expect(blurred()).toBe(false);
+    await key("keydown", "Shift", { ctrlKey: true, shiftKey: true });
+    expect(blurred()).toBe(false);
+    await key("keydown", "p", { metaKey: true });
+    await key("keydown", "p", { ctrlKey: true });
+    expect(blurred()).toBe(false);
+    await key("keydown", "Shift", { metaKey: true, shiftKey: true });
+    expect(blurred()).toBe(true);
+    await act(async () => void vi.advanceTimersByTime(BRIEF_MS));
+    expect(blurred()).toBe(false);
+    await key("keyup", "PrintScreen");
+    expect(blurred()).toBe(true);
   });
 
   it("never clears the clipboard", async () => {

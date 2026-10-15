@@ -149,21 +149,87 @@ export function useDesktopPointer(): boolean {
   return desktop;
 }
 
+const MODIFIERS = new Set(["Shift", "Meta", "Control", "Alt", "AltGraph", "OS", "Hyper", "Super"]);
+
+/** Typing in a field: key chords there are editing shortcuts, never screenshot signs (review #6b). */
+export function isEditable(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  const tag = el.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable === true;
+}
+
 /**
- * Whether the photo is shown; listens to the window for screenshot signs while mounted (one set of listeners, however
- * many photos read it: the shop's ProtectionProvider, ADR 0034 C1). `clearClipboard` (default on) can be turned off
- * without re-listening: the shop turns it off on phones, which keep their blur (C1) and never clear the clipboard.
+ * Whether the photo is shown; listens to the window for screenshot signs while mounted. One set of listeners, however
+ * many photos read it (the shop's ProtectionProvider, ADR 0034 C1), and re-made only when `mode` changes.
+ *
+ * - "blackout" (computers): the signs in this file's header, with two refinements (review #6): a Shift+Cmd/Ctrl chord
+ *   is a screenshot sign only while no other key is pressed during it (macOS swallows its 3/4/5, so a pure modifier
+ *   chord is the screenshot; Ctrl+Shift+V/Z/Home/Left are ordinary shortcuts and end the darkness at once, with no
+ *   lingering blackout and no clipboard clear), and chords typed in a field never count. `clearClipboard` (default on)
+ *   can be turned off without re-listening.
+ * - "blur" (phones and tablets): exactly the shop's round-7 deterrent (ADR 0022 §5): hidden while the page is hidden
+ *   or unfocused, a brief blur on Print Screen and on Shift with Cmd/Win, and when printing; no context-menu,
+ *   Ctrl+Shift or Cmd/Ctrl+P signs, and the clipboard is never touched.
  */
 export function useBlackout(
-  options: { write?: ((text: string) => Promise<void>) | undefined; clearClipboard?: boolean } = {},
+  options: {
+    write?: ((text: string) => Promise<void>) | undefined;
+    clearClipboard?: boolean;
+    mode?: "blackout" | "blur";
+  } = {},
 ): { shown: boolean } {
   const [state, dispatch] = useReducer(blackoutReducer, undefined, initialBlackout);
   const writeRef = useRef(options.write);
   writeRef.current = options.write;
   const clearRef = useRef(options.clearClipboard ?? true);
   clearRef.current = options.clearClipboard ?? true;
+  const mode = options.mode ?? "blackout";
 
   useEffect(() => {
+    let timer: number | undefined;
+    const flash = () => {
+      dispatch({ type: "brief", on: true });
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => dispatch({ type: "brief", on: false }), BRIEF_MS);
+    };
+    const onBlur = () => dispatch({ type: "windowBlur" });
+    const onVisibility = () =>
+      dispatch({ type: "visibility", hidden: document.visibilityState === "hidden" });
+    const listen = (
+      target: Window | Document,
+      type: string,
+      fn: EventListener,
+      capture = false,
+    ) => {
+      target.addEventListener(type, fn, capture);
+      return () => target.removeEventListener(type, fn, capture);
+    };
+
+    if (mode === "blur") {
+      // Round 7's phone deterrent, unchanged.
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === "PrintScreen" || (e.shiftKey && (e.metaKey || e.key === "Meta"))) flash();
+      };
+      const onFocus = () => {
+        dispatch({ type: "windowFocus" });
+        dispatch({ type: "visibility", hidden: document.visibilityState === "hidden" });
+      };
+      const stops = [
+        listen(document, "visibilitychange", onVisibility),
+        listen(window, "blur", onBlur),
+        listen(window, "focus", onFocus),
+        listen(window, "keydown", onKey as EventListener),
+        listen(window, "keyup", onKey as EventListener),
+        listen(window, "beforeprint", flash),
+      ];
+      return () => {
+        for (const stop of stops) stop();
+        window.clearTimeout(timer);
+        dispatch({ type: "keys", held: false });
+      };
+    }
+
     const clipboard = createClipboardClearer({
       write: (text) => {
         if (!clearRef.current) return Promise.resolve();
@@ -173,60 +239,53 @@ export function useBlackout(
       hasFocus: () => document.hasFocus(),
     });
     let held = false;
-    let timer: number | undefined;
-    const flash = () => {
-      dispatch({ type: "brief", on: true });
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => dispatch({ type: "brief", on: false }), BRIEF_MS);
-    };
-    const setHeld = (next: boolean) => {
+    // The current chord had another key in it: an ordinary shortcut, ignored until the chord ends.
+    let shortcut = false;
+    const setHeld = (next: boolean, quietly = false) => {
       if (next === held) return;
       held = next;
       dispatch({ type: "keys", held: next });
-      if (!next) {
-        // The combination was let go: the capture happens now. Stay dark a moment, then clear the clipboard.
+      if (!next && !quietly) {
+        // A pure modifier chord was let go: the capture happens now. Stay dark a moment, then clear the clipboard.
         flash();
         clipboard.request();
       }
     };
     const onKey = (e: KeyboardEvent) => {
       const k = keyEvent(e);
-      setHeld(k.held);
-      if (k.flash) flash();
+      if (!k.held) shortcut = false;
+      else if (isEditable(e.target)) shortcut = true;
+      else if (e.type === "keydown" && !MODIFIERS.has(e.key)) shortcut = true;
+      setHeld(k.held && !shortcut, shortcut);
+      if (k.flash && !(shortcut && !k.screenshotKey)) flash();
       if (k.screenshotKey && e.type === "keyup") clipboard.request();
     };
     // macOS may swallow the key-up while its screenshot tool runs: any later event's modifiers settle it.
     const onMove = (e: globalThis.MouseEvent) => {
       if (held) setHeld(comboHeld(e));
     };
-    const onBlur = () => dispatch({ type: "windowBlur" });
     const onFocus = () => {
       dispatch({ type: "windowFocus" });
       setHeld(false);
+      shortcut = false;
       clipboard.onFocus();
     };
-    const onVisibility = () =>
-      dispatch({ type: "visibility", hidden: document.visibilityState === "hidden" });
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("keyup", onKey, true);
-    window.addEventListener("mousemove", onMove, true);
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("beforeprint", flash);
-    window.addEventListener("contextmenu", flash, true);
+    const stops = [
+      listen(window, "keydown", onKey as EventListener, true),
+      listen(window, "keyup", onKey as EventListener, true),
+      listen(window, "mousemove", onMove as EventListener, true),
+      listen(window, "blur", onBlur),
+      listen(window, "focus", onFocus),
+      listen(document, "visibilitychange", onVisibility),
+      listen(window, "beforeprint", flash),
+      listen(window, "contextmenu", flash, true),
+    ];
     return () => {
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("keyup", onKey, true);
-      window.removeEventListener("mousemove", onMove, true);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("beforeprint", flash);
-      window.removeEventListener("contextmenu", flash, true);
+      for (const stop of stops) stop();
       window.clearTimeout(timer);
+      dispatch({ type: "keys", held: false });
     };
-  }, []);
+  }, [mode]);
 
   return { shown: isShown(state) };
 }
