@@ -81,6 +81,8 @@ export function useReviewState({
   const waiting = busy || loading;
   const base = `/jobs/${encodeURIComponent(jobId)}`;
 
+  // Stable, so a page can poll with it (a group's page while its photos are processed).
+  const bump = useCallback(() => setVersion((v) => v + 1), []);
   const changed = useCallback(async () => {
     setChecked(new Map());
     setVersion((v) => v + 1);
@@ -246,7 +248,7 @@ export function useReviewState({
   return {
     context,
     version,
-    bump: () => setVersion((v) => v + 1),
+    bump,
     checked,
     clear: () => setChecked(new Map()),
     status,

@@ -12,7 +12,7 @@ import { ArrowLeft, Ellipsis, Pencil, Trash2, Upload, Users } from "lucide-react
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
 import { MENU_ROW, Popover } from "../../../../../popover";
 import { JobTabActions, useJob } from "../../../job-context";
@@ -43,6 +43,9 @@ export default function GroupPageRoute() {
 }
 
 type Open = "rename" | "members" | "delete" | null;
+
+/** How often a group's photos are read again while some are still being processed. */
+const POLL_MS = 4000;
 
 /**
  * One group's page (D156; ADR 0030), or Not in a group (/groups/none: group photos in no group, C2; call 1). Back to
@@ -101,6 +104,15 @@ function GroupPage() {
     ? `/jobs/${encodeURIComponent(job.id)}/groups/none/photos`
     : `/groups/${encodeURIComponent(groupId)}/photos`;
   const photos = usePlacePhotos(job.id, null, review.version, 200, gone ? null : path);
+  // Photos just uploaded are still being processed: read the page again every few seconds until each has its preview
+  // (or failed), as Photos' People and To review do while tagging is pending.
+  const processing = photos.photos?.some((p) => p.status === "processing") ?? false;
+  const { bump } = review;
+  useEffect(() => {
+    if (!processing) return;
+    const timer = setInterval(bump, POLL_MS);
+    return () => clearInterval(timer);
+  }, [processing, bump]);
 
   function closePanel() {
     const back = opener.current?.id ?? photoId;

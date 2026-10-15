@@ -192,9 +192,11 @@ test("Photo groups: from a column, by hand, by upload, moved and shown, in Subje
   await expect(main.getByRole("heading", { name: "Choir", level: 2, exact: true })).toBeVisible();
   await expect(main.getByText("3 members", { exact: true })).toBeVisible();
   const groupPhotos = main.getByRole("region", { name: "Group photos", exact: true });
-  await expect(groupPhotos.getByRole("img", { name: "Choir, photo 2", exact: true })).toBeVisible({
-    timeout: 90_000,
-  });
+  // The page reads its photos again every few seconds until both have their previews.
+  for (const name of ["Choir, photo 1", "Choir, photo 2"])
+    await expect(groupPhotos.getByRole("img", { name, exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
   await groupPhotos.getByRole("checkbox", { name: "Select Choir, photo 1", exact: true }).check();
   await expect(main.getByRole("button", { name: "Give to a person", exact: true })).toHaveCount(0);
   await main.getByRole("button", { name: "Also show in…", exact: true }).click();
@@ -233,11 +235,17 @@ test("Photo groups: from a column, by hand, by upload, moved and shown, in Subje
   const groupField = main.getByRole("combobox", { name: "Group", exact: true });
   await expect(groupField).toBeFocused();
   await groupField.fill("Cho");
+  // The chip shows at once and is saved in the background (PUT /me/list-filters): reload only once it is saved, or
+  // the reload cancels the save.
+  const chipSaved = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/me/list-filters") && r.request().method() === "PUT",
+  );
   await main
     .getByRole("listbox", { name: "Groups", exact: true })
     .getByRole("option", { name: "Choir", exact: true })
     .click();
   await expect(page).toHaveURL(new RegExp(`\\?group=${choirId}$`));
+  expect((await chipSaved).status()).toBe(200);
   await page.reload();
   await expect(subjectChips.getByRole("link", { name: "Choir", exact: true })).toHaveAttribute(
     "aria-current",
