@@ -49,7 +49,9 @@ const config: NextConfig = {
       { key: "Strict-Transport-Security", value: "max-age=63072000" },
       {
         key: "Permissions-Policy",
-        value: "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()",
+        // encrypted-media for the large view's DRM, this site only (D158; ADR 0034).
+        value:
+          "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=(), encrypted-media=(self)",
       },
     ];
     return [

@@ -874,7 +874,8 @@ describe("shop pages and routes are never indexed, framed or referred (next.conf
       { key: "Strict-Transport-Security", value: "max-age=63072000" },
       {
         key: "Permissions-Policy",
-        value: "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()",
+        value:
+          "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=(), encrypted-media=(self)",
       },
     ];
     for (const source of ["/shop", "/shop/:path*"])
