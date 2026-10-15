@@ -225,7 +225,8 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   });
   await page.goto(`/app/jobs/${jobId}`);
   // New photos reopen Check photos: it is the step to do now again, linking to Review.
-  await expect(progress.getByText("Now: Photos", { exact: true })).toBeVisible();
+  // The header line, not the step to do now (whose screen-reader word also reads "Now:").
+  await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Photos");
   await expect(
     progress
       .getByRole("listitem")

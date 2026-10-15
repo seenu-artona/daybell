@@ -105,4 +105,32 @@ describe("a person's record (D153)", () => {
     expect(container.textContent).toContain("m•••@gmail.com");
     expect(container.textContent).not.toContain("maria.martin");
   });
+
+  it("someone marked Do not photograph has no card to print, but their access code still shows", async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="en-US" messages={messages} timeZone="America/Toronto">
+          <PersonRecord
+            child={{ ...CHILD, doNotPhotograph: true }}
+            job={JOB}
+            word="class"
+            canEdit
+            seesOrders
+            focusKey={null}
+            printedKey={0}
+            onUnfold={() => {}}
+            onEdit={() => {}}
+            onRemove={() => {}}
+            onPrintCard={async () => {}}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    const card = [...container.querySelectorAll("section")].find((s) =>
+      s.textContent?.startsWith("QR card"),
+    ) as HTMLElement;
+    expect(card.textContent).toContain("K7QM-4XPA");
+    expect(card.textContent).toContain("No QR card: marked Do not photograph.");
+    expect(card.querySelectorAll("button")).toHaveLength(0);
+  });
 });

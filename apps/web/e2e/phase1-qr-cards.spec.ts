@@ -105,7 +105,8 @@ test("QR cards: print from the API and from People, with the checklist task", as
   // 3. Overview: the step is done, so Prepare is finished and folds to one line; opened, it says when and who printed
   // them, with a quiet Print again. The print is in More › History.
   await page.reload();
-  await expect(progress.getByText("Now: Picture day", { exact: true })).toBeVisible();
+  // The header line, not the step to do now (whose screen-reader word also reads "Now:").
+  await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Picture day");
   await progress.getByRole("button", { name: /^Prepare\s*Done/ }).click();
   const qrDone = progress.getByRole("listitem").filter({ hasText: /^Done: QR cards printed/ });
   await expect(qrDone).toContainText(owner);
@@ -124,7 +125,8 @@ test("QR cards: print from the API and from People, with the checklist task", as
   // 4. A subject added later reopens the step (back to Prepare); its action opens Subjects' print dialog.
   await addChild({ firstName: "Late", lastName: "Comer", groupId: g5a });
   await page.reload();
-  await expect(progress.getByText("Now: Prepare", { exact: true })).toBeVisible();
+  // The header line, not the step to do now (whose screen-reader word also reads "Now:").
+  await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Prepare");
   await qrTodo.getByRole("link", { name: "Print QR cards" }).click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
   const dialog = page.getByRole("dialog", { name: "Print QR cards" });

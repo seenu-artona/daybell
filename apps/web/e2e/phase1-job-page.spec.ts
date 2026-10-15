@@ -144,7 +144,8 @@ test("job page layout, menu search and studio separation", async ({
   await expect(main.getByRole("region", { name: "Recent activity" })).toHaveCount(0);
   const progress = main.getByRole("region", { name: "Progress", exact: true });
   const step = (name: RegExp) => progress.getByRole("listitem").filter({ hasText: name });
-  await expect(progress.getByText("Now: Prepare", { exact: true })).toBeVisible();
+  // The header line, not the step to do now (whose screen-reader word also reads "Now:").
+  await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Prepare");
   await expect(progress.getByRole("heading", { level: 3 })).toHaveText([
     "Prepare",
     "Picture day",

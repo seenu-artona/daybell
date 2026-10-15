@@ -106,7 +106,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
       .filter({ hasText: /^Now: Add subjects/ }),
   ).toBeVisible();
   // The one green action on a draft: Publish shop (owners and admins, D152).
-  await expect(main.getByRole("button", { name: "Publish shop" })).toBeVisible();
+  await expect(main.getByRole("button", { name: "Publish shop", exact: true })).toBeVisible();
 
   // Editing uses the same form, from More actions.
   await main.getByRole("button", { name: "More actions" }).click();

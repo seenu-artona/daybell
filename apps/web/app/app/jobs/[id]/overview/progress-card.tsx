@@ -96,7 +96,7 @@ export function ProgressCard({
         <h2 id={titleId} className="m-0 text-h2">
           {t("title")}
         </h2>
-        <span className="text-body-lg text-muted">
+        <span data-progress-now="" className="text-body-lg text-muted">
           {progress.current ? t("now", { stage: t(`stages.${progress.current}`) }) : t("allDone")}
         </span>
       </div>
@@ -372,7 +372,8 @@ function StepRow({
                   className={INLINE}
                 >
                   {t("change")}
-                  <span className="sr-only"> {label}</span>
+                  {/* Named for the rule it changes (Shop opens, QR cards ready), not the step's action. */}
+                  <span className="sr-only"> {t(`ruleTitles.${view.change as RuleKey}`)}</span>
                 </button>
               </>
             ) : null}
@@ -386,7 +387,7 @@ function StepRow({
               className={INLINE}
             >
               {t("change")}
-              <span className="sr-only"> {label}</span>
+              <span className="sr-only"> {t(`ruleTitles.${view.change as RuleKey}`)}</span>
             </button>
           </span>
         ) : null}

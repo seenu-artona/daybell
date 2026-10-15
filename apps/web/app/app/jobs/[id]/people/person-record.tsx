@@ -324,25 +324,25 @@ export function PersonRecord({
               ) : null
             }
           >
+            {/* The access code always shows to the studio (Seenu, roster answer 2), card or not. */}
+            <dl className="m-0">
+              <Row
+                label={tr("columns.accessCode")}
+                value={
+                  child.accessCode ? (
+                    <span className="font-mono tracking-wider">{child.accessCode}</span>
+                  ) : (
+                    tr("codeUnavailable")
+                  )
+                }
+              />
+              {!child.doNotPhotograph && facts?.cardPrintedAt ? (
+                <Row label={t("printed")} value={day(facts.cardPrintedAt)} />
+              ) : null}
+            </dl>
             {child.doNotPhotograph ? (
               <p className="m-0 text-body text-muted">{t("noCard")}</p>
-            ) : (
-              <dl className="m-0">
-                <Row
-                  label={tr("columns.accessCode")}
-                  value={
-                    child.accessCode ? (
-                      <span className="font-mono tracking-wider">{child.accessCode}</span>
-                    ) : (
-                      tr("codeUnavailable")
-                    )
-                  }
-                />
-                {facts?.cardPrintedAt ? (
-                  <Row label={t("printed")} value={day(facts.cardPrintedAt)} />
-                ) : null}
-              </dl>
-            )}
+            ) : null}
           </Part>
         </div>
       </div>
