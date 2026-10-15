@@ -36,6 +36,7 @@
     "react-dom": "19.3.0",
     "read-excel-file": "9.3.10",
     "server-only": "0.0.1",
+    "shaka-player": "5.2.12",
     "stripe": "22.6.2",
     "zod": "4.6.5",
     "zxing-wasm": "3.1.4"
