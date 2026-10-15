@@ -4,6 +4,7 @@ export * from "./checklist";
 export * from "./fulfilment";
 export * from "./ids";
 export * from "./job-page";
+export * from "./job-shop";
 export * from "./jobs";
 export * from "./money";
 export * from "./notifications";
