@@ -259,11 +259,10 @@ test("job page layout, menu search and studio separation", async ({
     .getByRole("link", { name: "Shop", exact: true })
     .click();
   await expect(main.getByRole("heading", { name: "Shop", level: 2 })).toBeVisible();
+  // Job › Shop is one table of what parents can buy (D157; ADR 0033).
   await expect(
-    main
-      .getByRole("region", { name: "Price list", exact: true })
-      .getByLabel("Price list for this job", { exact: true }),
-  ).toHaveValue(job.priceListId);
+    main.getByRole("table", { name: "What parents can buy", exact: true }),
+  ).toBeVisible();
   await main
     .getByRole("navigation", { name: "Job sections" })
     .getByRole("link", { name: "Orders", exact: true })
