@@ -1,6 +1,6 @@
 "use client";
 
-import { SideMenu, SideMenuItem } from "@daybell/ui";
+import { RidgeMark, SideMenu, SideMenuItem } from "@daybell/ui";
 import { PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -70,12 +70,7 @@ export function AppMenu({
       >
         {folded ? null : (
           <>
-            <span
-              className="grid size-7 shrink-0 place-items-center rounded-[8px] bg-lime text-sm font-extrabold text-ink"
-              aria-hidden="true"
-            >
-              D
-            </span>
+            <RidgeMark tone="dark" className="size-7" />
             <span className="flex-1 text-lg font-extrabold text-white">{t("brand")}</span>
           </>
         )}

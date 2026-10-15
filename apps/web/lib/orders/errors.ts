@@ -26,7 +26,7 @@ const MESSAGES: Record<keyof typeof ORDER_CONFLICTS, string> = {
   nothingToRefund: "Choose something to refund.",
   refundRefused: "Stripe refused this refund. Nothing was refunded.",
   externalRefund:
-    "A refund was made outside Daybell. An owner or admin must check it before this order is printed or shipped.",
+    "A refund was made outside Silverback. An owner or admin must check it before this order is printed or shipped.",
 };
 
 export function orderConflict(key: keyof typeof ORDER_CONFLICTS): ApiError {

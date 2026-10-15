@@ -54,7 +54,7 @@ describe("the bell's words", () => {
       "A dispute was opened on order 7KQ2-M9XA",
     );
     expect(t("notificationText.refund_external", { order: "7KQ2-M9XA" })).toBe(
-      "Refund made outside Daybell on order 7KQ2-M9XA: check it before you print or ship",
+      "Refund made outside Silverback on order 7KQ2-M9XA: check it before you print or ship",
     );
   });
 });

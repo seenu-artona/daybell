@@ -57,7 +57,7 @@ export const POST = handle(async () => {
     if (!email)
       throw new ApiError(
         "conflict",
-        "Stripe needs an email address for your payout account, and your sign-in has none. Please contact Daybell support.",
+        "Stripe needs an email address for your payout account, and your sign-in has none. Please contact Silverback support.",
         { form: PAYOUT_NO_CONTACT_EMAIL },
       );
     const fetchedAt = stripeFetchTime();

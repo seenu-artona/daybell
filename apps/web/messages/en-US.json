@@ -1,16 +1,17 @@
 {
   "meta": {
-    "title": "Daybell",
+    "title": "Silverback",
     "description": "School and volume photography software."
   },
   "home": {
-    "title": "Daybell",
+    "title": "Silverback",
     "status": "Foundations in progress.",
     "componentsLink": "See the design system components"
   },
   "gallery": {
     "title": "Design system",
-    "intro": "Every Daybell component, built from the design system tokens. This page is for review only.",
+    "brand": "Silverback",
+    "intro": "Every Silverback component, built from the design system tokens. This page is for review only.",
     "sections": {
       "basics": "Basics",
       "layout": "Layout",
@@ -150,7 +151,7 @@
     "inviteToken": "This invite link isn't valid.",
     "tooLong": "That's too long. Please shorten it.",
     "regionCode": "Use the 2-letter code, like OR or ON.",
-    "quebec": "Daybell isn't available in Quebec yet, so Quebec addresses can't be added.",
+    "quebec": "Silverback isn't available in Quebec yet, so Quebec addresses can't be added.",
     "jobName": "Give the job a name.",
     "pictureDay": "Enter the date of picture day.",
     "nothingToChange": "Change something before saving.",
@@ -224,7 +225,7 @@
     "template": "Choose one of your templates."
   },
   "errors": {
-    "network": "We couldn't reach Daybell. Check your connection and try again.",
+    "network": "We couldn't reach Silverback. Check your connection and try again.",
     "invalid_input": "Please check the highlighted fields.",
     "not_signed_in": "Please sign in.",
     "forbidden": "You don't have permission to do that.",
@@ -238,7 +239,7 @@
     "shop_session_required": "Enter your access code to see your photos."
   },
   "auth": {
-    "brand": "Daybell",
+    "brand": "Silverback",
     "regions": {
       "us": "United States",
       "ca": "Canada"
@@ -254,14 +255,14 @@
       "submit": "Email me a link",
       "haveAccount": "Already have an account?",
       "signInLink": "Sign in",
-      "joinTitle": "Join your team on Daybell",
+      "joinTitle": "Join your team on Silverback",
       "joinIntro": "Enter the email your invite was sent to. We'll send you a link.",
       "joinSubmit": "Email me a link"
     },
     "checkEmail": {
       "title": "Check your inbox",
       "body": "We sent you a link. Open it on this device, then choose your password.",
-      "resetBody": "If that email has a Daybell account, we sent a link to set a new password.",
+      "resetBody": "If that email has a Silverback account, we sent a link to set a new password.",
       "back": "Back to sign in"
     },
     "signIn": {
@@ -270,7 +271,7 @@
       "password": "Password",
       "submit": "Sign in",
       "forgot": "Forgot password?",
-      "noAccount": "New to Daybell?",
+      "noAccount": "New to Silverback?",
       "signUpLink": "Start your studio",
       "linkExpired": "That link has expired or was already used. Sign in, or request a new one."
     },
@@ -409,7 +410,7 @@
         "order_paid": "New order {order}",
         "refund_failed": "A refund of order {order} failed: the parent wasn’t refunded",
         "dispute_opened": "A dispute was opened on order {order}",
-        "refund_external": "Refund made outside Daybell on order {order}: check it before you print or ship"
+        "refund_external": "Refund made outside Silverback on order {order}: check it before you print or ship"
       },
       "anOrder": "an order"
     },
@@ -527,7 +528,7 @@
         "ordersFailed": "We couldn’t load the orders waiting."
       },
       "checklistTitle": "Your next steps",
-      "daybellFee": "Daybell fee",
+      "daybellFee": "Silverback fee",
       "since": "Since {date}",
       "salesFailed": "We couldn’t load your numbers.",
       "closesIn": "{days, plural, =0 {Closes today} one {Closes in # day} other {Closes in # days}}"
@@ -993,7 +994,7 @@
           "check": "Check and import"
         },
         "fileLabel": "Roster file (CSV or Excel)",
-        "fileNote": "The file stays on your device. Only the rows you confirm are saved to Daybell.",
+        "fileNote": "The file stays on your device. Only the rows you confirm are saved to Silverback.",
         "sheet": "Sheet",
         "reading": "Reading the file…",
         "tooBig": "That file is over 5 MB. Save it with only the roster columns, or split it.",
@@ -1058,7 +1059,7 @@
         "changed": "The roster changed while you were checking. The rows were checked again."
       }
     },
-    "brand": "Daybell",
+    "brand": "Silverback",
     "search": {
       "label": "Search jobs and clients",
       "placeholder": "Search",
@@ -1526,9 +1527,9 @@
       "notForRole": "Only the studio’s owner and admins can see this.",
       "unavailable": "Payouts aren’t available in this region yet.",
       "notConfigured": "Payouts aren’t set up in this environment.",
-      "platformSetup": "Daybell’s platform setup with Stripe isn’t finished yet, so payouts can’t be set up. Please contact Daybell support.",
-      "noContactEmail": "Stripe needs an email address for your payout account, and your sign-in has none. Please contact Daybell support.",
-      "createConflict": "Payout setup needs Daybell support to finish.",
+      "platformSetup": "Silverback’s platform setup with Stripe isn’t finished yet, so payouts can’t be set up. Please contact Silverback support.",
+      "noContactEmail": "Stripe needs an email address for your payout account, and your sign-in has none. Please contact Silverback support.",
+      "createConflict": "Payout setup needs Silverback support to finish.",
       "status": {
         "title": "Connection",
         "notStarted": "Not started",
@@ -1621,7 +1622,7 @@
       },
       "fees": {
         "title": "Fees",
-        "daybell": "Daybell: {percent}% of product sales. Nothing if nothing sells, and never on shipping or tax.",
+        "daybell": "Silverback: {percent}% of product sales. Nothing if nothing sells, and never on shipping or tax.",
         "card": "Stripe card fees: {percent}% + {fixed} per payment, passed on at Stripe’s rates.",
         "payout": "Stripe payout fees: {percent}% + {fixed} per payout, plus {monthly} for each month you’re paid out, passed on at Stripe’s rates.",
         "instant": "Instant payouts: {percent}% at Stripe’s fee, coming later."
@@ -1638,7 +1639,7 @@
         "leave": "Leave unfinished",
         "payoutPaid": "Pay out a test payout",
         "paidOut": "A test payout was paid.",
-        "back": "Back to Daybell"
+        "back": "Back to Silverback"
       }
     },
     "taxes": {
@@ -1656,7 +1657,7 @@
       },
       "headOffice": {
         "title": "Business address",
-        "hint": "Sent to Stripe as your tax head office. Daybell keeps only the province.",
+        "hint": "Sent to Stripe as your tax head office. Silverback keeps only the province.",
         "set": "Set, in {province}.",
         "notSet": "Not set yet.",
         "line1": "Street address",
@@ -1773,7 +1774,7 @@
         "overRefund": "That’s more than is left to refund.",
         "nothingToRefund": "Choose something to refund.",
         "refundRefused": "Stripe refused this refund, so nothing was refunded.",
-        "externalRefund": "A refund was made outside Daybell. An owner or admin must check it before this order is printed or shipped."
+        "externalRefund": "A refund was made outside Silverback. An owner or admin must check it before this order is printed or shipped."
       },
       "detail": {
         "title": "Order {reference}",
@@ -1851,12 +1852,12 @@
         "tax": "Tax",
         "total": "Total",
         "refundedTotal": "Refunded",
-        "daybellFee": "Daybell fee",
+        "daybellFee": "Silverback fee",
         "fee": "{amount} ({percent}%)",
         "cardFee": "Card fee",
         "paidToYou": "Paid to you",
         "pending": "Pending",
-        "feeNote": "Daybell’s fee is a share of products only, never tax or shipping. The card fee is Stripe’s, passed on.",
+        "feeNote": "Silverback’s fee is a share of products only, never tax or shipping. The card fee is Stripe’s, passed on.",
         "shipTo": "Ships to",
         "cityLine": "{city} {province} {postalCode}",
         "shipToPurged": "The address was removed on {date}, as it is 90 days after shipping.",
@@ -1864,7 +1865,7 @@
         "printFilesBusy": "Preparing the print files…",
         "printFilesNote": "Full-resolution photos of what’s left to print, with a list of sizes and quantities.",
         "printFilesPreparing": "The print files are being prepared. Try again in a minute.",
-        "printFilesUnavailable": "A print file isn’t available right now. Daybell support has been told.",
+        "printFilesUnavailable": "A print file isn’t available right now. Silverback support has been told.",
         "printFilesStarted": "Your print files are downloading.",
         "refunds": {
           "title": "Refunds",
@@ -1903,7 +1904,7 @@
           "feesPending": "Refunds open once Stripe has settled the payment, usually within a minute.",
           "nothingLeft": "Everything was refunded.",
           "unrecovered": "{amount} of your share of a refund comes back from your next sale.",
-          "cardFeeNote": "Stripe’s card fee isn’t returned on a refund; Daybell’s fee on what’s refunded is."
+          "cardFeeNote": "Stripe’s card fee isn’t returned on a refund; Silverback’s fee on what’s refunded is."
         },
         "refundDialog": {
           "title": "Refund order {reference}",
@@ -1922,7 +1923,7 @@
           "summaryShipping": "Shipping",
           "summaryTax": "Tax",
           "summaryTotal": "The parent gets back",
-          "summaryFee": "Daybell’s fee returned to you",
+          "summaryFee": "Silverback’s fee returned to you",
           "summaryShare": "Taken from your Stripe balance",
           "summaryCardFee": "Stripe’s card fee isn’t returned.",
           "review": "Review refund",
@@ -1949,23 +1950,23 @@
             "order_paid": "Sale",
             "order_refunded": "Refund",
             "refund_failed": "Failed refund",
-            "refund_shortfall": "Shortfall absorbed by Daybell"
+            "refund_shortfall": "Shortfall absorbed by Silverback"
           },
           "accounts": {
             "parent_payments": "Parent payments",
             "studio_payable": "Owed to you",
-            "daybell_fees": "Daybell fees",
+            "daybell_fees": "Silverback fees",
             "payment_fees": "Card fees",
             "tax_payable": "Tax",
             "refunds": "Refunds",
             "lab_costs": "Lab costs"
           },
-          "note": "Each transaction adds up to zero. Positive amounts are money in hand or owed to Daybell; negative ones are owed to you or earned.",
+          "note": "Each transaction adds up to zero. Positive amounts are money in hand or owed to Silverback; negative ones are owed to you or earned.",
           "none": "Nothing yet: the sale is written once Stripe says its fee."
         },
         "externalRefund": {
-          "title": "A refund was made outside Daybell",
-          "body": "Someone refunded this payment in Stripe on {date}. Daybell’s totals and ledger don’t include it, and your share wasn’t taken back. Check it in Stripe and with the parent before you print or ship.",
+          "title": "A refund was made outside Silverback",
+          "body": "Someone refunded this payment in Stripe on {date}. Silverback’s totals and ledger don’t include it, and your share wasn’t taken back. Check it in Stripe and with the parent before you print or ship.",
           "check": "Mark as checked",
           "checked": "Checked on {date}. Printing and shipping can go on.",
           "saved": "Marked as checked."
@@ -2253,7 +2254,7 @@
   },
   "invite": {
     "title": "You've been invited",
-    "body": "Join your studio's team on Daybell.",
+    "body": "Join your studio's team on Silverback.",
     "accept": "Join the team",
     "signedOut": "Sign in or create an account with the email the invite was sent to.",
     "signIn": "Sign in",
@@ -2263,15 +2264,15 @@
     "missing": "Open your invite link again — the one your studio sent you — to continue."
   },
   "apiDocs": {
-    "title": "Daybell API",
-    "intro": "Every Daybell screen uses this same API. Today it signs in with the session cookie; API keys for integrations come later.",
+    "title": "Silverback API",
+    "intro": "Every Silverback screen uses this same API. Today it signs in with the session cookie; API keys for integrations come later.",
     "openapi": "Download openapi.json",
     "body": "Request body (JSON)",
     "success": "{status} response",
     "errors": "Possible errors",
     "errorsTitle": "Errors",
     "errorsBody": "Every error has the same shape: a stable code, a plain message, and for form problems a message key per field.",
-    "metaTitle": "Daybell API",
+    "metaTitle": "Silverback API",
     "option": "Option {n}",
     "arrayOf": "list of",
     "groups": {
@@ -2479,12 +2480,12 @@
     "metaTitle": "Your photos",
     "checkout": {
       "stripe": {
-        "processedBy": "Payments processed by Daybell for {studio}",
+        "processedBy": "Payments processed by Silverback for {studio}",
         "homeShipping": "Home delivery"
       },
       "pay": "Pay securely",
       "paying": "Opening payment…",
-      "processedBy": "Payments processed by Daybell for {studio}.",
+      "processedBy": "Payments processed by Silverback for {studio}.",
       "canceled": "Payment canceled. Your bag is unchanged.",
       "blocked": {
         "unavailable": "Remove what’s no longer available to pay.",

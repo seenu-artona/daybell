@@ -58,7 +58,7 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await fillClient(addClient, client, "QC");
   await expect(addClient.getByLabel("Country")).toHaveValue("CA");
   await addClient.getByRole("button", { name: "Add client", exact: true }).click();
-  await expect(addClient.getByText("Daybell isn't available in Quebec yet")).toBeVisible();
+  await expect(addClient.getByText("Silverback isn't available in Quebec yet")).toBeVisible();
   await addClient.getByLabel(/^Province/).fill("ON");
   await addClient.getByRole("button", { name: "Add client", exact: true }).click();
   await expect(addClient).toBeHidden();

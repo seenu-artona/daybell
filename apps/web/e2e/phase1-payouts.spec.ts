@@ -47,7 +47,7 @@ test("settings › stripe: onboarding on (fake) Stripe, status, schedule, fees, 
   const fees = main.getByRole("region", { name: "Fees", exact: true });
   await expect(
     fees.getByText(
-      "Daybell: 3% of product sales. Nothing if nothing sells, and never on shipping or tax.",
+      "Silverback: 3% of product sales. Nothing if nothing sells, and never on shipping or tax.",
       { exact: true },
     ),
   ).toBeVisible();

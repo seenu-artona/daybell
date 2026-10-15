@@ -107,7 +107,7 @@ export async function renderQrCardsPdf(
     compress: options.compress ?? true,
     // Starts in the embedded font, so no standard PDF font is ever loaded. No names in the metadata (D96).
     font: REGULAR_PATH,
-    info: { Title: texts.title, Creator: "Daybell", Producer: "Daybell" },
+    info: { Title: texts.title, Creator: "Silverback", Producer: "Silverback" },
   });
   doc.registerFont(BOLD, bold);
   const chunks: Buffer[] = [];

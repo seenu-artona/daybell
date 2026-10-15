@@ -1134,7 +1134,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Payouts",
     summary: "The studio's payouts",
     description:
-      "Connection status, schedule, the next scheduled payout day, the 10 latest payouts and the fees explained (D56, D98). Owners and admins; read from Daybell's copy, never live from Stripe. Canadian studios only for now: others get region_unavailable.",
+      "Connection status, schedule, the next scheduled payout day, the 10 latest payouts and the fees explained (D56, D98). Owners and admins; read from Silverback's copy, never live from Stripe. Canadian studios only for now: others get region_unavailable.",
     access: "owner-admin",
     success: { status: 200, schema: studioPayoutsResponse, description: "The studio's payouts." },
     errors: ["not_signed_in", "forbidden", "not_found", "region_unavailable"],
@@ -1164,7 +1164,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Payouts",
     summary: "Check the payout account with Stripe now",
     description:
-      "Owners and admins. Reads the account from Stripe and updates Daybell's copy, e.g. on coming back from Stripe. 409 with payouts.notConnected before setup has started.",
+      "Owners and admins. Reads the account from Stripe and updates Silverback's copy, e.g. on coming back from Stripe. 409 with payouts.notConnected before setup has started.",
     access: "owner-admin",
     success: { status: 200, schema: studioPayoutsResponse, description: "The studio's payouts." },
     errors: [
@@ -1388,7 +1388,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Stripe's webhook",
     description:
-      "Not for integrations. Events from connected accounts (account.updated, capability.updated, payout.created, payout.updated, payout.paid, payout.failed, payout.canceled), checked with the Stripe-Signature header. Each event is recorded once; the account or payout is then read from Stripe again. Answers 404 for an account Daybell doesn't know yet and 500 on failure, so Stripe tries again.",
+      "Not for integrations. Events from connected accounts (account.updated, capability.updated, payout.created, payout.updated, payout.paid, payout.failed, payout.canceled), checked with the Stripe-Signature header. Each event is recorded once; the account or payout is then read from Stripe again. Answers 404 for an account Silverback doesn't know yet and 500 on failure, so Stripe tries again.",
     access: "internal",
     success: { status: 200, schema: stripeWebhookResponse, description: "Received." },
     errors: ["invalid_input", "not_found", "conflict", "region_unavailable", "internal"],
@@ -1605,7 +1605,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Shop",
     summary: "Pay for the bag",
     description:
-      "Prices the bag again from each job's current list (never anything the browser sends: there is no body), copies it into an order and opens Stripe's hosted checkout for it (D97), as a destination charge on behalf of the studio (D106) with Daybell's fee taken as the application fee. The same bag reuses its open checkout; a changed bag replaces it. 409 with shop.bagEmpty, shop.lineUnavailable, shop.closed, shop.chooseDelivery, shop.notAccepting, shop.belowMinimum or shop.alreadyPaid (with fields.orderId); 422 with shop.checkoutNotConfigured where Stripe isn't set up, and region_unavailable for regions that don't take payments yet; 429 after 10 new checkouts in an hour.",
+      "Prices the bag again from each job's current list (never anything the browser sends: there is no body), copies it into an order and opens Stripe's hosted checkout for it (D97), as a destination charge on behalf of the studio (D106) with Silverback's fee taken as the application fee. The same bag reuses its open checkout; a changed bag replaces it. 409 with shop.bagEmpty, shop.lineUnavailable, shop.closed, shop.chooseDelivery, shop.notAccepting, shop.belowMinimum or shop.alreadyPaid (with fields.orderId); 422 with shop.checkoutNotConfigured where Stripe isn't set up, and region_unavailable for regions that don't take payments yet; 429 after 10 new checkouts in an hour.",
     access: "parent",
     query: shopGalleryQuery,
     success: { status: 201, schema: checkoutStartResponse, description: "Go to the url." },
@@ -1699,7 +1699,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Shop",
     summary: "Download all of an order's photos",
     description:
-      "One zip, daybell-<reference>.zip, of every paid download this gallery may have, named as the single downloads are; streamed from the studio's region. 409 shop.downloadPreparing (Retry-After) while a file is made, with no partial zip; at most 10 zips a gallery an hour.",
+      "One zip, silverback-<reference>.zip, of every paid download this gallery may have, named as the single downloads are; streamed from the studio's region. 409 shop.downloadPreparing (Retry-After) while a file is made, with no partial zip; at most 10 zips a gallery an hour.",
     access: "parent",
     query: shopGalleryQuery,
     success: { status: 200, description: "The zip.", contentType: "application/zip" },
@@ -1718,7 +1718,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Shop",
     summary: "Download a paid photo",
     description:
-      "A link to the full-resolution JPEG, metadata stripped (never the original; call 10), signed for 5 minutes and saved as daybell-<reference>-<n>.jpg. Only for paid digital lines this gallery may see; a later Do not publish or closed shop doesn't take it back (call 11). 409 shop.downloadPreparing with Retry-After while its file is made (only sold photos get one, lazily); 409 shop.downloadUnavailable once it has been asked for 3 times without appearing (support is alerted).",
+      "A link to the full-resolution JPEG, metadata stripped (never the original; call 10), signed for 5 minutes and saved as silverback-<reference>-<n>.jpg. Only for paid digital lines this gallery may see; a later Do not publish or closed shop doesn't take it back (call 11). 409 shop.downloadPreparing with Retry-After while its file is made (only sold photos get one, lazily); 409 shop.downloadUnavailable once it has been asked for 3 times without appearing (support is alerted).",
     access: "parent",
     query: shopGalleryQuery,
     success: { status: 200, schema: downloadLinkResponse, description: "Open the url." },
@@ -1814,7 +1814,7 @@ export const ROUTES: RouteSpec[] = [
     method: "POST",
     path: "/orders/{id}/external-refund/checked",
     group: "Orders",
-    summary: "Mark a refund made outside Daybell checked",
+    summary: "Mark a refund made outside Silverback checked",
     description:
       "A refund made in the Stripe Dashboard flags the order and stops fulfilment. Once an owner or admin has checked it with Stripe and the parent, fulfilment goes on.",
     access: "owner-admin",
@@ -1839,7 +1839,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Orders",
     summary: "Refund an order",
     description:
-      "By line and quantity (and the shipping left, if asked), or a custom amount of products before tax. Tax is refunded pro rata and Daybell's fee on it returned to the studio; Stripe's card fee isn't returned (answer 1). Send a new requestId per refund: the same one again answers the same refund. 409 orders.feesPending with Retry-After until Stripe's fee is known; orders.overRefund, orders.nothingToRefund, orders.notPaid; orders.refundRefused when Stripe refuses it. Owners and admins (answer 3).",
+      "By line and quantity (and the shipping left, if asked), or a custom amount of products before tax. Tax is refunded pro rata and Silverback's fee on it returned to the studio; Stripe's card fee isn't returned (answer 1). Send a new requestId per refund: the same one again answers the same refund. 409 orders.feesPending with Retry-After until Stripe's fee is known; orders.overRefund, orders.nothingToRefund, orders.notPaid; orders.refundRefused when Stripe refuses it. Owners and admins (answer 3).",
     access: "owner-admin",
     body: refundInput,
     success: {
@@ -1863,7 +1863,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Orders",
     summary: "Download an order's print files",
     description:
-      "A zip, daybell-<reference>-print-files.zip: the full-resolution photo of each line left to print, named <reference>-<line>-<size>-x<quantity>.jpg, and a manifest.csv with no names. 409 while a file is being made (Retry-After); at most 10 zips a person an hour; 500 files at most.",
+      "A zip, silverback-<reference>-print-files.zip: the full-resolution photo of each line left to print, named <reference>-<line>-<size>-x<quantity>.jpg, and a manifest.csv with no names. 409 while a file is being made (Retry-After); at most 10 zips a person an hour; 500 files at most.",
     access: "fulfilment",
     success: {
       status: 200,
@@ -1885,7 +1885,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Orders",
     summary: "Home's numbers",
     description:
-      "Today, this week and this season: sales after refunds, orders and Daybell's fee, from the ledger, in the region's currency (owners and admins); and To do: orders waiting to print, ship or go to school (owners, admins and staff; staff get To do only).",
+      "Today, this week and this season: sales after refunds, orders and Silverback's fee, from the ledger, in the region's currency (owners and admins); and To do: orders waiting to print, ship or go to school (owners, admins and staff; staff get To do only).",
     access: "fulfilment",
     query: salesQuery,
     success: { status: 200, schema: salesResponse, description: "The numbers." },
@@ -1908,7 +1908,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Taxes",
     summary: "Set the business address",
     description:
-      "Sent to Stripe as the studio's tax head office (call 3); Daybell keeps only its province. The owner only (call 6). 409 taxes.notConnected before payouts are set up.",
+      "Sent to Stripe as the studio's tax head office (call 3); Silverback keeps only its province. The owner only (call 6). 409 taxes.notConnected before payouts are set up.",
     access: "owner",
     body: taxHeadOfficeInput,
     success: { status: 200, schema: studioTaxesResponse, description: "Tax settings." },
@@ -2106,10 +2106,10 @@ export function buildOpenApi(serverUrl: string) {
   return {
     openapi: "3.1.0",
     info: {
-      title: "Daybell API",
+      title: "Silverback API",
       version: "1",
       description:
-        "Every Daybell screen uses this same API (D92). Today it authenticates with the session cookie set by sign-in; API keys for integrations come later.",
+        "Every Silverback screen uses this same API (D92). Today it authenticates with the session cookie set by sign-in; API keys for integrations come later.",
     },
     servers: [{ url: `${serverUrl}/api/v1` }],
     tags: ROUTE_GROUPS.map((name) => ({ name })),

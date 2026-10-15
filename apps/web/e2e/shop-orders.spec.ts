@@ -98,7 +98,7 @@ test("parent orders: bag badge, Download all, tracking once shipped, cancel befo
     const saving: Promise<Download> = page.waitForEvent("download", { timeout: 5_000 });
     await main.getByRole("button", { name: "Download all", exact: true }).click();
     const file = await saving;
-    expect(file.suggestedFilename()).toMatch(/^daybell-[0-9A-Z]{8}\.zip$/);
+    expect(file.suggestedFilename()).toMatch(/^silverback-[0-9A-Z]{8}\.zip$/);
   }).toPass({ intervals: [2_000, 3_000], timeout: 90_000 });
   await expect(
     main.getByRole("status").filter({ hasText: "Your photos are downloading as one zip file." }),

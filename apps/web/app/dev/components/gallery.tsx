@@ -19,6 +19,7 @@ import {
   MoneyStat,
   OptionCard,
   PhotoTile,
+  RidgeMark,
   ShopFrame,
   SideMenu,
   SideMenuItem,
@@ -161,13 +162,8 @@ export function Gallery() {
           label={t("menu.label")}
           brand={
             <>
-              <span
-                className="grid size-7 place-items-center rounded-[8px] bg-lime text-sm text-ink"
-                aria-hidden="true"
-              >
-                D
-              </span>
-              Daybell
+              <RidgeMark tone="dark" className="size-7" />
+              {t("brand")}
             </>
           }
         >

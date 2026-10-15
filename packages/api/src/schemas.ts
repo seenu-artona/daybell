@@ -864,7 +864,7 @@ const workerQr = z
   ])
   .meta({
     description:
-      "none: no Daybell card; card: a card was read (its code); unreadable: something that looks like a card couldn't be read.",
+      "none: no Silverback card; card: a card was read (its code); unreadable: something that looks like a card couldn't be read.",
   });
 
 /** The image worker's result for a photo (internal route). */

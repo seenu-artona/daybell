@@ -142,7 +142,7 @@ describe("order references", () => {
   });
 
   it("name downloads with no name in them", () => {
-    expect(downloadFileName("7KQ2M9XA", 3)).toBe("daybell-7KQ2M9XA-3.jpg");
+    expect(downloadFileName("7KQ2M9XA", 3)).toBe("silverback-7KQ2M9XA-3.jpg");
     expect(() => downloadFileName("Ava Patel", 1)).toThrow();
     expect(() => downloadFileName("7KQ2M9XA", 0)).toThrow();
   });
@@ -179,10 +179,10 @@ describe("unlocksDownloads (calls 9, 10)", () => {
 
 describe("zips (ADR 0024)", () => {
   it("are named by the order, never a child", () => {
-    expect(zipFileName("7KQ2M9XA", "downloads")).toBe("daybell-7KQ2M9XA.zip");
-    expect(zipFileName("7KQ2M9XA", "print-files")).toBe("daybell-7KQ2M9XA-print-files.zip");
+    expect(zipFileName("7KQ2M9XA", "downloads")).toBe("silverback-7KQ2M9XA.zip");
+    expect(zipFileName("7KQ2M9XA", "print-files")).toBe("silverback-7KQ2M9XA-print-files.zip");
     expect(() => zipFileName("Ava Patel", "downloads")).toThrow();
-    expect(zipEntryName("7KQ2M9XA", 3)).toBe("daybell-7KQ2M9XA-3.jpg");
+    expect(zipEntryName("7KQ2M9XA", 3)).toBe("silverback-7KQ2M9XA-3.jpg");
   });
 
   it("name print files by line, size and quantity", () => {

@@ -171,7 +171,7 @@ describe("payoutProblemKey (code review N5)", () => {
 
   it("tells the owner Daybell's platform setup isn't finished and to contact support, not to try again (N2)", () => {
     for (const m of [messages, enUS]) {
-      expect(m.app.payouts.platformSetup).toContain("contact Daybell support");
+      expect(m.app.payouts.platformSetup).toContain("contact Silverback support");
       expect(m.app.payouts.platformSetup).not.toMatch(/try again/i);
     }
   });

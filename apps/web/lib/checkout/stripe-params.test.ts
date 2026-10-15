@@ -29,7 +29,7 @@ const ORDER: CheckoutOrder = {
   createdAt: 1_791_000_000,
 };
 const TEXT = {
-  processedBy: "Payments processed by Daybell for Maple Lane Photography",
+  processedBy: "Payments processed by Silverback for Maple Lane Photography",
   homeShipping: "Home delivery",
 };
 const SITE = "https://daybell.test";

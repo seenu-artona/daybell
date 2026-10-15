@@ -371,7 +371,7 @@ describe("stripeDriver", () => {
       client.v2.core.accounts.create.mockRejectedValueOnce(conflict());
       await expect(driver.createAccount(newAccount)).rejects.toMatchObject({
         code: "internal",
-        message: "Payout setup needs Daybell support to finish.",
+        message: "Payout setup needs Silverback support to finish.",
         stage: "create",
         outcome: "unknown",
         fields: { form: "payouts.createConflict" },
@@ -456,7 +456,7 @@ describe("stripeDriver", () => {
           outcome: "refused",
           fields: { form: "payouts.platformSetup" },
         });
-        expect((err as Error).message).toMatch(/contact Daybell support/);
+        expect((err as Error).message).toMatch(/contact Silverback support/);
         expect((err as Error).message).not.toMatch(/try again/i);
       }
       expect(log).toHaveBeenCalledWith(

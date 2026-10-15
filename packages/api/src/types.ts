@@ -1257,7 +1257,7 @@ export const payoutAccount = z
   .meta({
     id: "PayoutAccount",
     description:
-      "The studio's Stripe account as Daybell last saw it: no bank details, names or addresses.",
+      "The studio's Stripe account as Silverback last saw it: no bank details, names or addresses.",
   });
 export type PayoutAccount = z.infer<typeof payoutAccount>;
 
@@ -1282,7 +1282,7 @@ const percentPlusFixed = z.object({
 export const payoutFees = z
   .object({
     daybellBasisPoints: z.number().int().meta({
-      description: "Daybell's fee on product sales only, nothing if nothing sells (300 = 3%).",
+      description: "Silverback's fee on product sales only, nothing if nothing sells (300 = 3%).",
     }),
     card: percentPlusFixed.meta({ description: "Stripe's fee on each card payment, passed on." }),
     payout: percentPlusFixed.meta({
@@ -1483,7 +1483,7 @@ export const cronJobsResponse = z.object({
   }),
   absorbedShortfalls: z.number().int().meta({
     description:
-      "Refund shortfalls still owed after 180 days without a settled sale to recover them from, absorbed by Daybell (Q2).",
+      "Refund shortfalls still owed after 180 days without a settled sale to recover them from, absorbed by Silverback (Q2).",
   }),
 });
 export type CronJobsResponse = z.infer<typeof cronJobsResponse>;
@@ -1951,7 +1951,9 @@ export const refund = z
     shipping: money,
     tax: money,
     amount: money.meta({ description: "What the parent gets back." }),
-    daybellFee: money.meta({ description: "Daybell's fee given back to the studio (answer 1)." }),
+    daybellFee: money.meta({
+      description: "Silverback's fee given back to the studio (answer 1).",
+    }),
     unrecovered: money.meta({
       description:
         "What the studio's transfer couldn't give back yet: taken from its next sale (Q2).",
@@ -1974,7 +1976,7 @@ export const ledgerTransaction = z
         id: z.number().int(),
         account: z.string(),
         amount: money.meta({
-          description: "Positive is a debit (in hand or owed to Daybell), negative a credit.",
+          description: "Positive is a debit (in hand or owed to Silverback), negative a credit.",
         }),
       }),
     ),
@@ -1993,13 +1995,13 @@ export const studioOrderDetail = z
     total: money,
     daybellFee: z
       .object({ basisPoints: z.number().int(), amount: money })
-      .meta({ description: "Daybell's fee on products, at the rate this order used (D59)." }),
+      .meta({ description: "Silverback's fee on products, at the rate this order used (D59)." }),
     cardFee: money
       .nullable()
       .meta({ description: "Stripe's fee for the payment (D98); null until Stripe says." }),
     paidToStudio: money.nullable().meta({
       description:
-        "Total less Daybell's fee and the card fee (tax included: the studio remits it).",
+        "Total less Silverback's fee and the card fee (tax included: the studio remits it).",
     }),
     feesSettled: z
       .boolean()
@@ -2023,7 +2025,7 @@ export const studioOrderDetail = z
       .nullable()
       .meta({
         description:
-          "A refund made outside Daybell (the Stripe Dashboard): fulfilment stops until an owner or admin marks it checked.",
+          "A refund made outside Silverback (the Stripe Dashboard): fulfilment stops until an owner or admin marks it checked.",
       }),
     tracking: tracking.nullable(),
     refund: refundBadge,
@@ -2138,7 +2140,7 @@ export const salesSummary = z
       description: "What parents paid less what was refunded (from the ledger).",
     }),
     orders: z.number().int(),
-    daybellFee: money.meta({ description: "Daybell's fee, net of refunds." }),
+    daybellFee: money.meta({ description: "Silverback's fee, net of refunds." }),
     averageOrder: money.nullable(),
   })
   .meta({ id: "SalesSummary" });
@@ -2180,7 +2182,8 @@ export const studioTaxesResponse = z
       .object({ province: z.string(), setAt: z.iso.datetime({ offset: true }) })
       .nullable()
       .meta({
-        description: "Whether the business address is at Stripe; Daybell keeps only its province.",
+        description:
+          "Whether the business address is at Stripe; Silverback keeps only its province.",
       }),
     registrations: z.array(taxRegistration).meta({ description: "Active registrations." }),
     collectsTax: z.boolean().meta({

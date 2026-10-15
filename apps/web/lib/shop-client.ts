@@ -136,7 +136,7 @@ async function saveZip(url: string): Promise<ShopResult<undefined>> {
   const objectUrl = URL.createObjectURL(await res.blob());
   const link = document.createElement("a");
   link.href = objectUrl;
-  link.download = name ?? "daybell.zip";
+  link.download = name ?? "silverback.zip";
   document.body.append(link);
   link.click();
   link.remove();

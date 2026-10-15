@@ -210,7 +210,7 @@ describe("the bag's Pay (ADR 0023 §6)", () => {
     );
     await render(<BagPage />);
     expect(container.textContent).toContain(
-      "Payments processed by Daybell for Maple Lane Photography.",
+      "Payments processed by Silverback for Maple Lane Photography.",
     );
     const pay = button("Pay securely");
     expect(container.querySelector("[data-docked-cta]")?.textContent).toContain("$19.00");
