@@ -4,6 +4,8 @@ import type {
   DownloadLinkResponse,
   ShopCartLineInput,
   ShopCartResponse,
+  ShopDrmConfigResponse,
+  ShopDrmTokenResponse,
   ShopGalleryResponse,
   ShopOpenedResponse,
   ShopOrderResponse,
@@ -74,6 +76,13 @@ export const shopApi = {
     call<undefined>(`/session${gallery ? inGallery(gallery) : ""}`, "DELETE"),
   gallery: (gallery: string, childId: string) =>
     call<ShopGalleryResponse>(`/children/${path(childId)}/gallery${inGallery(gallery)}`),
+  // The large view's DRM (ADR 0034): whether it is on, and a token per license request.
+  drm: (gallery: string) => call<ShopDrmConfigResponse>(`/drm${inGallery(gallery)}`),
+  drmToken: (gallery: string, childId: string, photoId: string) =>
+    call<ShopDrmTokenResponse>(
+      `/children/${path(childId)}/photos/${path(photoId)}/drm-token${inGallery(gallery)}`,
+      "POST",
+    ),
   priceList: (gallery: string, childId: string) =>
     call<ShopPriceListResponse>(`/children/${path(childId)}/price-list${inGallery(gallery)}`),
   cart: (gallery: string) => call<ShopCartResponse>(`/cart${inGallery(gallery)}`),

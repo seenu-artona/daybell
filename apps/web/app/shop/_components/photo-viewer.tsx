@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { type PointerEvent, useEffect, useId, useRef } from "react";
-import { ProtectedImage } from "./protected-image";
+import { DrmPhoto } from "./drm-photo";
 import { ShopDialog } from "./shop-dialog";
 import { shopButton } from "./styles";
 
@@ -16,7 +16,8 @@ const SWIPE_PX = 50;
  * One photo, full screen. Swipe, or the Previous and Next buttons and the arrow keys (the non-swipe alternatives, WCAG
  * 2.5.7). "Use this photo" starts the package flow with that pose, a portrait or a group photo (D156 C5). At either
  * end the button that can't go further is disabled and hidden, so focus moves to the other one, or to Close when
- * there is only one photo (code review N5).
+ * there is only one photo (code review N5). The photo itself is the large view (DrmPhoto): under DRM where it is
+ * protected and this device can, otherwise the watermarked WebP (D158; ADR 0034). Navigation is unchanged.
  */
 export function PhotoViewer({
   photos,
@@ -25,6 +26,7 @@ export function PhotoViewer({
   onClose,
   alt,
   orderHref,
+  drm = null,
 }: {
   photos: ShopPhoto[];
   index: number | null;
@@ -33,6 +35,8 @@ export function PhotoViewer({
   alt: (n: number, total: number) => string;
   /** Where "Use this photo" goes. */
   orderHref: (photo: ShopPhoto) => string;
+  /** The child and gallery the photos are shown for, for their DRM manifests and tokens; absent, the WebP. */
+  drm?: { childId: string; galleryId: string } | null;
 }) {
   const t = useTranslations("shop.viewer");
   const counterId = useId();
@@ -112,7 +116,7 @@ export function PhotoViewer({
               start.current = null;
             }}
           >
-            <ProtectedImage src={photo.viewUrl} alt={alt(index + 1, total)} fit="contain" eager />
+            <DrmPhoto photo={photo} alt={alt(index + 1, total)} target={drm} />
             <button
               ref={previousButton}
               type="button"

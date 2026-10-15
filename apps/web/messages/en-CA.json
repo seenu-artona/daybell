@@ -2701,7 +2701,10 @@
       "close": "Close",
       "previous": "Previous photo",
       "next": "Next photo",
-      "use": "Use this photo"
+      "use": "Use this photo",
+      "drm": {
+        "loading": "Loading photo"
+      }
     },
     "buy": {
       "packagesTitle": "Choose a package",
