@@ -1,6 +1,9 @@
 import { DATA_REGIONS } from "@daybell/config";
 import {
   CARRIERS,
+  cleanGroupName,
+  GROUP_COLUMNS,
+  GROUP_PHOTOS_TO,
   HEAD_OFFICE_PROVINCES,
   ITEM_DESCRIPTION_MAX,
   ITEM_NAME_MAX,
@@ -9,6 +12,8 @@ import {
   MAX_BLANK_CARDS,
   MAX_CLOSING_DAYS,
   MAX_FILES_PER_REQUEST,
+  MAX_GROUP_CHANGE,
+  MAX_GROUP_NAME,
   MAX_ITEM_PRICE_CENTS,
   MAX_LINE_QUANTITY,
   MAX_NOTIFICATIONS_PER_READ,
@@ -24,6 +29,7 @@ import {
   normalizeTrackingNumber,
   ORDER_FULFILMENTS,
   PAYOUT_WEEKDAY_CHOICES,
+  PEOPLE_PAGE_SIZE,
   PHOTO_PAGE_SIZE,
   PRICE_ITEM_KINDS,
   PRICE_LIST_NAME_MAX,
@@ -31,13 +37,13 @@ import {
   PST_PROVINCES,
   planParts,
   REFUND_REASONS,
-  REVIEW_CHILDREN_PAGE,
   RULE_KEYS,
   RULE_LIMITS,
   SHOP_MAX_QUANTITY,
   SHOP_OPENS,
   SHOP_SHIPPING_METHODS,
   STATUS_UNDO_REASONS,
+  UPLOAD_KINDS,
 } from "@daybell/core";
 import { z } from "zod";
 
@@ -584,18 +590,18 @@ const parentEmail = z
   .optional()
   .meta({ description: "School-provided; never used for marketing." });
 
-const groupName = rosterName("validation.groupName").meta({
-  description: "A class, team or group name, unique per job ignoring case.",
+const className = rosterName("validation.className").meta({
+  description: "A class or team name, unique per job ignoring case.",
 });
 
 const childFields = {
   firstName: rosterName("validation.firstName"),
   lastName: rosterName("validation.lastName"),
-  groupId: z
-    .uuid({ error: "validation.group" })
+  classId: z
+    .uuid({ error: "validation.class" })
     .nullable()
     .optional()
-    .meta({ description: "One of this job's classes, teams or groups. Optional." }),
+    .meta({ description: "One of this job's classes (or teams). Optional." }),
   studentId: rosterText("validation.studentId", 40).meta({
     description: "The school's ID for the child. Re-imports match children by it.",
   }),
@@ -615,15 +621,16 @@ export const childPatch = z
   .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
 export type ChildPatch = z.infer<typeof childPatch>;
 
-export const groupInput = z.object({ name: groupName });
-export type GroupInput = z.infer<typeof groupInput>;
-export const groupPatch = groupInput;
+/** A class (or team) of a job's roster (C1, C6: called a class in the API). */
+export const classInput = z.object({ name: className });
+export type ClassInput = z.infer<typeof classInput>;
+export const classPatch = classInput;
 
 /** One confirmed row of a roster file. Opt-outs are null when the file had no such column. */
 export const rosterRow = z.object({
   firstName: childFields.firstName,
   lastName: childFields.lastName,
-  group: groupName.nullable().optional(),
+  class: className.nullable().optional(),
   studentId: childFields.studentId,
   grade: childFields.grade,
   parentEmail,
@@ -657,10 +664,10 @@ export const rosterQuery = z.object({
     .uuid({ error: "validation.cursor" })
     .optional()
     .meta({ description: "The nextCursor from the previous page." }),
-  groupId: z
-    .union([z.uuid(), z.literal("none")], { error: "validation.group" })
+  classId: z
+    .union([z.uuid(), z.literal("none")], { error: "validation.class" })
     .optional()
-    .meta({ description: 'Only this class, team or group; "none" for children without one.' }),
+    .meta({ description: 'Only this class (or team); "none" for children without one.' }),
 });
 
 // ── Job page (Phase 1 step 2b, ADR 0013) ──────────────────────────────────────────────────────────────────────────
@@ -689,25 +696,25 @@ export const activityQuery = z.object({
 // ── QR cards (Phase 1 step 3, ADR 0015) ───────────────────────────────────────────────────────────────────────────
 
 /**
- * What to print (Seenu, answer 4): the whole job (no groupIds, no childId), chosen classes, or one child's card. Only
+ * What to print (Seenu, answer 4): the whole job (no classIds, no childId), chosen classes, or one child's card. Only
  * IDs and a count: the request never carries names or codes, and it is a POST body, never a URL (D113).
  */
 export const qrCardsInput = z
   .object({
-    groupIds: z
-      .array(z.union([z.uuid(), z.literal("none")]), { error: "validation.group" })
-      .min(1, { error: "validation.qrCardsGroups" })
-      .max(500, { error: "validation.group" })
-      .refine((ids) => new Set(ids).size === ids.length, { error: "validation.group" })
+    classIds: z
+      .array(z.union([z.uuid(), z.literal("none")]), { error: "validation.class" })
+      .min(1, { error: "validation.qrCardsClasses" })
+      .max(500, { error: "validation.class" })
+      .refine((ids) => new Set(ids).size === ids.length, { error: "validation.class" })
       .optional()
       .meta({
         description:
-          'Only these classes, teams or groups; "none" for children without one. Leave out for the whole job.',
+          'Only these classes (or teams); "none" for children without one. Leave out for the whole job.',
       }),
     childId: z
       .uuid({ error: "validation.invalid" })
       .optional()
-      .meta({ description: "Only this child's card. Not with groupIds or blank cards." }),
+      .meta({ description: "Only this child's card. Not with classIds or blank cards." }),
     blankCards: z
       .number({ error: "validation.blankCards" })
       .int({ error: "validation.blankCards" })
@@ -719,8 +726,8 @@ export const qrCardsInput = z
       }),
   })
   .superRefine((value, ctx) => {
-    if (value.childId && value.groupIds)
-      ctx.addIssue({ code: "custom", path: ["groupIds"], message: "validation.invalid" });
+    if (value.childId && value.classIds)
+      ctx.addIssue({ code: "custom", path: ["classIds"], message: "validation.invalid" });
     if (value.childId && value.blankCards > 0)
       ctx.addIssue({ code: "custom", path: ["blankCards"], message: "validation.blankCards" });
   });
@@ -896,13 +903,33 @@ export type WorkerResultInput = z.infer<typeof workerResultInput>;
 
 // ── QR tagging and review (Phase 1 step 5, ADR 0018) ─────────────────────────────────────────────────────────────
 
-/** An upload: individual photos (tagged by their QR cards), or a class's "Class photo" set (Seenu, answer 3). */
-export const uploadBatchInput = z.object({
-  groupId: z.uuid({ error: "validation.group" }).nullable().optional().meta({
-    description:
-      "One of the job's classes: every photo of this upload goes to its Class photo set, and QR cards in it are ignored. Leave out for individual photos.",
-  }),
-});
+/**
+ * An upload (D156; ADR 0030): individual photos, split by their QR cards, optionally adding everyone it places to a
+ * group (addToGroupId, C7); or group photos for one group (groupId), linked to it as they are registered. An empty body
+ * is an individual upload.
+ */
+export const uploadBatchInput = z
+  .object({
+    kind: z.enum(UPLOAD_KINDS, { error: "validation.invalid" }).default("individual").meta({
+      description: "individual (split by QR card) or group (group photos for groupId).",
+    }),
+    groupId: z.uuid({ error: "validation.group" }).optional().meta({
+      description:
+        "group uploads only: one of the job's groups. Every photo is a group photo in it; QR cards in them are ignored.",
+    }),
+    addToGroupId: z.uuid({ error: "validation.group" }).optional().meta({
+      description:
+        "individual uploads only: one of the job's groups. Everyone the upload's photos are given to joins it (add only).",
+    }),
+  })
+  .superRefine((value, ctx) => {
+    if (value.kind === "group" && value.groupId === undefined)
+      ctx.addIssue({ code: "custom", path: ["groupId"], message: "validation.group" });
+    if (value.kind === "group" && value.addToGroupId !== undefined)
+      ctx.addIssue({ code: "custom", path: ["addToGroupId"], message: "validation.invalid" });
+    if (value.kind === "individual" && value.groupId !== undefined)
+      ctx.addIssue({ code: "custom", path: ["groupId"], message: "validation.invalid" });
+  });
 export type UploadBatchInput = z.infer<typeof uploadBatchInput>;
 
 const reviewPhotoIds = z
@@ -916,15 +943,17 @@ export const moveTarget = z
     "kind",
     [
       z.object({ kind: z.literal("child"), childId: z.uuid({ error: "validation.invalid" }) }),
-      z.object({ kind: z.literal("classSet"), groupId: z.uuid({ error: "validation.invalid" }) }),
       z.object({ kind: z.literal("leftovers") }),
     ],
     { error: "validation.invalid" },
   )
-  .meta({ id: "MoveTarget", description: "A child, a class's Class photo set, or Leftovers." });
+  .meta({
+    id: "MoveTarget",
+    description: "A child (Give to a person) or Leftovers. Group photos never move here (C8).",
+  });
 export type MoveTarget = z.infer<typeof moveTarget>;
 
-/** Move up to 500 of a job's photos by hand (drag, or Move to…). Card photos can't be moved. */
+/** Move up to 500 of a job's photos by hand (drag, or Give to a person). Card and group photos can't be moved. */
 export const movePhotosInput = z.object({ photoIds: reviewPhotoIds, target: moveTarget });
 export type MovePhotosInput = z.infer<typeof movePhotosInput>;
 
@@ -946,7 +975,7 @@ export type UndoCardPhotosInput = z.infer<typeof undoCardPhotosInput>;
 export const claimBlankCardInput = z.object({
   firstName: childFields.firstName,
   lastName: childFields.lastName,
-  groupId: childFields.groupId,
+  classId: childFields.classId,
 });
 export type ClaimBlankCardInput = z.infer<typeof claimBlankCardInput>;
 
@@ -954,7 +983,6 @@ export const TAGGING_PLACES = [
   "leftovers",
   "flagged",
   "child",
-  "classSet",
   "blankCard",
   "unlinkedCards",
 ] as const;
@@ -966,12 +994,12 @@ export const taggingPhotosQuery = z
   .object({
     place: z.enum(TAGGING_PLACES, { error: "validation.invalid" }).meta({
       description:
-        "leftovers, flagged, a child's photos (with their card photos), a class's Class photo set, a blank card's photos, or unlinkedCards (card photos linked to none of the job's cards, such as photos marked card photos in Leftovers).",
+        "leftovers, flagged, a child's photos (with their card photos), a blank card's photos, or unlinkedCards (card photos linked to none of the job's cards, such as photos marked card photos in Leftovers).",
     }),
     id: z
       .uuid({ error: "validation.invalid" })
       .optional()
-      .meta({ description: "The child, class or blank card, for those places." }),
+      .meta({ description: "The child or blank card, for those places." }),
     cursor: z
       .uuid({ error: "validation.cursor" })
       .optional()
@@ -984,25 +1012,116 @@ export const taggingPhotosQuery = z
   });
 export type TaggingPhotosQuery = z.infer<typeof taggingPhotosQuery>;
 
-/** An album's children: a class (groupId), or children without one (noGroup=true). */
-export const taggingChildrenQuery = z
+// ── Photos: People and Groups (D156, ADR 0030) ───────────────────────────────────────────────────────────────────
+// Ids only in URLs (D113): group names travel in bodies.
+
+/** A page of Photos' People view: 50 people at a time, optionally one group's members. */
+export const photoPeopleQuery = z.object({
+  groupId: z
+    .uuid({ error: "validation.invalid" })
+    .optional()
+    .meta({ description: "Only this group's members." }),
+  cursor: z
+    .uuid({ error: "validation.cursor" })
+    .optional()
+    .meta({ description: "The nextCursor from the previous page (a child's id)." }),
+  limit: z.coerce.number().int().min(1).max(PEOPLE_PAGE_SIZE).default(PEOPLE_PAGE_SIZE),
+});
+export type PhotoPeopleQuery = z.infer<typeof photoPeopleQuery>;
+
+const groupName = z
+  .string({ error: "validation.groupName" })
+  .transform((name) => cleanGroupName(name))
+  .pipe(
+    z
+      .string()
+      .min(1, { error: "validation.groupName" })
+      .max(MAX_GROUP_NAME, { error: "validation.groupName" }),
+  )
+  .meta({ description: "1 to 60 characters, unique per job ignoring case (C10)." });
+
+/** Make a group by hand (+ New group), or rename one. */
+export const photoGroupInput = z.object({ name: groupName });
+export type PhotoGroupInput = z.infer<typeof photoGroupInput>;
+export const photoGroupPatch = photoGroupInput;
+
+/** Make a group for each value of a roster column, once (C3): Class or Grade. */
+export const groupsFromColumnInput = z.object({
+  column: z.enum(GROUP_COLUMNS, { error: "validation.invalid" }).meta({
+    description:
+      "class or grade. Names already used by a group are skipped; blank values make no group.",
+  }),
+});
+export type GroupsFromColumnInput = z.infer<typeof groupsFromColumnInput>;
+
+const groupIds = (description: string) =>
+  z
+    .array(z.uuid({ error: "validation.invalid" }), { error: "validation.invalid" })
+    .max(MAX_GROUP_CHANGE, { error: "validation.invalid" })
+    .refine((ids) => new Set(ids).size === ids.length, { error: "validation.invalid" })
+    .meta({ description });
+
+/** Add and remove a group's members by hand: up to 500 each, nobody in both. */
+export const groupMembersInput = z
   .object({
-    groupId: z.uuid({ error: "validation.invalid" }).optional(),
-    noGroup: z
-      .enum(["true", "false"], { error: "validation.invalid" })
-      .default("false")
-      .transform((v) => v === "true"),
-    cursor: z
-      .uuid({ error: "validation.cursor" })
-      .optional()
-      .meta({ description: "The nextCursor from the previous page (a child's id)." }),
-    limit: z.coerce.number().int().min(1).max(500).default(REVIEW_CHILDREN_PAGE),
+    add: groupIds("Children of the job to add (up to 500).").default([]),
+    remove: groupIds("Members to take out (up to 500).").default([]),
   })
-  .refine((q) => (q.groupId !== undefined) !== q.noGroup, {
-    error: "validation.invalid",
-    path: ["groupId"],
+  .superRefine((value, ctx) => {
+    if (value.add.length + value.remove.length === 0)
+      ctx.addIssue({ code: "custom", path: ["add"], message: "validation.nothingToChange" });
+    if (value.add.some((id) => value.remove.includes(id)))
+      ctx.addIssue({ code: "custom", path: ["remove"], message: "validation.invalid" });
   });
-export type TaggingChildrenQuery = z.infer<typeof taggingChildrenQuery>;
+export type GroupMembersInput = z.infer<typeof groupMembersInput>;
+
+/** A page of a group's members or photos. */
+export const groupPageQuery = z.object({
+  cursor: z
+    .uuid({ error: "validation.cursor" })
+    .optional()
+    .meta({ description: "The nextCursor from the previous page." }),
+  limit: z.coerce.number().int().min(1).max(500).default(PHOTO_PAGE_SIZE),
+});
+export type GroupPageQuery = z.infer<typeof groupPageQuery>;
+
+const groupPhotoIds = z
+  .array(z.uuid({ error: "validation.invalid" }), { error: "validation.invalid" })
+  .min(1, { error: "validation.invalid" })
+  .max(MAX_GROUP_CHANGE, { error: "validation.invalid" })
+  .refine((ids) => new Set(ids).size === ids.length, { error: "validation.invalid" })
+  .meta({ description: "1 to 500 of the job's group photos." });
+
+/** Move group photos to another group of the job (Move to group). */
+export const moveGroupPhotosInput = z.object({
+  photoIds: groupPhotoIds,
+  toGroupId: z.uuid({ error: "validation.group" }).meta({ description: "The group they go to." }),
+});
+export type MoveGroupPhotosInput = z.infer<typeof moveGroupPhotosInput>;
+
+/** Also show group photos in more groups (Also show in…): links only added. */
+export const alsoShowPhotosInput = z.object({
+  photoIds: groupPhotoIds,
+  groupIds: groupIds("1 to 500 of the job's groups.").min(1, { error: "validation.group" }),
+});
+export type AlsoShowPhotosInput = z.infer<typeof alsoShowPhotosInput>;
+
+/** Where a deleted group's photos go (C4): another group (photosTo=group&targetId=) or the bin. */
+export const deleteGroupQuery = z
+  .object({
+    photosTo: z.enum(GROUP_PHOTOS_TO, { error: "validation.invalid" }).optional().meta({
+      description: "group or bin; leave out for a group with no photos.",
+    }),
+    targetId: z
+      .uuid({ error: "validation.group" })
+      .optional()
+      .meta({ description: "With photosTo=group: the group they go to." }),
+  })
+  .refine((q) => (q.photosTo === "group") === (q.targetId !== undefined), {
+    error: "validation.group",
+    path: ["targetId"],
+  });
+export type DeleteGroupQuery = z.infer<typeof deleteGroupQuery>;
 
 // ── Products and price lists (Phase 1 step 6, ADR 0019) ───────────────────────────────────────────────────────────
 // Money is whole cents only (D96): 12.5, "1250" and negatives are refused, never rounded. The currency is never sent:
@@ -1391,8 +1510,9 @@ export const LIST_FILTER_KEYS = {
     doNotPublish: false,
     duplicates: false,
     noPhotos: false,
+    group: true,
   },
-  job_photos: {},
+  job_photos: { group: true },
   people_clients: {},
   people_contacts: { client: true },
   people_subjects: { job: true, client: true },

@@ -95,9 +95,9 @@ describe("API description", () => {
       ["/jobs/{id}/children", "post"],
       ["/children/{id}", "patch"],
       ["/children/{id}", "delete"],
-      ["/jobs/{id}/groups", "get"],
-      ["/jobs/{id}/groups", "post"],
-      ["/groups/{id}", "patch"],
+      ["/jobs/{id}/classes", "get"],
+      ["/jobs/{id}/classes", "post"],
+      ["/classes/{id}", "patch"],
       ["/jobs/{id}/children/import", "post"],
     ] as const) {
       const route = op(path, method);
@@ -106,7 +106,8 @@ describe("API description", () => {
       expect(route?.["x-access"]).toBe(method === "get" ? "signed-in" : "roster-editor");
     }
     expect(doc.components.schemas).toHaveProperty("Child");
-    expect(doc.components.schemas).toHaveProperty("Group");
+    expect(doc.components.schemas).toHaveProperty("Class");
+    expect(doc.components.schemas).toHaveProperty("PhotoGroup");
     expect(JSON.stringify(doc.components.schemas.Child)).not.toContain("accessCodeHash");
     expect(doc.tags.map((t) => t.name)).toContain("Roster");
   });

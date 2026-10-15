@@ -477,5 +477,3 @@ export function notReviewableReason(f: TaggingFacts): NotReviewableReason | null
 export const MAX_PHOTOS_PER_MOVE = 500;
 /** Photos in each child's strip on the review screen before "Show all". */
 export const REVIEW_STRIP_PHOTOS = 12;
-/** Children per page of an album on the review screen. */
-export const REVIEW_CHILDREN_PAGE = 100;
