@@ -9,7 +9,7 @@ import { linkFromEmail } from "./mail";
 // STORAGE_DRIVER=local (the web server reads the cards, as the Lambda does): a batch of photos with QR cards (one
 // before the first card, a card shot twice, a retake-free sequence, a damaged card, a blank card) is tagged; the
 // review moves a Leftover with Move to… by keyboard, drags a photo, confirms flagged photos (a photo that may be a card
-// is confirmed before it can move), names the blank card's child and marks tagging reviewed; the checklist ticks; a
+// is confirmed before it can move), names the blank card's child and marks tagging reviewed; Progress's Check photos is done (D152); a
 // new upload that starts with a card (a retake, and a second blank card given to an existing child) reopens it without
 // Leftovers; a class photo upload goes to its class; staff see the review read-only; another studio sees and changes
 // nothing. Desktop only (D136). JPEGs and QR codes are made in the test.
@@ -184,15 +184,17 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   ).toBeVisible();
   await expect(main.getByRole("region", { name: "Blank card 1", exact: true })).toHaveCount(0);
 
-  // 7. Clean: Mark reviewed ticks the checklist's Review tagging task.
+  // 7. Clean: Mark reviewed makes Progress's Check photos done (D152): the Photos stage is finished and folds to one
+  // line, which opens to show it.
   await expect(markReviewed).toBeEnabled();
   await markReviewed.click();
   await expect(main.getByText("Tagging marked reviewed.", { exact: true })).toBeVisible();
   await page.goto(`/app/jobs/${jobId}`);
-  const checklist = main.getByRole("region", { name: "Checklist", exact: true });
-  const reviewRow = checklist.getByRole("listitem").filter({ hasText: "Review tagging" });
-  await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
-  await expect(reviewRow).toContainText("Done");
+  const progress = main.getByRole("region", { name: "Progress", exact: true });
+  await progress.getByRole("button", { name: /^Photos\s*Done/ }).click();
+  await expect(
+    progress.getByRole("listitem").filter({ hasText: /^Done: Photos checked/ }),
+  ).toBeVisible();
 
   // 8. New photos reopen it, even with no Leftovers or flags (Seenu, answer 4): an upload that starts with Maya's card
   // (a retake across uploads, plan answer 8) and has a second blank card, whose photo goes to Noah, already on the
@@ -222,12 +224,14 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
     timeout: 90_000,
   });
   await page.goto(`/app/jobs/${jobId}`);
-  // On track, so the checklist opens collapsed to its next task.
+  // New photos reopen Check photos: it is the step to do now again, linking to Review.
+  await expect(progress.getByText("Now: Photos", { exact: true })).toBeVisible();
   await expect(
-    checklist.getByRole("link", { name: "Next: Review tagging", exact: true }),
-  ).toBeVisible();
-  await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
-  await expect(reviewRow).toContainText("Next");
+    progress
+      .getByRole("listitem")
+      .filter({ hasText: /^Now: Check photos/ })
+      .getByRole("link", { name: "Check photos" }),
+  ).toHaveAttribute("href", `/app/jobs/${jobId}/photos/review`);
   await page.goto(`/app/jobs/${jobId}/photos/review`);
   await expect(
     main.getByText("15 photos · 0 in Leftovers · 0 to check", { exact: true }),

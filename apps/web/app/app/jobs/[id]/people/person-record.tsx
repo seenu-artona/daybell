@@ -127,7 +127,16 @@ export function PersonRecord({
   const closes = job.status === "selling" && job.closesAt ? day(closingDay(job.closesAt)) : null;
 
   return (
-    <div className="flex flex-col gap-5.5 px-7 py-5.5">
+    // Escape inside the record goes back to the full list, as the floating panel's did (ADR 0025).
+    <div
+      className="flex flex-col gap-5.5 px-7 py-5.5"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        if ((e.target as HTMLElement).closest("dialog, [aria-expanded='true']")) return;
+        e.preventDefault();
+        onUnfold();
+      }}
+    >
       <div className="flex items-center gap-2.5">
         <div className="min-w-0 flex-1">
           <h2

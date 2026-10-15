@@ -71,15 +71,18 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
     ).status(),
   ).toBe(201);
 
-  // 1. Overview: Picture day has passed, so it ticked itself; Upload photos is to do, and its row links to Photos.
+  // 1. Overview (D152): Picture day has passed, so its stage is done and folds to one line; Upload photos is still
+  // ahead in Photos. The Photos tab is where it happens.
   await page.goto(`/app/jobs/${jobId}`);
-  const checklist = main.getByRole("region", { name: "Checklist", exact: true });
-  await expect(checklist.getByRole("listitem").filter({ hasText: /^Picture day/ })).toContainText(
-    "Done",
-  );
-  const todo = checklist.getByRole("listitem").filter({ hasText: "Upload photos" });
-  await expect(todo).toContainText("To do");
-  await todo.getByRole("link").click();
+  const progress = main.getByRole("region", { name: "Progress", exact: true });
+  await expect(progress.getByRole("button", { name: /^Picture day\s*Done/ })).toBeVisible();
+  await expect(
+    progress.getByRole("listitem").filter({ hasText: /^Next: Upload photos/ }),
+  ).toBeVisible();
+  await main
+    .getByRole("navigation", { name: "Job sections" })
+    .getByRole("link", { name: "Photos", exact: true })
+    .click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}/photos$`));
   await expect(main.getByRole("heading", { name: "No photos yet", exact: true })).toBeVisible();
 
@@ -143,10 +146,11 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
   expect(page.url()).toMatch(/\?photo=[0-9a-f-]{36}$/);
   expect(page.url()).not.toContain("IMG_");
 
-  // 5. The checklist's Upload photos task ticked itself.
+  // 5. Progress's Upload photos is done (D152); Check photos is next in the Photos stage.
   await page.goto(`/app/jobs/${jobId}`);
-  await expect(todo).toContainText("Done");
-  await expect(checklist.getByText("4 of 7 done", { exact: true })).toBeVisible();
+  await expect(
+    progress.getByRole("listitem").filter({ hasText: /^Done: Photos uploaded/ }),
+  ).toBeVisible();
 
   // 6. The bin: move one photo there and back.
   await page.goto(`/app/jobs/${jobId}/photos`);

@@ -275,9 +275,11 @@ test("People: clients, contacts made main, families coming soon, subjects across
   await expect(subject("Ben Ortiz")).toBeVisible();
   expect(page.url()).not.toContain("ben");
 
-  // A row opens the child on their job's Subjects tab.
+  // A row opens the child on their job's Subjects tab: the ?child= link opens their record beside the folded list
+  // (D153).
   await subject("Ben Ortiz").getByRole("link", { name: "Ben Ortiz", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job2}/people\\?child=[0-9a-f-]{36}$`));
+  await expect(main.getByRole("heading", { name: "Ben Ortiz", level: 2 })).toBeVisible();
 
   // 7. A photographer: no Families tab, no Ordered column or chips, the contact dialog read-only; Families' address
   // takes them to Clients.
