@@ -115,7 +115,17 @@ export function packagerEnv(env) {
   return { PATH: env.PATH ?? "" };
 }
 
-/** Shaka Packager's arguments: CMAF cbcs, raw key, no clear lead, a static DASH manifest and VOD HLS playlists. */
+/**
+ * The clip's constant cbcs IV, as hex: the key ID's own 16 bytes. FairPlay's license must carry the IV with the key
+ * (Axinom refuses an inline key without one: "An initialization vector must be provided with every key"), so it has to
+ * be known rather than random. An IV isn't secret (it is in the clip's tenc box and the HLS playlist), and deriving it
+ * from the key ID means no extra setting. lib/drm-test.ts sends the same bytes in the token (a test checks both agree).
+ */
+export function drmTestIvHex(keyIdHex) {
+  return keyIdHex.toLowerCase();
+}
+
+/** Shaka Packager's arguments: CMAF cbcs, raw key with its IV, no clear lead, a static DASH manifest and VOD HLS. */
 export function packagerArgs({ clear, out, keyId, keyIdHex, contentKeyHex }) {
   return [
     `in=${clear},stream=video,init_segment=${join(out, "video", "init.mp4")},segment_template=${join(out, "video", "$Number$.m4s")},playlist_name=video.m3u8`,
@@ -123,7 +133,7 @@ export function packagerArgs({ clear, out, keyId, keyIdHex, contentKeyHex }) {
     "cbcs",
     "--enable_raw_key_encryption",
     "--keys",
-    `label=:key_id=${keyIdHex}:key=${contentKeyHex}`,
+    `label=:key_id=${keyIdHex}:key=${contentKeyHex}:iv=${drmTestIvHex(keyIdHex)}`,
     "--protection_systems",
     "Widevine,PlayReady,FairPlay",
     "--hls_key_uri",

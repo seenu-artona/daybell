@@ -43,6 +43,15 @@ export function encryptContentKey(
 }
 
 /**
+ * The clip's constant cbcs IV, base64: the key ID's 16 bytes, exactly what the build packaged with
+ * (lib/drm-test-build.mjs, drmTestIvHex). FairPlay needs it in the license, so Axinom requires it with every inline key;
+ * Widevine and PlayReady read the IV from the clip and ignore it. Not secret.
+ */
+export function contentKeyIv(keyId: string): string {
+  return guidBytes(keyId).toString("base64");
+}
+
+/**
  * The entitlement message: one key, one usage policy that asks for hardware-backed DRM on every system (that is what
  * makes screenshots black: D158). Widevine L1 with the whole path in hardware, PlayReady SL3000, FairPlay with HDCP
  * type 1 and no AirPlay or AV adapter. No persistence: nothing is kept on the device.
@@ -59,6 +68,7 @@ export function entitlementMessage(
         {
           id: settings.keyId,
           encrypted_key: encryptContentKey(settings.contentKey, settings.comKey, settings.keyId),
+          iv: contentKeyIv(settings.keyId),
           usage_policy: DRM_TEST_POLICY,
         },
       ],

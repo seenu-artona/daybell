@@ -16,6 +16,7 @@ export declare function scrub(text: unknown, secrets: readonly string[]): string
 export declare function removeGenerated(outDir: string, remove?: (path: string) => void): void;
 export declare function packagerFileName(platform: string, arch: string): string | null;
 export declare function verifyPackager(name: string, bytes: Uint8Array): void;
+export declare function drmTestIvHex(keyIdHex: string): string;
 export declare function packagerEnv(env: Env): { PATH: string };
 export declare function packagerArgs(input: {
   clear: string;

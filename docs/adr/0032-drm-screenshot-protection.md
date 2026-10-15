@@ -49,9 +49,19 @@ This step only answers "does it work on real devices?":
   `Cache-Control: no-store`. A missing or malformed setting answers 409 with `setup: drmTest.notConfigured`. Nothing
   is logged but the name of a missing setting and a fixed `drm_test_rate_limited`.
 - **The entitlement message.** One inline key (`id` = the key ID; `encrypted_key` = AES-256-CBC, no padding, key = the
-  communication key, IV = the key ID's 16 bytes in written order) under "Policy A": Widevine `HW_SECURE_ALL`,
-  PlayReady `min_device_security_level: 3000`, FairPlay HDCP type 1 with no AirPlay and no AV adapter;
-  `allow_persistence: false`.
+  communication key, IV = the key ID's 16 bytes in written order; `iv` = the clip's IV, below) under "Policy A":
+  Widevine `HW_SECURE_ALL`, PlayReady `min_device_security_level: 3000`, FairPlay HDCP type 1 with no AirPlay and no AV
+  adapter; `allow_persistence: false`.
+- **The clip's IV** (fix after the first Safari test, Oct 14). Axinom (AxDRM 6.29.1) refused the FairPlay license with
+  400 "Invalid license request. An initialization vector must be provided with every key in the entitlement message."
+  FairPlay delivers the IV with the key, so the IV must be known, not left for the packager to pick at random. The
+  build now passes `iv=` with the key (`--keys label=:key_id=…:key=…:iv=…`; Shaka Packager 3.9.3 accepts it), and the
+  IV is **the key ID's own 16 bytes**: deterministic, no new setting, and not secret (it is in the clip's `tenc` box and
+  the HLS playlist anyway). Checked: the playlist's `IV=` and the `tenc` constant IV both equal the key ID, and the
+  clip still decrypts to the clear frame. The token sends the same bytes as `iv` (base64) on every inline key; tests
+  check the token's IV, the packager's and their derivation agree. Widevine and PlayReady read the IV from the clip and
+  ignore the token's, so DASH is unchanged. The field name `iv` is taken from the error's wording and Axinom's inline-key
+  naming as recalled; it couldn't be checked against their docs from here.
 - **A page.** `/dev/drm-test`, flag-gated (and never in Production), owners and admins (signed out: to sign-in and
   back; anyone else: not found). Its decisions are in `apps/web/lib/drm-test-player.ts` (unit-tested).
   1. What the device supports, in words: `requestMediaKeySystemAccess` for Widevine `HW_SECURE_ALL`,
@@ -175,7 +185,11 @@ id. Our server talks to Axinom not at all; it signs tokens in Montréal.
   taken from the D158 research notes, not checked against docs.axinom.com (blocked from the build machine). Neither
   `prevent_drm_message_reuse` nor a `jti` is sent (see "Token lifetime and replay").
 - How Axinom's FairPlay server expects the SPC and the `skd://` URI (here `skd://<key ID GUID>`); Shaka's default
-  raw SPC body is sent, and wrapped CKC responses are unwrapped.
+  raw SPC body is sent, and wrapped CKC responses are unwrapped. The first Safari test reached Axinom's FairPlay
+  server and got past the token's signature to the IV check, so the token's envelope and signing are accepted.
+- Axinom's log showed the request as `http://<tenant>.drm-fairplay-licensing.axprod.net/AcquireLicense`. Every license
+  address this code builds is `https://` (a test checks all three), and the player uses them as given; the `http` in
+  Axinom's log is presumably its own record behind TLS, to be confirmed with Axinom if it matters.
 - Whether PlayReady SL3000 devices play `cbcs` (PlayReady 4+ does; older hardware may want `cenc`).
 - Whether every browser reports key statuses (the page waits for `usable`): if one doesn't, its playback would end in
   the 15-second timeout, which the page reports in words.

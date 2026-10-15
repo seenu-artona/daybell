@@ -3,8 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 
 // License tokens for the DRM test page (D158; ADR 0032). Keys are made at run time; none is ever written in a file.
 vi.mock("server-only", () => ({}));
-const { DRM_TOKEN_TTL_SECONDS, encryptContentKey, guidBytes, licenseToken, licenseUrls } =
-  await import("./drm-test");
+const {
+  DRM_TOKEN_TTL_SECONDS,
+  contentKeyIv,
+  encryptContentKey,
+  guidBytes,
+  licenseToken,
+  licenseUrls,
+} = await import("./drm-test");
+const { drmTestIvHex } = await import("./drm-test-build.mjs");
 
 const settings = () => ({
   comKeyId: randomUUID(),
@@ -116,7 +123,35 @@ describe("licenseToken", () => {
   });
 });
 
+describe("the IV (FairPlay: Axinom requires one with every inline key)", () => {
+  it("is the key ID's 16 bytes, base64", () => {
+    const iv = Buffer.from(contentKeyIv("00112233-4455-6677-8899-aabbccddeeff"), "base64");
+    expect(iv.toString("hex")).toBe("00112233445566778899aabbccddeeff");
+    expect(iv).toHaveLength(16);
+  });
+
+  it("is on every inline key in the token, and is exactly the IV the build packaged with", () => {
+    const s = settings();
+    const { payload } = decode(licenseToken(s).token);
+    const keys = payload.message.content_keys_source.inline as { id: string; iv: string }[];
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(typeof key.iv).toBe("string");
+      expect(Buffer.from(key.iv, "base64").toString("hex")).toBe(
+        drmTestIvHex(key.id.replaceAll("-", "")),
+      );
+    }
+  });
+});
+
 describe("licenseUrls", () => {
+  it("are all https, whatever the tenant", () => {
+    for (const url of Object.values(licenseUrls("85ccc1ff", true)))
+      expect(url).toMatch(
+        /^https:\/\/[a-z0-9-]+\.drm-(widevine|playready|fairplay)-licensing\.axprod\.net\/AcquireLicense$/,
+      );
+  });
+
   it("names the tenant's Axinom servers, FairPlay only when it is set up", () => {
     expect(licenseUrls("t1", false)).toEqual({
       widevine: "https://t1.drm-widevine-licensing.axprod.net/AcquireLicense",

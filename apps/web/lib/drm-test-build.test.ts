@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildPlan,
+  drmTestIvHex,
   GENERATED,
   guidSetting,
   PACKAGER_SHA256,
@@ -161,6 +162,16 @@ describe("removeGenerated", () => {
   });
 });
 
+describe("drmTestIvHex", () => {
+  it("is the key ID's own 16 bytes, so the IV is known without another setting", () => {
+    expect(drmTestIvHex("00112233445566778899AABBCCDDEEFF")).toBe(
+      "00112233445566778899aabbccddeeff",
+    );
+    const id = randomBytes(16).toString("hex");
+    expect(drmTestIvHex(id)).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
 describe("the packager", () => {
   it("is chosen per platform, and only where a pinned binary exists", () => {
     expect(packagerFileName("linux", "x64")).toBe("packager-linux-x64");
@@ -204,6 +215,9 @@ describe("the packager", () => {
       contentKeyHex: "k".repeat(32),
     });
     const argAfter = (flag: string) => args[args.indexOf(flag) + 1];
+    expect(argAfter("--keys")).toBe(
+      `label=:key_id=00112233445566778899aabbccddeeff:key=${"k".repeat(32)}:iv=00112233445566778899aabbccddeeff`,
+    );
     expect(argAfter("--protection_scheme")).toBe("cbcs");
     expect(argAfter("--clear_lead")).toBe("0");
     expect(argAfter("--hls_key_uri")).toBe("skd://00112233-4455-6677-8899-aabbccddeeff");
