@@ -1,4 +1,4 @@
-import { ApiError } from "@daybell/api";
+import { ApiError, isJobListPage, LIST_FILTER_KEYS, type ListPage } from "@daybell/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Saved filter chips (D147, ADR 0026; D96 leak test): a person reads and saves only their own chips, in their own
@@ -23,6 +23,8 @@ const CLIENT_A = "c0000000-0000-4000-8000-00000000000a";
 const CLIENT_B = "c0000000-0000-4000-8000-00000000000b";
 const CLASS_A = "d0000000-0000-4000-8000-00000000000a";
 const CLASS_A2 = "d0000000-0000-4000-8000-0000000000a2";
+const GROUP_A = "e0000000-0000-4000-8000-00000000000a";
+const GROUP_A2 = "e0000000-0000-4000-8000-0000000000a2";
 
 type Row = Record<string, unknown>;
 const TABLES: Record<string, Row[]> = {
@@ -38,6 +40,10 @@ const TABLES: Record<string, Row[]> = {
   job_groups: [
     { id: CLASS_A, studio_id: A, job_id: JOB_A },
     { id: CLASS_A2, studio_id: A, job_id: JOB_A2 },
+  ],
+  photo_groups: [
+    { id: GROUP_A, studio_id: A, job_id: JOB_A },
+    { id: GROUP_A2, studio_id: A, job_id: JOB_A2 },
   ],
   list_filter_chips: [
     // Mine, in order 2 then 1 (the route orders them), plus a key Jobs no longer takes.
@@ -292,6 +298,43 @@ describe("PUT /me/list-filters", () => {
     ).toBe(204);
     expect(db.calls).toContainEqual(["job_groups", "eq", "job_id", JOB_A]);
     expect(db.calls).toContainEqual(["job_groups", "eq", "studio_id", A]);
+  });
+
+  it("saves a Group chip (a photo group of this job) on Subjects and Photos, never another job's (D156)", async () => {
+    for (const page of ["job_subjects", "job_photos"]) {
+      const db = signIn();
+      expect(
+        (await put({ page, jobId: JOB_A, chips: [{ key: "group", value: GROUP_A }] })).status,
+        page,
+      ).toBe(204);
+      expect(db.calls).toContainEqual(["photo_groups", "eq", "job_id", JOB_A]);
+      expect(db.calls).toContainEqual(["photo_groups", "eq", "studio_id", A]);
+      signIn();
+      expect(
+        (await put({ page, jobId: JOB_A, chips: [{ key: "group", value: GROUP_A2 }] })).status,
+        page,
+      ).toBe(400);
+    }
+  });
+
+  it("checks the record of every id-taking key a list takes (none is refused for want of a table)", async () => {
+    const own: Record<string, string> = {
+      client: CLIENT_A,
+      job: JOB_A,
+      class: CLASS_A,
+      group: GROUP_A,
+    };
+    for (const [page, keys] of Object.entries(LIST_FILTER_KEYS))
+      for (const [key, takesId] of Object.entries(keys)) {
+        if (!takesId) continue;
+        expect(own[key], `${page}.${key} has a record to check`).toBeDefined();
+        signIn();
+        const jobId = isJobListPage(page as ListPage) ? { jobId: JOB_A } : {};
+        expect(
+          (await put({ page, ...jobId, chips: [{ key, value: own[key] }] })).status,
+          `${page}.${key}`,
+        ).toBe(204);
+      }
   });
 
   it("refuses another studio's job for a job's tab, and keys the list doesn't take", async () => {

@@ -245,7 +245,7 @@ test("Photo groups: from a column, by hand, by upload, moved and shown, in Subje
     .getByRole("option", { name: "Choir", exact: true })
     .click();
   await expect(page).toHaveURL(new RegExp(`\\?group=${choirId}$`));
-  expect((await chipSaved).status()).toBe(200);
+  expect((await chipSaved).status()).toBe(204);
   await page.reload();
   await expect(subjectChips.getByRole("link", { name: "Choir", exact: true })).toHaveAttribute(
     "aria-current",

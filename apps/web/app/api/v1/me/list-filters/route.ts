@@ -47,14 +47,18 @@ async function assertJobFits(
   if (!job) throw new ApiError("not_found", "Job not found.");
 }
 
-/** The table and scope each id-taking key's records live in: the studio's clients, jobs, or the job's classes. */
+/**
+ * The table and scope each id-taking key's records live in: the studio's clients, jobs, the job's classes, or the
+ * job's photo groups (Subjects' and Photos' Group chip, D156). Every id-taking key of LIST_FILTER_KEYS must be here.
+ */
 const RECORDS: Record<string, { table: string; inJob: boolean }> = {
   client: { table: "clients", inJob: false },
   job: { table: "jobs", inJob: false },
   class: { table: "job_groups", inJob: true },
+  group: { table: "photo_groups", inJob: true },
 };
 
-/** Every id a chip names must be the studio's own record of the right kind (a class, of this job). */
+/** Every id a chip names must be the studio's own record of the right kind (a class or group, of this job). */
 async function assertRecordsFit(
   supabase: SupabaseClient,
   studioId: string,
