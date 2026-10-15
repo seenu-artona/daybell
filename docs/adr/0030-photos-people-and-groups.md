@@ -183,6 +183,23 @@ Calls made in this round:
     are in, even with a Do not publish groupmate (ADR 0022 call 6's question now applies to groups).
 19. **The Groups and group pages are read-only for staff and on closed jobs** (actions hidden), as Subjects is.
 20. **Upload group photos** needs at least one group: without one the sheet says to make a group first.
+21. **The bin** is Photos with `?bin=1` (no chips shown), reached from Bin (n) in the tab row as before.
+22. **The Groups page's tab row** has only Upload photos (no Bin (n)): the bin is People's.
+23. **People's footer** says "N of M people with photos", with Show more people when there are more than 50.
+24. **To review lists Flagged and Leftovers only when they hold photos**, and says "Nothing to review" when tagging is
+    clean, so an empty review isn't a page of empty boxes.
+25. **The panel's image alt text** is where the photo was opened from ("Maya Johnson, photo 3"), never its file name;
+    opened from an address alone it is "The photo".
+26. **Photos on a person's line can be ticked** (Give to a person, Looks right, card photo, bin) as on To review; the
+    first card photo and other read card photos can't.
+27. **C9 lives in core** (`reviewActions`): a Leftover's `confirm` is false, so every screen and the API agree.
+28. **A binned photo's detail** has `tagging: null` (no Give to a person from the bin).
+29. **Seniors and other non-school jobs** still say "Group" for the class field (D137's word), so their Subjects can show
+    a "Group" column (the class) beside "Groups" (photo groups). Should non-school jobs' class field get another word?
+30. **Deleting a group whose photos go to the bin** tags the job's due uploads again before answering, as binning does,
+    so To review's counts are right when the dialog closes.
+31. **Subjects' Group chip** (`?group=<id>`, saved as `group`) lists the group's members; a group that is deleted is
+    dropped from the saved chips, as a class is.
 
 ## Not in this round (deferred)
 
@@ -198,8 +215,9 @@ delete to a group or the bin and sold photos refused, from a column, events with
 photos become group photos in no group that parents can't see, no `class_set` left in any function body); updated
 `012`, `021`, `022`, `026` and `007`. Core (tagging with group uploads, group rules, the Group filter), API contracts,
 route tests with cross-studio and cross-job leak tests, role and region tests and a console spy for names, the shop's
-`groupPhotos`. e2e: rewritten `phase1-tagging` (To review, a group upload), updated `phase1-photos`, `phase1-people`,
-`phase1-roster` and `shop-gallery`, new `phase1-photo-groups`. The e2e specs could not be run in this environment.
+`groupPhotos`. e2e: rewritten `phase1-tagging` (To review, People, a group upload), updated `phase1-photos`,
+`phase1-roster`, `phase1-roster-load`, `phase1-qr-cards`, `phase1-going-live`, `shop-gallery` and the helpers, new
+`phase1-photo-groups` (with its cross-studio checks). The e2e specs could not be run in this environment.
 
 ## Rejected
 

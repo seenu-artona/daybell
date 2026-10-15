@@ -170,7 +170,7 @@ export async function studioSellingAva(
   await expect(sheet.getByText("Done: 3 photos added", { exact: true })).toBeVisible({
     timeout: 120_000,
   });
-  await page.goto(`/app/jobs/${jobId}/photos/review`);
+  await page.goto(`/app/jobs/${jobId}/photos?show=review`);
   await expect(
     main.getByText("3 photos · 0 in Leftovers · 0 to check", { exact: true }),
   ).toBeVisible({ timeout: 120_000 });

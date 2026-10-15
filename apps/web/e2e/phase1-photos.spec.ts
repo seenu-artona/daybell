@@ -6,9 +6,9 @@ import { expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { signUpOwner } from "./helpers";
 
-// Phase 1 step 4 "Photo storage and upload" (D39, D60, D100, D140, D142; ADR 0016), with STORAGE_DRIVER=local: a
-// folder upload (Upload photos in the job's tab row, D147) with a duplicate, a PNG and a hidden file; previews made
-// once; the checklist's Upload photos task (D143; ADR 0017); the bin; a dropped connection; a reload and a second
+// Phase 1 step 4 "Photo storage and upload" (D39, D60, D100, D140, D142; ADR 0016; D156, ADR 0030), with
+// STORAGE_DRIVER=local: a folder upload (Upload photos in the job's tab row, D147) with a duplicate, a PNG and a hidden
+// file; previews made once, waiting in To review; the checklist's Upload photos task (D143; ADR 0017); the bin; a dropped connection; a reload and a second
 // drop that resumes; and another studio that can't see any of it. Desktop only (D136). JPEGs are made in the test.
 const run = `${Date.now()}`;
 
@@ -104,8 +104,8 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
   );
   writeFileSync(join(day, ".DS_Store"), "x");
 
-  // Upload photos is the green action at the right end of the job's tab row (D147); the chips All and Review are in
-  // the photos card's toolbar, All selected.
+  // Upload photos is the white action at the right end of the job's tab row (D151); the photos card's toolbar has the
+  // People | Groups switch and the chips All and To review, People and All selected (D156).
   await expect(
     page
       .locator("[data-sticky-header] [data-tab-actions]")
@@ -113,9 +113,14 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
   ).toBeVisible();
   await expect(
     main
-      .getByRole("navigation", { name: "Photos views", exact: true })
-      .getByRole("link", { name: "All", exact: true }),
-  ).toHaveAttribute("aria-current", "true");
+      .getByRole("navigation", { name: "Photos by", exact: true })
+      .getByRole("link", { name: "People", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  const chips = main.getByRole("navigation", { name: "Show photos", exact: true });
+  await expect(chips.getByRole("link", { name: "All", exact: true })).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
   await main.getByRole("button", { name: "Upload photos", exact: true }).click();
   const sheet = main.getByRole("region", { name: "Upload photos", exact: true });
   await expect(sheet.getByRole("button", { name: "Choose folder", exact: true })).toBeVisible();
@@ -129,21 +134,35 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
     sheet.getByText("1 file skipped: not a JPEG, empty or over 50 MB", { exact: true }),
   ).toBeVisible();
 
-  // 3. Previews are made once, then shown in tagging order.
+  // 3. No QR cards, so no one has photos on People yet; both wait in To review's Leftovers, previews made once and
+  // shown in shot order.
   await expect(main.getByRole("heading", { name: "2 photos", exact: true })).toBeVisible();
-  await expect(main.getByRole("img", { name: "Photo 1", exact: true })).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(main.getByRole("img", { name: "Photo 2", exact: true })).toBeVisible({
-    timeout: 60_000,
-  });
+  await expect(
+    main.getByText("No one has photos yet. Photos the QR cards couldn't place wait in To review.", {
+      exact: true,
+    }),
+  ).toBeVisible({ timeout: 60_000 });
+  await chips.getByRole("link", { name: "To review", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}/photos\\?show=review$`));
+  const leftovers = main.getByRole("region", { name: "Leftovers", exact: true });
+  await expect(leftovers.getByRole("img", { name: "Leftovers, photo 1", exact: true })).toBeVisible(
+    { timeout: 60_000 },
+  );
+  await expect(leftovers.getByRole("img", { name: "Leftovers, photo 2", exact: true })).toBeVisible(
+    { timeout: 60_000 },
+  );
 
-  // 4. The panel: the 1600 px preview, the file's name, and the photo's id (never its name) in the URL.
-  await main.getByRole("button", { name: "Open photo 2", exact: true }).click();
+  // 4. The panel: the 1600 px preview with its alt text, the file's name, and the photo's id (never its name) in the URL.
+  await leftovers.getByRole("button", { name: "Open Leftovers, photo 2", exact: true }).click();
   const panel = main.getByRole("complementary", { name: "IMG_0002.jpg", exact: true });
-  await expect(panel.getByRole("img", { name: "Photo 2", exact: true })).toBeVisible();
+  await expect(panel.getByRole("img", { name: "Leftovers, photo 2", exact: true })).toBeVisible();
   await expect(panel.getByText("Ready", { exact: true }).first()).toBeVisible();
-  expect(page.url()).toMatch(/\?photo=[0-9a-f-]{36}$/);
+  // Actions coming later are listed and marked Soon (D156).
+  await expect(panel.getByRole("button", { name: /^Make main photo\s*Soon$/ })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  expect(page.url()).toMatch(/\?show=review&photo=[0-9a-f-]{36}$/);
   expect(page.url()).not.toContain("IMG_");
 
   // 5. Progress's Upload photos is done (D152); Check photos is next in the Photos stage.
@@ -152,13 +171,14 @@ test("Photos: a folder upload, previews, the checklist task, the bin, and nothin
     progress.getByRole("listitem").filter({ hasText: /^Done: Photos uploaded/ }),
   ).toBeVisible();
 
-  // 6. The bin: move one photo there and back.
-  await page.goto(`/app/jobs/${jobId}/photos`);
-  await main.getByRole("checkbox", { name: "Select photo 2", exact: true }).check();
+  // 6. The bin (?bin=1): move one photo there and back.
+  await page.goto(`/app/jobs/${jobId}/photos?show=review`);
+  await leftovers.getByRole("checkbox", { name: "Select Leftovers, photo 2", exact: true }).check();
   await main.getByRole("button", { name: "Move to bin", exact: true }).click();
   await expect(main.getByText("Moved 1 photo to the bin.", { exact: true })).toBeVisible();
   await expect(main.getByRole("heading", { name: "1 photo", exact: true })).toBeVisible();
   await main.getByRole("button", { name: "Bin (1)", exact: true }).click();
+  await expect(page).toHaveURL(/\?bin=1$/);
   await expect(
     main.getByRole("heading", { name: "1 photo in the bin", exact: true }),
   ).toBeVisible();

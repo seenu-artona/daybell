@@ -127,6 +127,12 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const details = main.getByRole("region", { name: "Details", exact: true });
   await expect(details.getByText("m•••@example.test", { exact: true })).toBeVisible();
   await expect(details.getByText("maya.parent@example.test")).toHaveCount(0);
+  // The photo groups she is in (D156): none yet.
+  await expect(
+    main.getByRole("region", { name: "Groups", exact: true }).getByText("In no group yet.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   expect(page.url()).not.toContain("Maya");
   await page.reload();
   await expect(main.getByRole("heading", { name: "Maya Johnson", level: 2 })).toBeVisible();
@@ -168,7 +174,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
     buffer: Buffer.from(CSV),
   });
   await expect(main.getByLabel("Import “Student First Name” as")).toHaveValue("firstName");
-  await expect(main.getByLabel("Import “Homeroom” as")).toHaveValue("group");
+  await expect(main.getByLabel("Import “Homeroom” as")).toHaveValue("class");
   await expect(main.getByLabel("Import “Student #” as")).toHaveValue("studentId");
   await expect(main.getByLabel("Import “Photo Opt Out” as")).toHaveValue("doNotPhotograph");
   await main.getByRole("button", { name: "Check rows" }).click();
@@ -251,8 +257,14 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const searchBox = await main.getByRole("button", { name: "Search children" }).boundingBox();
   expect(searchBox?.width).toBe(44);
   expect(searchBox?.height).toBe(44);
-  // Name, Class, Photos and Ordered columns (D153): nobody has photos or orders yet.
-  await expect(main.getByRole("columnheader")).toHaveText(["Name", "Class", "Photos", "Ordered"]);
+  // Name, Class, Groups (D156), Photos and Ordered columns (D153): nobody has photos, groups or orders yet.
+  await expect(main.getByRole("columnheader")).toHaveText([
+    "Name",
+    "Class",
+    "Groups",
+    "Photos",
+    "Ordered",
+  ]);
   await expect(row("Olivia Brown").getByText("Not ordered", { exact: true })).toBeVisible();
   await expect(classOf("Sophia Wilson")).toHaveText("Room 5");
   expect(jobLoads).toBeLessThanOrEqual(2);

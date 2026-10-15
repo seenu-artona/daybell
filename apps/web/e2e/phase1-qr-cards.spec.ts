@@ -41,26 +41,26 @@ test("QR cards: print from the API and from People, with the checklist task", as
   expect(created.status()).toBe(201);
   const job = (await created.json()).job as { id: string; internalNumber: string };
   const cardsPath = `/api/v1/jobs/${job.id}/qr-cards`;
-  const groupId = async (name: string) => {
-    const res = await page.request.post(`/api/v1/jobs/${job.id}/groups`, { data: { name } });
+  const classId = async (name: string) => {
+    const res = await page.request.post(`/api/v1/jobs/${job.id}/classes`, { data: { name } });
     expect(res.status()).toBe(201);
-    return (await res.json()).group.id as string;
+    return (await res.json()).class.id as string;
   };
-  const g4b = await groupId("4B");
-  const g5a = await groupId("5A");
+  const g4b = await classId("4B");
+  const g5a = await classId("5A");
   const addChild = async (data: Record<string, unknown>) => {
     const res = await page.request.post(`/api/v1/jobs/${job.id}/children`, { data });
     expect(res.status()).toBe(201);
     return (await res.json()).child.id as string;
   };
-  await addChild({ firstName: "Maya", lastName: "Johnson", groupId: g4b });
-  await addChild({ firstName: "Liam", lastName: "Chen", groupId: g4b });
-  await addChild({ firstName: "Ava", lastName: "Patel", groupId: g5a });
+  await addChild({ firstName: "Maya", lastName: "Johnson", classId: g4b });
+  await addChild({ firstName: "Liam", lastName: "Chen", classId: g4b });
+  await addChild({ firstName: "Ava", lastName: "Patel", classId: g5a });
   await addChild({ firstName: "Noah", lastName: "Garcia" });
   const dnp = await addChild({
     firstName: "Zoe",
     lastName: "Optout",
-    groupId: g4b,
+    classId: g4b,
     doNotPhotograph: true,
   });
 
@@ -90,13 +90,13 @@ test("QR cards: print from the API and from People, with the checklist task", as
   expect(withBlank.headers()["daybell-cards"]).toBe("5");
   expect(await pdfPages(withBlank)).toBe(4);
   // Chosen classes and "no class"; one child; refusals.
-  const chosen = await page.request.post(cardsPath, { data: { groupIds: [g4b, "none"] } });
+  const chosen = await page.request.post(cardsPath, { data: { classIds: [g4b, "none"] } });
   expect(chosen.headers()["daybell-cards"]).toBe("3");
   const single = await page.request.post(cardsPath, { data: { childId: dnp } });
   expect(single.status()).toBe(409);
   expect((await page.request.post(cardsPath, { data: { blankCards: 101 } })).status()).toBe(400);
   expect(
-    (await page.request.post(cardsPath, { data: { groupIds: [crypto.randomUUID()] } })).status(),
+    (await page.request.post(cardsPath, { data: { classIds: [crypto.randomUUID()] } })).status(),
   ).toBe(400);
   // Every child keeps one card: four cards for four children, and the one blank card made above.
   const status = await page.request.get(cardsPath);
@@ -123,7 +123,7 @@ test("QR cards: print from the API and from People, with the checklist task", as
   await history.getByRole("button", { name: "Close", exact: true }).first().click();
 
   // 4. A subject added later reopens the step (back to Prepare); its action opens Subjects' print dialog.
-  await addChild({ firstName: "Late", lastName: "Comer", groupId: g5a });
+  await addChild({ firstName: "Late", lastName: "Comer", classId: g5a });
   await page.reload();
   // The header line, not the step to do now (whose screen-reader word also reads "Now:").
   await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Prepare");

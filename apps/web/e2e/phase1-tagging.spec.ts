@@ -5,14 +5,16 @@ import { expect, test } from "@playwright/test";
 import { cardCodes, PASSWORD, photo, signUpOwner, VERIFY_LINK } from "./helpers";
 import { linkFromEmail } from "./mail";
 
-// Phase 1 step 5 "QR tagging and review" (D32, F16, D142 #7, D143; Seenu's answers of Oct 12 2026; ADR 0018), with
-// STORAGE_DRIVER=local (the web server reads the cards, as the Lambda does): a batch of photos with QR cards (one
-// before the first card, a card shot twice, a retake-free sequence, a damaged card, a blank card) is tagged; the
-// review moves a Leftover with Move to… by keyboard, drags a photo, confirms flagged photos (a photo that may be a card
-// is confirmed before it can move), names the blank card's child and marks tagging reviewed; Progress's Check photos is done (D152); a
-// new upload that starts with a card (a retake, and a second blank card given to an existing child) reopens it without
-// Leftovers; a class photo upload goes to its class; staff see the review read-only; another studio sees and changes
-// nothing. Desktop only (D136). JPEGs and QR codes are made in the test.
+// Phase 1 step 5 "QR tagging and review" (D32, F16, D142 #7, D143; Seenu's answers of Oct 12 2026; ADR 0018), on
+// Photos' People and To review (D156; ADR 0030), with STORAGE_DRIVER=local (the web server reads the cards, as the
+// Lambda does): a batch of photos with QR cards (one before the first card, a card shot twice, a retake-free sequence,
+// a damaged card, a blank card) is tagged; To review gives a Leftover to a person with Give to a person by keyboard,
+// confirms flagged photos (a photo that may be a card is confirmed before it can be given), names the blank card's
+// child and marks tagging reviewed; on People each line leads with the person's QR card photo and takes a dragged
+// photo; Progress's Check photos is done (D152); a new upload that starts with a card (a retake, and a second blank
+// card given to an existing child) reopens it without Leftovers; a group photo upload goes to its group, never to To
+// review; staff see it read-only; another studio sees and changes nothing. Desktop only (D136). JPEGs and QR codes are
+// made in the test.
 const run = `${Date.now()}`;
 
 const pastDay = () => new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
@@ -36,15 +38,15 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   });
   expect(created.status()).toBe(201);
   const jobId = (await created.json()).job.id as string;
-  const room = await page.request.post(`/api/v1/jobs/${jobId}/groups`, {
+  const room = await page.request.post(`/api/v1/jobs/${jobId}/classes`, {
     data: { name: "Room 4" },
   });
-  const roomId = (await room.json()).group.id as string;
+  const roomId = (await room.json()).class.id as string;
   const child = async (data: Record<string, unknown>) =>
     (await (await page.request.post(`/api/v1/jobs/${jobId}/children`, { data })).json()).child
       .id as string;
-  const maya = await child({ firstName: "Maya", lastName: "Johnson", groupId: roomId });
-  const liam = await child({ firstName: "Liam", lastName: "Chen", groupId: roomId });
+  const maya = await child({ firstName: "Maya", lastName: "Johnson", classId: roomId });
+  const liam = await child({ firstName: "Liam", lastName: "Chen", classId: roomId });
   await child({ firstName: "Noah", lastName: "Garcia" });
   expect(
     (
@@ -87,12 +89,11 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
     timeout: 90_000,
   });
 
-  // 2. Review: once every photo is read and the upload tagged, one Leftover, two flagged photos and a blank card.
-  await main
-    .getByRole("navigation", { name: "Photos views", exact: true })
-    .getByRole("link", { name: "Review", exact: true })
-    .click();
-  await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}/photos/review$`));
+  // 2. To review (the chip, ?show=review): once every photo is read and the upload tagged, one Leftover, two flagged
+  // photos and a blank card.
+  const chips = main.getByRole("navigation", { name: "Show photos", exact: true });
+  await chips.getByRole("link", { name: "To review", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}/photos\\?show=review$`));
   await expect(
     main.getByText("11 photos · 1 in Leftovers · 2 to check", { exact: true }),
   ).toBeVisible({
@@ -102,7 +103,7 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await expect(markReviewed).toBeDisabled();
   await expect(
     main.getByText(
-      "Mark reviewed opens once Leftovers is empty: move each photo to a child, or put it in the bin.",
+      "Mark reviewed opens once Leftovers is empty: give each photo to a person, or put it in the bin.",
       { exact: true },
     ),
   ).toBeVisible();
@@ -110,35 +111,37 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await expect(flagged.getByText("Card unreadable", { exact: true })).toBeVisible();
   await expect(flagged.getByText("Check: after a card", { exact: true })).toBeVisible();
 
-  // 3. Move the Leftover to Noah with Move to…, by keyboard (the non-drag way, WCAG 2.5.7).
+  // 3. Give the Leftover to Noah with Give to a person, by keyboard (the non-drag way, WCAG 2.5.7). Leftovers are
+  // never "Looks right" (C9).
   await main.getByRole("checkbox", { name: "Select Leftovers, photo 1", exact: true }).check();
-  await main.getByRole("button", { name: "Move to…", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Move 1 photo", exact: true });
-  await dialog.getByRole("searchbox", { name: "Find a child or class", exact: true }).fill("Noah");
+  await expect(main.getByRole("button", { name: "Looks right", exact: true })).toHaveCount(0);
+  await main.getByRole("button", { name: "Give to a person", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Give 1 photo to a person", exact: true });
+  await dialog.getByRole("searchbox", { name: "Find a person", exact: true }).fill("Noah");
   await dialog.getByRole("radio", { name: "Noah Garcia", exact: true }).focus();
   await page.keyboard.press("Space");
   await expect(dialog.getByRole("radio", { name: "Noah Garcia", exact: true })).toBeChecked();
-  await dialog.getByRole("button", { name: "Move", exact: true }).focus();
+  await dialog.getByRole("button", { name: "Give", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(main.getByText("Moved 1 photo to Noah Garcia.", { exact: true })).toBeVisible();
   await expect(
     main.getByText("11 photos · 0 in Leftovers · 2 to check", { exact: true }),
   ).toBeVisible();
 
-  // 4. The damaged card may be a card: it can't be moved until confirmed, either way (code review M1). It is a card
+  // 4. The damaged card may be a card: it can't be given until confirmed, either way (code review M1). It is a card
   // photo; the photo after it looks right.
   await flagged.getByRole("checkbox", { name: "Select Flagged, photo 1", exact: true }).check();
-  await expect(main.getByRole("button", { name: "Move to…", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "Give to a person", exact: true })).toHaveCount(0);
   await expect(
     main.getByRole("button", { name: "It's a normal photo", exact: true }),
   ).toBeVisible();
   await expect(
     main.getByText(
-      "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be moved.",
+      "Photos that may be a card are confirmed first (a card photo, or a normal photo), then they can be given to a person.",
       { exact: true },
     ),
   ).toBeVisible();
-  await main.getByRole("button", { name: "This is a card photo", exact: true }).click();
+  await main.getByRole("button", { name: "It's a card photo", exact: true }).click();
   await expect(
     main.getByText("Marked 1 card photo. It is hidden from parents.", { exact: true }),
   ).toBeVisible();
@@ -153,25 +156,39 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await expect(main.getByText("Confirmed 1 photo.", { exact: true })).toBeVisible();
   await expect(main.getByRole("region", { name: "Flagged", exact: true })).toHaveCount(0);
 
-  // 5. Drag one of Maya's photos onto Liam. Her strip starts with her two card photos, labelled "Card".
-  const album = main.getByRole("region", { name: "Room 4", exact: true });
-  await album
-    .getByRole("button", { name: "Room 4 2 of 2 children with photos", exact: true })
-    .click();
+  // 5. People (All): one line per person with photos. Maya's line leads with her first card photo, outlined and said in
+  // words ("QR card", C15); card photos can't be ticked. Drag one of her photos onto Liam's line.
+  await chips.getByRole("link", { name: "All", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/app/jobs/${jobId}/photos$`));
+  const people = main.getByRole("list", { name: "People with photos", exact: true });
+  const line = (name: string) =>
+    people
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("link", { name, exact: true }) })
+      .first();
+  await expect(line("Maya Johnson")).toContainText("2 photos");
+  await expect(line("Maya Johnson").getByText("QR card", { exact: true })).toBeVisible();
   await expect(
-    album.getByRole("img", { name: "Maya Johnson, photo 4", exact: true }),
+    people.getByRole("img", { name: "Maya Johnson, photo 4", exact: true }),
   ).toBeVisible();
   await expect(
-    album.getByRole("checkbox", { name: "Select Maya Johnson, photo 1", exact: true }),
+    people.getByRole("checkbox", { name: "Select Maya Johnson, photo 1", exact: true }),
   ).toHaveCount(0);
-  // The tile itself is the draggable list item (the child's row is a list item too).
-  await album
+  // The name links to the person's record in Subjects (an id only).
+  await expect(people.getByRole("link", { name: "Maya Johnson", exact: true })).toHaveAttribute(
+    "href",
+    `/app/jobs/${jobId}/people?child=${maya}`,
+  );
+  // The tile itself is the draggable list item (the person's line is a list item too).
+  await people
     .getByRole("img", { name: "Maya Johnson, photo 4", exact: true })
     .locator("xpath=ancestor::li[1]")
-    .dragTo(album.getByRole("heading", { name: "Liam Chen", exact: true }));
+    .dragTo(people.getByRole("link", { name: "Liam Chen", exact: true }));
   await expect(main.getByText("Moved 1 photo to Liam Chen.", { exact: true })).toBeVisible();
+  await expect(line("Maya Johnson")).toContainText("1 photo");
 
-  // 6. Name the blank card's child: they join Room 4 with the card's own code, and get its photo.
+  // 6. Name the blank card's child (To review): they join Room 4 with the card's own code, and get its photo.
+  await chips.getByRole("link", { name: "To review", exact: true }).click();
   const blank = main.getByRole("region", { name: "Blank card 1", exact: true });
   await blank.getByRole("textbox", { name: "First name", exact: true }).fill("Zoe");
   await blank.getByRole("textbox", { name: "Last name", exact: true }).fill("New");
@@ -224,7 +241,7 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
     timeout: 90_000,
   });
   await page.goto(`/app/jobs/${jobId}`);
-  // New photos reopen Check photos: it is the step to do now again, linking to Review.
+  // New photos reopen Check photos: it is the step to do now again, linking to To review.
   // The header line, not the step to do now (whose screen-reader word also reads "Now:").
   await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Photos");
   await expect(
@@ -232,8 +249,8 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
       .getByRole("listitem")
       .filter({ hasText: /^Now: Check photos/ })
       .getByRole("link", { name: "Check photos", exact: true }),
-  ).toHaveAttribute("href", `/app/jobs/${jobId}/photos/review`);
-  await page.goto(`/app/jobs/${jobId}/photos/review`);
+  ).toHaveAttribute("href", `/app/jobs/${jobId}/photos?show=review`);
+  await page.goto(`/app/jobs/${jobId}/photos?show=review`);
   await expect(
     main.getByText("15 photos · 0 in Leftovers · 0 to check", { exact: true }),
   ).toBeVisible({ timeout: 120_000 });
@@ -241,10 +258,10 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await secondCard
     .getByRole("button", { name: "Give photos to an existing child", exact: true })
     .click();
-  const giving = page.getByRole("dialog", { name: "Move 1 photo", exact: true });
-  await giving.getByRole("searchbox", { name: "Find a child or class", exact: true }).fill("Noah");
+  const giving = page.getByRole("dialog", { name: "Give 1 photo to a person", exact: true });
+  await giving.getByRole("searchbox", { name: "Find a person", exact: true }).fill("Noah");
   await giving.getByRole("radio", { name: "Noah Garcia", exact: true }).check();
-  await giving.getByRole("button", { name: "Move", exact: true }).click();
+  await giving.getByRole("button", { name: "Give", exact: true }).click();
   await expect(main.getByText("Moved 1 photo to Noah Garcia.", { exact: true })).toBeVisible();
   await expect(main.getByRole("region", { name: "Blank card 1", exact: true })).toHaveCount(0);
   await expect(
@@ -254,37 +271,44 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   ).toBeVisible();
   await expect(markReviewed).toBeEnabled();
   // The retake's photo went back to Maya: her one photo left after step 5, and this one.
-  await album
-    .getByRole("button", { name: "Room 4 3 of 3 children with photos", exact: true })
-    .click();
-  await expect(
-    album
-      .getByRole("listitem")
-      .filter({ has: page.getByRole("heading", { name: "Maya Johnson", exact: true }) }),
-  ).toContainText("2 photos");
+  await chips.getByRole("link", { name: "All", exact: true }).click();
+  await expect(line("Maya Johnson")).toContainText("2 photos");
 
-  // 9. A class photo upload goes to its class's Class photo set (answer 3).
+  // 9. A group photo upload goes to its group (D156), never to a person or To review: a group "Room 4 class photo"
+  // with Maya and Liam, then one photo uploaded into it from the group's page.
+  const madeGroup = await page.request.post(`/api/v1/jobs/${jobId}/groups`, {
+    data: { name: "Room 4 class photo" },
+  });
+  expect(madeGroup.status()).toBe(201);
+  const groupId = (await madeGroup.json()).group.id as string;
+  expect(
+    (
+      await page.request.post(`/api/v1/groups/${groupId}/members`, {
+        data: { add: [maya, liam], remove: [] },
+      })
+    ).status(),
+  ).toBe(200);
   const classPhoto = join(folder, "CLASS_0001.JPG");
   writeFileSync(classPhoto, await photo(200));
-  await page.goto(`/app/jobs/${jobId}/photos`);
-  await main.getByRole("button", { name: "Upload photos", exact: true }).click();
-  await sheet.getByRole("radio", { name: "Class photo for a class", exact: true }).check();
-  await sheet
-    .getByRole("combobox", { name: "Class", exact: true })
-    .selectOption({ label: "Room 4" });
+  await page.goto(`/app/jobs/${jobId}/photos/groups/${groupId}`);
+  await expect(
+    main.getByRole("heading", { name: "Room 4 class photo", level: 2, exact: true }),
+  ).toBeVisible();
+  await main.getByRole("button", { name: "Upload group photos", exact: true }).click();
+  await expect(sheet.getByRole("radio", { name: "Group photos", exact: true })).toBeChecked();
+  await expect(sheet.getByRole("combobox", { name: "Group", exact: true })).toHaveValue(groupId);
   await sheet.locator('input[type="file"][accept]').setInputFiles(classPhoto);
   await expect(sheet.getByText("Done: 1 photo added", { exact: true })).toBeVisible({
     timeout: 90_000,
   });
-  await page.goto(`/app/jobs/${jobId}/photos/review`);
-  await album
-    .getByRole("button", { name: "Room 4 3 of 3 children with photos", exact: true })
-    .click();
+  const groupPhotos = main.getByRole("region", { name: "Group photos", exact: true });
   await expect(
-    album.getByRole("img", { name: "Room 4 class photo, photo 1", exact: true }),
-  ).toBeVisible({
-    timeout: 90_000,
-  });
+    groupPhotos.getByRole("img", { name: "Room 4 class photo, photo 1", exact: true }),
+  ).toBeVisible({ timeout: 90_000 });
+  await page.goto(`/app/jobs/${jobId}/photos?show=review`);
+  await expect(
+    main.getByText("16 photos · 0 in Leftovers · 0 to check", { exact: true }),
+  ).toBeVisible({ timeout: 90_000 });
 
   // 10. Staff see the review read-only (plan answer 10): no checkboxes, no Mark reviewed, and the API refuses.
   const invite = await page.request.post("/api/v1/studio/invites", {
@@ -309,7 +333,7 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await expect(staffTab).toHaveURL(/\/invite$/);
   await staffTab.getByRole("button", { name: "Join the team", exact: true }).click();
   await expect(staffTab).toHaveURL(/\/app$/);
-  await staffTab.goto(`/app/jobs/${jobId}/photos/review`);
+  await staffTab.goto(`/app/jobs/${jobId}/photos?show=review`);
   const staffMain = staffTab.getByRole("main");
   await expect(
     staffMain.getByText("Owners, admins and photographers fix tagging.", { exact: true }),
@@ -320,12 +344,15 @@ test("QR tagging: cards sort photos to children, review fixes the rest, and the 
   await expect(staffMain.getByRole("button", { name: "Mark reviewed", exact: true })).toHaveCount(
     0,
   );
-  const staffAlbum = staffMain.getByRole("region", { name: "Room 4", exact: true });
-  await staffAlbum
-    .getByRole("button", { name: "Room 4 3 of 3 children with photos", exact: true })
+  await expect(staffMain.getByRole("checkbox")).toHaveCount(0);
+  await staffMain
+    .getByRole("navigation", { name: "Show photos", exact: true })
+    .getByRole("link", { name: "All", exact: true })
     .click();
   await expect(
-    staffAlbum.getByRole("img", { name: "Maya Johnson, photo 1", exact: true }),
+    staffMain
+      .getByRole("list", { name: "People with photos", exact: true })
+      .getByRole("img", { name: "Maya Johnson, photo 1", exact: true }),
   ).toBeVisible();
   await expect(staffMain.getByRole("checkbox")).toHaveCount(0);
   const anyPhoto = (await (await page.request.get(`/api/v1/jobs/${jobId}/photos`)).json()).photos[0]
