@@ -26,6 +26,8 @@ export function PeopleLines({ groupId, onEmpty }: { groupId: string | null; onEm
   const [total, setTotal] = useState(0);
   const [failed, setFailed] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // The next page couldn't be read: said in words, with Try again (the people shown stay).
+  const [moreFailed, setMoreFailed] = useState(false);
   const shown = useRef(0);
   const base = `/jobs/${encodeURIComponent(jobId)}/photos/people?limit=${PEOPLE_PAGE_SIZE}${
     groupId ? `&groupId=${encodeURIComponent(groupId)}` : ""
@@ -70,9 +72,13 @@ export function PeopleLines({ groupId, onEmpty }: { groupId: string | null; onEm
   const more = useCallback(async () => {
     if (!next) return;
     setLoadingMore(true);
+    setMoreFailed(false);
     const res = await api<PhotoPeopleResponse>(`${base}&cursor=${encodeURIComponent(next)}`);
     setLoadingMore(false);
-    if (!res.ok) return;
+    if (!res.ok) {
+      setMoreFailed(true);
+      return;
+    }
     setPeople((current) => {
       const merged = [...(current ?? []), ...res.data.people];
       shown.current = merged.length;
@@ -98,6 +104,11 @@ export function PeopleLines({ groupId, onEmpty }: { groupId: string | null; onEm
       </ul>
       <div className="flex flex-wrap items-center gap-3 border-t border-line px-6 py-3 text-body text-muted">
         <span className="flex-1">{t("footer", { shown: people.length, total })}</span>
+        {moreFailed ? (
+          <span role="alert" className="text-sm font-semibold text-danger">
+            {t("moreFailed")}
+          </span>
+        ) : null}
         {next ? (
           <Button
             variant="secondary"
@@ -105,7 +116,7 @@ export function PeopleLines({ groupId, onEmpty }: { groupId: string | null; onEm
             disabled={loadingMore}
             onClick={() => void more()}
           >
-            {t("showMore")}
+            {moreFailed ? t("tryAgain") : t("showMore")}
           </Button>
         ) : null}
       </div>

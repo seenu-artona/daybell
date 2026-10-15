@@ -255,6 +255,19 @@ describe("moving and confirming", () => {
     expect((await res.json()).error.fields).toEqual({ form: "tagging.cardPhoto" });
   });
 
+  it("refuses Looks right on Leftovers by name (C9), as the screens do", async () => {
+    writeRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "P0001", message: "leftovers_confirm" },
+    });
+    const confirm = (await import("./jobs/[id]/photos/confirm/route")).POST;
+    const res = await confirm(json({ photoIds: [PHOTO] }), ctx(JOB));
+    expect([res.status, (await res.json()).error.fields]).toEqual([
+      409,
+      { form: "tagging.leftovers" },
+    ]);
+  });
+
   it("never gives a group photo to a person (C8), and takes no class photo set as a target", async () => {
     writeRpc.mockResolvedValueOnce({
       data: null,

@@ -7,7 +7,7 @@
 -- photos are group photos in no group that nobody sees (C2); events carry ids and counts only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(132);
+select plan(143);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -170,7 +170,13 @@ select is(pg_temp.try($$ select public.create_photo_group('11111111-1111-4111-81
 select is(pg_temp.try(format($$ select public.create_photo_group('11111111-1111-4111-8111-111111111111',
   'a0000000-0000-4000-8000-000000000001', %L) $$, repeat('x', 61))), '22023 A group name is 1 to 60 characters',
   'and up to 60 characters');
+select is((select array_agg(distinct pg_temp.try(format($f$ select public.create_photo_group(
+    '11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001', %L) $f$, n)))
+  from unnest(array[E'Ev\u202Eil', E'Tab\tbed', E'Iso\u2066late', E'C1\u0085']) n),
+  array['22023 A group name is 1 to 60 characters'], 'no control, C1 or bidi characters in a name');
 reset role;
+select throws_ok($$ insert into public.photo_groups (studio_id, job_id, name) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'a0000000-0000-4000-8000-000000000001', E'Ev\u202Eil') $$, '23514', null, 'the table refuses them too');
 insert into public.photo_groups (studio_id, job_id, name)
 select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000002', 'G' || n
 from generate_series(1, 499) n;
@@ -236,32 +242,35 @@ select is(public.make_photo_groups_from_column('33333333-3333-4333-8333-33333333
   'Grade makes 3 and 4; a blank grade makes no group');
 select is(pg_temp.try($$ select public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
   'a0000000-0000-4000-8000-000000000001', 'teacher') $$),
-  '22023 The column is class, grade, firstName, lastName or studentId', 'only the roster''s columns (no Teacher field)');
--- The other roster columns that name a group (C3; ADR 0030, call 9), tried and then removed so the counts below stay.
-select is(public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
-  'a0000000-0000-4000-8000-000000000001', 'lastName'), '{"groups": 4, "members": 4, "skipped": 0}'::jsonb,
-  'Last name makes a group per family name');
-select is(public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
-  'a0000000-0000-4000-8000-000000000001', 'firstName'), '{"groups": 4, "members": 4, "skipped": 0}'::jsonb,
-  'First name too');
+  '22023 The column is class or grade', 'only the roster''s columns (no Teacher field)');
+-- Never a column that holds a person's name or ID (a group name would keep it after the person is erased), nor the
+-- parent's email or a yes/no flag (Seenu, Oct 14).
+select is((select array_agg(distinct pg_temp.try(format(
+    $f$ select public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
+      'a0000000-0000-4000-8000-000000000001', %L) $f$, c)))
+  from unnest(array['firstName', 'lastName', 'studentId', 'parentEmail', 'doNotPhotograph']) c),
+  array['22023 The column is class or grade'], 'never names, IDs, the parent''s email or a flag');
+-- A value is cleaned as core's preview cleans it (runs of whitespace made one space), and a value that can't be a
+-- group name (bidi or control characters) makes no group.
 reset role;
-update public.children set student_id = case first_name when 'Maya' then 'A-1' when 'Liam' then 'a-1' else null end
-  where job_id = 'a0000000-0000-4000-8000-000000000001';
+update public.children set grade = 'Year   2' where id = 'c1000000-0000-4000-8000-000000000004';
 set local role service_role;
 select pg_temp.as_server() as server;
 select is(public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
-  'a0000000-0000-4000-8000-000000000001', 'studentId'), '{"groups": 1, "members": 2, "skipped": 0}'::jsonb,
-  'Student ID, values compared ignoring case; blank IDs make no group');
-select is(pg_temp.try($$ select public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
-  'a0000000-0000-4000-8000-000000000001', 'parentEmail') $$),
-  '22023 The column is class, grade, firstName, lastName or studentId', 'never the parent''s email (call 9)');
-select is(pg_temp.try($$ select public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
-  'a0000000-0000-4000-8000-000000000001', 'doNotPhotograph') $$),
-  '22023 The column is class, grade, firstName, lastName or studentId', 'nor a yes/no flag (call 9)');
+  'a0000000-0000-4000-8000-000000000001', 'grade'), '{"groups": 1, "members": 1, "skipped": 2}'::jsonb,
+  'Noah''s grade makes one group; 3 and 4 are skipped');
+select is((select count(*) from public.photo_groups where job_id = 'a0000000-0000-4000-8000-000000000001'
+           and name = 'Year 2'), 1::bigint, 'named with its spaces made one, as the preview says');
 reset role;
-delete from public.photo_groups where job_id = 'a0000000-0000-4000-8000-000000000001'
-  and name in ('Johnson', 'Chen', 'Patel', 'Brown', 'Maya', 'Liam', 'Ava', 'Noah', 'A-1');
-update public.children set student_id = null where job_id = 'a0000000-0000-4000-8000-000000000001';
+delete from public.photo_groups where job_id = 'a0000000-0000-4000-8000-000000000001' and name = 'Year 2';
+update public.children set grade = E'Ev‮il' where id = 'c1000000-0000-4000-8000-000000000004';
+set local role service_role;
+select pg_temp.as_server() as server;
+select is(public.make_photo_groups_from_column('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'grade'), '{"groups": 0, "members": 0, "skipped": 2}'::jsonb,
+  'a value with a bidi override makes no group');
+reset role;
+update public.children set grade = null where id = 'c1000000-0000-4000-8000-000000000004';
 set local role service_role;
 select pg_temp.as_server() as server;
 select is(pg_temp.try($$ select public.make_photo_groups_from_column('44444444-4444-4444-8444-444444444444',
@@ -378,6 +387,17 @@ select is(public.apply_batch_tags(pg_temp.id('ib'), (select tag_round from publi
   '[]'::jsonb), 0, 'tagging the upload again');
 select is((select count(*) from public.photo_group_members m where m.group_id = pg_temp.id('band')
            and m.child_id = 'c1000000-0000-4000-8000-000000000003'), 0::bigint, 'never puts her back');
+-- Only a photo's first placement counts (ADR 0030, Calls): a later run that gives one of the upload's photos to Ava
+-- doesn't add her back either. The photo then goes back to Liam.
+select is(public.apply_batch_tags(pg_temp.id('ib'), (select tag_round from public.upload_batches where id = pg_temp.id('ib')),
+  jsonb_build_array(jsonb_build_object('photo_id', pg_temp.id('i1'), 'place', 'child',
+    'child_id', 'c1000000-0000-4000-8000-000000000003'))), 1, 'a later run gives one of its photos to Ava');
+select is((select count(*) from public.photo_group_members m where m.group_id = pg_temp.id('band')
+           and m.child_id = 'c1000000-0000-4000-8000-000000000003'), 0::bigint,
+  'and still doesn''t add her back: only a first placement adds people');
+select is(public.apply_batch_tags(pg_temp.id('ib'), (select tag_round from public.upload_batches where id = pg_temp.id('ib')),
+  jsonb_build_array(jsonb_build_object('photo_id', pg_temp.id('i1'), 'place', 'child',
+    'child_id', 'c1000000-0000-4000-8000-000000000002'))), 1, 'the photo goes back to Liam');
 
 -- ── Nothing moves people or group photos by itself (D156) ─────────────────────────────────────────────────────────
 create temp table before_state on commit drop as
@@ -429,6 +449,12 @@ select is(pg_temp.try($$ select public.also_show_photos('44444444-4444-4444-8444
 select is(pg_temp.try($$ select public.also_show_photos('22222222-2222-4222-8222-222222222222',
   'b0000000-0000-4000-8000-000000000001', array[pg_temp.id('g2')], array['99000000-0000-4000-8000-0000000000b1'::uuid]) $$),
   'P0001 not_group_photo', 'another studio can''t show A''s photos in its groups');
+select is(pg_temp.try($$ select public.also_show_photos('33333333-3333-4333-8333-333333333333',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.id('g2')], array['99000000-0000-4000-8000-000000000002'::uuid]) $$),
+  'P0001 group_not_in_job', 'nor in another job''s group of the same studio');
+select is(pg_temp.try($$ select public.also_show_photos('33333333-3333-4333-8333-333333333333',
+  'a0000000-0000-4000-8000-000000000002', array[pg_temp.id('g2')], array['99000000-0000-4000-8000-000000000002'::uuid]) $$),
+  'P0001 not_group_photo', 'nor another job''s photo, even of the same studio');
 
 -- ── What parents see (amends ADR 0022) ────────────────────────────────────────────────────────────────────────────
 reset role;
@@ -438,6 +464,13 @@ select is((select array_agg(v.id order by v.ord) from app.parent_visible_photos(
   'Maya (choir and band) sees each of their group photos once, in tagging order, even one shown in both');
 select is((select count(*) from app.parent_visible_photos('a0000000-0000-4000-8000-000000000001',
            'c1000000-0000-4000-8000-000000000004', true)), 0::bigint, 'Noah, in neither, sees none');
+-- Do not publish (Seenu, Oct 14): a member's Do not publish doesn't hide the group's photos from the other members.
+update public.children set do_not_publish = true where id = 'c1000000-0000-4000-8000-000000000002';
+select is((select array_agg(v.id order by v.ord) from app.parent_visible_photos('a0000000-0000-4000-8000-000000000001',
+           'c1000000-0000-4000-8000-000000000001', true) v),
+  array['9c000000-0000-4000-8000-000000000001'::uuid, pg_temp.id('g1'), pg_temp.id('g2')],
+  'Maya still sees every group photo when Liam, in her groups, is marked Do not publish');
+update public.children set do_not_publish = false where id = 'c1000000-0000-4000-8000-000000000002';
 select is((select count(*) from app.parent_visible_photos('a0000000-0000-4000-8000-000000000001',
            'c1000000-0000-4000-8000-000000000001', false) v where v.place = 'group_photo'), 0::bigint,
   'portraits alone hold no group photo');
@@ -489,15 +522,80 @@ select is((select count(*) from public.events where type = 'photos.binned'), 1::
   'the bin writes its own photos.binned event');
 select is(pg_temp.try($$ select public.delete_photo_group('44444444-4444-4444-8444-444444444444', pg_temp.id('choir'),
   'bin', null) $$), '42501 Owners, admins and photographers only', 'staff can''t delete groups');
+-- "Its photos" are the ones the list counts: a group whose photos are all in the bin, or a group upload's card frame,
+-- is deleted with no destination; those links are dropped quietly and a card photo is never binned.
+insert into ids values ('gone', public.create_photo_group('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'Gone'));
+insert into ids values ('frame', public.create_photo_group('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', 'Frame'));
+reset role;
+insert into public.photo_group_photos (studio_id, job_id, group_id, photo_id)
+values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', pg_temp.id('gone'),
+        pg_temp.id('g1'));
+insert into public.photos (id, studio_id, job_id, batch_id, batch_seq, status, original_filename, byte_size, sha256,
+  width, height, qr_kind, created_by)
+select '9c000000-0000-4000-8000-000000000002', b.studio_id, b.job_id, b.id, b.seq, 'ready', 'CARD.JPG', 1,
+  extensions.digest('frame', 'sha256'), 1200, 1500, 'card', b.created_by
+from public.upload_batches b where b.id = pg_temp.id('gb');
+insert into public.photo_tags (photo_id, studio_id, job_id, place, source) values
+  ('9c000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+   'a0000000-0000-4000-8000-000000000001', 'card', 'auto');
+insert into public.photo_group_photos (studio_id, job_id, group_id, photo_id)
+values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', pg_temp.id('frame'),
+        '9c000000-0000-4000-8000-000000000002');
+set local role service_role;
+select pg_temp.as_server() as server;
+select is(public.delete_photo_group('11111111-1111-4111-8111-111111111111', pg_temp.id('gone'), null, null),
+  '{"moved": 0, "binned": 0}'::jsonb, 'a group whose photos are all in the bin is deleted with no destination');
+select is(public.delete_photo_group('11111111-1111-4111-8111-111111111111', pg_temp.id('frame'), 'bin', null),
+  '{"moved": 0, "binned": 0}'::jsonb, 'a group holding only a card frame is deleted, and the card photo isn''t binned');
+select is((select binned_at is null from public.photos where id = '9c000000-0000-4000-8000-000000000002'), true,
+  'the card photo stays out of the bin, a card photo still');
+select is((select count(*) from public.photo_groups where id in (pg_temp.id('gone'), pg_temp.id('frame'))), 0::bigint,
+  'both groups are gone');
 
 -- ── Reads ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 reset role;
+-- Ordered (C16): paid orders holding any of a group's photos, as a print line or through "all digitals"; each order
+-- once, an unpaid one never.
+insert into public.payout_accounts (id, studio_id, stripe_account_id, country, livemode, status, payout_interval,
+  weekly_anchor, delay_days)
+values ('ad000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'acct_A9', 'US', false,
+  'active', 'weekly', 'friday', 2);
+insert into public.orders (id, studio_id, reference, currency, shipping_method, products_cents, shipping_cents,
+  daybell_fee_bps, daybell_fee_cents, card_fee_recovery, tax_enabled, payout_account_id, stripe_account_id,
+  bag_fingerprint)
+select ('ac000000-0000-4000-8000-00000000000' || n)::uuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  '8KQ2M9X' || n, 'USD', 'home', 2000, 0, 300, 60, 'per_sale', false,
+  'ad000000-0000-4000-8000-000000000001', 'acct_A9', repeat(n::text, 64)
+from generate_series(1, 3) n;
+insert into public.order_lines (id, studio_id, order_id, position, job_id, child_id, photo_id, price_list_id,
+  price_list_item_id, kind, name, unit_price_cents, quantity, line_total_cents)
+values
+  ('ae000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ac000000-0000-4000-8000-000000000001',
+   1, 'a0000000-0000-4000-8000-000000000001', 'c1000000-0000-4000-8000-000000000001', pg_temp.id('g2'),
+   gen_random_uuid(), gen_random_uuid(), 'print', 'Print', 2000, 1, 2000),
+  ('ae000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ac000000-0000-4000-8000-000000000001',
+   2, 'a0000000-0000-4000-8000-000000000001', 'c1000000-0000-4000-8000-000000000001', pg_temp.id('g2'),
+   gen_random_uuid(), gen_random_uuid(), 'print', 'Print', 0, 1, 0),
+  ('ae000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ac000000-0000-4000-8000-000000000002',
+   1, 'a0000000-0000-4000-8000-000000000001', 'c1000000-0000-4000-8000-000000000001', null,
+   gen_random_uuid(), gen_random_uuid(), 'digital_all', 'All digitals', 2000, 1, 2000),
+  ('ae000000-0000-4000-8000-000000000004', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ac000000-0000-4000-8000-000000000003',
+   1, 'a0000000-0000-4000-8000-000000000001', 'c1000000-0000-4000-8000-000000000001', pg_temp.id('g2'),
+   gen_random_uuid(), gen_random_uuid(), 'print', 'Print', 2000, 1, 2000);
+insert into public.order_line_photos (studio_id, order_line_id, job_id, photo_id, position)
+values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ae000000-0000-4000-8000-000000000003',
+  'a0000000-0000-4000-8000-000000000001', pg_temp.id('g2'), 1);
+update public.orders set status = 'paid', paid_at = now(), tax_cents = 0, total_cents = 2000,
+  payment_intent_id = 'pi_A' || right(id::text, 1)
+where id in ('ac000000-0000-4000-8000-000000000001', 'ac000000-0000-4000-8000-000000000002');
 set local role authenticated;
 select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as owner_a;
 select is((select x ->> 'members' || '/' || (x ->> 'photos') || '/' || (x ->> 'ordered')
            from jsonb_array_elements(public.list_photo_groups('a0000000-0000-4000-8000-000000000001') -> 'groups') x
-           where x ->> 'id' = pg_temp.id('choir')::text), '2/2/0',
-  'the choir: 2 members, 2 group photos, ordered 0 (owners and admins see it)');
+           where x ->> 'id' = pg_temp.id('choir')::text), '2/2/2',
+  'the choir: 2 members, 2 group photos, ordered by 2 paid orders, the unpaid one not (owners and admins see it)');
 select is((select jsonb_agg(x ->> 'name') from jsonb_array_elements(
              public.list_photo_groups('a0000000-0000-4000-8000-000000000001') -> 'groups') x),
   '["3", "4", "4B", "5a", "Another group", "Choir"]'::jsonb, 'groups are listed by name');

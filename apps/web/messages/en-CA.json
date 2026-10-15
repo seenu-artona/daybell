@@ -1462,7 +1462,8 @@
           "confirmFirst": "Confirm photos that may be a card first: mark them card photos, or say they're normal photos. Then move them.",
           "otherCard": "A photo of another job's card can only be marked a card photo.",
           "notMarkedCard": "Only photos someone marked as card photos can be undone. A photo whose card was read stays a card photo.",
-          "groupPhoto": "Group photos stay group photos: move them between groups instead."
+          "groupPhoto": "Group photos stay group photos: move them between groups instead.",
+          "leftovers": "Leftovers are given to a person or put in the bin, not marked “Looks right” where they are."
         },
         "tile": {
           "alt": "{where}, photo {n}",
@@ -1556,7 +1557,9 @@
         "showMore": "Show more people",
         "footer": "{shown, number} of {total, plural, one {# person} other {# people}} with photos",
         "hint": "Drag photos onto a person, or tick them and use Give to a person.",
-        "showMorePhotos": "Show more photos"
+        "showMorePhotos": "Show more photos",
+        "moreFailed": "We couldn't load more people.",
+        "tryAgain": "Try again"
       },
       "groups": {
         "heading": "{count, plural, =0 {No groups} one {# group} other {# groups}}",
@@ -1614,13 +1617,15 @@
           "saving": "Saving…",
           "nameEmpty": "Enter a name.",
           "nameTooLong": "Use up to 60 characters.",
-          "nameTaken": "This job already has a group with that name."
+          "nameTaken": "This job already has a group with that name.",
+          "nameInvalid": "Remove control or direction characters from the name."
         },
         "deleteDialog": {
           "title": "Delete {name}?",
           "body": "Its members stay on the roster and in their other groups.",
           "noPhotos": "It has no photos.",
           "photosLegend": "Its {count, plural, one {# photo goes} other {# photos go}} to",
+          "photosLegendNew": "Its photos go to",
           "toGroup": "Another group",
           "chooseGroup": "Choose a group",
           "noOtherGroup": "There's no other group yet.",
@@ -1657,10 +1662,7 @@
           "noValues": "No one has a value in this column.",
           "make": "Make groups",
           "making": "Making…",
-          "cancel": "Cancel",
-          "firstName": "First name",
-          "lastName": "Last name",
-          "studentId": "Student ID"
+          "cancel": "Cancel"
         },
         "page": {
           "back": "Groups",

@@ -6,7 +6,7 @@ import { cardCodes, photo, signUpOwner } from "./helpers";
 
 // Photos' Groups (D156; Seenu's answers C1-C6, C13, C15; ADR 0030) with STORAGE_DRIVER=local. A school job with classes
 // 4B (Maya, Liam) and 5A (Ava), and Noah without a class. The owner makes a group for each class from the Class column
-// (any roster column is offered), makes "Choir" by hand (a second "Choir" is refused) and adds Maya and Noah; an
+// (the class and grade are offered), makes "Choir" by hand (a second "Choir" is refused) and adds Maya and Noah; an
 // individual upload adds everyone it is given to to Choir (add only, C7); group photos are uploaded into Choir; on
 // Choir's page one is also shown in 4B and another moved to 5A; Subjects shows the group's members (?group=<id>, an id
 // only) and saves a Group chip; 5A is deleted with its photo going to Choir. Another studio sees and changes none of
@@ -50,6 +50,14 @@ test("Photo groups: from a column, by hand, by upload, moved and shown, in Subje
   const ava = await child({ firstName: "Ava", lastName: "Patel", classId: c5a });
   await child({ firstName: "Noah", lastName: "Garcia" });
 
+  // The roster's old ?groupId= filter is refused, never ignored (classes are classId now; ADR 0030).
+  expect((await page.request.get(`/api/v1/jobs/${jobId}/children?groupId=${c4b}`)).status()).toBe(
+    400,
+  );
+  expect((await page.request.get(`/api/v1/jobs/${jobId}/children?classId=${c4b}`)).status()).toBe(
+    200,
+  );
+
   // 1. Photos › Groups (the switch in the card's toolbar): none yet.
   await page.goto(`/app/jobs/${jobId}/photos`);
   const switcher = main.getByRole("navigation", { name: "Photos by", exact: true });
@@ -68,10 +76,11 @@ test("Photo groups: from a column, by hand, by upload, moved and shown, in Subje
   // 2. Make groups from a column: Class, with what it makes said before anything is saved (C3).
   await main.getByRole("button", { name: "Make groups from a column", exact: true }).click();
   const column = page.getByRole("dialog", { name: "Make groups from a column", exact: true });
-  // Any roster column that names a group (C3): the class (in the job's word for it), grade, names and student ID.
-  await expect(column.getByRole("radio")).toHaveCount(5);
-  for (const name of ["Grade", "First name", "Last name", "Student ID"])
-    await expect(column.getByRole("radio", { name, exact: true })).not.toBeChecked();
+  // The class (in the job's word for it) and grade only: never a column holding a name or ID (Seenu, Oct 14).
+  await expect(column.getByRole("radio")).toHaveCount(2);
+  await expect(column.getByRole("radio", { name: "Grade", exact: true })).not.toBeChecked();
+  for (const name of ["First name", "Last name", "Student ID"])
+    await expect(column.getByRole("radio", { name, exact: true })).toHaveCount(0);
   await expect(column.getByRole("radio", { name: "Class", exact: true })).toBeChecked();
   await expect(column.getByText(/^Makes 2 groups: /)).toBeVisible();
   await column.getByRole("button", { name: "Make groups", exact: true }).click();

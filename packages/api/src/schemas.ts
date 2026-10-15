@@ -9,6 +9,7 @@ import {
   HEAD_OFFICE_PROVINCES,
   ITEM_DESCRIPTION_MAX,
   ITEM_NAME_MAX,
+  isGroupNameText,
   JOB_STATUSES,
   JOB_TYPES,
   MAX_BLANK_CARDS,
@@ -666,23 +667,27 @@ export const rosterImportInput = z.object({
 });
 export type RosterImportInput = z.infer<typeof rosterImportInput>;
 
-export const rosterQuery = z.object({
-  limit: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(500)
-    .default(200)
-    .meta({ description: "How many to return, 1–500 (default 200)." }),
-  cursor: z
-    .uuid({ error: "validation.cursor" })
-    .optional()
-    .meta({ description: "The nextCursor from the previous page." }),
-  classId: z
-    .union([z.uuid(), z.literal("none")], { error: "validation.class" })
-    .optional()
-    .meta({ description: 'Only this class (or team); "none" for children without one.' }),
-});
+/** Strict, like the other queries D156 changed: an old ?groupId= is refused (400), never ignored. */
+export const rosterQuery = z.strictObject(
+  {
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .default(200)
+      .meta({ description: "How many to return, 1–500 (default 200)." }),
+    cursor: z
+      .uuid({ error: "validation.cursor" })
+      .optional()
+      .meta({ description: "The nextCursor from the previous page." }),
+    classId: z
+      .union([z.uuid(), z.literal("none")], { error: "validation.class" })
+      .optional()
+      .meta({ description: 'Only this class (or team); "none" for children without one.' }),
+  },
+  { error: "validation.unknownField" },
+);
 
 // ── Job page (Phase 1 step 2b, ADR 0013) ──────────────────────────────────────────────────────────────────────────
 
@@ -1005,21 +1010,24 @@ const PLACES_WITHOUT_ID: readonly string[] = ["leftovers", "flagged", "unlinkedC
 
 /** A page of the photos in one place on the review screen. Ids only in the URL (D96). */
 export const taggingPhotosQuery = z
-  .object({
-    place: z.enum(TAGGING_PLACES, { error: "validation.invalid" }).meta({
-      description:
-        "leftovers, flagged, a child's photos (with their card photos), a blank card's photos, or unlinkedCards (card photos linked to none of the job's cards, such as photos marked card photos in Leftovers).",
-    }),
-    id: z
-      .uuid({ error: "validation.invalid" })
-      .optional()
-      .meta({ description: "The child or blank card, for those places." }),
-    cursor: z
-      .uuid({ error: "validation.cursor" })
-      .optional()
-      .meta({ description: "The nextCursor from the previous page (a photo's id)." }),
-    limit: z.coerce.number().int().min(1).max(500).default(PHOTO_PAGE_SIZE),
-  })
+  .strictObject(
+    {
+      place: z.enum(TAGGING_PLACES, { error: "validation.invalid" }).meta({
+        description:
+          "leftovers, flagged, a child's photos (with their card photos), a blank card's photos, or unlinkedCards (card photos linked to none of the job's cards, such as photos marked card photos in Leftovers).",
+      }),
+      id: z
+        .uuid({ error: "validation.invalid" })
+        .optional()
+        .meta({ description: "The child or blank card, for those places." }),
+      cursor: z
+        .uuid({ error: "validation.cursor" })
+        .optional()
+        .meta({ description: "The nextCursor from the previous page (a photo's id)." }),
+      limit: z.coerce.number().int().min(1).max(500).default(PHOTO_PAGE_SIZE),
+    },
+    { error: "validation.unknownField" },
+  )
   .refine((q) => PLACES_WITHOUT_ID.includes(q.place) === (q.id === undefined), {
     error: "validation.invalid",
     path: ["id"],
@@ -1030,17 +1038,20 @@ export type TaggingPhotosQuery = z.infer<typeof taggingPhotosQuery>;
 // Ids only in URLs (D113): group names travel in bodies.
 
 /** A page of Photos' People view: 50 people at a time, optionally one group's members. */
-export const photoPeopleQuery = z.object({
-  groupId: z
-    .uuid({ error: "validation.invalid" })
-    .optional()
-    .meta({ description: "Only this group's members." }),
-  cursor: z
-    .uuid({ error: "validation.cursor" })
-    .optional()
-    .meta({ description: "The nextCursor from the previous page (a child's id)." }),
-  limit: z.coerce.number().int().min(1).max(PEOPLE_PAGE_SIZE).default(PEOPLE_PAGE_SIZE),
-});
+export const photoPeopleQuery = z.strictObject(
+  {
+    groupId: z
+      .uuid({ error: "validation.invalid" })
+      .optional()
+      .meta({ description: "Only this group's members." }),
+    cursor: z
+      .uuid({ error: "validation.cursor" })
+      .optional()
+      .meta({ description: "The nextCursor from the previous page (a child's id)." }),
+    limit: z.coerce.number().int().min(1).max(PEOPLE_PAGE_SIZE).default(PEOPLE_PAGE_SIZE),
+  },
+  { error: "validation.unknownField" },
+);
 export type PhotoPeopleQuery = z.infer<typeof photoPeopleQuery>;
 
 const groupName = z
@@ -1050,20 +1061,24 @@ const groupName = z
     z
       .string()
       .min(1, { error: "validation.groupName" })
-      .max(MAX_GROUP_NAME, { error: "validation.groupName" }),
+      .refine((name) => [...name].length <= MAX_GROUP_NAME, { error: "validation.groupName" })
+      .refine(isGroupNameText, { error: "validation.groupName" }),
   )
-  .meta({ description: "1 to 60 characters, unique per job ignoring case (C10)." });
+  .meta({
+    description:
+      "1 to 60 characters, unique per job ignoring case (C10); no control or bidi characters (as price list names).",
+  });
 
 /** Make a group by hand (+ New group), or rename one. */
 export const photoGroupInput = z.object({ name: groupName });
 export type PhotoGroupInput = z.infer<typeof photoGroupInput>;
 export const photoGroupPatch = photoGroupInput;
 
-/** Make a group for each value of a roster column, once (C3: any roster column; ADR 0030, call 9). */
+/** Make a group for each value of a roster column, once (C3 as Seenu narrowed it; ADR 0030, call 9). */
 export const groupsFromColumnInput = z.object({
   column: z.enum(GROUP_COLUMNS, { error: "validation.invalid" }).meta({
     description:
-      "class (the job's classes, teams or groups), grade, firstName, lastName or studentId. Names already used by a group are skipped; blank values make no group. Parent email and the yes/no flags aren't columns groups are made from.",
+      "class (the job's classes, in its own word for them) or grade. Never a column holding a person's name or ID, the parent's email or a flag. Names already used by a group are skipped; blank values make no group.",
   }),
 });
 export type GroupsFromColumnInput = z.infer<typeof groupsFromColumnInput>;
@@ -1090,13 +1105,16 @@ export const groupMembersInput = z
 export type GroupMembersInput = z.infer<typeof groupMembersInput>;
 
 /** A page of a group's members or photos. */
-export const groupPageQuery = z.object({
-  cursor: z
-    .uuid({ error: "validation.cursor" })
-    .optional()
-    .meta({ description: "The nextCursor from the previous page." }),
-  limit: z.coerce.number().int().min(1).max(500).default(PHOTO_PAGE_SIZE),
-});
+export const groupPageQuery = z.strictObject(
+  {
+    cursor: z
+      .uuid({ error: "validation.cursor" })
+      .optional()
+      .meta({ description: "The nextCursor from the previous page." }),
+    limit: z.coerce.number().int().min(1).max(500).default(PHOTO_PAGE_SIZE),
+  },
+  { error: "validation.unknownField" },
+);
 export type GroupPageQuery = z.infer<typeof groupPageQuery>;
 
 const groupPhotoIds = z
@@ -1122,15 +1140,18 @@ export type AlsoShowPhotosInput = z.infer<typeof alsoShowPhotosInput>;
 
 /** Where a deleted group's photos go (C4): another group (photosTo=group&targetId=) or the bin. */
 export const deleteGroupQuery = z
-  .object({
-    photosTo: z.enum(GROUP_PHOTOS_TO, { error: "validation.invalid" }).optional().meta({
-      description: "group or bin; leave out for a group with no photos.",
-    }),
-    targetId: z
-      .uuid({ error: "validation.group" })
-      .optional()
-      .meta({ description: "With photosTo=group: the group they go to." }),
-  })
+  .strictObject(
+    {
+      photosTo: z.enum(GROUP_PHOTOS_TO, { error: "validation.invalid" }).optional().meta({
+        description: "group or bin; leave out for a group with no photos.",
+      }),
+      targetId: z
+        .uuid({ error: "validation.group" })
+        .optional()
+        .meta({ description: "With photosTo=group: the group they go to." }),
+    },
+    { error: "validation.unknownField" },
+  )
   .refine((q) => (q.photosTo === "group") === (q.targetId !== undefined), {
     error: "validation.group",
     path: ["targetId"],

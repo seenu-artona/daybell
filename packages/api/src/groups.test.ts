@@ -6,12 +6,15 @@ import {
   alsoShowPhotosInput,
   deleteGroupQuery,
   groupMembersInput,
+  groupPageQuery,
   groupsFromColumnInput,
   LIST_FILTER_KEYS,
   listFiltersInput,
   moveGroupPhotosInput,
   photoGroupInput,
   photoPeopleQuery,
+  rosterQuery,
+  taggingPhotosQuery,
 } from "./schemas";
 import { childResponse, GROUP_CONFLICTS, rosterChild, TAGGING_CONFLICTS } from "./types";
 
@@ -30,15 +33,37 @@ describe("groups (D156, ADR 0030)", () => {
     expect(photoGroupInput.safeParse({ name: "   " }).success).toBe(false);
     expect(photoGroupInput.safeParse({ name: "x".repeat(60) }).success).toBe(true);
     expect(photoGroupInput.safeParse({ name: "x".repeat(61) }).success).toBe(false);
+    // The same clean-text rule as price list names: no control, C1 or bidi characters (the database refuses them too).
+    for (const name of ["Ev\u202Eil", "Iso\u2066late", "C1\u0085", "Bell\u0007"])
+      expect(photoGroupInput.safeParse({ name }).error?.issues[0]?.message).toBe(
+        "validation.groupName",
+      );
   });
 
-  it("are made from Class or Grade only (C3)", () => {
+  it("changed queries are strict: an old ?groupId= is refused, never ignored", () => {
+    expect(rosterQuery.safeParse({ groupId: ID }).error?.issues[0]?.message).toBe(
+      "validation.unknownField",
+    );
+    expect(rosterQuery.parse({ classId: ID }).classId).toBe(ID);
+    expect(photoPeopleQuery.safeParse({ groupId: ID, classId: ID }).success).toBe(false);
+    expect(taggingPhotosQuery.safeParse({ place: "leftovers", groupId: ID }).success).toBe(false);
+    expect(groupPageQuery.safeParse({ limit: "10", order: "name" }).success).toBe(false);
+    expect(deleteGroupQuery.safeParse({ photosTo: "bin", force: "1" }).success).toBe(false);
+  });
+
+  it("are made from Class or Grade only (C3 as Seenu narrowed it)", () => {
     expect(groupsFromColumnInput.parse({ column: "class" }).column).toBe("class");
     expect(groupsFromColumnInput.parse({ column: "grade" }).column).toBe("grade");
-    for (const column of ["firstName", "lastName", "studentId"])
-      expect(groupsFromColumnInput.parse({ column }).column).toBe(column);
-    // No Teacher field on the roster; never the parent's email or a yes/no flag (ADR 0030, call 9).
-    for (const column of ["teacher", "parentEmail", "doNotPhotograph", "doNotPublish"])
+    // Never a name or ID (kept in a group name after erasure), the parent's email or a flag; no Teacher field.
+    for (const column of [
+      "firstName",
+      "lastName",
+      "studentId",
+      "teacher",
+      "parentEmail",
+      "doNotPhotograph",
+      "doNotPublish",
+    ])
       expect(groupsFromColumnInput.safeParse({ column }).success).toBe(false);
   });
 

@@ -1,6 +1,7 @@
 import { type ClassesResponse, type ClassResponse, classInput } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { check, handle, parseBody } from "@/lib/api";
+import { assertFunctionRegion } from "@/lib/region-guard";
 import {
   CLASS_NAME_TAKEN,
   isClassNameTaken,
@@ -9,6 +10,10 @@ import {
   sortClasses,
 } from "@/lib/roster";
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
+
+export const runtime = "nodejs";
+// Names and classes of a Canadian studio's children are handled in Montréal (D113), like the rest of the roster.
+export const preferredRegion = "yul1";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -19,6 +24,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handle(async (_request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
   await loadRosterJob(supabase, studio.id, jobId);
   const rows = (check(await supabase.rpc("list_job_groups", { p_job_id: jobId })) ?? []) as {
     id: string;
@@ -37,6 +43,7 @@ export const GET = handle(async (_request: Request, ctx: Ctx) => {
 export const POST = handle(async (request: Request, ctx: Ctx) => {
   const jobId = await pathId(ctx, "Job not found.");
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
   assertCanEditRoster(studio);
   const input = await parseBody(request, classInput);
   await loadRosterJob(supabase, studio.id, jobId);

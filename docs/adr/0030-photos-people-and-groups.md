@@ -31,9 +31,12 @@ These override the architect's plan where they differ.
 - **C13** "Give to a person" is also in the open photo's panel (the same action as To review's).
 - **C15** People lists everyone with photos, by last name; people with no photos are not listed; their first card
   photo leads their line.
-- **C3, as built:** Make groups from a column offers every roster column that exists: the class (in the job's word
-  for it, so Team on a sports template), grade, first name, last name and student ID. The roster has no Teacher field
-  and no custom columns today, so neither is offered; when they exist they join the list.
+- **C3 narrowed (Seenu, Oct 14): Make groups from a column offers the class (in the job's own word for it) and
+  grade only**, and any other column that holds no personal data when one exists. Never first name, last name or
+  student ID (a group name would keep a child's name or ID after the child is erased), never parent email or a yes/no
+  flag. The roster has no Teacher field and no custom columns today.
+- **Do not publish and groups (Seenu, Oct 14): group photos are shown anyway.** A member marked Do not publish doesn't
+  hide a group's photos from the other members; that child's own gallery stays unavailable. Closes call 18.
 - **Call 29 answered (Oct 14): the class field's label comes from the job's template**, never "Group". A template's
   Subjects and photos section names it (free text, 1 to 30 characters, "Class" unless changed); a new job copies it
   like the template's other rules. Subjects' column, chips, record, the QR card text and the import mapping use the
@@ -166,17 +169,21 @@ Calls made in this round:
 7. **Other card photos** (card photos linked to no card) stay listed at the end of To review, not blocking Mark
    reviewed, so owners and admins can still undo a card photo mark there.
 8. **Mark reviewed** sits on To review's own heading line, with the reason it is disabled in words, not in the tab row.
-9. **Make groups from a column** (decided: C3, above). A group takes the value as its name ("4B", "3", "Johnson").
-   Values are compared ignoring case. All new groups and members land at once or none (the 500-group limit is checked
-   first). **New: needs Seenu:** parent email and the two yes/no flags are not offered. A group named by an email
-   would show the whole address, which Subjects masks (Seenu, Oct 14), and a yes/no flag has no value to name a group
-   by. Should they be offered, and how would a flag's group be named?
+9. **Make groups from a column** (decided: C3 as narrowed, above): class or grade. A group takes the value as its
+   name ("4B", "3"), cleaned the same way in the preview and the database (runs of whitespace made one space, ends
+   trimmed). Values are compared ignoring case and the first spelling in code point order names the group; a value
+   that can't be a group name (over 60 characters, control or bidi characters) makes none. All new groups and members
+   land at once or none (the 500-group limit is checked first).
 10. **A tagging run that adds people to the upload's group** (C7) writes one `photo_group.members_changed` event,
-    attributed to whoever started the upload.
+    attributed to whoever started the upload. **New: needs Seenu:** only a photo's first placement adds its person.
+    A later run that retags the upload's photos (after a purge, or a card printed again) never adds anyone, so someone
+    taken out of the group by hand is never put back. The simpler safe choice; the cost is that a photo first left in
+    Leftovers and given to a person later doesn't add them (they are added by hand).
 11. **Classes are renamed in the API's inputs too** (`classId`, `classIds`, an import row's `class`, the
-    `validation.class*` messages), so "group" never means a class in the API. The roster's word for a class on senior
-    and mini-session jobs is still "Group" (unchanged; it now sits beside the Groups column). Question for Seenu: call
-    it "Class" there too?
+    `validation.class*` messages), so "group" never means a class in the API. On screen the class field takes the
+    job's own label (call 29), never "Group". **New: needs Seenu:** these renames break `/api/v1` callers that used
+    `groupId` or `/jobs/{id}/groups` for classes. Pre-launch there are no outside callers; the changed queries are
+    strict, so an old `?groupId=` gets 400 instead of an unfiltered roster.
 12. **The panel's Give to a person** needs to know what review allows for the photo, so `GET /photos/{id}` returns its
     place, flag and actions (`tagging`, null before it is tagged).
 13. **A person's line** shows 12 photos (card photos included, the first card photo first); Show all loads the rest in
@@ -189,7 +196,7 @@ Calls made in this round:
 17. **The flat "All photos" grid is gone**: People shows every person's photos and Groups every group photo. The bin
     keeps its own grid. Photos still being processed show in their person's line once tagged.
 18. **Group photos in the parent shop** are labelled "Group photos". A child sees the group photos of every group they
-    are in, even with a Do not publish groupmate (ADR 0022 call 6's question now applies to groups).
+    are in, even with a Do not publish groupmate: **decided by Seenu (Oct 14)**, above.
 19. **The Groups and group pages are read-only for staff and on closed jobs** (actions hidden), as Subjects is.
 20. **Upload group photos** needs at least one group: without one the sheet says to make a group first.
 21. **The bin** is Photos with `?bin=1` (no chips shown), reached from Bin (n) in the tab row as before.
@@ -201,7 +208,8 @@ Calls made in this round:
     opened from an address alone it is "The photo".
 26. **Photos on a person's line can be ticked** (Give to a person, Looks right, card photo, bin) as on To review; the
     first card photo and other read card photos can't.
-27. **C9 lives in core** (`reviewActions`): a Leftover's `confirm` is false, so every screen and the API agree.
+27. **C9 lives in core and the database**: core's `reviewActions` gives a Leftover no `confirm`, and `confirm_photos`
+    refuses one (`tagging.leftovers`), so the screens and the API agree.
 28. **A binned photo's detail** has `tagging: null` (no Give to a person from the bin).
 29. **Answered by Seenu** (see Seenu's answers above): the class field's label comes from the template. How it was
     built, each **New: needs Seenu**:
@@ -213,8 +221,12 @@ Calls made in this round:
     - **A job's label is fixed** when the job is made (the database refuses a change). It isn't one of the rules a job
       can change for itself, and isn't shown under "Changed for this job".
     - **Jobs made before this** keep the word they showed: Team for sports jobs, Class for every other (no job says
-      "Group" any more). Existing templates, and every studio's first template, say Class; a studio that photographs
-      sports changes its template to Team.
+      "Group" any more). **Existing templates got "Class"**, and so does every studio's first template, so **a new
+      sports job made from an existing template says "Class", not "Team"** (a visible change from D137) until the
+      studio edits the template's label.
+    - **The default label is data in English** ("Class", and "Team" on existing sports jobs), stored on templates and
+      jobs, not a locale string: it is the studio's own word (template data, per Seenu), so it doesn't follow the
+      screen's language.
     - **Import:** a column headed with the job's label (e.g. "Section") is guessed as the class column, ahead of the
       usual names.
     - **Photos' dialogs** that show people with their class (Give to a person, Add or remove people, a blank card's
@@ -223,6 +235,13 @@ Calls made in this round:
     so To review's counts are right when the dialog closes.
 31. **Subjects' Group chip** (`?group=<id>`, saved as `group`) lists the group's members; a group that is deleted is
     dropped from the saved chips, as a class is.
+32. **Old hand-filed class photos** (photos someone moved into a class's Class photo set by hand) are group photos
+    in "Not in a group" now (C2), and C8 means they can't go back to a person: they can only be put in a group or
+    binned. **New: needs Seenu.**
+33. **Deleting a group** counts its photos as the Groups list does (out of the bin, not card photos): a group whose
+    photos are all binned, or which holds only a group upload's card frame, is deleted without asking; those links
+    are dropped and a card photo is never binned. If photos arrive while the dialog is open, the database says
+    `groups.hasPhotos` and the dialog asks where they go.
 
 ## Not in this round (deferred)
 
@@ -234,7 +253,7 @@ activity log.
 
 pgTAP: new `029_photo_groups` (row-level security and grants, studio and job leaks, links written only at
 registration, roster imports, new groups and tagging runs never changing links or members, add-to-group add only,
-delete to a group or the bin and sold photos refused, from any roster column (never parent email or a flag), events with ids only, the C2 migration: class-set
+delete to a group or the bin and sold photos refused, a group of binned photos or a card frame deleted without asking, from the class or grade only (never a name, ID, email or flag) with the preview's cleaning, names without control or bidi characters, add-to-group on a first placement only, Ordered counted from the group's photos, a Do not publish member, events with ids only, the C2 migration: class-set
 photos become group photos in no group that parents can't see, no `class_set` left in any function body); updated
 `012`, `021`, `022`, `026` and `007`. Core (tagging with group uploads, group rules, the Group filter), API contracts,
 route tests with cross-studio and cross-job leak tests, role and region tests and a console spy for names, the shop's

@@ -3,6 +3,7 @@ import { countNewClasses, planRosterImport } from "@daybell/core";
 import { NextResponse } from "next/server";
 import { accessCodeCryptoKeys, newAccessCode } from "@/lib/access-codes";
 import { handle, parseBody } from "@/lib/api";
+import { assertFunctionRegion } from "@/lib/region-guard";
 import {
   importRpcRows,
   importSummary,
@@ -15,6 +16,10 @@ import {
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
 import { codeWriteRpc } from "@/lib/supabase/service";
 
+export const runtime = "nodejs";
+// Names and classes of a Canadian studio's children are handled in Montréal (D113), like the rest of the roster.
+export const preferredRegion = "yul1";
+
 /**
  * POST /api/v1/jobs/:id/children/import — the confirmed rows of a roster file (the file itself never leaves the
  * browser, D113). The plan (adds, updates by student ID, duplicates) is made here from the current roster; with dryRun
@@ -25,6 +30,7 @@ export const POST = handle(async (request: Request, ctx: { params: Promise<{ id:
   const jobId = await pathId(ctx, "Job not found.");
   // Who and what role first: nobody else gets as far as reading the body (S4).
   const { supabase, studio, userId } = await studioScope();
+  assertFunctionRegion(studio.region);
   assertCanEditRoster(studio);
   const input = await parseBody(request, rosterImportInput);
   await loadRosterJob(supabase, studio.id, jobId);

@@ -1111,6 +1111,8 @@ export const TAGGING_CONFLICTS = {
   notMarkedCard: "tagging.notMarkedCard",
   /** A group photo is never given to a person (D156, C8). */
   groupPhoto: "tagging.groupPhoto",
+  /** Leftovers are given to a person or binned, never confirmed where they are (C9). */
+  leftovers: "tagging.leftovers",
 } as const;
 export type TaggingConflict = (typeof TAGGING_CONFLICTS)[keyof typeof TAGGING_CONFLICTS];
 

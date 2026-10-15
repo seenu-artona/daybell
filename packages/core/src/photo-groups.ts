@@ -17,12 +17,11 @@ export const PEOPLE_PAGE_SIZE = 50;
 export const PERSON_STRIP_PHOTOS = 12;
 
 /**
- * The roster columns groups can be made from (C3: any roster column; ADR 0030, call 9): the class (a team or group on
- * other job types), grade, first name, last name and student ID. The roster has no Teacher or custom columns yet. Parent
- * email and the yes/no flags are left out (call 9: an email would show unmasked as a group's name; a flag has no value
- * to name a group by).
+ * The roster columns groups can be made from (C3 as Seenu narrowed it on Oct 14; ADR 0030, call 9): the class (in the
+ * job's own word for it) and grade. Never a column that holds a person's name or ID (a group name would keep it after
+ * the person is erased), nor parent email or a yes/no flag. The roster has no Teacher or custom columns yet.
  */
-export const GROUP_COLUMNS = ["class", "grade", "firstName", "lastName", "studentId"] as const;
+export const GROUP_COLUMNS = ["class", "grade"] as const;
 export type GroupColumn = (typeof GROUP_COLUMNS)[number];
 
 /** Where a deleted group's photos go (C4): another group, or the bin. */
@@ -33,18 +32,33 @@ export type GroupPhotosTo = (typeof GROUP_PHOTOS_TO)[number];
 export const UPLOAD_KINDS = ["individual", "group"] as const;
 export type UploadKind = (typeof UPLOAD_KINDS)[number];
 
-const fold = (name: string) => name.trim().toLowerCase();
-
-/** A name as typed, with runs of spaces made one and the ends trimmed. */
-export function cleanGroupName(name: string): string {
-  return name.replace(/\s+/g, " ").trim();
-}
-
-export type GroupNameProblem = "empty" | "tooLong" | "taken";
+const fold = (name: string) => name.toLowerCase();
 
 /**
- * Why a name can't be a group's (C10): empty, over 60 characters, or another group of the job already has it,
- * ignoring case. `exceptId` is the group being renamed. Null when the name is fine. Check a cleaned name.
+ * A name as typed, or a roster value made a name: runs of ASCII whitespace made one space and the spaces at the ends
+ * removed. The database cleans a column's values the same way (make_photo_groups_from_column), so the preview and
+ * what is made agree.
+ */
+export function cleanGroupName(name: string): string {
+  return name.replace(/[ \t\n\r\f\v]+/g, " ").replace(/^ +| +$/g, "");
+}
+
+// C0 and C1 controls and bidi overrides and isolates, which can make a name read differently from what it is (the
+// same rule as price list names; the database refuses them too).
+// biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control and bidi characters is the point.
+const NAME_FORBIDDEN = /[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Whether a (cleaned) name is clean text: no control or bidi characters, no lone surrogates. */
+export function isGroupNameText(name: string): boolean {
+  return !NAME_FORBIDDEN.test(name) && !LONE_SURROGATE.test(name);
+}
+
+export type GroupNameProblem = "empty" | "tooLong" | "invalid" | "taken";
+
+/**
+ * Why a name can't be a group's (C10): empty, over 60 characters, control or bidi characters, or another group of
+ * the job already has it, ignoring case. `exceptId` is the group being renamed. Null when the name is fine. Check a cleaned name.
  */
 export function groupNameProblem(
   name: string,
@@ -52,7 +66,8 @@ export function groupNameProblem(
   exceptId: string | null = null,
 ): GroupNameProblem | null {
   if (name === "") return "empty";
-  if (name.length > MAX_GROUP_NAME) return "tooLong";
+  if ([...name].length > MAX_GROUP_NAME) return "tooLong";
+  if (!isGroupNameText(name)) return "invalid";
   const key = fold(name);
   return groups.some((g) => g.id !== exceptId && fold(g.name) === key) ? "taken" : null;
 }
@@ -115,31 +130,19 @@ export interface ColumnGroupsPreview {
 export interface ColumnPerson {
   class: { name: string } | null;
   grade: string | null;
-  firstName: string;
-  lastName: string;
-  studentId: string | null;
 }
 
 /** A person's value in a roster column, or null when blank. */
 export function columnValue(person: ColumnPerson, column: GroupColumn): string | null {
-  switch (column) {
-    case "class":
-      return person.class?.name ?? null;
-    case "grade":
-      return person.grade;
-    case "firstName":
-      return person.firstName;
-    case "lastName":
-      return person.lastName;
-    case "studentId":
-      return person.studentId;
-  }
+  return column === "class" ? (person.class?.name ?? null) : person.grade;
 }
 
 /**
  * The groups "Make groups from a column" would make, for the dialog to say before anything is saved: one per distinct
- * value (ignoring case and extra spaces), blank values none, a value whose name is already a group skipped. In natural
- * order. The database decides again when it runs.
+ * value, cleaned as cleanGroupName cleans it and compared ignoring case, named by its first spelling in code point
+ * order; a blank value, or one that can't be a group name (over 60 characters, control or bidi characters), makes
+ * none; a value whose name is already a group is skipped. In natural order. The database decides the same way when
+ * it runs.
  */
 export function columnGroupsPreview(
   people: readonly ColumnPerson[],
@@ -151,11 +154,14 @@ export function columnGroupsPreview(
   for (const person of people) {
     const raw = columnValue(person, column);
     const name = raw === null ? "" : cleanGroupName(raw);
-    if (name === "") continue;
+    if (name === "" || [...name].length > MAX_GROUP_NAME || !isGroupNameText(name)) continue;
     const key = fold(name);
     const entry = values.get(key);
-    if (entry) entry.people++;
-    else values.set(key, { name, people: 1 });
+    if (!entry) values.set(key, { name, people: 1 });
+    else {
+      entry.people++;
+      if (name < entry.name) entry.name = name;
+    }
   }
   const all = [...values.entries()].sort(([, a], [, b]) => natural.compare(a.name, b.name));
   return {

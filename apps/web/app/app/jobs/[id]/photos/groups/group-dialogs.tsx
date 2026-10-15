@@ -90,19 +90,32 @@ export function GroupNameDialog({
   const [error, setError] = useState("");
   const [form, setForm] = useState("");
   const [busy, setBusy] = useState(false);
+  // Reset when the dialog opens for a group, not when the Groups list reloads (a new object, the same group).
+  const groupId = group?.id ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the name is read when the dialog opens for this group.
   useEffect(() => {
     if (!open) return;
     setName(group?.name ?? "");
     setError("");
     setForm("");
-  }, [open, group]);
+  }, [open, groupId]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const clean = cleanGroupName(name);
     const why = groupNameProblem(clean, groups, group?.id ?? null);
     if (why) {
-      setError(t(why === "empty" ? "nameEmpty" : why === "tooLong" ? "nameTooLong" : "nameTaken"));
+      setError(
+        t(
+          why === "empty"
+            ? "nameEmpty"
+            : why === "tooLong"
+              ? "nameTooLong"
+              : why === "invalid"
+                ? "nameInvalid"
+                : "nameTaken",
+        ),
+      );
       return;
     }
     setBusy(true);
@@ -121,7 +134,7 @@ export function GroupNameDialog({
       return;
     }
     if (res.fields.form === GROUP_CONFLICTS.nameTaken) setError(t("nameTaken"));
-    else if (res.fields.name) setError(t("nameTooLong"));
+    else if (res.fields.name) setError(t("nameInvalid"));
     else setForm(problem(res));
   }
 
@@ -180,6 +193,8 @@ export function DeleteGroupDialog({
   const [target, setTarget] = useState("");
   const [form, setForm] = useState("");
   const [busy, setBusy] = useState(false);
+  // Photos arrived after the list was read (groups.hasPhotos): ask where they go after all.
+  const [askWhere, setAskWhere] = useState(false);
   const radios = useId();
   const select = useId();
   const others = groups.filter((g) => g.id !== group?.id);
@@ -188,9 +203,10 @@ export function DeleteGroupDialog({
     setTo(others.length > 0 ? "group" : "bin");
     setTarget("");
     setForm("");
+    setAskWhere(false);
   }, [open, others.length]);
   if (!group) return null;
-  const hasPhotos = group.photos > 0;
+  const hasPhotos = group.photos > 0 || askWhere;
   const ready = !hasPhotos || to === "bin" || target !== "";
 
   async function remove(e: React.FormEvent) {
@@ -206,8 +222,9 @@ export function DeleteGroupDialog({
       method: "DELETE",
     });
     setBusy(false);
-    if (res.ok) onDeleted(res.data);
-    else setForm(problem(res));
+    if (res.ok) return onDeleted(res.data);
+    if (res.fields.form === GROUP_CONFLICTS.hasPhotos) setAskWhere(true);
+    setForm(problem(res));
   }
 
   return (
@@ -217,7 +234,7 @@ export function DeleteGroupDialog({
         {hasPhotos ? (
           <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
             <legend className="mb-1 p-0 text-sm font-semibold text-ink">
-              {t("photosLegend", { count: group.photos })}
+              {group.photos > 0 ? t("photosLegend", { count: group.photos }) : t("photosLegendNew")}
             </legend>
             <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
               <input
@@ -315,12 +332,15 @@ export function MembersDialog({
   const [form, setForm] = useState("");
   const [busy, setBusy] = useState(false);
   const hintId = useId();
+  // Keyed on the group's id, not its object: the Groups list reloading (a new object, the same group) never resets
+  // the ticks someone is making. The roster itself loads again only when the dialog opens.
+  const groupId = group?.id ?? null;
   const before = useMemo(
     () =>
       new Set(
-        (people ?? []).filter((p) => p.groups.some((g) => g.id === group?.id)).map((p) => p.id),
+        (people ?? []).filter((p) => p.groups.some((g) => g.id === groupId)).map((p) => p.id),
       ),
-    [people, group],
+    [people, groupId],
   );
   useEffect(() => {
     if (open) {

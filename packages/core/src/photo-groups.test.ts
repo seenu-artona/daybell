@@ -9,6 +9,7 @@ import {
   deleteNeedsDestination,
   GROUP_COLUMNS,
   groupNameProblem,
+  isGroupNameText,
   MAX_GROUP_CHANGE,
   membersChange,
   membersRequests,
@@ -33,6 +34,10 @@ describe("group names (C10)", () => {
     expect(groupNameProblem("x".repeat(60), groups)).toBeNull();
     expect(groupNameProblem("choir", groups)).toBe("taken");
     expect(groupNameProblem("Band", groups)).toBeNull();
+    // The same clean-text rule as price list names (and the database): no control, C1 or bidi characters.
+    for (const bad of ["Ev\u202Eil", "Iso\u2066late", "C1\u0085", "Bell\u0007", "Lone\uD800"])
+      expect(groupNameProblem(bad, groups)).toBe("invalid");
+    expect(isGroupNameText("Émilie’s 😀 group")).toBe(true);
   });
 
   it("lets a group keep its own name when renamed", () => {
@@ -84,18 +89,15 @@ describe("deleting a group (C4)", () => {
 });
 
 describe("columnGroupsPreview (C3)", () => {
-  const person = (
-    klass: string | null,
-    grade: string | null,
-    firstName = "Maya",
-    lastName = "Johnson",
-    studentId: string | null = null,
-  ) => ({ class: klass === null ? null : { name: klass }, grade, firstName, lastName, studentId });
+  const person = (klass: string | null, grade: string | null) => ({
+    class: klass === null ? null : { name: klass },
+    grade,
+  });
   const people = [
-    person("4B", "3", "Maya", "Johnson", "S-1"),
-    person("4b ", " 3", "Liam", "Chen", "s-1"),
-    person("Choir", "K", "Ava", "Johnson"),
-    person(null, null, "Noah", "brown"),
+    person("4B", "3"),
+    person("4b ", " 3"),
+    person("Choir", "K"),
+    person(null, null),
     person("Room 10", ""),
     person("Room 2", "4"),
   ];
@@ -113,26 +115,26 @@ describe("columnGroupsPreview (C3)", () => {
     ]);
   });
 
-  it("reads any roster column: names and student IDs too (C3)", () => {
-    expect(GROUP_COLUMNS).toEqual(["class", "grade", "firstName", "lastName", "studentId"]);
-    expect(columnGroupsPreview(people, "lastName", [{ name: "chen" }])).toEqual({
+  it("offers the class and grade only: never a name, an ID, an email or a flag (Seenu, Oct 14)", () => {
+    expect(GROUP_COLUMNS).toEqual(["class", "grade"]);
+    expect(columnValue(people[3] as ColumnPerson, "class")).toBeNull();
+  });
+
+  it("cleans values as the database does, and skips ones that can't be names", () => {
+    const odd = [
+      person("Room   4", null),
+      person("room 4", null),
+      person("Ev\u202Eil", null),
+      person("x".repeat(61), null),
+      person("Tab\tbed", null),
+    ];
+    expect(columnGroupsPreview(odd, "class", [])).toEqual({
       make: [
-        { name: "brown", people: 1 },
-        { name: "Johnson", people: 4 },
+        { name: "Room 4", people: 2 },
+        { name: "Tab bed", people: 1 },
       ],
-      skipped: ["Chen"],
-    });
-    expect(columnGroupsPreview(people, "firstName", []).make.map((g) => g.name)).toEqual([
-      "Ava",
-      "Liam",
-      "Maya",
-      "Noah",
-    ]);
-    expect(columnGroupsPreview(people, "studentId", [])).toEqual({
-      make: [{ name: "S-1", people: 2 }],
       skipped: [],
     });
-    expect(columnValue(people[3] as ColumnPerson, "class")).toBeNull();
   });
 
   it("reads grades too", () => {

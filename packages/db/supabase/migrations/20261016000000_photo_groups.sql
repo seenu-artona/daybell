@@ -14,8 +14,10 @@ create table public.photo_groups (
   id uuid primary key default gen_random_uuid(),
   studio_id uuid not null references public.studios (id) on delete cascade,
   job_id uuid not null,
-  -- 1-60 characters, trimmed, unique per job ignoring case (C10).
-  name text not null check (char_length(name) between 1 and 60 and name = btrim(name)),
+  -- 1-60 characters, trimmed, unique per job ignoring case (C10). No control characters (C0 or C1) and no bidi
+  -- overrides or isolates, which could make a name read differently from what it is (as price list names).
+  name text not null check (char_length(name) between 1 and 60 and name = btrim(name)
+    and name !~ '[\u0001-\u001F\u007F-\u009F‪-‮⁦-⁩]'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint photo_groups_job_fk foreign key (studio_id, job_id)
@@ -27,6 +29,11 @@ create unique index photo_groups_job_name_key on public.photo_groups (studio_id,
 create index photo_groups_studio_idx on public.photo_groups (studio_id);
 comment on table public.photo_groups is
   'A group of people in a job and its group photos (D156; ADR 0030). Not a class: classes are job_groups.';
+-- Two kinds of "group", kept apart by name in the API (C6): job_groups are the roster's classes (children.group_id,
+-- /classes), named by the job's label (Class, Team…); photo_groups are these photo groups (/groups), with members and
+-- group photos. A class never makes anyone a member of a photo group by itself.
+comment on table public.job_groups is
+  'A job''s classes (teams, homerooms…): the roster''s class field (children.group_id). Not photo groups (photo_groups).';
 
 create trigger photo_groups_touch before update on public.photo_groups
 for each row execute function app.touch_updated_at();
@@ -119,8 +126,8 @@ comment on table public.photo_tags is
   'Where each photo is after QR tagging and review: a child, a group photo, Leftovers, a card photo or a blank card. Card photos and flagged photos are never shown to parents.';
 
 -- ── Group photos ──────────────────────────────────────────────────────────────────────────────────────────────────
--- A group photo (ADR 0030, call 2): a photo from a group upload, or one that was in a class's Class photo set; a card
--- photo inside a group upload stays a card photo. One of the job's photos, out of the bin and not uploading.
+-- Whether a photo is a group photo (ADR 0030, call 2): a photo from a group upload, or one that was in a class's Class
+-- photo set; a card photo inside a group upload stays a card photo. Its bin and status are the caller's to check.
 create function app.is_group_photo(p_photo_id uuid) returns boolean
 language sql stable security definer
 set search_path = ''
@@ -133,7 +140,8 @@ as $$
     where p.id = p_photo_id), false);
 $$;
 
--- Checks a change's photos: 1 to 500, every one a group photo of the job (not_group_photo otherwise).
+-- Checks a change's photos: 1 to 500, every one a group photo of the job, processed or failed (not uploading) and out of
+-- the bin (not_group_photo otherwise).
 create function app.check_group_photos(p_job_id uuid, p_photo_ids uuid[]) returns void
 language plpgsql security definer
 set search_path = ''
@@ -144,7 +152,7 @@ begin
   end if;
   if (select count(*) from public.photos p
       where p.job_id = p_job_id and p.id = any (p_photo_ids) and p.status <> 'uploading'
-        and app.is_group_photo(p.id))
+        and p.binned_at is null and app.is_group_photo(p.id))
      <> (select count(distinct x) from unnest(p_photo_ids) x) then
     raise exception 'not_group_photo' using errcode = 'P0001';
   end if;
@@ -449,8 +457,9 @@ begin
   v_changed := v_changed + v_n;
 
   -- Only the rows actually written count, so a write skipped for a manual tag never reopens the review (code review
-  -- nice 2). prev is read before the write (one snapshot), so a person counts as newly placed only when one of their
-  -- photos wasn't theirs before.
+  -- nice 2). prev is read before the write (one snapshot). A person counts as placed for the upload's add-to-group
+  -- (C7) only by a photo tagged for the first time: a later run that retags photos (after a purge, a card printed
+  -- again) never adds back someone a person took out of the group by hand (ADR 0030, Calls).
   with prev as (
     select t.photo_id, t.child_id from public.photo_tags t
     where t.photo_id in (select (w ->> 'photo_id')::uuid from jsonb_array_elements(p_writes) w)
@@ -472,7 +481,7 @@ begin
   select count(*), coalesce(bool_or(w.place = 'leftovers' or w.flag is not null), false),
     array(select distinct x.child_id from written x
           where x.place = 'child'
-            and x.child_id is distinct from (select p.child_id from prev p where p.photo_id = x.photo_id))
+            and not exists (select 1 from prev p where p.photo_id = x.photo_id))
   into v_n, v_reopen, v_placed
   from written w;
   v_changed := v_changed + v_n;
@@ -685,6 +694,14 @@ begin
     where p.id = any (p_photo_ids)
       and (p.qr_kind = 'other_card' or (p.qr_kind = 'card' and p.qr_card_id is null))) then
     raise exception 'other_card' using errcode = 'P0001';
+  end if;
+  -- Leftovers are given to someone or binned, never "Looks right" where they are (C9; core's reviewActions), unless the
+  -- photo may be a card and is being said to be a normal photo.
+  if not p_as_card and exists (
+    select 1 from public.photo_tags t
+    where t.photo_id = any (p_photo_ids) and t.job_id = p_job_id and t.place = 'leftovers'
+      and t.flag is distinct from 'unreadable_card') then
+    raise exception 'leftovers_confirm' using errcode = 'P0001';
   end if;
   update public.photo_tags t
   set flag = null, source = 'manual', tagged_by = p_actor,
@@ -939,17 +956,23 @@ as $$
           'id', g.id, 'name', g.name,
           'members', (select count(*) from public.photo_group_members m where m.group_id = g.id),
           'photos', (select count(*) from shown s where s.group_id = g.id),
+          -- From the group's photo links to the lines that sold them (each by photo id, indexed), then their paid
+          -- orders: never a scan of the studio's orders.
           'ordered', case when (select sees_orders from job) then (
-            select count(distinct o.id) from public.orders o
-            where o.studio_id = g.studio_id and o.status = 'paid'
-              and exists (select 1 from public.order_lines ol
-                          where ol.studio_id = o.studio_id and ol.order_id = o.id
-                            and (ol.photo_id in (select l.photo_id from public.photo_group_photos l
-                                                 where l.group_id = g.id)
-                                 or exists (select 1 from public.order_line_photos lp
-                                            join public.photo_group_photos l on l.photo_id = lp.photo_id
-                                            where lp.studio_id = ol.studio_id and lp.order_line_id = ol.id
-                                              and l.group_id = g.id)))) end)
+            select count(distinct o.id)
+            from (
+              select ol.order_id
+              from public.photo_group_photos l
+              join public.order_lines ol on ol.photo_id = l.photo_id and ol.studio_id = l.studio_id
+              where l.group_id = g.id
+              union
+              select ol.order_id
+              from public.photo_group_photos l
+              join public.order_line_photos lp on lp.photo_id = l.photo_id and lp.studio_id = l.studio_id
+              join public.order_lines ol on ol.id = lp.order_line_id and ol.studio_id = lp.studio_id
+              where l.group_id = g.id
+            ) sold
+            join public.orders o on o.id = sold.order_id and o.status = 'paid') end)
         order by lower(g.name), g.id)
       from public.photo_groups g where g.job_id = p_job_id), '[]'::jsonb),
     'not_in_group', (
@@ -1033,7 +1056,8 @@ language plpgsql immutable
 set search_path = ''
 as $$
 begin
-  if p_name is null or char_length(p_name) not between 1 and 60 or p_name <> btrim(p_name) then
+  if p_name is null or char_length(p_name) not between 1 and 60 or p_name <> btrim(p_name)
+     or p_name ~ '[\u0001-\u001F\u007F-\u009F‪-‮⁦-⁩]' then
     raise exception 'A group name is 1 to 60 characters' using errcode = '22023';
   end if;
 end;
@@ -1101,9 +1125,12 @@ end;
 $$;
 
 -- Deletes a group (C4; ADR 0030, call 3). Its photos go to another group of the job (p_photos_to 'group', p_target)
--- or to the bin ('bin': only the photos shown in no other group; the rest just leave this group). A group with photos
--- needs a destination (group_has_photos); if any photo to bin has sold, nothing changes (photo_sold). Members leave
--- with the group. Returns {moved, binned}.
+-- or to the bin ('bin': only the photos shown in no other group; the rest just leave this group). "Its photos" are
+-- the ones the Groups list counts: out of the bin and not card photos (a card frame of a group upload stays a card
+-- photo, call 2); links to binned photos and card photos are dropped quietly, and a card photo is never binned. A
+-- group with photos needs a destination (group_has_photos); if any photo to bin has sold, nothing changes
+-- (photo_sold). Members leave with the group. The group's row is locked first, so a file registered meanwhile can't
+-- link a photo to it (register_photos takes the same row). Returns {moved: photos newly in the target, binned}.
 create function public.delete_photo_group(p_actor uuid, p_group_id uuid, p_photos_to text, p_target uuid)
 returns jsonb
 language plpgsql security definer
@@ -1129,7 +1156,15 @@ begin
     raise exception 'Photos go to another group or to the bin' using errcode = '22023';
   end if;
   perform pg_advisory_xact_lock(hashtextextended('photo_groups:' || v_job::text, 0));
-  v_photos := array(select l.photo_id from public.photo_group_photos l where l.group_id = p_group_id
+  perform 1 from public.photo_groups g where g.id = p_group_id for update;
+  if not found then
+    raise exception 'Group not found' using errcode = 'P0002';
+  end if;
+  v_photos := array(select l.photo_id from public.photo_group_photos l
+                    join public.photos p on p.id = l.photo_id
+                    left join public.photo_tags t on t.photo_id = p.id
+                    where l.group_id = p_group_id and p.binned_at is null
+                      and (t.photo_id is null or t.place = 'group_photo')
                     order by l.photo_id);
   if cardinality(v_photos) > 0 and p_photos_to is null then
     raise exception 'group_has_photos' using errcode = 'P0001';
@@ -1138,13 +1173,14 @@ begin
     if not exists (select 1 from public.photo_groups g where g.id = p_target and g.job_id = v_job) then
       raise exception 'group_not_in_job' using errcode = 'P0001';
     end if;
+    perform 1 from public.photo_groups g where g.id = p_target for key share;
     insert into public.photo_group_photos (studio_id, job_id, group_id, photo_id, added_by)
     select v_studio, v_job, p_target, x, p_actor from unnest(v_photos) x
     on conflict (group_id, photo_id) do nothing;
-    v_moved := cardinality(v_photos);
+    get diagnostics v_moved = row_count;
   elsif p_photos_to = 'bin' then
     v_bin := array(select p.id from public.photos p
-                   where p.id = any (v_photos) and p.binned_at is null and p.status <> 'uploading'
+                   where p.id = any (v_photos) and p.status <> 'uploading'
                      and not exists (select 1 from public.photo_group_photos l
                                      where l.photo_id = p.id and l.group_id <> p_group_id));
     if exists (select 1 from public.photos p where p.id = any (v_bin) and p.sold_at is not null) then
@@ -1163,10 +1199,14 @@ begin
 end;
 $$;
 
--- Makes a group for each value of a roster column, once (D156: a shortcut, not a switch; C3; ADR 0030, call 9):
--- p_column 'class', 'grade', 'firstName', 'lastName' or 'studentId'. Values are compared ignoring case; blank values make no group; a value whose name is
--- already a group is skipped (its group is left alone). Each new group's members are the people with that value. All
--- or nothing: the 500-group limit is checked first. Returns {groups, members, skipped}.
+-- Makes a group for each value of a roster column, once (D156: a shortcut, not a switch; C3 as Seenu narrowed it, ADR
+-- 0030): p_column 'class' (the job's classes, in its own word for them) or 'grade'. Never a column that holds a
+-- person's name or ID (a group name would keep it after the person is erased), nor parent email or a flag. A value is
+-- cleaned as core's columnGroupsPreview cleans it (runs of ASCII whitespace made one space, ends trimmed); values
+-- are compared ignoring case and the first by code point names the group; a blank value, or one that can't be a group
+-- name (over 60 characters, control or bidi characters), makes no group; a value whose name is already a group is
+-- skipped (its group is left alone). Each new group's members are the people with that value. All or nothing: the
+-- 500-group limit is checked first. Returns {groups, members, skipped}.
 create function public.make_photo_groups_from_column(p_actor uuid, p_job_id uuid, p_column text) returns jsonb
 language plpgsql security definer
 set search_path = ''
@@ -1186,29 +1226,25 @@ begin
   end if;
   v_previous := app.act_for(p_actor, v_studio);
   perform app.assert_job_open(p_job_id);
-  -- Every roster column whose values name a group (C3; ADR 0030, call 9): the class (or team), grade, first name, last
-  -- name and student ID. The API's words. Parent email and the two yes/no flags aren't offered (call 9).
-  if coalesce(p_column, '') not in ('class', 'grade', 'firstName', 'lastName', 'studentId') then
-    raise exception 'The column is class, grade, firstName, lastName or studentId' using errcode = '22023';
+  if coalesce(p_column, '') not in ('class', 'grade') then
+    raise exception 'The column is class or grade' using errcode = '22023';
   end if;
   perform pg_advisory_xact_lock(hashtextextended('photo_groups:' || p_job_id::text, 0));
 
   -- One row per distinct value (ignoring case), with its people and whether a group already has its name.
   for r in
     with vals as (
-      select c.id as child_id, btrim(case p_column
-          when 'class' then k.name
-          when 'grade' then c.grade
-          when 'firstName' then c.first_name
-          when 'lastName' then c.last_name
-          when 'studentId' then c.student_id
-        end) as value
+      select c.id as child_id,
+        btrim(regexp_replace(case p_column when 'class' then k.name else c.grade end, '[ \t\n\r\f\v]+', ' ', 'g'), ' ')
+          as value
       from public.children c
       left join public.job_groups k on k.id = c.group_id and k.studio_id = c.studio_id
       where c.job_id = p_job_id and c.studio_id = v_studio
     ), named as (
-      select min(v.value) as name, array_agg(v.child_id order by v.child_id) as children
-      from vals v where v.value is not null and v.value <> ''
+      select min(v.value collate "C") as name, array_agg(v.child_id order by v.child_id) as children
+      from vals v
+      where v.value is not null and char_length(v.value) between 1 and 60
+        and v.value !~ '[\u0001-\u001F\u007F-\u009F‪-‮⁦-⁩]'
       group by lower(v.value)
     )
     select n.name, n.children,
@@ -1369,7 +1405,10 @@ $$;
 
 -- ── What parents see (amends ADR 0022) ────────────────────────────────────────────────────────────────────────────
 -- photo_parent_visible as in 20261012100000, with group photos in place of class sets: a group photo only when it is
--- in a group with at least one member (C2: one in no group is seen by no one).
+-- in a group with at least one member (C2: one in no group is seen by no one). It means "some parent may see it",
+-- never "this parent may": a parent's own access is app.parent_visible_photos for their child. Never use it to
+-- authorize one parent. A member's Do not publish doesn't hide a group photo from the other members (Seenu, Oct 14);
+-- that child's own gallery stays unavailable.
 create or replace function public.photo_parent_visible(p_photo_id uuid) returns boolean
 language sql stable
 set search_path = ''

@@ -5,7 +5,7 @@
 -- changes nothing.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(187);
+select plan(188);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -335,6 +335,20 @@ select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111
 select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111111111',
   'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(9)], true) $$, 'P0001', 'card_photo',
   'nor marked again');
+-- Leftovers are given to someone or binned, never "Looks right" where they are (D156, C9). Liam's photo is put back
+-- in Leftovers for the check, then returned as it was.
+reset role;
+update public.photo_tags set place = 'leftovers', child_id = null where photo_id = pg_temp.p(1);
+set local role service_role;
+select pg_temp.as_server() as server;
+select throws_ok($$ select public.confirm_photos('11111111-1111-4111-8111-111111111111',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(1)], false) $$, 'P0001', 'leftovers_confirm',
+  'a Leftover can''t be confirmed where it is');
+reset role;
+update public.photo_tags set place = 'child', child_id = 'c1000000-0000-4000-8000-000000000002'
+  where photo_id = pg_temp.p(1);
+set local role service_role;
+select pg_temp.as_server() as server;
 
 -- ── Undoing "This is a card photo" (Seenu, answer 12): owners and admins only ────────────────────────────────────
 select throws_ok($$ select public.undo_card_photos('33333333-3333-4333-8333-333333333333',

@@ -390,6 +390,11 @@ const NAMED: Record<string, () => ApiError> = {
       "Group photos stay group photos: they are moved between groups, never given to a person.",
       TAGGING_CONFLICTS.groupPhoto,
     ),
+  leftovers_confirm: () =>
+    conflict(
+      "Leftovers are given to a person or put in the bin, not confirmed where they are.",
+      TAGGING_CONFLICTS.leftovers,
+    ),
   tagging_not_ready: () =>
     conflict(
       "Tagging can be marked reviewed once there are no Leftovers, flagged photos or blank cards to name.",

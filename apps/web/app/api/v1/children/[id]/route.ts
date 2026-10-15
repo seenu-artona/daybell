@@ -2,6 +2,7 @@ import { ApiError, type ChildInput, childPatch } from "@daybell/api";
 import { NextResponse } from "next/server";
 import { accessCodeCryptoKeys } from "@/lib/access-codes";
 import { check, handle, parseBody } from "@/lib/api";
+import { assertFunctionRegion } from "@/lib/region-guard";
 import {
   assertCanRemoveFrom,
   assertClassInJob,
@@ -17,12 +18,17 @@ import {
 } from "@/lib/roster";
 import { assertCanEditRoster, studioScope } from "@/lib/studio";
 
+export const runtime = "nodejs";
+// Names and classes of a Canadian studio's children are handled in Montréal (D113), like the rest of the roster.
+export const preferredRegion = "yul1";
+
 type Ctx = { params: Promise<{ id: string }> };
 
 /** PATCH /api/v1/children/:id — owners, admins and photographers change a child. The access code never changes. */
 export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const id = await pathId(ctx, "Child not found.");
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
   assertCanEditRoster(studio);
   const patch = await parseBody(request, childPatch);
   const current = check(
@@ -75,6 +81,7 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
 export const DELETE = handle(async (_request: Request, ctx: Ctx) => {
   const id = await pathId(ctx, "Child not found.");
   const { supabase, studio } = await studioScope();
+  assertFunctionRegion(studio.region);
   assertCanEditRoster(studio);
   const current = check(
     await supabase

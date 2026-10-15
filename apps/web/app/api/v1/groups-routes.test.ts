@@ -182,6 +182,34 @@ describe("group writes check the person, their role and the region before the bo
       expect((await (await route())(get(), ctx(id))).status).toBe(422);
     });
 
+  it("roster routes that carry names and classes run in Montréal too (D113)", async () => {
+    for (const path of [
+      "jobs/[id]/classes",
+      "classes/[id]",
+      "children/[id]",
+      "jobs/[id]/children",
+      "jobs/[id]/children/import",
+    ]) {
+      const mod = await import(`./${path}/route`);
+      expect(mod.preferredRegion, path).toBe("yul1");
+      expect(mod.runtime, path).toBe("nodejs");
+    }
+    vi.stubEnv("VERCEL_REGION", "iad1");
+    scope.mockResolvedValue({ supabase: fakeDatabase({}), studio: owner, userId: "u" });
+    const refused: [string, string, unknown][] = [
+      ["jobs/[id]/classes", "GET", undefined],
+      ["jobs/[id]/classes", "POST", { name: "4B" }],
+      ["classes/[id]", "PATCH", { name: "4B" }],
+      ["children/[id]", "PATCH", { firstName: "Maya" }],
+      ["jobs/[id]/children/import", "POST", { rows: [{ firstName: "Maya", lastName: "Johnson" }] }],
+    ];
+    for (const [path, method, body] of refused) {
+      const route = await load(path, method)();
+      const res = await route(body === undefined ? get() : json(body, method), ctx(JOB));
+      expect(res.status, `${method} ${path}`).toBe(422);
+    }
+  });
+
   it("every group route file runs in Montréal (preferredRegion yul1)", async () => {
     for (const path of [
       "jobs/[id]/photos/people",
@@ -317,10 +345,10 @@ describe("groups", () => {
     expect(body.notInGroup).toBe(4);
   });
 
-  it("makes groups from any roster column (C3), never the parent's email or a flag (call 9)", async () => {
+  it("makes groups from the class or grade only (C3 as Seenu narrowed it)", async () => {
     scope.mockResolvedValue({ supabase: db(), studio: photographer, userId: "u" });
     const route = await load("jobs/[id]/groups/from-column", "POST")();
-    for (const column of ["class", "grade", "firstName", "lastName", "studentId"]) {
+    for (const column of ["class", "grade"]) {
       groupRpc.mockResolvedValueOnce({ data: { groups: 2, members: 5, skipped: 1 }, error: null });
       const res = await route(json({ column }), ctx(JOB));
       expect(await res.json()).toEqual({ made: 2, members: 5, skipped: 1 });
@@ -330,7 +358,15 @@ describe("groups", () => {
       });
     }
     groupRpc.mockClear();
-    for (const column of ["parentEmail", "doNotPhotograph", "teacher"])
+    // Never a name or ID (Seenu, Oct 14: a group name would keep it after erasure), an email, a flag or a Teacher.
+    for (const column of [
+      "firstName",
+      "lastName",
+      "studentId",
+      "parentEmail",
+      "doNotPhotograph",
+      "teacher",
+    ])
       expect((await route(json({ column }), ctx(JOB))).status).toBe(400);
     expect(groupRpc).not.toHaveBeenCalled();
   });
