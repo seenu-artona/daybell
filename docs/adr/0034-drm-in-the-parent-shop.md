@@ -1,6 +1,6 @@
 # 0034 — DRM in the parent shop's large view
 
-- Status: Proposed with UI round 8 (branch `ui/round8-shop-drm`, stacked on `ui/round7-shop` with
+- Status: Proposed with UI round 8 (amended Oct 15 by the round 8 review fixes, below) (branch `ui/round8-shop-drm`, stacked on `ui/round7-shop` with
   `spike/drm-test-page` (PR #48) merged in; B5). Seenu asked on Oct 14 for every decision needed to be made overnight;
   each one is listed under "Calls" and marked **Decided by Claude overnight — please review**. Nothing is merged or
   deployed; Seenu releases (CLAUDE.md rule 6).
@@ -63,8 +63,8 @@ page re-exports them.
 layer at `/opt/bin`. The build downloads FFmpeg **7.0.2** static GPL for linux-arm64 with libx264 (John Van Sickle's
 build as published in release **`b6.1.1`** of eugeneware/ffmpeg-static, last modified Nov 14, 2025), checking the `.gz`
 and the binary against pinned SHA-256s, plus its GPL licence and build notes (also pinned); copies Shaka Packager's
-arm64 binary from the pinned npm package (the spike's hash); writes the zip with fixed times and order (the same
-SHA-256 every build, checked twice locally: `277210e0…1727`); and fails on any mismatch or if the layer and function
+arm64 binary from the pinned npm package (the spike's hash); writes the zip with fixed times, modes and order
+(the zip's own hash isn't pinned: it depends on the zip tool's version; every file in it is); and fails on any mismatch or if the layer and function
 would pass Lambda's 250 MB unzipped (it is about 61 MB). The deploy workflow publishes and attaches it when its new
 input is ticked (Seenu approves the `staging` environment). The pins live twice, in the layer script and in the
 pipeline (`DRM_BINARY_SHA256`), and a test keeps them equal.
@@ -79,7 +79,7 @@ any form. Checked here with the same binaries: decrypted PSNR was infinite (iden
 
 - One content key per photo: group photos and photos shown in several groups make per-child or per-group keys
   impossible. Key IDs are random v4 GUIDs; one Axinom license per large view opened.
-- The worker asks KMS key `alias/daybell-{env}-ca-drm` (ca-central-1) for a 16-byte data key with the encryption context
+- The worker asks the KMS key `daybell-{env}-ca-drm` (ca-central-1; its key ARN in the settings, never the alias) for a 16-byte data key with the encryption context
   `{studio, photo, key}` and sends only the wrapped copy. The worker's role may `GenerateDataKey` only with exactly those
   context keys, and never `Decrypt`.
 - The token route unwraps with `Decrypt` and the same context, through a new Vercel OIDC role (`AWS_DRM_ROLE_ARN`) whose
@@ -90,8 +90,8 @@ any form. Checked here with the same binaries: decrypted PSNR was infinite (iden
 
 ## Storage keys
 
-`{studio}/{job}/{photo}/drm.mp4`, `drm.mpd`, `drm.m3u8`, `drm-video.m3u8` join `PHOTO_VARIANTS` (ids only, never a
-name). The lifecycle rule, the bin's purge and "delete every version under the prefix" cover them already.
+**Amended (review H1):** `{studio}/{job}/{photo}/drm/{keyId}.mp4`, `.mpd`, `.m3u8`, `-video.m3u8` (`drmObjectKey`;
+ids only, never a name), not in `PHOTO_VARIANTS`. The lifecycle rule, the bin's purge and "delete every version under the prefix" cover them already.
 
 ## Entitlement and tokens
 
@@ -104,7 +104,8 @@ session, another group's, binned, flagged, card, unprocessed or a closed shop's 
 `Retry-After` (to the end of the minute or the UTC day), nothing counted.
 
 Routes (Node, `preferredRegion = "yul1"`, `callShopFunction` with its region check, `assertStorageRegion` before S3,
-counted against the shop's 120/min network budget before anything else, `?gallery=`, never cached):
+counted against **their own** network budget before anything else (300 a minute per network, 3,000 per /24 or /48;
+review: tester #4), `?gallery=`, never cached):
 
 - `GET /api/v1/shop/drm` → `{enabled, licenseUrls|null, fairplayCertificateUrl|null, codec}`.
 - `GET /api/v1/shop/drm/fairplay-certificate` → the DER bytes (C10).
@@ -141,8 +142,8 @@ window losing focus, the page hidden, Shift with Cmd/Win or Ctrl held (and 1.5 s
 printing, the context menu. On a computer (`(hover: hover) and (pointer: fine)`) every `ProtectedImage` (grid, viewer
 fallback, pose picker, bag, cover) becomes an ink panel with words (`aria-hidden`), its alt emptied, and one polite
 status says "Photo hidden while a screenshot may be taken. It comes back in a moment." for the page; keyboard signs
-empty the clipboard, best effort, **never** the window losing focus (C14). Phones and tablets keep the blur and their
-clipboard is never touched. The DRM video itself isn't blacked out by Blackout: hardware DRM does that.
+empty the clipboard, best effort, **never** the window losing focus (C14). Phones and tablets keep round 7's blur exactly (review #6c)
+and their clipboard is never touched. Amended by the review fixes: only pure modifier chords count, never in a field. The DRM video itself isn't blacked out by Blackout: hardware DRM does that.
 
 ## CSP, Permissions-Policy and CORS
 
@@ -223,7 +224,8 @@ the privacy notice must say so, C9) and the token (no personal data).
   `drm-photo.test.tsx` (fake Shaka: shown, label, loading words once, 8-second fallback, two failures, never falling
   back once shown, one player per viewer, a token per license request, WebP cases, lazy probing),
   `drm-player.test.ts`.
-- pgTAP `033_shop_drm` (82 assertions): grants and RLS, the entitlement equal to `parent_visible_photos` for every
+- pgTAP `033_shop_drm` (103 assertions after the review fixes; the per-studio switch, the cron's undo, a US database and a
+  US studio added): grants and RLS, the entitlement equal to `parent_visible_photos` for every
   photo and child, member yes and non-member no, closed and cross-studio not found, the switch off by default (and with
   no settings), owner-only and kept, stale results ignored, the minute and day windows, the cron's three outcomes,
   reprocessing and purging, no events, the wrapped key in its own table only. `010` and `021` updated.
@@ -231,7 +233,35 @@ the privacy notice must say so, C9) and the token (no personal data).
   within 8 s, two failures then the WebP at once, Blackout on the computer, no CSP violations. Not run here (no local
   Supabase or Playwright browser); CI runs it.
 
-Totals on this branch: `pnpm check` passes (2,167 unit and jsdom tests); pgTAP 2,319 ok, 0 not ok, 0 errors.
+Totals on this branch: `pnpm check` passes (2,191 unit and jsdom tests after the review fixes); pgTAP 2,340 ok, 0
+not ok, 0 errors; the real-tools packaging test passes with the pinned x64 builds (decrypted PSNR 36.6 dB).
+
+## Review fixes (Oct 15)
+
+The security, code and tester reviews of round 8, fixed with tests in four commits on this branch (no history
+rewritten). Every decision made in them is a call below, marked **Decided by Claude overnight — please review**.
+
+| Finding | Fix |
+|---|---|
+| Code H1, security L1: overlapping or stale packaging runs could leave a clip encrypted with a key the database doesn't hold | Each run writes `drm/{keyId}.*`; the manifest route reads and signs only the database key's files and refuses a manifest whose `cenc:default_KID` or HLS key lines name another key (or a missing file) as `shop.drmUnavailable`; a new request deletes the photo's earlier `drm/` files before queueing; a purge removes the folder. Tested with overlapping and stale runs |
+| Code #2 (a11y) | "Loading photo" and its timer go when a photo is shown or falls back; a fast photo never shows it |
+| Code #3 | Listeners before `load()`; only a presented frame counts where `requestVideoFrameCallback` exists; a refused `play()` before any frame is a failure |
+| Tester #1 | One 8-second budget per photo from the moment it is shown, covering every step; DRM fetches take the viewer's signal and an 8-second timeout |
+| Tester #2 | After a fallback, every request is aborted and the player destroyed; a later license request never asks for a token |
+| Tester #3/#7, code #10 | Blackout: pure modifier chords only; never in a field; phones back to round 7 exactly; independent of the DRM switch |
+| Tester #4 | The DRM routes' own request bucket (300/min, 3,000 per /24 or /48); a 300 ms hold while swiping |
+| Tester #5 | A failed `GET /shop/drm` isn't remembered; asked again next time; counts as a failure |
+| Tester #6 | "No hardware DRM" and "not on for this gallery" are remembered for the tab: the WebP at once, no stand-in |
+| Security M1/M2 | No DRM secrets or roles on Preview; a per-studio switch (`shop_drm_studio_ids`) so staging can run the device matrix on one test studio |
+| Security L2/L3/L4 | KMS client cache per role and region; the key ARN required and compared before KMS is asked; an explicit key policy; the deploy role's configuration change conditioned on the layer; a pgTAP US-studio case |
+| Code #4, tester #8 | The cron sends in batches of 10 and undoes the marks of unsent messages (`photos_drm_unsent`), so retries count only real sends; skipped with under a minute left; retries are daily |
+| Code #5 | The backfill index leaves card photos out; a US database packages nothing |
+| Code #6 | The CI check proves 10 frames (one IDR, then P), High level 4.0, BT.709 limited, the first sample encrypted, and the strict rewrites on the real output; PSNR bar 32 dB (measured 36.6) |
+| Tester #10 | Strict HLS: exactly the packager's master (one variant) and media playlist |
+| Code #7, #8 | No pinned zip hash claimed; Shaka's licence pinned; the deploy step keeps other layers |
+| Code #9 | One probe module (`lib/shop/drm-probes.ts`, `DRM_CODEC_MIME`); the test page re-exports it |
+| Tester #9 | Small thumbnails show an icon only in the Blackout panel; the words stay in the page's status |
+| Tester (e2e) | One studio for the fallback tests; console errors fail them; a setup that never answers falls back within 8 s |
 
 ## Calls
 
@@ -284,10 +314,39 @@ Totals on this branch: `pnpm check` passes (2,167 unit and jsdom tests); pgTAP 2
 32. **The shop's DRM refusal has words** (`shop.refusals.drmUnavailable`) though the viewer never shows it (silent
     fallback): every shop refusal must have words.
 
+**Decided by Claude overnight — please review** (the review fixes, Oct 15):
+
+33. **Key-scoped files** (`drm/{keyId}.*`): orphans from a run that lost a race stay until the photo is reprocessed (its
+    `drm/` folder is cleared before a new request) or purged; nothing serves them.
+34. **Blackout's chord rule**: a Shift+Cmd/Ctrl chord is a screenshot sign only while no other key arrives during it.
+    If a browser ever delivers the 3/4/5 of a macOS screenshot, that capture isn't darkened (macOS swallows them today).
+35. **Never in a field**: chords typed in an input, textarea, select or contenteditable never count.
+36. **Phones back to round 7 now**: no context-menu, Ctrl+Shift or Cmd/Ctrl+P blur on phones and tablets.
+37. **Blackout stays on computers whatever the DRM switch says**, including during checkout: the window losing focus
+    (another app, a password manager, Stripe's page in another window) darkens the shop's photos until it comes back.
+38. **DRM's own request bucket**: 300 requests a minute per network and 3,000 per /24 or /48 for the four DRM routes,
+    apart from the shop's 120 and 1,200; a protected large view costs about four extra requests (setup once per gallery,
+    a manifest or two, a token per license).
+39. **300 ms hold while swiping** before a photo's clip is asked for (not the first photo).
+40. **Placeholder behaviour**: a protected photo shows its 400 px proof until its frame is presented; where the tab
+    already knows the WebP will be shown, it shows at once with no stand-in.
+41. **A failed setup read isn't remembered** and counts toward the two-failure rule; "not on" is remembered for the
+    tab (until a reload).
+42. **One 8-second budget per photo**, from when it is shown (the swipe hold included), covering every step.
+43. **Per-studio switch**: `set_shop_drm(enabled, note, studio_ids)`; null = every studio; up to 100 studios of the
+    database; each change kept with the note.
+44. **No DRM secrets or roles on Preview**; the device matrix runs on staging, switched on for Seenu's test studio.
+45. **The settings name the KMS key ARN, not its alias**, so the token route can compare a wrapped key's KMS key with
+    this environment's before asking KMS.
+46. **Cron retries are daily** (the daily cron is the only re-queuer): "an hour" is a lower bound. Messages are marked
+    before sending (a fast worker must find them requested) and unsent ones undone.
+47. **The CI packaging check's PSNR bar is 32 dB** (measured 36.6 dB with the synthetic gradient), and the strict
+    manifest rewrites run on the real packager output.
+
 ## Risks
 
 - **R1 — untested changes from the spike.** Real photos, one key per photo, P frames instead of all-intra, KMS keys and
-  per-photo tokens haven't met a real device. The **device matrix on this branch's Preview is the gate** before the
+  per-photo tokens haven't met a real device. The **device matrix on staging, switched on for Seenu's test studio only, is the gate** before the
   switch goes on anywhere parents are.
 - **R2 — Safari autoplay after async steps.** `play()` now comes after a token fetch and a KMS unwrap, further from the
   parent's tap than on the spike's page; Safari may refuse a muted play it considers unprompted. Watch for the 8-second
@@ -317,7 +376,7 @@ Totals on this branch: `pnpm check` passes (2,167 unit and jsdom tests); pgTAP 2
 
 ## Follow-ups
 
-- The device matrix on Preview (Seenu): Windows Chrome/Edge (Widevine L1 / PlayReady SL3000), Android Chrome (L1),
+- The device matrix on staging, for Seenu's test studio only (Seenu): Windows Chrome/Edge (Widevine L1 / PlayReady SL3000), Android Chrome (L1),
   Mac and iPhone Safari (FairPlay), an external monitor, Firefox, a phone without hardware DRM.
 - `prevent_drm_message_reuse` / `jti` once Axinom's schema is confirmed (C4).
 - The parent privacy notice: IP addresses to Axinom (C9), the device cookie (ADR 0022).
@@ -330,17 +389,17 @@ Totals on this branch: `pnpm check` passes (2,167 unit and jsdom tests); pgTAP 2
 
 1. **Axinom** (B3): settle the plan, price and DPA; create the shop's communication key (separate from the spike's test
    key); FairPlay: Apple's FPS certificate and Axinom's FairPlay setup.
-2. **AWS** (`docs/aws-staging-photos.md` §14): the KMS key `alias/daybell-staging-ca-drm`; the worker role's `drm`
-   policy; the deploy role's layer rights; run **Deploy image worker (staging)** with "Publish the DRM tools layer"
-   ticked; the Lambda's `DRM_KMS_KEY_ARN`; the `daybell-staging-ca-drm` role; `*/drm*` for the web role; the bucket's
+2. **AWS** (`docs/aws-staging-photos.md` §14): the KMS key `alias/daybell-staging-ca-drm` with its explicit key policy;
+   the worker role's `drm` policy; the deploy role's layer rights (UpdateFunctionConfiguration conditioned on the layer); run **Deploy image worker (staging)** with "Publish the DRM tools layer"
+   ticked; the Lambda's `DRM_KMS_KEY_ARN`; the `daybell-staging-ca-drm` role; `*/drm/*` for the web role; the bucket's
    CORS.
-3. **Vercel** (Production = staging, and Preview for the device matrix): `DRM_KMS_KEY_ARN_CA`, `AWS_DRM_ROLE_ARN`,
+3. **Vercel** (Production = staging only; never Preview): `DRM_KMS_KEY_ARN_CA` (the key ARN), `AWS_DRM_ROLE_ARN`,
    `SHOP_DRM_COM_KEY_ID`, `SHOP_DRM_COM_KEY` (Sensitive), `SHOP_DRM_LICENSE_PREFIX`, optionally
    `SHOP_DRM_FAIRPLAY_CERT`; redeploy.
 4. **Check packaging** (§14.10): upload photos or wait for the backfill; `drm_status = 'ready'` grows; the four files
    are in S3.
-5. **Turn it on for staging**: `select public.set_shop_drm(true, 'Staging: device matrix');` in the Canadian
-   project's SQL editor.
-6. **Device matrix** on this branch's Preview (Follow-ups); turn it off again with `set_shop_drm(false, …)` if anything
-   looks wrong.
+5. **Turn it on for your test studio only**: `select public.set_shop_drm(true, 'Staging: device matrix',
+   array['<studio id>'::uuid]);` in the Canadian project's SQL editor (§14.9).
+6. **Device matrix** on staging with that studio's codes (Follow-ups); turn it off again with `set_shop_drm(false, …)`
+   if anything looks wrong; widen to every studio (no list) only after it passes.
 7. **Before production**: the legal check (C13), the privacy notice (C9), production's own key, roles, layer and tenant.

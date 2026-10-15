@@ -75,7 +75,8 @@ describe("on a computer: Blackout (C1)", () => {
     const removed = vi.spyOn(window, "removeEventListener");
     await render();
     // The set is re-made once the pointer is known (phone first, then computer); one is listening at a time.
-    const count = (spy: typeof added) => spy.mock.calls.filter(([type]) => type === "keydown").length;
+    const count = (spy: typeof added) =>
+      spy.mock.calls.filter(([type]) => type === "keydown").length;
     expect(count(added) - count(removed)).toBe(1);
   });
 
