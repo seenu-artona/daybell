@@ -1,6 +1,6 @@
 "use client";
 
-import type { Group } from "@daybell/api";
+import type { Class } from "@daybell/api";
 import type { GroupLabel } from "@daybell/core";
 import { Button } from "@daybell/ui";
 import { ChevronRight, Pencil } from "lucide-react";
@@ -50,11 +50,11 @@ export function ClassesPanel({
   onClose,
   onRename,
 }: {
-  groups: readonly Group[];
+  groups: readonly Class[];
   word: GroupLabel;
   focusKey: string | null;
   onClose: () => void;
-  onRename: (group: Group) => void;
+  onRename: (group: Class) => void;
 }) {
   const t = useTranslations("app.people");
   return (

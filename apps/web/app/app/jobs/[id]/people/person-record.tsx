@@ -18,7 +18,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
 import { OrderStatusBadge, orderMoney } from "../../../orders/order-badges";
 import { MENU_ROW, Popover } from "../../../popover";
-import { tabHref } from "../tabs";
+import { groupHref, groupsHref, tabHref } from "../tabs";
 import { OrderedPill } from "./people-list";
 
 const LINK =
@@ -54,7 +54,7 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
  * pill, Edit (roster editors), ⋯ (Remove, while the job is a draft) and the button back to the full list. Photos (with
  * Add photos for roster editors) and Orders (people who see orders; GET /orders?childId=, in Montréal like /orders) on
  * the left; Details (Class, Grade when there is one, Student ID, the parent's email masked like p•••@gmail.com, and
- * when they were photographed) and their QR card (access code, when it was first printed, Print again) on the right.
+ * when they were photographed), the photo groups they are in (D156; each opens the group's page) and their QR card (access code, when it was first printed, Print again) on the right.
  * Only ids go in addresses (D113).
  */
 export function PersonRecord({
@@ -160,7 +160,7 @@ export function PersonRecord({
             {name}
           </h2>
           <p className="m-0 mt-0.5 flex flex-wrap items-center gap-2 text-body text-muted">
-            <span>{child.group?.name ?? tr("noGroup", { group: word })}</span>
+            <span>{child.class?.name ?? tr("noGroup", { group: word })}</span>
             {seesOrders ? (
               <>
                 <span aria-hidden="true">·</span>
@@ -289,7 +289,7 @@ export function PersonRecord({
             <dl className="m-0">
               <Row
                 label={tr("columns.group", { group: word })}
-                value={child.group?.name ?? tr("noGroup", { group: word })}
+                value={child.class?.name ?? tr("noGroup", { group: word })}
               />
               {child.grade ? <Row label={tr("columns.grade")} value={child.grade} /> : null}
               <Row label={tr("columns.studentId")} value={child.studentId ?? t("none")} />
@@ -301,6 +301,31 @@ export function PersonRecord({
                 <Row label={t("photographed")} value={day(facts.photographedAt)} />
               ) : null}
             </dl>
+          </Part>
+          <Part
+            title={t("groups")}
+            link={
+              <Link href={groupsHref(job.id)} className={LINK}>
+                {t("groupsLink")}
+              </Link>
+            }
+          >
+            {child.groups.length === 0 ? (
+              <p className="m-0 text-body text-muted">{t("noGroups")}</p>
+            ) : (
+              <ul className="m-0 flex list-none flex-col p-0">
+                {child.groups.map((g) => (
+                  <li key={g.id}>
+                    <Link
+                      href={groupHref(job.id, g.id)}
+                      className="inline-flex min-h-11 items-center font-semibold text-ink no-underline hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                    >
+                      {g.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Part>
           <Part
             title={t("qrCard")}

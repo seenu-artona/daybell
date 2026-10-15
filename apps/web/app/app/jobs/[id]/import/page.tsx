@@ -362,7 +362,7 @@ export default function ImportRosterPage() {
             {[
               t("summary.add", { count: plan?.added ?? 0 }),
               t("summary.update", { count: plan?.updated ?? 0 }),
-              t("summary.groups", { count: plan?.groupsAdded ?? 0, group: word }),
+              t("summary.groups", { count: plan?.classesAdded ?? 0, group: word }),
               t("summary.duplicates", { count: plan?.duplicates ?? 0 }),
               t("summary.invalid", { count: invalidCount }),
             ].join(" · ")}
@@ -400,7 +400,7 @@ export default function ImportRosterPage() {
                 <TableRow>
                   <TableHead numeric>{t("columns.row")}</TableHead>
                   <TableHead>{t("columns.name")}</TableHead>
-                  <TableHead>{t("columns.group", { group: word })}</TableHead>
+                  <TableHead>{t("columns.class", { group: word })}</TableHead>
                   <TableHead>{t("columns.studentId")}</TableHead>
                   <TableHead>{t("columns.grade")}</TableHead>
                   <TableHead>{t("columns.parentEmail")}</TableHead>
@@ -415,7 +415,7 @@ export default function ImportRosterPage() {
                     <TableCell className="font-semibold">
                       {`${r.draft.firstName} ${r.draft.lastName}`.trim()}
                     </TableCell>
-                    <TableCell>{r.draft.group ?? ""}</TableCell>
+                    <TableCell>{r.draft.class ?? ""}</TableCell>
                     <TableCell>{r.draft.studentId ?? ""}</TableCell>
                     <TableCell>{r.draft.grade ?? ""}</TableCell>
                     <TableCell>{r.draft.parentEmail ?? ""}</TableCell>

@@ -16,7 +16,7 @@ const child = (n: number) =>
     id: `c${n}`,
     firstName: "Kid",
     lastName: `${n}`,
-    group: null,
+    class: null,
     doNotPhotograph: false,
   }) as unknown as Child;
 

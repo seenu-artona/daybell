@@ -3,11 +3,12 @@ import { subjectChipFrom, subjectChipFromSaved, subjectFilters, subjectsHref } f
 
 const BASE = "/app/jobs/j1/people";
 const CLASS = "d0000000-0000-4000-8000-000000000001";
+const GROUP = "e0000000-0000-4000-8000-000000000001";
 const CHILD = "c0000000-0000-4000-8000-000000000001";
 const from = (query: string, seesOrders = true) =>
   subjectChipFrom(new URLSearchParams(query), { seesOrders });
 
-describe("Subjects chips (D147, D153)", () => {
+describe("Subjects chips (D147, D153, D156)", () => {
   it("reads one chip from the address and round-trips it with the open child", () => {
     for (const query of [
       "show=notPhotographed",
@@ -18,6 +19,7 @@ describe("Subjects chips (D147, D153)", () => {
       "show=doNotPublish",
       "show=noClass",
       `class=${CLASS}`,
+      `group=${GROUP}`,
     ]) {
       const { chip, clean } = from(query);
       expect(clean).toBe(false);
@@ -30,7 +32,13 @@ describe("Subjects chips (D147, D153)", () => {
   });
 
   it("unknown words, both parameters or a class that isn't an id are All, and clean the address", () => {
-    for (const query of ["show=ordered", "class=4B", `show=noPhotos&class=${CLASS}`])
+    for (const query of [
+      "show=ordered",
+      "class=4B",
+      "group=Choir",
+      `show=noPhotos&class=${CLASS}`,
+      `class=${CLASS}&group=${GROUP}`,
+    ])
       expect(from(query)).toEqual({ chip: { kind: "all" }, clean: true });
   });
 
@@ -45,12 +53,13 @@ describe("Subjects chips (D147, D153)", () => {
 
   it("each chip is one of core's filters", () => {
     expect(subjectFilters({ kind: "all" })).toEqual([]);
-    expect(subjectFilters({ kind: "show", show: "noClass" })).toEqual([{ kind: "noGroup" }]);
+    expect(subjectFilters({ kind: "show", show: "noClass" })).toEqual([{ kind: "noClass" }]);
     expect(subjectFilters({ kind: "show", show: "notOrdered" })).toEqual([{ kind: "notOrdered" }]);
     expect(subjectFilters({ kind: "show", show: "notPhotographed" })).toEqual([
       { kind: "notPhotographed" },
     ]);
-    expect(subjectFilters({ kind: "class", id: CLASS })).toEqual([{ kind: "group", id: CLASS }]);
+    expect(subjectFilters({ kind: "class", id: CLASS })).toEqual([{ kind: "class", id: CLASS }]);
+    expect(subjectFilters({ kind: "group", id: GROUP })).toEqual([{ kind: "group", id: GROUP }]);
     expect(subjectFilters({ kind: "grade", grade: "K" })).toEqual([{ kind: "grade", value: "K" }]);
   });
 
@@ -58,6 +67,10 @@ describe("Subjects chips (D147, D153)", () => {
     expect(subjectChipFromSaved({ key: "class", value: CLASS })).toEqual({
       kind: "class",
       id: CLASS,
+    });
+    expect(subjectChipFromSaved({ key: "group", value: GROUP })).toEqual({
+      kind: "group",
+      id: GROUP,
     });
     expect(subjectChipFromSaved({ key: "doNotPublish", value: null })).toEqual({
       kind: "show",

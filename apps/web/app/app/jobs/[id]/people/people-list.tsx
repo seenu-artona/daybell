@@ -71,11 +71,11 @@ export function OrderedPill({ hasPaidOrder }: { hasPaidOrder: boolean | null | u
 
 /**
  * Subjects' list (D153, amending D147): one flat table in a white list card whose toolbar holds the chips and the
- * search; 56px one-line rows with the Name and its small tags, the Class, the Photos count and, for people who see
- * orders, an Ordered pill; the card's footer counts the roster. A click on a row (or its name link, the keyboard
- * target) opens the person: the list folds to its Name column in the same card, with the same chips and search, and
- * the person fills the rest (`folded`). The open row is grey with a 3px ink bar on its left and aria-current; ↑ and ↓
- * on a name move to the person above or below.
+ * search; 56px one-line rows with the Name and its small tags, the Class (a roster field, C1), the person's photo
+ * Groups (D156), the Photos count and, for people who see orders, an Ordered pill; the card's footer counts the
+ * roster. A click on a row (or its name link, the keyboard target) opens the person: the list folds to its Name
+ * column in the same card, with the same chips and search, and the person fills the rest (`folded`). The open row is
+ * grey with a 3px ink bar on its left and aria-current; ↑ and ↓ on a name move to the person above or below.
  */
 export function PeopleList({
   rows,
@@ -200,6 +200,7 @@ export function PeopleList({
               <TableHead className="h-11 w-40 py-0">
                 {tr("columns.group", { group: word })}
               </TableHead>
+              <TableHead className="h-11 w-48 py-0">{t("columns.groups")}</TableHead>
               <TableHead numeric className="h-11 w-24 py-0">
                 {t("columns.photos")}
               </TableHead>
@@ -219,7 +220,12 @@ export function PeopleList({
                   </span>
                 </TableCell>
                 <TableCell className="py-0 whitespace-nowrap">
-                  {child.group?.name ?? noGroup}
+                  {child.class?.name ?? noGroup}
+                </TableCell>
+                <TableCell className="max-w-48 truncate py-0 text-body text-muted">
+                  {child.groups.length > 0
+                    ? child.groups.map((g) => g.name).join(", ")
+                    : t("noGroups")}
                 </TableCell>
                 <TableCell numeric className="py-0">
                   {child.photoCount}

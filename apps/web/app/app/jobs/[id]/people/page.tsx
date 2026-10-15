@@ -1,6 +1,6 @@
 "use client";
 
-import { type Child, type Group, QR_CARD_HEADERS } from "@daybell/api";
+import { type Child, type Class, QR_CARD_HEADERS } from "@daybell/api";
 import {
   applyFilters,
   canSeeOrders,
@@ -24,6 +24,7 @@ import { ChildForm, GroupForm } from "../child-form";
 import { useJob } from "../job-context";
 import { JobSection } from "../job-section";
 import { LiveNote } from "../live-note";
+import { usePhotoGroups } from "../photos/use-photo-groups";
 import { RemoveChildDialog } from "../remove-child-dialog";
 import { tabHref } from "../tabs";
 import { ClassesPanel, ClassesRow, renameButtonId } from "./classes-panel";
@@ -49,8 +50,8 @@ export default function PeoplePageRoute() {
  * A job's Subjects (D153, amending D137, D138, D144 and D147): white "Print ▾" and "Add subjects ▾" at the right end of
  * the job's tab row; then one flat list in a white list card whose toolbar has the chips (All, Not photographed, Not
  * ordered for people who see orders, then the person's own through "+ Add filter": a class, No class, Possible
- * duplicates, No photos, Do not photograph, Do not publish, and grades kept in this browser) and the search (never
- * sent or put in the address, D113); Name with small tags, Class, Photos and Ordered columns; the footer counts the
+ * duplicates, No photos, Do not photograph, Do not publish, a photo group (D156), and grades kept in this browser) and the search (never
+ * sent or put in the address, D113); Name with small tags, Class, Groups (D156), Photos and Ordered columns; the footer counts the
  * roster. Opening a person (?child=<id>, an id only) folds the list to its Name column in the same card and shows their
  * record beside it. Under the list, roster editors get a "Classes N ›" row that opens the job's classes in the floating
  * panel, each with Rename (D147). Add and edit keep the existing child form dialog (D133); Upload a list is the Import
@@ -68,6 +69,7 @@ function PeoplePage() {
   const word = groupLabel(job.type);
   const base = tabHref(job.id, "people");
   const roster = useRoster(job.id);
+  const photoGroups = usePhotoGroups(job.id);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
   const [editing, setEditing] = useState<Child | "new" | null>(null);
@@ -80,14 +82,15 @@ function PeoplePage() {
   const opener = useRef<string | null>(null);
   // The classes panel (roster editors, D147): open with a focus key, and the class being renamed.
   const [classesFocus, setClassesFocus] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<Group | null>(null);
+  const [renaming, setRenaming] = useState<Class | null>(null);
   const classesRow = useRef<HTMLButtonElement>(null);
 
   const grades = useMemo(() => gradeOptions(roster.rows ?? []), [roster.rows]);
   const chips = useSubjectChips({
     base,
     jobId: job.id,
-    groups: roster.groups,
+    classes: roster.classes,
+    photoGroups: photoGroups.groups,
     grades,
     loaded: roster.rows !== null && !roster.failed && !roster.loadingMore,
     word,
@@ -196,8 +199,8 @@ function PeoplePage() {
   const duplicates = summary?.duplicates ?? 0;
   // Until the job's summary has loaded, the duplicates are unknown: the footer leaves them out rather than say "none".
   const footer = summary
-    ? t("footer", { count: roster.total, groups: roster.groups.length, group: word, duplicates })
-    : t("footerCounting", { count: roster.total, groups: roster.groups.length, group: word });
+    ? t("footer", { count: roster.total, groups: roster.classes.length, group: word, duplicates })
+    : t("footerCounting", { count: roster.total, groups: roster.classes.length, group: word });
 
   return (
     <JobSection
@@ -251,7 +254,7 @@ function PeoplePage() {
       panel={
         classesFocus !== null && canEdit ? (
           <ClassesPanel
-            groups={roster.groups}
+            groups={roster.classes}
             word={word}
             focusKey={classesFocus}
             onClose={closeClasses}
@@ -312,11 +315,11 @@ function PeoplePage() {
         </div>
       ) : null}
 
-      {canEdit && roster.rows && roster.groups.length > 0 ? (
+      {canEdit && roster.rows && roster.classes.length > 0 ? (
         <div className="mt-3">
           <ClassesRow
             ref={classesRow}
-            count={roster.groups.length}
+            count={roster.classes.length}
             word={word}
             open={classesFocus !== null}
             onOpen={openClasses}
@@ -375,7 +378,7 @@ function PeoplePage() {
           onClose={() => setPrinting(false)}
           jobId={job.id}
           roster={roster.rows}
-          groups={roster.groups}
+          groups={roster.classes}
           word={word}
           onPrinted={() => {
             refreshSummary();
