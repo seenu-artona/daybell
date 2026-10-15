@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // region before any storage), another studio's batches and photos are simply not found (row-level security, faked
 // here), uploads complete only from what storage has, and the internal routes accept only signed or cron requests.
 vi.mock("server-only", () => ({}));
-const { scope, writeRpc, systemRpc, storage, afterCallbacks } = vi.hoisted(() => ({
+const { scope, writeRpc, systemRpc, storage, afterCallbacks, queueDrm } = vi.hoisted(() => ({
   afterCallbacks: [] as (() => Promise<void>)[],
+  queueDrm: vi.fn(),
   scope: vi.fn(),
   writeRpc: vi.fn(),
   systemRpc: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock("@/lib/photo-storage", () => ({
   photoStorage: () => storage,
   isLocalDriver: () => false,
   queuePhotoForProcessing: vi.fn(),
+  queueDrmForProcessing: queueDrm,
   localStorageDriver: () => null,
 }));
 
@@ -153,6 +155,7 @@ afterEach(() => {
   scope.mockReset();
   writeRpc.mockReset();
   systemRpc.mockReset();
+  queueDrm.mockReset();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
@@ -582,6 +585,8 @@ describe("the image worker's routes accept signed requests only", () => {
       byteSize: 10,
       attempt: 2,
       studioName: "North Peak",
+      drmStatus: null,
+      drmAttempt: 0,
     });
     expect(systemRpc).toHaveBeenCalledWith("ca", "photo_for_worker", { p_photo_id: PHOTO });
   });
@@ -647,6 +652,147 @@ describe("the image worker's routes accept signed requests only", () => {
     });
     expect((await result(await signed("POST", `${path}/result`, old))).status).toBe(400);
     expect(systemRpc).not.toHaveBeenCalled();
+  });
+
+  describe("DRM packaging (ADR 0034)", () => {
+    const ARN = "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
+    const KEY_ID = "2b0e6a4c-9f6e-4f0a-8d2b-3c4d5e6f7a8b";
+    const wrapped = Buffer.from("k".repeat(184)).toString("base64");
+    const drm = async (req: Request) =>
+      (await import("./internal/photo-worker/photos/[id]/drm/route")).POST(req, ctx(PHOTO));
+    const ready = {
+      status: "ready",
+      attempt: 3,
+      keyId: KEY_ID,
+      wrappedKey: wrapped,
+      kmsKeyArn: ARN,
+      width: 1600,
+      height: 1066,
+      bytes: 61234,
+    };
+    const S3_ENV = {
+      STORAGE_DRIVER: "s3",
+      AWS_REGION: "ca-central-1",
+      PHOTO_BUCKET_CA: "daybell-staging-ca-photos",
+      PHOTO_QUEUE_URL_CA: "https://sqs.ca-central-1.amazonaws.com/123456789012/q",
+      AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/web",
+    };
+
+    it("reads the photo's DRM request with it", async () => {
+      systemRpc.mockResolvedValueOnce({
+        data: {
+          id: PHOTO,
+          studio_id: STUDIO,
+          job_id: JOB,
+          status: "ready",
+          sha256: "a".repeat(64),
+          byte_size: 10,
+          attempt: 1,
+          studio_name: "North Peak",
+          drm_status: "requested",
+          drm_attempt: 3,
+        },
+        error: null,
+      });
+      const res = await read(await signed("GET", path));
+      expect((await res.json()).photo).toMatchObject({ drmStatus: "requested", drmAttempt: 3 });
+    });
+
+    it("records a signed clip with the wrapped key as bytea, logging nothing about it", async () => {
+      const logs = (["log", "info", "warn", "error"] as const).map((m) =>
+        vi.spyOn(console, m).mockImplementation(() => {}),
+      );
+      systemRpc.mockResolvedValue({ data: true, error: null });
+      const res = await drm(await signed("POST", `${path}/drm`, JSON.stringify(ready)));
+      expect(await res.json()).toEqual({ recorded: true });
+      expect(systemRpc).toHaveBeenCalledWith("ca", "record_photo_drm_result", {
+        p_photo_id: PHOTO,
+        p_attempt: 3,
+        p_key_id: KEY_ID,
+        p_wrapped_key: `\\x${Buffer.from(wrapped, "base64").toString("hex")}`,
+        p_kms_key_arn: ARN,
+        p_width: 1600,
+        p_height: 1066,
+        p_bytes: 61234,
+      });
+      for (const spy of logs) expect(JSON.stringify(spy.mock.calls)).not.toContain(wrapped);
+      for (const spy of logs) expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("records a permanent failure for its attempt, logging the id and reason only", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      systemRpc.mockResolvedValue({ data: false, error: null });
+      const body = JSON.stringify({ status: "failed", attempt: 3, reason: "unreadable" });
+      expect(await (await drm(await signed("POST", `${path}/drm`, body))).json()).toEqual({
+        recorded: false,
+      });
+      expect(systemRpc).toHaveBeenCalledWith("ca", "record_photo_drm_failed", {
+        p_photo_id: PHOTO,
+        p_attempt: 3,
+      });
+      expect(warn.mock.calls).toEqual([["drm_failed", PHOTO, "unreadable"]]);
+    });
+
+    it("refuses an unsigned or changed result, a key outside ca-central-1 and a malformed key", async () => {
+      expect(
+        (await drm(new Request(`https://x${path}/drm`, { method: "POST", body: "{}" }))).status,
+      ).toBe(401);
+      const genuine = await signed("POST", `${path}/drm`, JSON.stringify(ready));
+      const forged = new Request(genuine.url, {
+        method: "POST",
+        headers: genuine.headers,
+        body: JSON.stringify({ ...ready, attempt: 4 }),
+      });
+      expect((await drm(forged)).status).toBe(401);
+      for (const bad of [
+        { ...ready, kmsKeyArn: ARN.replace("ca-central-1", "us-east-1") },
+        { ...ready, wrappedKey: "not base64!" },
+        { ...ready, keyId: "2b0e6a4c-9f6e-1f0a-8d2b-3c4d5e6f7a8b" },
+        { ...ready, width: 1601 },
+      ])
+        expect((await drm(await signed("POST", `${path}/drm`, JSON.stringify(bad)))).status).toBe(
+          400,
+        );
+      expect(systemRpc).not.toHaveBeenCalled();
+    });
+
+    it("requests a ready photo's clip after its result, only where packaging is on", async () => {
+      const body = JSON.stringify({
+        status: "ready",
+        attempt: 2,
+        width: 10,
+        height: 8,
+        capturedAt: null,
+        qr: { kind: "none" },
+      });
+      // Off: no KMS key here.
+      for (const [name, value] of Object.entries(S3_ENV)) vi.stubEnv(name, value);
+      systemRpc.mockResolvedValue({ data: true, error: null });
+      await result(await signed("POST", `${path}/result`, body));
+      expect(afterCallbacks).toHaveLength(1);
+      expect(systemRpc).not.toHaveBeenCalledWith("ca", "photo_drm_requested", expect.anything());
+      expect(queueDrm).not.toHaveBeenCalled();
+      // On: DRM_KMS_KEY_ARN_CA set.
+      afterCallbacks.length = 0;
+      vi.stubEnv("DRM_KMS_KEY_ARN_CA", ARN);
+      systemRpc.mockImplementation(async (_r, fn) =>
+        fn === "photo_drm_requested" ? { data: 5, error: null } : { data: true, error: null },
+      );
+      await result(await signed("POST", `${path}/result`, body));
+      expect(afterCallbacks).toHaveLength(2);
+      await afterCallbacks[1]?.();
+      expect(systemRpc).toHaveBeenCalledWith("ca", "photo_drm_requested", { p_photo_id: PHOTO });
+      expect(queueDrm).toHaveBeenCalledWith("ca", PHOTO);
+      // A photo that can't be shown (null) isn't queued.
+      afterCallbacks.length = 0;
+      queueDrm.mockClear();
+      systemRpc.mockImplementation(async (_r, fn) =>
+        fn === "photo_drm_requested" ? { data: null, error: null } : { data: true, error: null },
+      );
+      await result(await signed("POST", `${path}/result`, body));
+      await afterCallbacks[1]?.();
+      expect(queueDrm).not.toHaveBeenCalled();
+    });
   });
 
   it("fails closed without secrets, naming the variable only", async () => {

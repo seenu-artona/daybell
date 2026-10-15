@@ -80,6 +80,7 @@ import {
   undoCardPhotosInput,
   uploadBatchInput,
   uploadFilesInput,
+  workerDrmResultInput,
   workerResultInput,
 } from "./schemas";
 import {
@@ -1663,6 +1664,18 @@ export const ROUTES: RouteSpec[] = [
       "Not for integrations. Signed like the read. Idempotent: a photo already processed doesn't change.",
     access: "internal",
     body: workerResultInput,
+    success: { status: 200, schema: workerRecordedResponse, description: "Recorded." },
+    errors: ["invalid_input", "not_signed_in", "region_unavailable"],
+  },
+  {
+    method: "POST",
+    path: "/internal/photo-worker/photos/{id}/drm",
+    group: "Internal",
+    summary: "The image worker reports a photo's DRM clip",
+    description:
+      "Not for integrations (D158; ADR 0034). Signed like the read; at most 4 KB. For one packaging request (attempt): the clip's key ID, the content key as wrapped by KMS in ca-central-1 (never the key itself) and the clip's size; or failed for good with a reason. A late result of an earlier request, or for a photo that can no longer be shown, changes nothing (recorded: false). Writes no event.",
+    access: "internal",
+    body: workerDrmResultInput,
     success: { status: 200, schema: workerRecordedResponse, description: "Recorded." },
     errors: ["invalid_input", "not_signed_in", "region_unavailable"],
   },

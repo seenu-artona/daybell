@@ -4,6 +4,7 @@ import {
   classLabelValid,
   cleanGroupName,
   DEFAULT_CLASS_LABEL,
+  DRM_FAILURE_REASONS,
   GROUP_COLUMNS,
   GROUP_PHOTOS_TO,
   HEAD_OFFICE_PROVINCES,
@@ -920,6 +921,36 @@ export const workerResultInput = z.discriminatedUnion("status", [
   }),
 ]);
 export type WorkerResultInput = z.infer<typeof workerResultInput>;
+
+/**
+ * The image worker's DRM packaging result for one request (D158; ADR 0034): the clip's key ID (a random v4 GUID), the
+ * content key as wrapped by KMS in ca-central-1 (base64; never the key itself), and the clip's size. Or failed for good,
+ * with a reason. Fits the internal routes' 4 KB body.
+ */
+const drmAttempt = z.number().int().min(1).meta({
+  description:
+    "The packaging request, as the read gave it; results of an earlier request are ignored.",
+});
+export const workerDrmResultInput = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ready"),
+    attempt: drmAttempt,
+    keyId: z
+      .string()
+      .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+    wrappedKey: z.base64().min(24).max(1400).meta({ description: "KMS's CiphertextBlob, base64." }),
+    kmsKeyArn: z.string().regex(/^arn:aws:kms:ca-central-1:\d{12}:key\/[0-9a-f-]{36}$/),
+    width: z.number().int().min(2).max(4096).multipleOf(2),
+    height: z.number().int().min(2).max(4096).multipleOf(2),
+    bytes: z.number().int().min(1).max(52_428_800),
+  }),
+  z.object({
+    status: z.literal("failed"),
+    attempt: drmAttempt,
+    reason: z.enum(DRM_FAILURE_REASONS),
+  }),
+]);
+export type WorkerDrmResultInput = z.infer<typeof workerDrmResultInput>;
 
 // ── QR tagging and review (Phase 1 step 5, ADR 0018) ─────────────────────────────────────────────────────────────
 

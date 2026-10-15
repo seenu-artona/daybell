@@ -124,7 +124,12 @@ export type PhotoSystemRpc =
   | "tagging_inputs"
   | "apply_batch_tags"
   | "batches_of_photos"
-  | "batches_to_tag";
+  | "batches_to_tag"
+  // DRM packaging (ADR 0034): a request after a new ready result, the worker's clip or failure, the cron's batch.
+  | "photo_drm_requested"
+  | "record_photo_drm_result"
+  | "record_photo_drm_failed"
+  | "photos_drm_due";
 
 export function photoSystemRpc(
   region: DataRegion,

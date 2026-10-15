@@ -168,3 +168,19 @@ export async function queueDownloadForProcessing(
     }),
   );
 }
+
+/**
+ * Asks for a photo's large view to be packaged for DRM (D158; ADR 0034, B6): the same queue and worker, with
+ * `{photoId, make: "drm"}` (ids only, D113). With the local driver nothing is queued: nothing is packaged locally and
+ * the shop shows the watermarked WebP.
+ */
+export async function queueDrmForProcessing(region: DataRegion, photoId: string): Promise<void> {
+  const { settings, sqs } = regionStorage(region);
+  if (settings.driver !== "s3" || !sqs) return;
+  await sqs.send(
+    new SendMessageCommand({
+      QueueUrl: settings.queueUrl,
+      MessageBody: JSON.stringify({ photoId, make: "drm" }),
+    }),
+  );
+}
