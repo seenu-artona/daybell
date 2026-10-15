@@ -1,3 +1,4 @@
+import { DRM_CODEC_MIME } from "@daybell/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createShopDrmPlayer,
@@ -94,13 +95,15 @@ describe("Apple's prefixed EME (iPhone Chrome and other in-app browsers)", () =>
     expect(probed.widevineHwAll).toBe("noEme");
     expect(planFromProbes(probed, true)).toBe("fairplay");
     expect(planFromProbes(probed, false)).toBe("none");
-    expect(keys.asked).toEqual(["com.apple.fps.1_0 video/mp4"]);
+    expect(keys.asked).toEqual([`com.apple.fps.1_0 ${DRM_CODEC_MIME}`]);
   });
 
-  it("counts FairPlay when the standard API refuses it but WebKitMediaKeys has it", async () => {
-    const probed = await probeShopDrm(refuse, legacy(["com.apple.fps"]));
-    expect(probed.fairplay).toBe("supported");
-    expect(planFromProbes(probed, true)).toBe("fairplay");
+  it("keeps the standard API's answer where it exists (desktop Safari has both): a refusal stands", async () => {
+    const keys = legacy(["com.apple.fps", "com.apple.fps.1_0"]);
+    const probed = await probeShopDrm(refuse, keys);
+    expect(probed.fairplay).toBe("notSupported");
+    expect(planFromProbes(probed, true)).toBe("none");
+    expect(keys.asked).toEqual([]);
   });
 
   it("changes nothing without WebKitMediaKeys, or when it says no or throws", async () => {
@@ -117,7 +120,7 @@ describe("Apple's prefixed EME (iPhone Chrome and other in-app browsers)", () =>
 
   it("never turns software DRM into a plan: only FairPlay is asked of the prefixed API", async () => {
     const keys = legacy(["com.widevine.alpha", "com.microsoft.playready.recommendation"]);
-    const probed = await probeShopDrm(refuse, keys);
+    const probed = await probeShopDrm(undefined, keys);
     expect(planFromProbes(probed, true)).toBe("none");
     expect(keys.asked.every((a) => a.startsWith("com.apple.fps"))).toBe(true);
   });
@@ -125,7 +128,7 @@ describe("Apple's prefixed EME (iPhone Chrome and other in-app browsers)", () =>
   it("needs the polyfill only where the prefixed API has FairPlay and the standard one doesn't", async () => {
     const ok = async () => ({});
     expect(await fairplayNeedsLegacyEme(undefined, legacy(["com.apple.fps.1_0"]))).toBe(true);
-    expect(await fairplayNeedsLegacyEme(refuse, legacy(["com.apple.fps.1_0"]))).toBe(true);
+    expect(await fairplayNeedsLegacyEme(refuse, legacy(["com.apple.fps.1_0"]))).toBe(false);
     expect(await fairplayNeedsLegacyEme(ok, legacy(["com.apple.fps.1_0"]))).toBe(false);
     expect(await fairplayNeedsLegacyEme(refuse, legacy([]))).toBe(false);
     expect(await fairplayNeedsLegacyEme(undefined, undefined)).toBe(false);
@@ -462,5 +465,23 @@ describe("createShopDrmPlayer: one player per open viewer (review #3, #4, #5)", 
     await create("fairplay", false);
     await create("dash", true);
     expect(order).toEqual(["installAll", "installAll"]);
+  });
+
+  it("names FairPlay com.apple.fps.1_0 through the polyfill, so Shaka attaches keys without waiting (review #1)", () => {
+    const fairplaySetup = {
+      licenseUrls: { widevine: "https://w", playready: "https://p", fairplay: "https://f" },
+      fairplayCertificateUrl: "https://c",
+    };
+    const legacyConfig = shakaConfig("fairplay", fairplaySetup, {}, true) as {
+      drm: { servers: Record<string, string>; advanced: Record<string, unknown> };
+    };
+    expect(legacyConfig.drm.servers).toEqual({ "com.apple.fps.1_0": "https://f" });
+    expect(legacyConfig.drm.advanced["com.apple.fps.1_0"]).toEqual({
+      serverCertificateUri: "https://c",
+    });
+    expect(legacyConfig.drm.advanced["com.apple.fps"]).toBeUndefined();
+    const standard = shakaConfig("fairplay", fairplaySetup, {}) as typeof legacyConfig;
+    expect(standard.drm.servers).toEqual({ "com.apple.fps": "https://f" });
+    expect(standard.drm.advanced["com.apple.fps.1_0"]).toBeUndefined();
   });
 });

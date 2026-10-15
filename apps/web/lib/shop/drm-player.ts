@@ -241,19 +241,25 @@ export function manifestUrl(target: DrmTarget, plan: Exclude<DrmPlan, "none">): 
   return `/api/v1/shop/children/${encodeURIComponent(target.childId)}/photos/${encodeURIComponent(target.photoId)}/drm-manifest?format=${format}&gallery=${encodeURIComponent(target.galleryId)}`;
 }
 
-/** Shaka's configuration for the plan: hardware only, FairPlay played natively by Safari with our certificate. */
+/**
+ * Shaka's configuration for the plan: hardware only, FairPlay played natively by Safari with our certificate. Through
+ * Apple's prefixed EME (iPhone Chrome) FairPlay is named "com.apple.fps.1_0": Shaka waits for a standard `encrypted`
+ * event before attaching keys for "com.apple.fps", which the polyfill only raises after attaching, so it would stall.
+ */
 export function shakaConfig(
   plan: Exclude<DrmPlan, "none">,
   setup: DrmSetup,
   mapping: Record<string, string>,
+  legacyEme = false,
 ): object {
   const playready = setup.licenseUrls.playready;
+  const fps = legacyEme ? "com.apple.fps.1_0" : "com.apple.fps";
   return {
     streaming: { useNativeHlsForFairPlay: true },
     drm: {
       servers:
         plan === "fairplay" && setup.licenseUrls.fairplay
-          ? { "com.apple.fps": setup.licenseUrls.fairplay }
+          ? { [fps]: setup.licenseUrls.fairplay }
           : {
               "com.widevine.alpha": setup.licenseUrls.widevine,
               "com.microsoft.playready": playready,
@@ -264,7 +270,7 @@ export function shakaConfig(
         "com.widevine.alpha": { videoRobustness: ["HW_SECURE_ALL"] },
         "com.microsoft.playready.recommendation": { videoRobustness: ["3000"] },
         ...(setup.fairplayCertificateUrl
-          ? { "com.apple.fps": { serverCertificateUri: setup.fairplayCertificateUrl } }
+          ? { [fps]: { serverCertificateUri: setup.fairplayCertificateUrl } }
           : {}),
       },
       ...(mapping["com.microsoft.playready"]
@@ -311,14 +317,17 @@ export async function createShopDrmPlayer(args: {
   const { shaka, video } = args;
   // Shaka installs the Apple polyfill by itself only when the standard API is missing; where the standard API exists
   // but refuses FairPlay and the prefixed one has it, it is installed here, before anything else asks for keys.
-  if (args.plan === "fairplay" && (await (args.needsLegacyEme ?? fairplayNeedsLegacyEme)()))
-    shaka.polyfill.PatchedMediaKeysApple?.install();
+  const legacyEme =
+    args.plan === "fairplay" &&
+    !!shaka.polyfill.PatchedMediaKeysApple &&
+    (await (args.needsLegacyEme ?? fairplayNeedsLegacyEme)());
+  if (legacyEme) shaka.polyfill.PatchedMediaKeysApple?.install();
   shaka.polyfill.installAll();
   if (!shaka.Player.isBrowserSupported()) return null;
   const player = new shaka.Player();
   await player.attach(video);
   player.configure(
-    shakaConfig(args.plan, args.setup, player.getConfiguration().drm.keySystemsMapping),
+    shakaConfig(args.plan, args.setup, player.getConfiguration().drm.keySystemsMapping, legacyEme),
   );
   let current: { target: DrmTarget; signal: AbortSignal } | null = null;
   const net = player.getNetworkingEngine();

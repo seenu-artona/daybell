@@ -107,7 +107,7 @@ export function legacyFairplaySupported(legacy: AppleLegacyKeys | undefined): bo
   if (!legacy) return false;
   return LEGACY_FAIRPLAY_KEY_SYSTEMS.some((keySystem) => {
     try {
-      return legacy.isTypeSupported(keySystem, "video/mp4");
+      return legacy.isTypeSupported(keySystem, DRM_CODEC_MIME);
     } catch {
       return false;
     }
@@ -115,35 +115,28 @@ export function legacyFairplaySupported(legacy: AppleLegacyKeys | undefined): bo
 }
 
 /**
- * Whether FairPlay plays here only through the prefixed API: the standard one is missing or refuses FairPlay, and the
- * prefixed one has it. The player then installs Shaka's Apple polyfill before loading (iPhone Chrome).
+ * Whether FairPlay plays here only through the prefixed API: the standard one is missing altogether and the prefixed
+ * one has FairPlay for the clips' codec. The player then installs Shaka's Apple polyfill before loading (iPhone
+ * Chrome). Where the standard API exists (Safari) its answer stands, even a refusal.
  */
-export async function fairplayNeedsLegacyEme(
+export function fairplayNeedsLegacyEme(
   request: RequestAccess | undefined = browserRequest(),
   legacy: AppleLegacyKeys | undefined = browserLegacyKeys(),
 ): Promise<boolean> {
-  if (!legacyFairplaySupported(legacy)) return false;
-  const fairplay = DRM_PROBES.find((p) => p.id === "fairplay");
-  if (!request || !fairplay) return true;
-  try {
-    await request(fairplay.keySystem, [probeConfig(fairplay)]);
-    return false;
-  } catch {
-    return true;
-  }
+  return Promise.resolve(!request && legacyFairplaySupported(legacy));
 }
 
 /**
- * Asks the browser, once, which hardware DRM it has for the clips' codec (no network, nothing personal). FairPlay
- * counts when either the standard API or Apple's prefixed one has it (iPhone Chrome and other in-app browsers).
+ * Asks the browser, once, which hardware DRM it has for the clips' codec (no network, nothing personal). Where the
+ * standard API is missing altogether (iPhone Chrome and other in-app browsers), FairPlay counts when Apple's prefixed
+ * API has it for the clips' codec; where the standard API exists, its answer stands.
  */
 export async function probeShopDrm(
   request: RequestAccess | undefined = browserRequest(),
   legacy: AppleLegacyKeys | undefined = browserLegacyKeys(),
 ) {
   const results = await probeSome(SHOP_PROBES, request);
-  if (results.fairplay !== "supported" && legacyFairplaySupported(legacy))
-    results.fairplay = "supported";
+  if (!request && legacyFairplaySupported(legacy)) results.fairplay = "supported";
   return results;
 }
 
