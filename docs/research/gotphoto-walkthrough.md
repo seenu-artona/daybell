@@ -71,6 +71,17 @@ Settings · Subjects · Tagging · Photo Management · Photo Editing · Communic
 - "Album available for everyone": every photo is a group photo and no QR cards are needed. This can't be undone.
 - Photo sorting within albums only works for jobs without activated access codes.
 
+## 8a. Uploading individuals and activating access codes (GotPhoto UK demo transcript)
+
+1. Create the album first (Photo Management › Create new album, any name). Use **separate albums when groups have different group photos**: everyone with individual access to an album also sees its group photos, so Class B must not share Class A's album.
+2. An empty album shows two buttons: **Upload Group Photos** ("everyone with access to individual photos of this album will see the group photos as well") and **Upload Individual Photos** ("including the photos with QR codes").
+3. Upload all of a group's photos in one go, in shooting order: from the browser (bulk select or drag and drop) or with **EasyUpload**, a desktop app for Windows and Mac (Settings › Photo upload › EasyUpload) that logs in with GotPhoto credentials and lets you pick job › album › individuals or groups.
+4. After upload, the photos sit in the album as one flat list. The QR card photos are **highlighted in green with a QR icon**.
+5. Check the order is right, then press **Activate access codes**. The system reads the QR positions and splits the list into one section per subject: QR card photo first, then that subject's photos. This takes a minute or two.
+6. Each subject's section can be checked straight away in the shop by entering their access code.
+
+So subjects join an album through their QR card photo being uploaded into it, not through the names list. Activation is a separate, manual step after upload.
+
 ## 9. Account-level shop settings (Online shop › Shop settings)
 
 - **Logo and design**: studio logo, logo text, page title, primary colour (the shop's call-to-action colour).
