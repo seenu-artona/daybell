@@ -30,7 +30,7 @@
   alone it takes a `label` and becomes `role="img"` with that name. `apps/web/app/icon.svg` (the favicon) is the light
   mark; `apps/web/public/brand/silverback-ridge.svg` and `silverback-ridge-dark.svg` hold both for later uses (e.g.
   emails), with hex only in those files. A test keeps the files' arcs and colours equal to the component's paths and the
-  tokens. A designer will make the final mark later; only these places change then.
+  tokens. The parent shop has its own neutral favicon (call 3). A designer will make the final mark later; only these places change then.
 
 ## What stays "Daybell" (internal) and why
 
@@ -46,14 +46,18 @@ Changing these would break running systems, stored data or history for no user-v
 
 ## Calls for Seenu
 
-1. **Email sender name.** No sender display name is set in the repo (local Supabase uses its test mailbox); the hosted
-   projects' SMTP "Sender name" is set in the Supabase dashboard. It should become "Silverback" there by hand. Not done
-   here (no production or dashboard changes by agents).
+1. **Hosted email settings.** No sender display name is set in the repo (local Supabase uses its test mailbox); the hosted
+   projects' SMTP "Sender name" is set in the Supabase dashboard and should become "Silverback" there by hand. The
+   live projects also keep the old magic-link subject and HTML until someone pastes the new ones from
+   `supabase/config.toml` and `supabase/templates/magic_link.html` into the dashboard again, as
+   `packages/db/README.md` describes. Not done here (no production or dashboard changes by agents).
 2. **The sign-up address example** still shows `north-peak.daybell.io`: it's the domain, and no new domain is decided.
    Changing it needs a domain decision.
 3. **No Ridge mark in the parent shop.** The brief listed the shop header, but D62 says parents see only the studio's
    logo, with no platform logo or "Powered by". The shop keeps the studio's logo; only its words ("Payments processed by
-   Silverback for …") changed.
+   Silverback for …") changed. **The shop's favicon is neutral:** `apps/web/app/shop/icon.svg` is a plain rounded
+   square in the ink colour, with no mark and no letters, so /shop pages don't show the Ridge from `app/icon.svg`. A
+   per-studio favicon could come later.
 4. **Download and zip file names** now start with `silverback-` (parents and studios keep these files). Earlier
    downloads keep their old names.
 5. **API docs prose and API error messages** count as user-visible (studio developers and screens read them), so they

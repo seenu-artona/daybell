@@ -1699,7 +1699,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Shop",
     summary: "Download all of an order's photos",
     description:
-      "One zip, daybell-<reference>.zip, of every paid download this gallery may have, named as the single downloads are; streamed from the studio's region. 409 shop.downloadPreparing (Retry-After) while a file is made, with no partial zip; at most 10 zips a gallery an hour.",
+      "One zip, silverback-<reference>.zip, of every paid download this gallery may have, named as the single downloads are; streamed from the studio's region. 409 shop.downloadPreparing (Retry-After) while a file is made, with no partial zip; at most 10 zips a gallery an hour.",
     access: "parent",
     query: shopGalleryQuery,
     success: { status: 200, description: "The zip.", contentType: "application/zip" },
@@ -1718,7 +1718,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Shop",
     summary: "Download a paid photo",
     description:
-      "A link to the full-resolution JPEG, metadata stripped (never the original; call 10), signed for 5 minutes and saved as daybell-<reference>-<n>.jpg. Only for paid digital lines this gallery may see; a later Do not publish or closed shop doesn't take it back (call 11). 409 shop.downloadPreparing with Retry-After while its file is made (only sold photos get one, lazily); 409 shop.downloadUnavailable once it has been asked for 3 times without appearing (support is alerted).",
+      "A link to the full-resolution JPEG, metadata stripped (never the original; call 10), signed for 5 minutes and saved as silverback-<reference>-<n>.jpg. Only for paid digital lines this gallery may see; a later Do not publish or closed shop doesn't take it back (call 11). 409 shop.downloadPreparing with Retry-After while its file is made (only sold photos get one, lazily); 409 shop.downloadUnavailable once it has been asked for 3 times without appearing (support is alerted).",
     access: "parent",
     query: shopGalleryQuery,
     success: { status: 200, schema: downloadLinkResponse, description: "Open the url." },
@@ -1863,7 +1863,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Orders",
     summary: "Download an order's print files",
     description:
-      "A zip, daybell-<reference>-print-files.zip: the full-resolution photo of each line left to print, named <reference>-<line>-<size>-x<quantity>.jpg, and a manifest.csv with no names. 409 while a file is being made (Retry-After); at most 10 zips a person an hour; 500 files at most.",
+      "A zip, silverback-<reference>-print-files.zip: the full-resolution photo of each line left to print, named <reference>-<line>-<size>-x<quantity>.jpg, and a manifest.csv with no names. 409 while a file is being made (Retry-After); at most 10 zips a person an hour; 500 files at most.",
     access: "fulfilment",
     success: {
       status: 200,

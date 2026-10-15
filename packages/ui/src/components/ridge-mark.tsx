@@ -9,6 +9,7 @@ const TONES = {
   /** On light backgrounds: primary green over ink. */
   light: { top: "stroke-primary", bottom: "stroke-ink" },
   /** On dark backgrounds (the ink side menu): lime over white. */
+  // The white arc uses on-primary because it is the design system's white token (#FFFFFF); there is no "white".
   dark: { top: "stroke-lime", bottom: "stroke-on-primary" },
 } as const;
 

@@ -4,6 +4,16 @@ import { buildOpenApi, ROUTES } from "./routes";
 describe("API description", () => {
   const doc = buildOpenApi("https://example.test");
 
+  it("names files users keep Silverback, never daybell-<…> (D155; ADR 0031)", () => {
+    for (const r of ROUTES) {
+      const words = `${r.summary} ${r.description ?? ""}`;
+      expect(words, `${r.method} ${r.path}`).not.toMatch(/daybell-</i);
+    }
+    expect(JSON.stringify(doc)).not.toMatch(/daybell-</i);
+    const zip = ROUTES.map((r) => r.description ?? "").filter((d) => d.includes("<reference>.zip"));
+    expect(zip.join(" ")).toContain("silverback-<reference>.zip");
+  });
+
   it("lists every route once", () => {
     const keys = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(new Set(keys).size).toBe(keys.length);

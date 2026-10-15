@@ -41,3 +41,12 @@ describe("the Ridge mark's files (D155)", () => {
     expect(svg).not.toMatch(/daybell/i);
   });
 });
+
+describe("the parent shop's favicon (D62)", () => {
+  it("is a plain ink square: no Ridge mark, no letters", () => {
+    const svg = read("app", "shop", "icon.svg");
+    expect(svg).toMatch(new RegExp(`<rect [^>]*fill="${token("ink")}"`, "i"));
+    expect(svg).not.toMatch(/<path|<text|aria-label/);
+    expect(svg).not.toMatch(/silverback|daybell/i);
+  });
+});
