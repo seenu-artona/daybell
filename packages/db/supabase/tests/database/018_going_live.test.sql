@@ -1,12 +1,12 @@
 -- Going live (D75, D127, D143, D96; Claude's calls 1–2, A1–A3; ADR 0021): only owners and admins open, close and
 -- reopen a shop, through the service-role functions that re-check their role before anything is read; the server
--- refuses Start selling unless the roster, a ready photo, reviewed tagging, a price list with an item and Active
+-- refuses Start selling unless the roster, a ready photo, reviewed tagging, something sold (ADR 0033 N3) and Active
 -- payouts are all there, naming what is missing by key; a job never goes back to Draft, whoever writes; a closing date
 -- is in the future, at most 400 days away and never on a closed job, and a draft whose date has passed can't start
 -- selling until it is changed; the cron closes due selling jobs of every studio and nothing else; events carry ids only, and a status change writes no job.updated; another studio can do nothing.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(76);
+select plan(78);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -117,6 +117,20 @@ select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'a0000000-000
   'P0001 not_ready payouts', 'a ready job is refused while payouts aren''t Active');
 select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000003'),
   'P0001 not_ready price_list,payouts', 'a price list with no items counts as no price list (A2)');
+-- N3 (ADR 0033): the job must sell at least one item. Every list item switched off for the job is nothing to sell; a
+-- product of the job's own is something.
+insert into public.job_price_overrides (studio_id, job_id, price_list_id, price_list_item_id, sold)
+select i.studio_id, j.id, i.price_list_id, i.id, false from public.price_list_items i
+join public.jobs j on j.price_list_id = i.price_list_id and j.studio_id = i.studio_id
+where j.id = 'a0000000-0000-4000-8000-000000000001';
+select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001'),
+  'P0001 not_ready price_list,payouts', 'every list item switched off for the job counts as nothing to sell (N3)');
+delete from public.job_price_overrides where job_id = 'a0000000-0000-4000-8000-000000000001';
+insert into public.job_shop_items (studio_id, job_id, kind, name, print_size, price_cents)
+values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000003', 'print', 'Job print', '5x7', 1500);
+select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000003'),
+  'P0001 not_ready payouts', 'a job''s own product is something to sell, even on an empty list (N3)');
+delete from public.job_shop_items where job_id = 'a0000000-0000-4000-8000-000000000003';
 update public.payout_accounts set status = 'active' where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 delete from public.job_tagging_reviews where job_id = 'a0000000-0000-4000-8000-000000000001';
 select is(pg_temp.try_sell('11111111-1111-4111-8111-111111111111', 'a0000000-0000-4000-8000-000000000001'),
