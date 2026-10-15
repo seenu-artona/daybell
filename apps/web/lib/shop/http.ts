@@ -1,7 +1,12 @@
 import "server-only";
 import { ApiError, fromDatabaseError, SHOP_CONFLICTS } from "@daybell/api";
 import { availableRegions, type DataRegion } from "@daybell/config";
-import { SHOP_REQUESTS_PER_MINUTE, SHOP_WIDE_REQUESTS_PER_MINUTE } from "@daybell/core";
+import {
+  SHOP_DRM_REQUESTS_PER_MINUTE,
+  SHOP_DRM_WIDE_REQUESTS_PER_MINUTE,
+  SHOP_REQUESTS_PER_MINUTE,
+  SHOP_WIDE_REQUESTS_PER_MINUTE,
+} from "@daybell/core";
 import { NextResponse } from "next/server";
 import { handle } from "../api";
 import { assertFunctionRegion } from "../region-guard";
@@ -155,19 +160,22 @@ export function fallbackRegion(): DataRegion {
 /**
  * Every shop request, first: in its region's function region (Canadian data in Montréal, D113), and at most 120 a
  * minute per network (Claude's call) and 1,200 per IPv4 /24 or IPv6 /48 (R4), counted in that region's database (the
- * device's first session's, else the first region's).
+ * device's first session's, else the first region's). The large view's DRM routes count in a bucket of their own, 300
+ * and 3,000 a minute (ADR 0034, review: tester #4), so viewing photos never uses up what the bag and checkout need.
  */
 export async function admitShopRequest(
   request: Request,
   sessions: readonly ShopCookieSession[] = shopCookieSessions(request),
+  bucket: "shop" | "drm" = "shop",
 ): Promise<void> {
   const region = sessions[0]?.region ?? fallbackRegion();
-  const keys = budgetKeys(request);
+  const keys = budgetKeys(request, bucket);
   const ok = await callShopFunction<boolean>(region, "take_shop_request", {
     p_ip_key: keys.networkKey,
-    p_limit: SHOP_REQUESTS_PER_MINUTE,
+    p_limit: bucket === "drm" ? SHOP_DRM_REQUESTS_PER_MINUTE : SHOP_REQUESTS_PER_MINUTE,
     p_wide_key: keys.wideKey,
-    p_wide_limit: SHOP_WIDE_REQUESTS_PER_MINUTE,
+    p_wide_limit:
+      bucket === "drm" ? SHOP_DRM_WIDE_REQUESTS_PER_MINUTE : SHOP_WIDE_REQUESTS_PER_MINUTE,
   });
   if (!ok) throw new RetryLater(60, "Too many requests. Wait a minute and try again.");
 }
@@ -186,9 +194,12 @@ export function chosenSession(
  * A request that needs a session: admitted first, then the gallery it names (S6) and its token's hash; 401 without a
  * usable cookie or for a gallery not on this device.
  */
-export async function requireShopSession(request: Request): Promise<ShopCookieSession> {
+export async function requireShopSession(
+  request: Request,
+  bucket: "shop" | "drm" = "shop",
+): Promise<ShopCookieSession> {
   const sessions = shopCookieSessions(request);
-  await admitShopRequest(request, sessions);
+  await admitShopRequest(request, sessions, bucket);
   const session = chosenSession(request, sessions);
   if (!session) throw sessionRequired();
   return session;

@@ -7,6 +7,7 @@ import {
   FFMPEG_RELEASE,
   LAMBDA_UNZIPPED_LIMIT,
   PACKAGER_FILES,
+  PACKAGER_LICENSE_SHA256,
 } from "../layer/build-layer.mjs";
 
 // The DRM tools layer (ADR 0034): what the layer build downloads and copies is exactly what the worker checks before
@@ -36,6 +37,7 @@ describe("the DRM tools layer's pins", () => {
       FFMPEG_FILES.x64.gz,
     ];
     for (const file of pinned) expect(file.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(PACKAGER_LICENSE_SHA256).toMatch(/^[0-9a-f]{64}$/);
     expect(LAMBDA_UNZIPPED_LIMIT).toBe(250 * 1024 * 1024);
   });
 

@@ -45,7 +45,7 @@ describe("the shop's DRM matches the database", () => {
   it("never grants anything to browsers, and keeps the switch from the API", () => {
     expect(sql).not.toMatch(/grant [^;]* to (anon|authenticated)/);
     expect(sql).toContain(
-      "revoke all on function public.set_shop_drm(boolean, text) from service_role;",
+      "revoke all on function public.set_shop_drm(boolean, text, uuid[]) from service_role;",
     );
   });
 });

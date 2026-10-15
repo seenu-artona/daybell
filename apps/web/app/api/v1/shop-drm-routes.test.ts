@@ -28,7 +28,10 @@ vi.mock("@/lib/photo-storage", () => ({
     },
     get: async (key: string) => {
       const text = stored.get(key);
-      if (text === undefined) throw new Error("not_found");
+      if (text === undefined) {
+        const { StorageError } = await import("@daybell/storage");
+        throw new StorageError("not_found");
+      }
       return new TextEncoder().encode(text);
     },
   }),
@@ -74,7 +77,8 @@ const ENV = {
   AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/web",
   AWS_DOWNLOAD_ROLE_ARN: "arn:aws:iam::123456789012:role/downloads",
   AWS_DRM_ROLE_ARN: "arn:aws:iam::123456789012:role/drm",
-  DRM_KMS_KEY_ARN_CA: "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm",
+  DRM_KMS_KEY_ARN_CA:
+    "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
   SHOP_DRM_COM_KEY_ID: randomUUID(),
   SHOP_DRM_COM_KEY: COM_KEY.toString("base64"),
   SHOP_DRM_LICENSE_PREFIX: "daybell-shop",
@@ -100,7 +104,7 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const DEVICE = signDevice("D".repeat(43), Math.floor(Date.now() / 1000));
 const COOKIE = `daybell_shop=ca.${TOKEN}; daybell_device=${DEVICE}`;
 const BASE = `http://localhost/api/v1/shop/children/${CHILD}/photos/${PHOTO}`;
-const PREFIX = `${STUDIO}/${JOB}/${PHOTO}/`;
+const PREFIX = `${STUDIO}/${JOB}/${PHOTO}/drm/${"2b0e6a4c-9f6e-4f0a-8d2b-3c4d5e6f7a8b"}`;
 
 /** Each shop function answers from `answer` (take_shop_request lets everything in). */
 function database(
@@ -156,7 +160,7 @@ afterEach(() => {
 
 describe("GET /shop/drm", () => {
   it("is on when the gallery's database has the switch on and DRM is set up here", async () => {
-    database((fn) => (fn === "shop_drm_enabled" ? { data: true } : {}));
+    database((fn) => (fn === "shop_drm_enabled_for" ? { data: true } : {}));
     const res = await (await routes.config())(request("GET", "http://localhost/api/v1/shop/drm"));
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.json()).toEqual({
@@ -169,11 +173,11 @@ describe("GET /shop/drm", () => {
       fairplayCertificateUrl: "/api/v1/shop/drm/fairplay-certificate",
       codec: "avc1.640028",
     });
-    expect(calls("shop_drm_enabled")).toHaveLength(1);
+    expect(calls("shop_drm_enabled_for")).toHaveLength(1);
   });
 
   it("is off with the switch off (the default, C6)", async () => {
-    database((fn) => (fn === "shop_drm_enabled" ? { data: false } : {}));
+    database((fn) => (fn === "shop_drm_enabled_for" ? { data: false } : {}));
     const res = await (await routes.config())(request("GET", "http://localhost/api/v1/shop/drm"));
     expect(await res.json()).toEqual({
       enabled: false,
@@ -189,7 +193,7 @@ describe("GET /shop/drm", () => {
       vi.stubEnv(name, "");
     let res = await (await routes.config())(request("GET", "http://localhost/api/v1/shop/drm"));
     expect((await res.json()).enabled).toBe(false);
-    expect(calls("shop_drm_enabled")).toHaveLength(0);
+    expect(calls("shop_drm_enabled_for")).toHaveLength(0);
     stubAll(ENV);
     vi.stubEnv("SHOP_DRM_FAIRPLAY_CERT", "");
     res = await (await routes.config())(request("GET", "http://localhost/api/v1/shop/drm"));
@@ -219,7 +223,7 @@ describe("GET /shop/drm", () => {
       }),
     );
     expect(res.status).toBe(401);
-    expect(calls("shop_drm_enabled")).toHaveLength(0);
+    expect(calls("shop_drm_enabled_for")).toHaveLength(0);
   });
 });
 
@@ -260,16 +264,16 @@ describe("GET /shop/drm/fairplay-certificate (C10)", () => {
   });
 });
 
-const MPD = `<?xml version="1.0"?>\n<MPD><Period><AdaptationSet><Representation>\n<BaseURL>drm.mp4</BaseURL>\n</Representation></AdaptationSet></Period></MPD>\n`;
-const MASTER = `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="avc1.640028"\ndrm-video.m3u8\n`;
-const MEDIA = `#EXTM3U\n#EXT-X-MAP:URI="drm.mp4",BYTERANGE="1495@0"\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://${KEY_ID}"\n#EXTINF:2.000,\n#EXT-X-BYTERANGE:60777@1539\ndrm.mp4\n#EXT-X-ENDLIST\n`;
-const where = { data: { studio_id: STUDIO, job_id: JOB, photo_id: PHOTO } };
+const MPD = `<?xml version="1.0"?>\n<MPD xmlns:cenc="urn:mpeg:cenc:2013"><Period><AdaptationSet><ContentProtection value="cbcs" cenc:default_KID="${KEY_ID}"/><Representation>\n<BaseURL>drm.mp4</BaseURL>\n</Representation></AdaptationSet></Period></MPD>\n`;
+const MASTER = `#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="avc1.640028"\ndrm-video.m3u8\n`;
+const MEDIA = `#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:2\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MAP:URI="drm.mp4",BYTERANGE="1495@0"\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://${KEY_ID}",KEYFORMATVERSIONS="1",KEYFORMAT="com.apple.streamingkeydelivery"\n#EXTINF:2.000,\n#EXT-X-BYTERANGE:60777@1539\ndrm.mp4\n#EXT-X-ENDLIST\n`;
+const where = { data: { studio_id: STUDIO, job_id: JOB, photo_id: PHOTO, key_id: KEY_ID } };
 
 describe("GET /shop/children/:childId/photos/:photoId/drm-manifest", () => {
   beforeEach(() => {
-    stored.set(`${PREFIX}drm.mpd`, MPD);
-    stored.set(`${PREFIX}drm.m3u8`, MASTER);
-    stored.set(`${PREFIX}drm-video.m3u8`, MEDIA);
+    stored.set(`${PREFIX}.mpd`, MPD);
+    stored.set(`${PREFIX}.m3u8`, MASTER);
+    stored.set(`${PREFIX}-video.m3u8`, MEDIA);
   });
 
   it("DASH: the clip signed for 10 minutes, & escaped, never cached", async () => {
@@ -282,9 +286,9 @@ describe("GET /shop/children/:childId/photos/:photoId/drm-manifest", () => {
     expect(res.headers.get("content-type")).toBe("application/dash+xml");
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.text()).toContain(
-      `<BaseURL>https://bucket.s3.ca-central-1.amazonaws.com/${PREFIX}drm.mp4?X-Amz-Expires=600&amp;X-Amz-Signature=s</BaseURL>`,
+      `<BaseURL>https://bucket.s3.ca-central-1.amazonaws.com/${PREFIX}.mp4?X-Amz-Expires=600&amp;X-Amz-Signature=s</BaseURL>`,
     );
-    expect(signed).toEqual([{ key: `${PREFIX}drm.mp4`, expiresIn: 600 }]);
+    expect(signed).toEqual([{ key: `${PREFIX}.mp4`, expiresIn: 600 }]);
     expect(calls("shop_drm_photo")[0]?.[2]).toEqual({
       p_session_hash: sha(TOKEN),
       p_child_id: CHILD,
@@ -309,7 +313,7 @@ describe("GET /shop/children/:childId/photos/:photoId/drm-manifest", () => {
     );
     const text = await media.text();
     expect(text).toContain(
-      `#EXT-X-MAP:URI="https://bucket.s3.ca-central-1.amazonaws.com/${PREFIX}drm.mp4?`,
+      `#EXT-X-MAP:URI="https://bucket.s3.ca-central-1.amazonaws.com/${PREFIX}.mp4?`,
     );
     expect(text).toContain(`URI="skd://${KEY_ID}"`);
     expect(text).not.toMatch(/^drm\.mp4$/m);
@@ -359,6 +363,49 @@ describe("GET /shop/children/:childId/photos/:photoId/drm-manifest", () => {
     );
     expect(off.status).toBe(409);
     expect(calls("shop_drm_photo")).toHaveLength(0);
+  });
+
+  it("serves only the files of the database's key, and refuses a manifest for any other key (review H1)", async () => {
+    // Another run's files (drm/{other}.*) are never read: the database's key names the only files served.
+    const other = "3c1d2e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+    database((fn) => (fn === "shop_drm_photo" ? { data: { ...where.data, key_id: other } } : {}));
+    const missing = await (await routes.manifest())(
+      request("GET", `${BASE}/drm-manifest?format=dash`),
+      params(),
+    );
+    expect(missing.status).toBe(409);
+    // Its files exist, but its manifest names the other key: refused, never served.
+    stored.set(`${STUDIO}/${JOB}/${PHOTO}/drm/${other}.mpd`, MPD);
+    stored.set(`${STUDIO}/${JOB}/${PHOTO}/drm/${other}-video.m3u8`, MEDIA);
+    for (const format of ["dash", "hls-media"]) {
+      const res = await (await routes.manifest())(
+        request("GET", `${BASE}/drm-manifest?format=${format}`),
+        params(),
+      );
+      expect(res.status).toBe(409);
+      expect((await res.json()).error.fields.form).toBe("shop.drmUnavailable");
+    }
+    expect(signed.every((s) => s.key.includes(`/drm/${other}.mp4`))).toBe(true);
+    const error = logs[3] as ReturnType<typeof vi.spyOn>;
+    expect(error.mock.calls).toEqual([
+      ["shop_drm_manifest_missing"],
+      ["shop_drm_manifest_mismatch"],
+      ["shop_drm_manifest_mismatch"],
+    ]);
+    error.mockClear();
+  });
+
+  it("counts in the DRM routes' own bucket, never the shop's (review: tester #4)", async () => {
+    database((fn) => (fn === "shop_drm_photo" ? where : {}));
+    await (await routes.manifest())(request("GET", `${BASE}/drm-manifest?format=dash`), params());
+    const take = calls("take_shop_request")[0]?.[2] as Record<string, unknown>;
+    expect(take.p_limit).toBe(300);
+    expect(take.p_wide_limit).toBe(3000);
+    // Not the shop's 120 and 1,200, and under keys of its own.
+    const { budgetKeys } = await import("@/lib/shop/throttle");
+    const req = request("GET", `${BASE}/drm-manifest?format=dash`);
+    expect(take.p_ip_key).toBe(budgetKeys(req, "drm").networkKey);
+    expect(take.p_ip_key).not.toBe(budgetKeys(req).networkKey);
   });
 
   it("needs a session (401) and the gallery it names", async () => {
@@ -469,6 +516,20 @@ describe("POST /shop/children/:childId/photos/:photoId/drm-token", () => {
     );
     expect(cross.status).toBe(403);
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses a wrapped key from any KMS key but this environment's, before asking KMS (review L3)", async () => {
+    database((fn) =>
+      fn === "shop_drm_key"
+        ? { data: { ...keyRow.data, kms_key_arn: KMS_KEY.replace("1234abcd", "9999abcd") } }
+        : {},
+    );
+    const res = await (await routes.token())(request("POST", `${BASE}/drm-token`), params());
+    expect(res.status).toBe(409);
+    expect(kms.decrypts).toEqual([]);
+    const error = logs[3] as ReturnType<typeof vi.spyOn>;
+    expect(error.mock.calls).toEqual([["shop_drm_key_mismatch"]]);
+    error.mockClear();
   });
 
   it("fails with a 500 when KMS refuses, logging the error's name only, never a key", async () => {

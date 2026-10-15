@@ -422,10 +422,11 @@ export function awsDrmRoleArn(
 }
 
 /**
- * DRM_KMS_KEY_ARN_CA (ADR 0034): the KMS key (alias/daybell-{env}-ca-drm) that wraps each photo's content key, in
- * ca-central-1 like the photos (D113). Its being set is what turns DRM packaging on in this environment: unset, nothing
- * is packaged and the shop keeps the WebP. Null with the local driver (no packaging locally) and for regions without
- * photo storage. A key or alias ARN in the photos' AWS region; anything else throws, naming the variable.
+ * DRM_KMS_KEY_ARN_CA (ADR 0034): the KMS key that wraps each photo's content key, in ca-central-1 like the photos
+ * (D113). Its key ARN, not its alias: the token route refuses any wrapped key whose KMS key isn't exactly this one
+ * (review L3). Its being set is what turns DRM packaging on in this environment: unset, nothing is packaged and the shop
+ * keeps the WebP. Null with the local driver (no packaging locally) and for regions without photo storage. Anything
+ * else throws, naming the variable.
  */
 export function drmKmsKeyArn(
   region: DataRegion,
@@ -436,10 +437,8 @@ export function drmKmsKeyArn(
   const name = `DRM_KMS_KEY_ARN_${region.toUpperCase()}`;
   const value = env[name]?.trim() ?? "";
   if (!value) return null;
-  const pattern = new RegExp(
-    `^arn:aws:kms:${settings.awsRegion}:\\d{12}:(key/[0-9a-f-]{36}|alias/[A-Za-z0-9/_-]{1,250})$`,
-  );
+  const pattern = new RegExp(`^arn:aws:kms:${settings.awsRegion}:\\d{12}:key/[0-9a-f-]{36}$`);
   if (!pattern.test(value))
-    throw new Error(`${name} must be a KMS key or alias ARN in ${settings.awsRegion}`);
+    throw new Error(`${name} must be a KMS key ARN in ${settings.awsRegion}`);
   return value;
 }

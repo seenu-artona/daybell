@@ -5,6 +5,7 @@ import {
   DRM_CONTENT_TYPES,
   DRM_VARIANTS,
   type DrmFailureReason,
+  drmObjectKey,
   MAX_PHOTO_BYTES,
   photoKey,
 } from "@daybell/core";
@@ -256,10 +257,12 @@ export async function runDrmJob(photoId: string, deps: DrmJobDeps): Promise<Phot
   } finally {
     dataKey.plaintext.fill(0);
   }
-  // The manifests last, so a manifest never names a clip that isn't there yet.
+  // Under this run's own key ID (drm/{keyId}.*; review H1): a second run for the photo (a repeated message, a stale
+  // request) writes its own files and never overwrites these, so the database's key always names the files it
+  // encrypted. The manifests last, so a manifest never names a clip that isn't there yet.
   for (const variant of DRM_VARIANTS)
     await deps.put(
-      photoKey(ids, variant),
+      drmObjectKey(ids, keyId, variant),
       clip.files[variant],
       DRM_CONTENT_TYPES[variant],
       PREVIEW_CACHE_CONTROL,

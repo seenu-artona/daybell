@@ -1,7 +1,8 @@
 import "server-only";
 import type { DataRegion } from "@daybell/config";
 import { drmKmsKeyArn } from "@daybell/config/server";
-import { queueDrmForProcessing } from "./photo-storage";
+import { drmPrefix } from "@daybell/core";
+import { photoStorage, queueDrmForProcessing } from "./photo-storage";
 import { photoSystemRpc } from "./supabase/service";
 
 /**
@@ -22,8 +23,10 @@ export function drmPackagingOn(region: DataRegion): boolean {
 
 /**
  * Requests a photo's clip (after a new ready result: its proofs were remade, and record_photo_result dropped the old
- * clip) and queues it. A photo that can't be shown to parents (a card, binned) isn't requested. A failure to queue is
- * left for the daily cron, which re-queues requests unanswered for an hour.
+ * clip) and queues it. A photo that can't be shown to parents (a card, binned) isn't requested. Earlier clips in the
+ * photo's drm/ folder are deleted first (review H1): the database no longer names any of them, and the new run writes
+ * under its own key. A run already under way may still leave its files there; the photo's purge removes them. A failure
+ * to queue is left for the daily cron, which re-queues requests unanswered for an hour.
  */
 export async function requestDrm(region: DataRegion, photoId: string): Promise<void> {
   if (!drmPackagingOn(region)) return;
@@ -31,6 +34,16 @@ export async function requestDrm(region: DataRegion, photoId: string): Promise<v
     p_photo_id: photoId,
   });
   if (error || data === null || data === undefined) return;
+  try {
+    const where = await photoSystemRpc(region, "photo_for_worker", { p_photo_id: photoId });
+    const row = where.data as { studio_id?: string; job_id?: string } | null;
+    if (row?.studio_id && row.job_id)
+      await photoStorage(region).deleteAllVersions(
+        drmPrefix({ studioId: row.studio_id, jobId: row.job_id, photoId }),
+      );
+  } catch (err) {
+    console.error("drm_cleanup_failed", photoId, err instanceof Error ? err.name : "unknown");
+  }
   try {
     await queueDrmForProcessing(region, photoId);
   } catch (err) {

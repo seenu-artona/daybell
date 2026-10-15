@@ -109,9 +109,11 @@ describe("awsDrmRoleArn (B4)", () => {
 describe("drmKmsKeyArn (D113)", () => {
   const KEY = "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
   const ALIAS = "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm";
-  it("reads a key or alias ARN in ca-central-1; unset means DRM packaging is off here", () => {
+  it("reads a key ARN in ca-central-1 (never an alias: review L3); unset means DRM packaging is off here", () => {
     expect(drmKmsKeyArn("ca", { ...S3, DRM_KMS_KEY_ARN_CA: KEY })).toBe(KEY);
-    expect(drmKmsKeyArn("ca", { ...S3, DRM_KMS_KEY_ARN_CA: ALIAS })).toBe(ALIAS);
+    expect(() => drmKmsKeyArn("ca", { ...S3, DRM_KMS_KEY_ARN_CA: ALIAS })).toThrow(
+      /^DRM_KMS_KEY_ARN_CA must be a KMS key ARN in ca-central-1$/,
+    );
     expect(drmKmsKeyArn("ca", S3)).toBeNull();
     expect(drmKmsKeyArn("ca", { STORAGE_DRIVER: "local", DRM_KMS_KEY_ARN_CA: KEY })).toBeNull();
     expect(drmKmsKeyArn("us", { ...S3, DRM_KMS_KEY_ARN_CA: KEY })).toBeNull();
@@ -124,7 +126,7 @@ describe("drmKmsKeyArn (D113)", () => {
       expect.unreachable();
     } catch (err) {
       expect((err as Error).message).toBe(
-        "DRM_KMS_KEY_ARN_CA must be a KMS key or alias ARN in ca-central-1",
+        "DRM_KMS_KEY_ARN_CA must be a KMS key ARN in ca-central-1",
       );
     }
   });

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cardQrPayload, photoKey, verifyWorkerRequest } from "@daybell/core";
+import { cardQrPayload, drmObjectKey, photoKey, verifyWorkerRequest } from "@daybell/core";
 import { localPhotoStorage, type PhotoStorage } from "@daybell/storage";
 import type { SQSEvent } from "aws-lambda";
 import QRCode from "qrcode";
@@ -84,7 +84,12 @@ describe("photoTasksFromMessage (ADR 0023)", () => {
     ).toEqual([]);
     // A download.jpg or a DRM clip landing in S3 is not an original.
     expect(photoTasksFromMessage(s3Event(photoKey(ids, "download.jpg")), BUCKET)).toEqual([]);
-    expect(photoTasksFromMessage(s3Event(photoKey(ids, "drm.mp4")), BUCKET)).toEqual([]);
+    expect(
+      photoTasksFromMessage(
+        s3Event(drmObjectKey(ids, "2b0e6a4c-9f6e-4f0a-8d2b-3c4d5e6f7a8b", "drm.mp4")),
+        BUCKET,
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -108,11 +113,17 @@ describe("configFromEnv and the secret", () => {
     });
   });
   it("reads the DRM key's ARN when set, in ca-central-1 only (ADR 0034)", () => {
-    const key = "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm";
+    const key = "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
     expect(configFromEnv({ ...env, DRM_KMS_KEY_ARN: key }).drmKmsKeyArn).toBe(key);
     expect(() =>
+      configFromEnv({
+        ...env,
+        DRM_KMS_KEY_ARN: "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm",
+      }),
+    ).toThrow(/^DRM_KMS_KEY_ARN must be a KMS key ARN in ca-central-1$/);
+    expect(() =>
       configFromEnv({ ...env, DRM_KMS_KEY_ARN: key.replace("ca-central-1", "us-east-1") }),
-    ).toThrow(/^DRM_KMS_KEY_ARN must be a KMS key or alias ARN in ca-central-1$/);
+    ).toThrow(/^DRM_KMS_KEY_ARN must be a KMS key ARN in ca-central-1$/);
   });
   it("runs only in Canada for Canadian data (D113), and names what's wrong, never a value", () => {
     expect(() => configFromEnv({ ...env, AWS_REGION: "us-east-1" })).toThrow(/^AWS_REGION must be/);
@@ -290,8 +301,10 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     expect(await handler(sqs(JSON.stringify({ photoId: ids.photoId, make: "drm" })))).toEqual({
       batchItemFailures: [],
     });
+    // Under the reported key's own names (review H1).
+    const keyId = (reports[0] as { keyId: string }).keyId;
     for (const variant of ["drm.mp4", "drm.mpd", "drm.m3u8", "drm-video.m3u8"] as const)
-      expect(await storage.head(photoKey(ids, variant))).not.toBeNull();
+      expect(await storage.head(drmObjectKey(ids, keyId, variant))).not.toBeNull();
     expect(fetchFake.mock.calls.map(([url]) => String(url)).at(-1)).toBe(
       `${config.callbackBaseUrl}/api/v1/internal/photo-worker/photos/${ids.photoId}/drm`,
     );

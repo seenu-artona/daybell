@@ -79,7 +79,10 @@ jobs:
             --zip-file fileb://image-worker-drm-layer.zip \
             --compatible-architectures arm64 --compatible-runtimes nodejs22.x \
             --output text --query 'LayerVersionArn')
-          aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers "$layer_arn" \
+          # Keep any other layer the function has; replace only an earlier version of this one.
+          others=$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" \
+            --query 'Layers[].Arn' --output text | tr '\t' '\n' | grep -v -e ":layer:$LAYER_NAME:" -e '^None$' || true)
+          aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers $others "$layer_arn" \
             --output text --query 'LastUpdateStatus'
           aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
       - name: Update the function's code

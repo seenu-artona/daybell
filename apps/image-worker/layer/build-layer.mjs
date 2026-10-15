@@ -1,7 +1,7 @@
 // Builds the image worker's DRM tools layer (D158; ADR 0034): ffmpeg and Shaka Packager for Lambda (Linux, arm64),
-// mounted at /opt/bin. Reproducible: every input is pinned by SHA-256 and the zip is written with fixed times and order,
-// so the same commit always makes the same layer. Run in CI (the drm-packaging workflow) and by the deploy workflow; no
-// AWS access here.
+// mounted at /opt/bin. Every file in it is pinned by SHA-256, and the zip is written with fixed times, modes and order.
+// The zip's own hash isn't pinned (it depends on the zip tool's version); its contents are. Run in CI (the
+// drm-packaging workflow) and by the deploy workflow; no AWS access here.
 //
 //   node layer/build-layer.mjs                       downloads, checks and zips the arm64 layer: image-worker-drm-layer.zip
 //   node layer/build-layer.mjs --tools x64 <dir>     puts the x64 builds of the same versions in <dir>/bin (CI's check)
@@ -64,6 +64,9 @@ export const FFMPEG_FILES = {
   },
 };
 /** Shaka Packager 3.9.3's binaries, as in packages/image-pipeline (DRM_BINARY_SHA256) and the spike (ADR 0032). */
+/** Shaka Packager's licence file in the same npm package, pinned too (review #16). */
+export const PACKAGER_LICENSE_SHA256 =
+  "0eea5a66a8505f758fdc8710637c5b4f5f1b18b29d0f248d6e95a3cdfc8fb599";
 export const PACKAGER_FILES = {
   arm64: {
     name: "packager-linux-arm64",
@@ -97,7 +100,11 @@ function packagerBinary(arch) {
   const file = join(dirname(pkg), "bin", PACKAGER_FILES[arch].name);
   return {
     bytes: check(PACKAGER_FILES[arch].name, readFileSync(file), PACKAGER_FILES[arch].sha256),
-    license: readFileSync(join(dirname(pkg), "LICENSE")),
+    license: check(
+      "shaka-packager LICENSE",
+      readFileSync(join(dirname(pkg), "LICENSE")),
+      PACKAGER_LICENSE_SHA256,
+    ),
   };
 }
 

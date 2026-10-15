@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,9 +7,12 @@ import { Writable } from "node:stream";
 import {
   DRM_CLIP_FRAMES,
   DRM_VARIANTS,
+  DrmManifestError,
+  drmObjectKey,
   H264_LEVEL_40_MAX_MACROBLOCKS,
   photoKey,
   rewriteDashManifest,
+  rewriteHlsMaster,
   rewriteHlsMedia,
 } from "@daybell/core";
 import sharp from "sharp";
@@ -353,20 +356,20 @@ describe("runDrmJob (B6)", () => {
       photo: ids.photoId,
       key: KEY_ID,
     });
-    for (const v of DRM_VARIANTS) expect(stored.has(photoKey(ids, v))).toBe(true);
+    for (const v of DRM_VARIANTS) expect(stored.has(drmObjectKey(ids, KEY_ID, v))).toBe(true);
     expect(deps.put).toHaveBeenCalledWith(
-      photoKey(ids, "drm.mp4"),
+      drmObjectKey(ids, KEY_ID, "drm.mp4"),
       expect.anything(),
       "video/mp4",
       "private, max-age=3600",
     );
     expect(deps.put).toHaveBeenCalledWith(
-      photoKey(ids, "drm.mpd"),
+      drmObjectKey(ids, KEY_ID, "drm.mpd"),
       expect.anything(),
       "application/dash+xml",
       "private, max-age=3600",
     );
-    expect(deps.put.mock.calls.map((c) => c[0]).at(0)).toBe(photoKey(ids, "drm.mp4"));
+    expect(deps.put.mock.calls.map((c) => c[0]).at(0)).toBe(drmObjectKey(ids, KEY_ID, "drm.mp4"));
     expect(deps.reportDrm).toHaveBeenCalledWith(ids.photoId, {
       status: "ready",
       attempt: 4,
@@ -434,6 +437,84 @@ describe("runDrmJob (B6)", () => {
   });
 });
 
+describe("overlapping packaging runs (review H1)", () => {
+  const ids = {
+    studioId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    jobId: "0b6f7c1e-2a7d-4c55-9d0e-3f1a2b3c4d5e",
+    photoId: "1c7a8d2f-3b8e-4d66-8e1f-4a2b3c4d5e6f",
+  };
+  const ARN = "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
+
+  it("never leave the database's key naming files another key encrypted", async () => {
+    const proof = await webp(64, 48);
+    const stored = new Map<string, Uint8Array>([[photoKey(ids, "proof.webp"), proof]]);
+    // The database: the first ready result for the current attempt wins; later or stale ones are ignored.
+    const db = { attempt: 2, keyId: null as string | null };
+    const keys = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    const run = (keyId: string, attempt: number, delayMs: number) =>
+      runDrmJob(ids.photoId, {
+        photo: async () =>
+          ({
+            id: ids.photoId,
+            studioId: ids.studioId,
+            jobId: ids.jobId,
+            status: "ready",
+            sha256: "00",
+            byteSize: 1,
+            attempt: 1,
+            studioName: "x",
+            drmStatus: "requested",
+            drmAttempt: attempt,
+          }) as WorkerPhoto,
+        head: async (key) => (stored.has(key) ? { size: stored.get(key)?.length ?? 0 } : null),
+        get: async (key) => stored.get(key) as Uint8Array<ArrayBuffer>,
+        put: async (key, body) => {
+          await new Promise((ok) => setTimeout(ok, delayMs));
+          stored.set(key, body);
+        },
+        log: () => {},
+        dataKey: async () => ({
+          plaintext: new Uint8Array(16).fill(1),
+          wrapped: new Uint8Array([1]),
+          kmsKeyArn: ARN,
+        }),
+        // Each run's files say which key encrypted them.
+        packageClip: async (_f, id) => ({
+          files: Object.fromEntries(
+            DRM_VARIANTS.map((v) => [v, new TextEncoder().encode(`${v} for ${id}`)]),
+          ) as DrmClip["files"],
+          width: 64,
+          height: 48,
+        }),
+        reportDrm: async (_id, result) => {
+          if (result.status === "ready" && result.attempt === db.attempt && db.keyId === null)
+            db.keyId = result.keyId;
+        },
+        newKeyId: () => keyId,
+      });
+    // A repeated message (same attempt) racing the first, and a stale run of an earlier attempt finishing last.
+    await Promise.all([
+      run(keys[0] as string, 2, 5),
+      run(keys[1] as string, 2, 1),
+      run(keys[2] as string, 1, 10),
+    ]);
+    expect(db.keyId).not.toBeNull();
+    for (const v of DRM_VARIANTS) {
+      const body = stored.get(drmObjectKey(ids, db.keyId as string, v));
+      expect(new TextDecoder().decode(body)).toBe(`${v} for ${db.keyId}`);
+    }
+    // Every run kept its own files; none overwrote another's.
+    for (const k of keys)
+      expect(new TextDecoder().decode(stored.get(drmObjectKey(ids, k, "drm.mp4")))).toBe(
+        `drm.mp4 for ${k}`,
+      );
+  });
+});
+
 // The real tools, when their paths are given (the CI job drm-packaging, or by hand): a throwaway key, a synthetic
 // picture. The clip decrypts with the key to the picture and to nothing usable without it, and the key is in no file.
 const FFMPEG = process.env.DRM_TEST_FFMPEG?.trim();
@@ -481,11 +562,31 @@ describe.runIf(FFMPEG && PACKAGER)("packaging with the pinned binaries", () => {
     return mse === 0 ? Number.POSITIVE_INFINITY : 10 * Math.log10((255 * 255) / mse);
   };
 
-  it("makes a clip that decrypts with its key only, and holds no key", async () => {
+  /** ffmpeg's log lines (stderr) for a run that reads the clip, decrypting it with `key` when given. */
+  const log = (key: string | null, mp4: string, args: string[]) => {
+    const out = spawnSync(
+      FFMPEG as string,
+      [
+        "-hide_banner",
+        ...(key ? ["-decryption_key", key] : []),
+        "-i",
+        mp4,
+        ...args,
+        "-f",
+        "null",
+        "-",
+      ],
+      { env: { PATH: process.env.PATH ?? "" }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    );
+    return out.stderr;
+  };
+
+  it("makes a clip that decrypts with its key only, is what the shop expects, and holds no key", async () => {
     await verifyDrmBinaries({ ffmpeg: FFMPEG as string, packager: PACKAGER as string });
     const decoded = await drmFrame(await webp(1600, 1067));
     if (!decoded.ok) throw new Error("decode");
     const key = randomBytes(16);
+    const keyHex = key.toString("hex");
     const keyId = randomUUID();
     const clip = await packageDrmClip({
       frame: decoded.frame,
@@ -496,31 +597,61 @@ describe.runIf(FFMPEG && PACKAGER)("packaging with the pinned binaries", () => {
     const dir = mkdtempSync(join(tmpdir(), "drm-check-"));
     for (const v of DRM_VARIANTS) writeFileSync(join(dir, v), clip.files[v]);
     const mp4 = join(dir, "drm.mp4");
+    expect(readFileSync(mp4).length).toBe(clip.files["drm.mp4"].length);
 
-    const withKey = decode(mp4, key.toString("hex"), clip);
+    // Decrypts with its key to the picture. This synthetic gradient through WebP (quality 80) then H.264 at CRF 18
+    // measures 36.6 dB with the pinned tools (deterministic); 32 dB leaves room for a different test picture while
+    // still meaning "the same picture" (no key gives under 20).
+    const withKey = decode(mp4, keyHex, clip);
     expect(withKey).not.toBeNull();
-    expect(psnr(withKey as Buffer, decoded.frame.rgb)).toBeGreaterThan(35);
+    const clear = psnr(withKey as Buffer, decoded.frame.rgb);
+    expect(clear).toBeGreaterThan(32);
+    // The very first sample is encrypted (no clear lead): without the key, nothing usable even at frame 1.
     const withoutKey = decode(mp4, null, clip);
     if (withoutKey) expect(psnr(withoutKey, decoded.frame.rgb)).toBeLessThan(20);
 
+    // 10 frames: one IDR, then 9 P frames (showinfo on the decrypted clip).
+    const frames = [
+      ...log(keyHex, mp4, ["-vf", "showinfo"]).matchAll(/iskey:([01]) type:([IPB])/g),
+    ].map((m) => `${m[1]}${m[2]}`);
+    expect(frames).toEqual(["1I", ...Array(9).fill("0P")]);
+    // H.264 High, level 4.0, BT.709 limited range, tagged (the SPS, read by trace_headers).
+    const sps = log(keyHex, mp4, ["-c:v", "copy", "-bsf:v", "trace_headers"]);
+    const field = (name: string) => new RegExp(`\\b${name}\\s+[01]+ = (\\d+)`).exec(sps)?.[1];
+    expect(field("profile_idc")).toBe("100");
+    expect(field("level_idc")).toBe("40");
+    expect(field("colour_primaries")).toBe("1");
+    expect(field("transfer_characteristics")).toBe("1");
+    expect(field("matrix_coefficients")).toBe("1");
+    expect(field("video_full_range_flag")).toBe("0");
+
+    // No form of the key in any file.
     for (const v of DRM_VARIANTS) {
       const bytes = Buffer.from(clip.files[v]);
       expect(bytes.includes(key)).toBe(false);
-      for (const form of [key.toString("hex"), key.toString("base64"), key.toString("base64url")])
+      for (const form of [keyHex, key.toString("base64"), key.toString("base64url")])
         expect(bytes.toString("latin1").toLowerCase().includes(form.toLowerCase())).toBe(false);
     }
+
+    // The shop's strict rewriting accepts exactly this output, for this key and no other.
+    const other = randomUUID();
     const mpd = Buffer.from(clip.files["drm.mpd"]).toString("utf8");
     expect(mpd).toContain('codecs="avc1.640028"');
     expect(mpd).toContain('value="cbcs"');
-    expect(mpd).toContain(`cenc:default_KID="${keyId}"`);
-    expect(rewriteDashManifest(mpd, "https://b.example/drm.mp4?a=1&b=2")).toContain("a=1&amp;b=2");
-    const media = Buffer.from(clip.files["drm-video.m3u8"]).toString("utf8");
-    expect(media).toContain(`URI="skd://${keyId}"`);
-    expect(media).toContain(`IV=0x${keyId.replaceAll("-", "")}`);
-    expect(rewriteHlsMedia(media, "https://b.example/drm.mp4?s=1")).toContain(
-      'URI="https://b.example/drm.mp4?s=1"',
+    expect(rewriteDashManifest(mpd, "https://b.example/drm.mp4?a=1&b=2", keyId)).toContain(
+      "a=1&amp;b=2",
     );
-    expect(existsSync(dir)).toBe(true);
-    expect(readFileSync(mp4).length).toBe(clip.files["drm.mp4"].length);
+    expect(() => rewriteDashManifest(mpd, "https://b.example/x", other)).toThrow(DrmManifestError);
+    const master = Buffer.from(clip.files["drm.m3u8"]).toString("utf8");
+    expect(rewriteHlsMaster(master, "/api/v1/x?format=hls-media")).toContain(
+      "\n/api/v1/x?format=hls-media\n",
+    );
+    const media = Buffer.from(clip.files["drm-video.m3u8"]).toString("utf8");
+    expect(media).toContain(`IV=0x${keyId.replaceAll("-", "")}`);
+    const rewritten = rewriteHlsMedia(media, "https://b.example/drm.mp4?s=1", keyId);
+    expect(rewritten).toContain('URI="https://b.example/drm.mp4?s=1"');
+    expect(rewritten).toContain(`URI="skd://${keyId}"`);
+    expect(() => rewriteHlsMedia(media, "https://b.example/x", other)).toThrow(DrmManifestError);
+    process.stdout.write(`drm-packaging: decrypted PSNR ${clear.toFixed(1)} dB\n`);
   });
 });

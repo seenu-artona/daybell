@@ -32,7 +32,7 @@ type KeyRow =
  * Nothing about it is logged.
  */
 export const POST = shopHandle(async (request: Request, ctx: Ctx) => {
-  const session = await requireShopSession(request);
+  const session = await requireShopSession(request, "drm");
   const { childId, photoId } = await ctx.params;
   if (!z.uuid().safeParse(childId).success || !z.uuid().safeParse(photoId).success)
     throw new ApiError("not_found", "Photo not found.");
@@ -49,6 +49,11 @@ export const POST = shopHandle(async (request: Request, ctx: Ctx) => {
     throw new RetryLater(row.retry_after, "Too many photos opened. Wait a moment and try again.");
   }
   assertStorageRegion(session.region);
+  // Only this environment's DRM key unwraps (review L3): a row naming any other key is refused before KMS is asked.
+  if (row.kms_key_arn !== setup.kmsKeyArn) {
+    console.error("shop_drm_key_mismatch");
+    throw drmUnavailable();
+  }
   const contentKey = await unwrapContentKey(setup, {
     studioId: row.studio_id,
     photoId: row.photo_id,

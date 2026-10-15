@@ -65,8 +65,8 @@ export interface EnvConfig {
 }
 
 const SECRET_ARN = /^arn:aws:secretsmanager:ca-central-1:\d{12}:secret:[A-Za-z0-9/_+=.@-]+$/;
-const KMS_KEY_ARN =
-  /^arn:aws:kms:ca-central-1:\d{12}:(key\/[0-9a-f-]{36}|alias\/[A-Za-z0-9/_-]{1,250})$/;
+const KMS_KEY_ARN = /^arn:aws:kms:ca-central-1:\d{12}:key\/[0-9a-f-]{36}$/;
+/^arn:aws:kms:ca-central-1:\d{12}:(key\/[0-9a-f-]{36}|alias\/[A-Za-z0-9/_-]{1,250})$/;
 
 /** Every value a variable must have, by name only, so a misconfigured worker fails loudly and never quietly. */
 export function configFromEnv(env: Record<string, string | undefined>): EnvConfig {
@@ -86,7 +86,7 @@ export function configFromEnv(env: Record<string, string | undefined>): EnvConfi
   if (!base.startsWith("https://")) throw new Error("CALLBACK_BASE_URL must be https");
   const drmKmsKeyArn = env.DRM_KMS_KEY_ARN?.trim() || null;
   if (drmKmsKeyArn && !KMS_KEY_ARN.test(drmKmsKeyArn))
-    throw new Error("DRM_KMS_KEY_ARN must be a KMS key or alias ARN in ca-central-1");
+    throw new Error("DRM_KMS_KEY_ARN must be a KMS key ARN in ca-central-1");
   return { callbackBaseUrl: base, region, bucket: need("PHOTO_BUCKET"), secretArn, drmKmsKeyArn };
 }
 

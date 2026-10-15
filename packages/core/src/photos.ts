@@ -5,8 +5,6 @@
  * Object keys and URLs hold IDs only, never a file's name (D96, D113).
  */
 
-import type { DrmVariant } from "./drm";
-
 /** Seenu, answer 1: JPEG only, at most 50 MB a photo (50 MiB, so a camera's "50 MB" file always fits). */
 export const MAX_PHOTO_BYTES = 52_428_800;
 /** Seenu, answer 1: at most 50,000 photos per job, the bin included. */
@@ -134,7 +132,7 @@ export function partsComplete(
  * (the studio's name tiled across) for parents (D60); and the file a parent downloads once they have paid
  * (`download.jpg`: full resolution, upright, sRGB, every bit of metadata stripped; ADR 0023, call 10). Previews are
  * made once, at upload (D100); the download only once the photo is sold (security review N1). Parents never get the
- * original.
+ * original. The large view's DRM clips live in the photo's `drm/` folder under their key IDs (./drm, drmObjectKey).
  */
 export const PHOTO_VARIANTS = [
   "original",
@@ -143,15 +141,10 @@ export const PHOTO_VARIANTS = [
   "proof-thumb.webp",
   "proof.webp",
   "download.jpg",
-  // The large view's DRM clip and its manifests (D158; ADR 0034), made from proof.webp: DRM_VARIANTS in ./drm.
-  "drm.mp4",
-  "drm.mpd",
-  "drm.m3u8",
-  "drm-video.m3u8",
 ] as const;
 export type PhotoVariant = (typeof PHOTO_VARIANTS)[number];
 /** The WebP previews (studio and parents). */
-export type DerivativeVariant = Exclude<PhotoVariant, "original" | "download.jpg" | DrmVariant>;
+export type DerivativeVariant = Exclude<PhotoVariant, "original" | "download.jpg">;
 /** The paid download's key's last part (ADR 0023). */
 export const DOWNLOAD_VARIANT = "download.jpg" satisfies PhotoVariant;
 

@@ -6,7 +6,7 @@
 -- key with it; the cron's retries, give-ups and backfill; no events; the wrapped key nowhere but its own table.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(82);
+select plan(103);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -141,19 +141,21 @@ select is((select count(*)::int from unnest(array['drm_status', 'drm_key_id', 'd
            'drm_requests']) col where has_column_privilege('authenticated', 'public.photos', col, 'select')), 0,
   'studio members don''t read the photos'' DRM columns');
 select is((select count(*)::int from unnest(array['anon', 'authenticated']) r,
-           unnest(array['public.shop_drm_enabled()', 'public.set_shop_drm(boolean, text)',
+           unnest(array['public.shop_drm_enabled()', 'public.set_shop_drm(boolean, text, uuid[])',
+             'public.shop_drm_enabled_for(text)', 'public.photos_drm_unsent(uuid[])', 'app.shop_drm_on_for(uuid)',
              'public.photo_drm_requested(uuid)',
              'public.record_photo_drm_result(uuid, integer, uuid, bytea, text, integer, integer, bigint)',
              'public.record_photo_drm_failed(uuid, integer)', 'public.photos_drm_due(integer)',
              'public.shop_drm_photo(text, uuid, uuid)', 'public.shop_drm_key(text, uuid, uuid)',
              'app.photo_drm_eligible(public.photos)', 'app.shop_drm_photo_row(text, uuid, uuid)']) f
            where has_function_privilege(r, f, 'execute')), 0, 'browsers can run none of the functions');
-select is((select count(*)::int from unnest(array['public.shop_drm_enabled()', 'public.photo_drm_requested(uuid)',
+select is((select count(*)::int from unnest(array['public.shop_drm_enabled()', 'public.shop_drm_enabled_for(text)',
+             'public.photos_drm_unsent(uuid[])', 'public.photo_drm_requested(uuid)',
              'public.record_photo_drm_result(uuid, integer, uuid, bytea, text, integer, integer, bigint)',
              'public.record_photo_drm_failed(uuid, integer)', 'public.photos_drm_due(integer)',
              'public.shop_drm_photo(text, uuid, uuid)', 'public.shop_drm_key(text, uuid, uuid)']) f
-           where has_function_privilege('service_role', f, 'execute')), 7, 'the API runs the rest');
-select ok(not has_function_privilege('service_role', 'public.set_shop_drm(boolean, text)', 'execute'),
+           where has_function_privilege('service_role', f, 'execute')), 9, 'the API runs the rest');
+select ok(not has_function_privilege('service_role', 'public.set_shop_drm(boolean, text, uuid[])', 'execute'),
   'the switch is the database owner''s alone: not the API''s');
 
 -- ── 2. The kill switch (C6) ───────────────────────────────────────────────────────────────────────────────────────
@@ -230,7 +232,8 @@ select is((select jsonb_agg(p -> 'drm') from jsonb_array_elements(public.shop_ga
 select is(pg_temp.drm('s1', 'c0000000-0000-4000-8000-000000000001', 1), 'ok', 'Ava''s parent opens her portrait');
 select is(public.shop_drm_photo(pg_temp.h('s1'), 'c0000000-0000-4000-8000-000000000001', pg_temp.pid(1)),
   jsonb_build_object('studio_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_id', 'a0000000-0000-4000-8000-000000000001',
-    'photo_id', pg_temp.pid(1)), 'the manifest route learns where the clip is, and nothing else');
+    'photo_id', pg_temp.pid(1), 'key_id', pg_temp.kid(1)),
+  'the manifest route learns where the clip is and its key ID (its files'' name, review H1), and nothing else');
 select is(pg_temp.drm('s1', 'c0000000-0000-4000-8000-000000000001', 70), 'ok', 'a member of the Choir opens its photo');
 select is(pg_temp.drm('s2', 'c0000000-0000-4000-8000-000000000002', 70), 'P0002 Photo not found',
   'a non-member (Noah) doesn''t');
@@ -278,6 +281,25 @@ select is(pg_temp.drm('s1', 'c0000000-0000-4000-8000-000000000001', 4), 'P0002 P
 select lives_ok($$ select public.set_shop_drm(true, 'Test: on again') $$, 'on again');
 select is((select count(*)::int from app.platform_settings_changes where setting = 'shop_drm_enabled'), 3,
   'every switch is in the history');
+
+-- ── 6b. One studio only (staging's device matrix; review M1/M2) ───────────────────────────────────────────────────
+select is(pg_temp.try($$ select public.set_shop_drm(true, 'x', array[gen_random_uuid()]) $$),
+  '22023 List 1 to 100 studios of this database, or none for every studio', 'only studios of this database');
+select is(pg_temp.try($$ select public.set_shop_drm(true, 'x', '{}'::uuid[]) $$),
+  '22023 List 1 to 100 studios of this database, or none for every studio', 'an empty list is refused (null = all)');
+select lives_ok($$ select public.set_shop_drm(true, 'Test: studio B only', array['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'::uuid]) $$,
+  'the owner narrows it to studio B');
+select is(pg_temp.drm('s1', 'c0000000-0000-4000-8000-000000000001', 1), 'P0001 drm_unavailable',
+  'studio A''s large views are no longer protected');
+select is((select jsonb_agg(p -> 'drm') from jsonb_array_elements(public.shop_gallery(pg_temp.h('s1'),
+  'c0000000-0000-4000-8000-000000000001') -> 'portraits') p), '[false, false]'::jsonb, 'nor marked in its gallery');
+select is(array[public.shop_drm_enabled_for(pg_temp.h('s1')), public.shop_drm_enabled_for(pg_temp.h('sb')),
+  public.shop_drm_enabled_for(pg_temp.h('nope'))], array[false, true, false], 'GET /shop/drm asks per session''s studio');
+select is(pg_temp.drm('sb', 'cb000000-0000-4000-8000-000000000001', 10), 'ok', 'studio B''s are');
+select is((select (old_value, new_value) from app.platform_settings_changes where setting = 'shop_drm_studio_ids'),
+  ('all'::text, '{bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb}'::text), 'the list is kept in the history');
+select lives_ok($$ select public.set_shop_drm(true, 'Test: every studio again') $$, 'every studio again');
+select is(pg_temp.drm('s1', 'c0000000-0000-4000-8000-000000000001', 1), 'ok', 'studio A''s are protected again');
 
 -- ── 7. Keys and the token budget (C3) ─────────────────────────────────────────────────────────────────────────────
 select is(public.shop_drm_key(pg_temp.h('s1'), 'c0000000-0000-4000-8000-000000000001', pg_temp.pid(1)),
@@ -335,6 +357,25 @@ select is((select array_agg(outcome) from public.photos_drm_due(10)), array['fai
   'after 3 messages it is given up (the cron logs drm_unavailable)');
 select is((select drm_status::text from public.photos where id = pg_temp.pid(2)), 'failed', 'failed for good');
 select is((select count(*)::int from public.photos_drm_due(0)), 0, 'nothing beyond the limit');
+-- Messages the cron couldn't send are undone (review #12): a backfill goes back to never asked, a retry uncounted.
+update public.photos set drm_status = null, drm_key_id = null, drm_requests = 0, drm_requested_at = null
+where id = pg_temp.pid(2);
+select is((select array_agg(outcome) from public.photos_drm_due(10)), array['backfill'], 'backfilled again');
+select is(public.photos_drm_unsent(array[pg_temp.pid(2)]), 1, 'its message wasn''t sent');
+select is((select (drm_status, drm_requests, drm_requested_at) from public.photos where id = pg_temp.pid(2)),
+  (null::public.photo_drm_status, 0::smallint, null::timestamptz), 'so it is never asked, as before');
+select is((select array_agg(outcome) from public.photos_drm_due(10)), array['backfill'], 'and taken again next run');
+update public.photos set drm_requested_at = now() - interval '2 hours' where id = pg_temp.pid(2);
+select is((select array_agg(outcome) from public.photos_drm_due(10)), array['retry'], 'a retry');
+select is(public.photos_drm_unsent(array[pg_temp.pid(2)]), 1, 'not sent either');
+select is((select (drm_status::text, drm_requests) from public.photos where id = pg_temp.pid(2)),
+  ('requested'::text, 1::smallint), 'counts only the message that was sent');
+-- Only a Canadian database packages (D113).
+savepoint us_database;
+alter table app.config disable trigger user;
+update app.config set value = 'us' where key = 'data_region';
+select is((select count(*)::int from public.photos_drm_due(10)), 0, 'a US database packages nothing');
+rollback to savepoint us_database;
 
 -- ── 9. Reprocessing and purging ───────────────────────────────────────────────────────────────────────────────────
 update public.photos set status = 'processing', attempt = 2 where id = pg_temp.pid(1);
@@ -347,6 +388,45 @@ select ok(exists (select 1 from app.photo_drm_keys where photo_id = pg_temp.pid(
 delete from public.photo_tags where photo_id = pg_temp.pid(4);
 delete from public.photos where id = pg_temp.pid(4);
 select ok(not exists (select 1 from app.photo_drm_keys where photo_id = pg_temp.pid(4)), 'a purged photo takes its key with it');
+
+-- ── 9b. A US studio's large view: region_unavailable (D113) ──────────────────────────────────────────────────────
+-- A US studio can't exist in a Canadian database (the region guard); this test puts one there to check the function's
+-- own guard, after the entitlement and before the switch.
+alter table public.studios disable trigger studios_guard_region;
+insert into public.studios (id, name, slug, data_region) values
+  ('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'US Studio', 'studio-us', 'us');
+alter table public.studios enable trigger studios_guard_region;
+insert into public.jobs (id, studio_id, name, type, picture_day, internal_number, status) values
+  ('d0000000-0000-4000-8000-000000000001', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'US Fall', 'school', '2026-10-13', 'JOB00001', 'draft');
+update public.jobs set status = 'selling' where id = 'd0000000-0000-4000-8000-000000000001';
+insert into public.children (id, studio_id, job_id, first_name, last_name, access_code_hash, access_code_ciphertext)
+values ('cd000000-0000-4000-8000-000000000001', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  'd0000000-0000-4000-8000-000000000001', 'Uma', 'Ward', pg_temp.h('cd1'), 'v1.' || repeat('A', 48));
+insert into public.upload_batches (id, studio_id, job_id, created_by, kind) values
+  ('ed000000-0000-4000-8000-000000000001', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+   'd0000000-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'individual');
+insert into public.photos (id, studio_id, job_id, batch_id, batch_seq, status, original_filename, byte_size, sha256,
+  width, height, qr_kind, created_by)
+select pg_temp.pid(80), b.studio_id, b.job_id, b.id, b.seq, 'ready', 'IMG_80.JPG', 1, extensions.digest('80', 'sha256'),
+  1600, 1067, 'none', b.created_by
+from public.upload_batches b where b.id = 'ed000000-0000-4000-8000-000000000001';
+insert into public.photo_tags (photo_id, studio_id, job_id, place, child_id, source)
+values (pg_temp.pid(80), 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'd0000000-0000-4000-8000-000000000001', 'child',
+  'cd000000-0000-4000-8000-000000000001', 'auto');
+update public.upload_batches set tagged_round = tag_round where id = 'ed000000-0000-4000-8000-000000000001';
+-- The fixture's own inserts write events (a studio, a job); the DRM functions below must write none.
+create temp table us_events as select (select count(*) from public.events) - (select events from counts) as extra;
+update counts set events = events + (select extra from us_events);
+insert into public.shop_sessions (id, studio_id, token_hash) values
+  ('dd000000-0000-4000-8000-000000000001', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', pg_temp.h('sus'));
+insert into public.shop_session_children (session_id, studio_id, job_id, child_id) values
+  ('dd000000-0000-4000-8000-000000000001', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+   'd0000000-0000-4000-8000-000000000001', 'cd000000-0000-4000-8000-000000000001');
+select is(public.photo_drm_requested(pg_temp.pid(80)), null::integer, 'a US studio''s photo is never packaged');
+select is(pg_temp.drm('sus', 'cd000000-0000-4000-8000-000000000001', 80), 'P0001 region_unavailable',
+  'its large view is region_unavailable');
+select is((select jsonb_agg(p -> 'drm') from jsonb_array_elements(public.shop_gallery(pg_temp.h('sus'),
+  'cd000000-0000-4000-8000-000000000001') -> 'portraits') p), '[false]'::jsonb, 'and its gallery protects nothing');
 
 -- ── 10. No events; the wrapped key nowhere else ───────────────────────────────────────────────────────────────────
 select is((select count(*) from public.events), (select events from counts),

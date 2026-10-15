@@ -23,6 +23,8 @@ export interface ShopDrmSetup {
   settings: ShopDrmSettings;
   roleArn: string;
   awsRegion: string;
+  /** The region's DRM key (a key ARN): the only one tokens unwrap with. */
+  kmsKeyArn: string;
 }
 
 /** The setup for a region, or null when DRM isn't set up there (the switch is read separately, per database). */
@@ -30,9 +32,10 @@ export function shopDrmSetup(region: DataRegion): ShopDrmSetup | null {
   try {
     const settings = shopDrmSettings();
     const awsRegion = PHOTO_AWS_REGION[region];
-    if (!settings || !awsRegion || !drmKmsKeyArn(region)) return null;
+    const kmsKeyArn = settings && awsRegion ? drmKmsKeyArn(region) : null;
+    if (!settings || !awsRegion || !kmsKeyArn) return null;
     const roleArn = awsDrmRoleArn(region);
-    return roleArn ? { settings, roleArn, awsRegion } : null;
+    return roleArn ? { settings, roleArn, awsRegion, kmsKeyArn } : null;
   } catch (err) {
     // The message names the variable, never its value.
     console.error("shop_drm_misconfigured", err instanceof Error ? err.message : "unknown");
@@ -61,9 +64,13 @@ export interface KmsDecrypt {
 
 const clients = new Map<string, KmsDecrypt>();
 
-/** KMS in the photos' region, with the DRM role's short-lived credentials from Vercel's OIDC token. */
+/**
+ * KMS in the photos' region, with the DRM role's short-lived credentials from Vercel's OIDC token. One client per role
+ * and region (review L2).
+ */
 function kmsClient(setup: ShopDrmSetup): KmsDecrypt {
-  const cached = clients.get(setup.roleArn);
+  const cacheKey = `${setup.roleArn}|${setup.awsRegion}`;
+  const cached = clients.get(cacheKey);
   if (cached) return cached;
   const client = new KMSClient({
     region: setup.awsRegion,
@@ -72,7 +79,7 @@ function kmsClient(setup: ShopDrmSetup): KmsDecrypt {
       clientConfig: { region: setup.awsRegion },
     }),
   });
-  clients.set(setup.roleArn, client);
+  clients.set(cacheKey, client);
   return client;
 }
 

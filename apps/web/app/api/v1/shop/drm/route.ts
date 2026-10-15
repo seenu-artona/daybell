@@ -19,10 +19,13 @@ export const FAIRPLAY_CERTIFICATE_PATH = "/api/v1/shop/drm/fairplay-certificate"
  * certificate address. Off, every large view is the watermarked WebP. Nothing about the parent or child.
  */
 export const GET = shopHandle(async (request: Request) => {
-  const session = await requireShopSession(request);
+  const session = await requireShopSession(request, "drm");
   const setup = shopDrmSetup(session.region);
+  // The switch for this gallery's studio (on for every studio, or only for those listed: ADR 0034, review M1/M2).
   const switchedOn = setup
-    ? await callShopFunction<boolean>(session.region, "shop_drm_enabled", {})
+    ? await callShopFunction<boolean>(session.region, "shop_drm_enabled_for", {
+        p_session_hash: session.hash,
+      })
     : false;
   const enabled = Boolean(setup && switchedOn);
   const fairplay = Boolean(setup?.settings.fairplayCertificate);

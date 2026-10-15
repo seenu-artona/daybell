@@ -12,7 +12,7 @@ export const preferredRegion = "yul1";
  * parent's session; not found while FairPlay isn't set up.
  */
 export const GET = shopHandle(async (request: Request) => {
-  const session = await requireShopSession(request);
+  const session = await requireShopSession(request, "drm");
   const certificate = shopDrmSetup(session.region)?.settings.fairplayCertificate;
   if (!certificate) throw new ApiError("not_found", "Not found.");
   return new Response(new Uint8Array(certificate), {

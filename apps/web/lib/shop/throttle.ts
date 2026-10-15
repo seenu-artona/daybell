@@ -126,11 +126,16 @@ export function networksOf(address: string | null): Networks {
  * The request budget's HMACs (120 a minute per network; R4: 1,200 per IPv4 /24 or IPv6 /48, so rotating addresses
  * inside one doesn't escape it).
  */
-export function budgetKeys(request: Request): { networkKey: string; wideKey: string } {
+export function budgetKeys(
+  request: Request,
+  /** "drm": the large view's own bucket (ADR 0034, review: tester #4), counted apart from the rest of the shop. */
+  bucket: "shop" | "drm" = "shop",
+): { networkKey: string; wideKey: string } {
   const networks = networksOf(clientAddress(request));
+  const scope = bucket === "drm" ? "drm-" : "";
   return {
-    networkKey: macHex(`net:${networks.net}`),
-    wideKey: macHex(`budget-wide:${networks.wider ?? networks.wide}`),
+    networkKey: macHex(`${scope}net:${networks.net}`),
+    wideKey: macHex(`${scope}budget-wide:${networks.wider ?? networks.wide}`),
   };
 }
 

@@ -129,7 +129,8 @@ export type PhotoSystemRpc =
   | "photo_drm_requested"
   | "record_photo_drm_result"
   | "record_photo_drm_failed"
-  | "photos_drm_due";
+  | "photos_drm_due"
+  | "photos_drm_unsent";
 
 export function photoSystemRpc(
   region: DataRegion,
@@ -235,7 +236,7 @@ export type ShopRpc =
   | "shop_zip_take"
   | "shop_download_all_request"
   // DRM in the large view (ADR 0034): the switch, a clip's place and a token's wrapped key.
-  | "shop_drm_enabled"
+  | "shop_drm_enabled_for"
   | "shop_drm_photo"
   | "shop_drm_key";
 

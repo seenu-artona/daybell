@@ -1,3 +1,5 @@
+import { type PhotoKeyParts, photoPrefix } from "./photos";
+
 /**
  * DRM in the parent shop's large view (D158; ADR 0034): the rules shared by the image worker (packaging), the API
  * (tokens, manifests, the cron) and the viewer. Framework-free; no keys ever pass through here.
@@ -40,7 +42,10 @@ export function drmClipSize(width: number, height: number): { width: number; hei
   return { width: w, height: h };
 }
 
-/** What the worker stores beside a photo's previews: one file and its manifests (single-file, on demand). */
+/**
+ * The packager's output files (single file, on demand): the clip and its manifests, as the packager names them and the
+ * manifests refer to them. In storage each is kept under its key's own name (drmObjectKey), never these names.
+ */
 export const DRM_VARIANTS = ["drm.mp4", "drm.mpd", "drm.m3u8", "drm-video.m3u8"] as const;
 export type DrmVariant = (typeof DRM_VARIANTS)[number];
 
@@ -50,6 +55,28 @@ export const DRM_CONTENT_TYPES: Record<DrmVariant, string> = {
   "drm.m3u8": "application/vnd.apple.mpegurl",
   "drm-video.m3u8": "application/vnd.apple.mpegurl",
 };
+
+const DRM_SUFFIX: Record<DrmVariant, string> = {
+  "drm.mp4": ".mp4",
+  "drm.mpd": ".mpd",
+  "drm.m3u8": ".m3u8",
+  "drm-video.m3u8": "-video.m3u8",
+};
+
+/** The folder of every DRM clip ever made for a photo: `{studio}/{job}/{photo}/drm/`. */
+export function drmPrefix(parts: PhotoKeyParts): string {
+  return `${photoPrefix(parts)}drm/`;
+}
+
+/**
+ * Where one key's file is stored: `{studio}/{job}/{photo}/drm/{keyId}.mp4`, `.mpd`, `.m3u8`, `-video.m3u8` (review H1).
+ * Each packaging run writes under its own key ID, so two runs for one photo (a repeated message, a stale request) never
+ * overwrite each other: the files the database's key names are always the files that key encrypted. IDs only.
+ */
+export function drmObjectKey(parts: PhotoKeyParts, keyId: string, variant: DrmVariant): string {
+  if (!isDrmKeyId(keyId)) throw new Error("drmObjectKey needs a key ID");
+  return `${drmPrefix(parts)}${keyId}${DRM_SUFFIX[variant]}`;
+}
 
 /** Why packaging gave up for good (reported, logged; the cron doesn't retry these). */
 export const DRM_FAILURE_REASONS = ["proof_missing", "too_large", "unreadable"] as const;
@@ -92,11 +119,18 @@ export const DRM_MANIFEST_SECONDS = 600;
 /** C3: tokens per shop session, counted in the database. */
 export const SHOP_DRM_TOKENS_PER_MINUTE = 60;
 export const SHOP_DRM_TOKENS_PER_DAY = 1500;
+/**
+ * The DRM routes' own request budget per network (review: tester #4), separate from the shop's 120 a minute, so viewing
+ * photos can never use up what the bag and checkout need. The per-session token limits above still apply.
+ */
+export const SHOP_DRM_REQUESTS_PER_MINUTE = 300;
+export const SHOP_DRM_WIDE_REQUESTS_PER_MINUTE = 3000;
 
 /** What the manifest route serves: the DASH manifest, the HLS master playlist, or the HLS media playlist. */
 export const DRM_MANIFEST_FORMATS = ["dash", "hls", "hls-media"] as const;
 export type DrmManifestFormat = (typeof DRM_MANIFEST_FORMATS)[number];
 
+/** Which stored file each format reads. */
 export const DRM_MANIFEST_VARIANT: Record<DrmManifestFormat, DrmVariant> = {
   dash: "drm.mpd",
   hls: "drm.m3u8",
@@ -111,43 +145,118 @@ const xmlEscape = (text: string) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
 
-function replaceExactlyOnce(text: string, find: string, replacement: string): string {
-  const at = text.indexOf(find);
-  if (at < 0 || text.indexOf(find, at + 1) >= 0)
-    throw new Error("The stored manifest isn't the packager's");
-  return text.slice(0, at) + replacement + text.slice(at + find.length);
+/** A stored manifest that isn't exactly what the packager writes, or isn't for the expected key. */
+export class DrmManifestError extends Error {
+  constructor() {
+    super("drm_manifest_mismatch");
+    this.name = "DrmManifestError";
+  }
 }
 
-/** The DASH manifest with its one BaseURL (drm.mp4) replaced by the signed address, XML-escaped (& in the query). */
-export function rewriteDashManifest(mpd: string, signedClipUrl: string): string {
-  return replaceExactlyOnce(
-    mpd,
+const fail = (): never => {
+  throw new DrmManifestError();
+};
+
+/** The manifest's lines, without blank lines and the packager's "## Generated with …" comment. */
+const playlistLines = (m3u8: string) =>
+  m3u8.split(/\r?\n/).filter((line) => line.trim() !== "" && !line.startsWith("## "));
+
+const safeAddress = (url: string) => (/[\s"<>]/.test(url) ? fail() : url);
+
+/**
+ * The DASH manifest with its one BaseURL (drm.mp4) replaced by the signed address, XML-escaped (& in the query).
+ * Refused unless it has exactly one BaseURL and its cenc:default_KID is the expected key (review H1).
+ */
+export function rewriteDashManifest(mpd: string, signedClipUrl: string, keyId: string): string {
+  const kids = [...mpd.matchAll(/cenc:default_KID="([^"]*)"/g)].map((m) => m[1]?.toLowerCase());
+  if (kids.length !== 1 || kids[0] !== keyId) fail();
+  const bases = mpd.match(/<BaseURL>[^<]*<\/BaseURL>/g) ?? [];
+  if (bases.length !== 1 || bases[0] !== "<BaseURL>drm.mp4</BaseURL>") fail();
+  return mpd.replace(
     "<BaseURL>drm.mp4</BaseURL>",
-    `<BaseURL>${xmlEscape(signedClipUrl)}</BaseURL>`,
+    `<BaseURL>${xmlEscape(safeAddress(signedClipUrl))}</BaseURL>`,
   );
 }
 
-/** The HLS master playlist with its one variant (drm-video.m3u8) pointing back at the manifest route. */
+/**
+ * The HLS master playlist, exactly as the packager writes it (one variant: drm-video.m3u8), with that variant pointing
+ * back at the manifest route. Anything else is refused.
+ */
 export function rewriteHlsMaster(m3u8: string, mediaPlaylistUrl: string): string {
-  if (/[\r\n"]/.test(mediaPlaylistUrl)) throw new Error("Not a playlist address");
-  return replaceExactlyOnce(m3u8, "\ndrm-video.m3u8\n", `\n${mediaPlaylistUrl}\n`);
+  const lines = playlistLines(m3u8);
+  if (
+    lines.length !== 4 ||
+    lines[0] !== "#EXTM3U" ||
+    lines[1] !== "#EXT-X-INDEPENDENT-SEGMENTS" ||
+    !/^#EXT-X-STREAM-INF:[^\n]*CODECS="avc1\.640028"/.test(lines[2] ?? "") ||
+    lines[3] !== "drm-video.m3u8"
+  )
+    fail();
+  return `${[lines[0], lines[1], lines[2], safeAddress(mediaPlaylistUrl)].join("\n")}\n`;
 }
 
-/** The HLS media playlist with drm.mp4 (its init map and its one segment) replaced by the signed address. */
-export function rewriteHlsMedia(m3u8: string, signedClipUrl: string): string {
-  if (/[\r\n"]/.test(signedClipUrl)) throw new Error("Not a clip address");
-  const map = replaceExactlyOnce(m3u8, 'URI="drm.mp4"', `URI="${signedClipUrl}"`);
-  return replaceExactlyOnce(map, "\ndrm.mp4\n", `\n${signedClipUrl}\n`);
+/**
+ * The HLS media playlist, exactly as the packager writes it (one init map and one segment of drm.mp4, VOD, its keys),
+ * with drm.mp4 replaced by the signed address. Every key line must be for the expected key: FairPlay's skd://<key ID>,
+ * and KEYID=0x<key ID> where a line names one (review H1). Anything else is refused.
+ */
+export function rewriteHlsMedia(m3u8: string, signedClipUrl: string, keyId: string): string {
+  const url = safeAddress(signedClipUrl);
+  const hex = keyId.replaceAll("-", "");
+  const lines = playlistLines(m3u8);
+  const keys = lines.filter((l) => l.startsWith("#EXT-X-KEY:"));
+  const rest = lines.filter((l) => !l.startsWith("#EXT-X-KEY:"));
+  const shape = [
+    /^#EXTM3U$/,
+    /^#EXT-X-VERSION:\d+$/,
+    /^#EXT-X-TARGETDURATION:\d+$/,
+    /^#EXT-X-PLAYLIST-TYPE:VOD$/,
+    /^#EXT-X-MAP:URI="drm\.mp4",BYTERANGE="\d+@\d+"$/,
+    /^#EXTINF:[\d.]+,$/,
+    /^#EXT-X-BYTERANGE:\d+@\d+$/,
+    /^drm\.mp4$/,
+    /^#EXT-X-ENDLIST$/,
+  ];
+  if (rest.length !== shape.length || !shape.every((re, i) => re.test(rest[i] ?? ""))) fail();
+  if (
+    keys.length === 0 ||
+    !keys.includes(
+      `#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://${keyId}",KEYFORMATVERSIONS="1",KEYFORMAT="com.apple.streamingkeydelivery"`,
+    )
+  )
+    fail();
+  for (const key of keys) {
+    if (!key.startsWith("#EXT-X-KEY:METHOD=SAMPLE-AES,")) fail();
+    const named = /KEYID=0x([0-9a-fA-F]{32})/.exec(key)?.[1];
+    if (named !== undefined && named.toLowerCase() !== hex) fail();
+    const iv = /IV=0x([0-9a-fA-F]{32})/.exec(key)?.[1];
+    if (iv !== undefined && iv.toLowerCase() !== hex) fail();
+  }
+  // Keys stay where the packager put them: before the segment, after the map.
+  const out = lines.map((line) =>
+    line.startsWith("#EXT-X-MAP:")
+      ? line.replace('URI="drm.mp4"', `URI="${url}"`)
+      : line === "drm.mp4"
+        ? url
+        : line,
+  );
+  return `${out.join("\n")}\n`;
 }
 
 // ── The viewer (C2, C7) ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** A large view not shown within this long falls back to the watermarked WebP, silently. */
+/**
+ * A large view not shown within this long falls back to the watermarked WebP, silently. One budget per photo, from the
+ * moment it is shown in the viewer, covering everything: the setup, the probe, loading Shaka, the manifest, the token,
+ * the license and the first presented frame (review: tester #1).
+ */
 export const DRM_FALLBACK_TIMEOUT_MS = 8000;
 /** After this many failures in a row, the rest of the tab's session uses the WebP. */
 export const DRM_FAILURES_BEFORE_WEBP = 2;
 /** "Loading photo" is said only after this long, so a quick photo never flashes it. */
 export const DRM_LOADING_WORDS_AFTER_MS = 500;
+/** While swiping, a photo must stay this long before its DRM clip is asked for (the first photo isn't held). */
+export const DRM_SWIPE_SETTLE_MS = 300;
 
 // ── Packaging runs (B6, C8) ───────────────────────────────────────────────────────────────────────────────────────
 

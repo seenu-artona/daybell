@@ -5,6 +5,7 @@ export declare const FFMPEG_FILES: {
   arm64: { gz: Pinned; binary: string; license: Pinned; readme: Pinned };
   x64: { gz: Pinned; binary: string };
 };
+export declare const PACKAGER_LICENSE_SHA256: string;
 export declare const PACKAGER_FILES: { arm64: Pinned; x64: Pinned };
 export declare const LAMBDA_UNZIPPED_LIMIT: number;
 export declare function tools(

@@ -7,25 +7,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // region before any storage), another studio's batches and photos are simply not found (row-level security, faked
 // here), uploads complete only from what storage has, and the internal routes accept only signed or cron requests.
 vi.mock("server-only", () => ({}));
-const { scope, writeRpc, systemRpc, storage, afterCallbacks, queueDrm } = vi.hoisted(() => ({
-  afterCallbacks: [] as (() => Promise<void>)[],
-  queueDrm: vi.fn(),
-  scope: vi.fn(),
-  writeRpc: vi.fn(),
-  systemRpc: vi.fn(),
-  storage: {
-    createMultipart: vi.fn(),
-    presignPart: vi.fn(),
-    listParts: vi.fn(),
-    complete: vi.fn(),
-    abort: vi.fn(),
-    head: vi.fn(),
-    get: vi.fn(),
-    put: vi.fn(),
-    presignGet: vi.fn(),
-    deleteAllVersions: vi.fn(),
-  },
-}));
+const { scope, writeRpc, systemRpc, storage, afterCallbacks, queueDrm, queueDrmBatch } = vi.hoisted(
+  () => ({
+    afterCallbacks: [] as (() => Promise<void>)[],
+    queueDrm: vi.fn(),
+    queueDrmBatch: vi.fn(),
+    scope: vi.fn(),
+    writeRpc: vi.fn(),
+    systemRpc: vi.fn(),
+    storage: {
+      createMultipart: vi.fn(),
+      presignPart: vi.fn(),
+      listParts: vi.fn(),
+      complete: vi.fn(),
+      abort: vi.fn(),
+      head: vi.fn(),
+      get: vi.fn(),
+      put: vi.fn(),
+      presignGet: vi.fn(),
+      deleteAllVersions: vi.fn(),
+    },
+  }),
+);
 vi.mock("@/lib/studio", async (original) => ({
   ...(await original<typeof import("@/lib/studio")>()),
   studioScope: () => scope(),
@@ -47,6 +50,7 @@ vi.mock("@/lib/photo-storage", () => ({
   isLocalDriver: () => false,
   queuePhotoForProcessing: vi.fn(),
   queueDrmForProcessing: queueDrm,
+  queueDrmBatch,
   localStorageDriver: () => null,
 }));
 
@@ -156,6 +160,7 @@ afterEach(() => {
   writeRpc.mockReset();
   systemRpc.mockReset();
   queueDrm.mockReset();
+  queueDrmBatch.mockReset();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
@@ -776,13 +781,25 @@ describe("the image worker's routes accept signed requests only", () => {
       afterCallbacks.length = 0;
       vi.stubEnv("DRM_KMS_KEY_ARN_CA", ARN);
       systemRpc.mockImplementation(async (_r, fn) =>
-        fn === "photo_drm_requested" ? { data: 5, error: null } : { data: true, error: null },
+        fn === "photo_drm_requested"
+          ? { data: 5, error: null }
+          : fn === "photo_for_worker"
+            ? { data: { studio_id: STUDIO, job_id: JOB }, error: null }
+            : { data: true, error: null },
       );
+      const order: string[] = [];
+      storage.deleteAllVersions.mockImplementation(async (prefix: string) => {
+        order.push(`delete ${prefix}`);
+        return 2;
+      });
+      queueDrm.mockImplementation(async () => void order.push("queue"));
       await result(await signed("POST", `${path}/result`, body));
       expect(afterCallbacks).toHaveLength(2);
       await afterCallbacks[1]?.();
       expect(systemRpc).toHaveBeenCalledWith("ca", "photo_drm_requested", { p_photo_id: PHOTO });
       expect(queueDrm).toHaveBeenCalledWith("ca", PHOTO);
+      // Earlier clips (drm/{old key}.*) go before the new run is queued (review H1); never the photo's previews.
+      expect(order).toEqual([`delete ${STUDIO}/${JOB}/${PHOTO}/drm/`, "queue"]);
       // A photo that can't be shown (null) isn't queued.
       afterCallbacks.length = 0;
       queueDrm.mockClear();
@@ -861,7 +878,8 @@ describe("the daily clean-up", () => {
       PHOTO_BUCKET_CA: "daybell-staging-ca-photos",
       PHOTO_QUEUE_URL_CA: "https://sqs.ca-central-1.amazonaws.com/123456789012/q",
       AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/web",
-      DRM_KMS_KEY_ARN_CA: "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm",
+      DRM_KMS_KEY_ARN_CA:
+        "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
     }))
       vi.stubEnv(name, value);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -878,14 +896,15 @@ describe("the daily clean-up", () => {
         };
       return { data: [], error: null };
     });
-    queueDrm.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("SQS down"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The batch's second message isn't sent: its mark is undone, so retries count only real sends (review #12).
+    queueDrmBatch.mockResolvedValueOnce([BATCH]);
     const res = await cron(`Bearer ${SECRET}`);
     expect(await res.json()).toMatchObject({ drmQueued: 1, drmGivenUp: 1 });
     expect(systemRpc).toHaveBeenCalledWith("ca", "photos_drm_due", { p_limit: 2000 });
-    expect(queueDrm.mock.calls).toEqual([
-      ["ca", PHOTO],
-      ["ca", BATCH],
-    ]);
+    expect(queueDrmBatch.mock.calls).toEqual([["ca", [PHOTO, BATCH]]]);
+    expect(systemRpc).toHaveBeenCalledWith("ca", "photos_drm_unsent", { p_photo_ids: [BATCH] });
     expect(warn.mock.calls).toEqual([["drm_unavailable", JOB]]);
+    expect(error.mock.calls).toEqual([["drm_queue_failed", 1]]);
   });
 });

@@ -23,10 +23,12 @@ alter table public.photos
   add constraint photos_drm_key_id_key unique (drm_key_id),
   add constraint photos_drm_ready check (coalesce(drm_status = 'ready', false) = (drm_key_id is not null)),
   add constraint photos_drm_requested check (drm_status is null or drm_requested_at is not null);
--- The cron's two queries: requests without an answer, and photos never asked.
+-- The cron's two queries: requests without an answer, and photos never asked (never a card photo: those are never
+-- packaged, so the backfill's index leaves them out rather than reading past them every day; review #13).
 create index photos_drm_requested_idx on public.photos (drm_requested_at) where drm_status = 'requested';
 create index photos_drm_backfill_idx on public.photos (created_at)
-  where drm_status is null and status = 'ready' and binned_at is null;
+  where drm_status is null and status = 'ready' and binned_at is null
+    and qr_kind is distinct from 'card' and qr_kind is distinct from 'other_card';
 -- Browsers keep reading the columns granted in 20261011100000 only: none of these.
 
 -- ── Wrapped keys ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -74,14 +76,18 @@ create index shop_drm_rate_day_idx on app.shop_drm_rate (day_start);
 alter table app.shop_drm_rate enable row level security;
 revoke all on app.shop_drm_rate from public, anon, authenticated, service_role;
 
--- ── The kill switch (B3, C6) ──────────────────────────────────────────────────────────────────────────────────────
+-- ── The kill switch (B3, C6) and the studios it covers ──────────────────────────────────────────────────────────
 -- Off by default; only the database owner turns it on (set_shop_drm, from the SQL editor), never the API. A missing
--- settings row also means off.
+-- settings row also means off. shop_drm_studio_ids narrows it to some studios (null = every studio): staging can be
+-- switched on for Seenu's own test studio alone to run the device matrix (review M1/M2).
 alter table app.platform_settings add column shop_drm_enabled boolean not null default false;
+alter table app.platform_settings add column shop_drm_studio_ids uuid[]
+  check (shop_drm_studio_ids is null or cardinality(shop_drm_studio_ids) between 1 and 100);
 alter table app.platform_settings_changes drop constraint platform_settings_changes_setting_check;
 alter table app.platform_settings_changes add constraint platform_settings_changes_setting_check
-  check (setting in ('daybell_fee_bps', 'card_fee_recovery', 'shop_drm_enabled'));
+  check (setting in ('daybell_fee_bps', 'card_fee_recovery', 'shop_drm_enabled', 'shop_drm_studio_ids'));
 
+-- Whether the switch is on at all (any studio).
 create function public.shop_drm_enabled() returns boolean
 language sql stable security definer
 set search_path = ''
@@ -89,24 +95,55 @@ as $$
   select coalesce((select s.shop_drm_enabled from app.platform_settings s), false);
 $$;
 
-create function public.set_shop_drm(p_enabled boolean, p_note text) returns void
+-- Whether the switch is on for one studio: on, and the studio listed (or no list).
+create function app.shop_drm_on_for(p_studio_id uuid) returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select coalesce((select s.shop_drm_enabled and (s.shop_drm_studio_ids is null or p_studio_id = any (s.shop_drm_studio_ids))
+                   from app.platform_settings s), false);
+$$;
+
+-- For GET /shop/drm: whether the switch is on for the studio of a live session (false for anything else).
+create function public.shop_drm_enabled_for(p_session_hash text) returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select coalesce((select app.shop_drm_on_for(x.studio_id) from public.shop_sessions x
+                   where x.token_hash = p_session_hash and x.expires_at > now()), false);
+$$;
+
+-- p_studio_ids: null = every studio; otherwise only these (1 to 100, each a studio of this database). Each change is
+-- kept with the note: the switch, and the list when it changes.
+create function public.set_shop_drm(p_enabled boolean, p_note text, p_studio_ids uuid[] default null) returns void
 language plpgsql security definer
 set search_path = ''
 as $$
 declare
-  v_old boolean;
+  v record;
 begin
   if p_enabled is null then
     raise exception 'Say on or off' using errcode = '22023';
   end if;
+  if p_studio_ids is not null and (cardinality(p_studio_ids) not between 1 and 100 or array_position(p_studio_ids, null) is not null
+     or (select count(*) from public.studios s where s.id = any (p_studio_ids))
+        <> (select count(distinct x) from unnest(p_studio_ids) x)) then
+    raise exception 'List 1 to 100 studios of this database, or none for every studio' using errcode = '22023';
+  end if;
   perform app.check_settings_note(p_note);
-  select s.shop_drm_enabled into v_old from app.platform_settings s for update;
+  select s.shop_drm_enabled as enabled, s.shop_drm_studio_ids as studio_ids into v
+  from app.platform_settings s for update;
   if not found then
     raise exception 'platform_settings_missing' using errcode = 'P0001';
   end if;
   insert into app.platform_settings_changes (setting, old_value, new_value, note)
-  values ('shop_drm_enabled', v_old::text, p_enabled::text, p_note);
-  update app.platform_settings s set shop_drm_enabled = p_enabled, updated_at = now() where s.id;
+  values ('shop_drm_enabled', v.enabled::text, p_enabled::text, p_note);
+  if v.studio_ids is distinct from p_studio_ids then
+    insert into app.platform_settings_changes (setting, old_value, new_value, note)
+    values ('shop_drm_studio_ids', coalesce(v.studio_ids::text, 'all'), coalesce(p_studio_ids::text, 'all'), p_note);
+  end if;
+  update app.platform_settings s
+  set shop_drm_enabled = p_enabled, shop_drm_studio_ids = p_studio_ids, updated_at = now() where s.id;
 end;
 $$;
 
@@ -199,7 +236,9 @@ $$;
 -- The daily cron's work, at most p_limit photos (C8: 2,000) in this order: requests unanswered for an hour that were
 -- already queued 3 times become failed ('failed', for the cron's drm_unavailable log line); other unanswered requests
 -- are queued again ('retry', same attempt); then photos never asked are requested ('backfill'). Locked rows are
--- skipped, so two runs never take the same photo.
+-- skipped, so two runs never take the same photo. Rows are marked before their messages are sent (a worker that read
+-- the photo first would skip it); the cron undoes the mark of any message it couldn't send (photos_drm_unsent), so
+-- drm_requests counts only real sends (review #12). Only a Canadian database packages (D113).
 create function public.photos_drm_due(p_limit integer)
 returns table (id uuid, studio_id uuid, job_id uuid, outcome text)
 language plpgsql security definer
@@ -209,6 +248,9 @@ declare
   v_left integer := least(greatest(coalesce(p_limit, 0), 0), 2000);
   v_count integer;
 begin
+  if (select c.value from app.config c where c.key = 'data_region') is distinct from 'ca' then
+    return;
+  end if;
   return query
   with due as (
     select x.id from public.photos x
@@ -243,6 +285,28 @@ begin
     drm_requests = 1
   from due where p.id = due.id
   returning p.id, p.studio_id, p.job_id, 'backfill'::text;
+end;
+$$;
+
+-- The messages the cron couldn't send: their marks undone, so a retry counts only real sends, and a backfill that never
+-- left goes back to "never asked" (the next daily run takes it again).
+create function public.photos_drm_unsent(p_photo_ids uuid[]) returns integer
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_count integer;
+begin
+  if coalesce(cardinality(p_photo_ids), 0) > 2000 then
+    raise exception 'At most 2000 photos' using errcode = '22023';
+  end if;
+  update public.photos p
+  set drm_requests = greatest(p.drm_requests - 1, 0),
+    drm_status = case when p.drm_requests <= 1 then null else p.drm_status end,
+    drm_requested_at = case when p.drm_requests <= 1 then null else p.drm_requested_at end
+  where p.id = any (coalesce(p_photo_ids, '{}')) and p.drm_status = 'requested';
+  get diagnostics v_count = row_count;
+  return v_count;
 end;
 $$;
 
@@ -347,7 +411,7 @@ begin
   if not exists (select 1 from public.studios s where s.id = v.studio_id and s.data_region = 'ca') then
     raise exception 'region_unavailable' using errcode = 'P0001';
   end if;
-  if not public.shop_drm_enabled() or v_photo.drm_status is distinct from 'ready' then
+  if not app.shop_drm_on_for(v.studio_id) or v_photo.drm_status is distinct from 'ready' then
     raise exception 'drm_unavailable' using errcode = 'P0001';
   end if;
   return v_photo;
@@ -362,7 +426,8 @@ as $$
 declare
   v public.photos := app.shop_drm_photo_row(p_session_hash, p_child_id, p_photo_id);
 begin
-  return jsonb_build_object('studio_id', v.studio_id, 'job_id', v.job_id, 'photo_id', v.id);
+  -- The key ID names the clip's files (drm/{key}.*): only the files the database's key encrypted are ever served.
+  return jsonb_build_object('studio_id', v.studio_id, 'job_id', v.job_id, 'photo_id', v.id, 'key_id', v.drm_key_id);
 end;
 $$;
 
@@ -419,7 +484,7 @@ declare
   v public.shop_sessions := app.shop_session_row(p_session_hash);
   v_child public.children := app.shop_session_child(v, p_child_id);
   v_state text := app.shop_child_state(v_child.id);
-  v_drm boolean := public.shop_drm_enabled()
+  v_drm boolean := app.shop_drm_on_for(v.studio_id)
     and exists (select 1 from public.studios s where s.id = v.studio_id and s.data_region = 'ca');
 begin
   if v_state <> 'open' then
@@ -478,11 +543,14 @@ end;
 $$;
 
 -- ── Grants ────────────────────────────────────────────────────────────────────────────────────────────────────────
-revoke all on function app.photo_drm_eligible(public.photos), app.shop_drm_photo_row(text, uuid, uuid)
+revoke all on function app.photo_drm_eligible(public.photos), app.shop_drm_photo_row(text, uuid, uuid),
+  app.shop_drm_on_for(uuid)
   from public, anon, authenticated;
 revoke all on function
   public.shop_drm_enabled(),
-  public.set_shop_drm(boolean, text),
+  public.shop_drm_enabled_for(text),
+  public.set_shop_drm(boolean, text, uuid[]),
+  public.photos_drm_unsent(uuid[]),
   public.photo_drm_requested(uuid),
   public.record_photo_drm_result(uuid, integer, uuid, bytea, text, integer, integer, bigint),
   public.record_photo_drm_failed(uuid, integer),
@@ -491,10 +559,12 @@ revoke all on function
   public.shop_drm_key(text, uuid, uuid)
   from public, anon, authenticated;
 -- The switch: the database owner only, from the SQL editor (like set_platform_fee): no bug in the API can turn it.
-revoke all on function public.set_shop_drm(boolean, text) from service_role;
+revoke all on function public.set_shop_drm(boolean, text, uuid[]) from service_role;
 -- The worker's results and the cron (signed internal routes), and parents (the /api/v1/shop routes): the service role.
 grant execute on function
   public.shop_drm_enabled(),
+  public.shop_drm_enabled_for(text),
+  public.photos_drm_unsent(uuid[]),
   public.photo_drm_requested(uuid),
   public.record_photo_drm_result(uuid, integer, uuid, bytea, text, integer, integer, bigint),
   public.record_photo_drm_failed(uuid, integer),

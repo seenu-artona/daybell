@@ -3,7 +3,7 @@ import { DRM_BACKFILL_PER_RUN, photoPrefix } from "@daybell/core";
 import { NextResponse } from "next/server";
 import { handle } from "@/lib/api";
 import { drmPackagingOn } from "@/lib/drm-packaging";
-import { photoStorage, queueDrmForProcessing } from "@/lib/photo-storage";
+import { photoStorage, queueDrmBatch } from "@/lib/photo-storage";
 import { photoResult } from "@/lib/photos";
 import { assertFunctionRegion, STORAGE_REGIONS } from "@/lib/region-guard";
 import { photoSystemRpc } from "@/lib/supabase/service";
@@ -32,7 +32,7 @@ const prefixOf = (r: Row) => photoPrefix({ studioId: r.studio_id, jobId: r.job_i
  *   as unreadable (the photos after them are flagged for review);
  * - where DRM packaging is on (ADR 0034, C8): up to 2,000 photos' large views, queued again when a request has had no
  *   answer for an hour (3 messages in all, then given up with a drm_unavailable line: the shop keeps the WebP), then
- *   photos never packaged (the backfill).
+ *   photos never packaged (the backfill). Sent in batches; unsent messages are undone. Retries happen once a day.
  * Logs photo ids only, and only when something fails.
  */
 export const GET = handle(async (request: Request) => {
@@ -118,25 +118,25 @@ export const GET = handle(async (request: Request) => {
       }
     }
 
-    // DRM packaging: retries, give-ups and the backfill, at most 2,000 a day (C8). A message that can't be queued
-    // stays requested and is queued again by a later run.
-    if (inTime() && drmPackagingOn(region)) {
-      const due = photoResult<(Row & { outcome: "failed" | "retry" | "backfill" })[] | null>(
-        await photoSystemRpc(region, "photos_drm_due", { p_limit: DRM_BACKFILL_PER_RUN }),
-      );
-      for (const row of due ?? []) {
-        if (row.outcome === "failed") {
-          totals.drmGivenUp++;
-          console.warn("drm_unavailable", row.id);
-          continue;
-        }
-        if (!inTime()) continue;
-        try {
-          await queueDrmForProcessing(region, row.id);
-          totals.drmQueued++;
-        } catch {
-          console.error("drm_queue_failed", row.id);
-        }
+    // DRM packaging: retries, give-ups and the backfill, at most 2,000 a day (C8). Only with a minute left: rows are
+    // marked before their messages go out (a fast worker must find them requested), then sent 10 a call; any message
+    // that couldn't be sent has its mark undone, so retries count only real sends (review #12). Retries are daily:
+    // a request unanswered for an hour is queued again by the next day's run.
+    if (Date.now() - started < BUDGET_MS - 60_000 && drmPackagingOn(region)) {
+      const due =
+        photoResult<(Row & { outcome: "failed" | "retry" | "backfill" })[] | null>(
+          await photoSystemRpc(region, "photos_drm_due", { p_limit: DRM_BACKFILL_PER_RUN }),
+        ) ?? [];
+      for (const row of due.filter((r) => r.outcome === "failed")) {
+        totals.drmGivenUp++;
+        console.warn("drm_unavailable", row.id);
+      }
+      const toSend = due.filter((r) => r.outcome !== "failed").map((r) => r.id);
+      const unsent = await queueDrmBatch(region, toSend);
+      totals.drmQueued += toSend.length - unsent.length;
+      if (unsent.length > 0) {
+        console.error("drm_queue_failed", unsent.length);
+        await photoSystemRpc(region, "photos_drm_unsent", { p_photo_ids: unsent });
       }
     }
   }
