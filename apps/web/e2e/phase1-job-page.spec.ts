@@ -193,8 +193,8 @@ test("job page layout, menu search and studio separation", async ({
   await expect(sell.getByRole("listitem").filter({ hasText: "Photos uploaded" })).toContainText(
     "To do",
   );
-  // Every job has a price list (the studio's default), so that item is done (ADR 0019).
-  await expect(sell.getByRole("listitem").filter({ hasText: "Price list chosen" })).toContainText(
+  // Every job sells its studio's default list, so that item is done (ADR 0019; renamed "Something to sell", ADR 0033).
+  await expect(sell.getByRole("listitem").filter({ hasText: "Something to sell" })).toContainText(
     "Done",
   );
   await sell.getByRole("button", { name: "Close" }).last().click();
