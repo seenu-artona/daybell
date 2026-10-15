@@ -2294,7 +2294,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Daily photo clean-up",
     description:
-      "Not for integrations. Vercel Cron with CRON_SECRET, as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
+      "Not for integrations. Vercel Cron with CRON_SECRET, as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged. Where DRM packaging is set up (ADR 0034), queues up to 2,000 photos' large views a day: requests unanswered for an hour again (3 messages in all, then given up), then photos never packaged.",
     access: "internal",
     success: { status: 200, schema: cronPhotosResponse, description: "What was cleaned up." },
     errors: ["not_signed_in", "internal"],

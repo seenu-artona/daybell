@@ -846,7 +846,46 @@ describe("the daily clean-up", () => {
       droppedUploads: 0,
       purgedPhotos: 1,
       taggedBatches: 0,
+      drmQueued: 0,
+      drmGivenUp: 0,
     });
     expect(systemRpc).toHaveBeenCalledWith("ca", "delete_purged_photos", { p_photo_ids: [PHOTO] });
+    // DRM packaging isn't set up here: nothing asked.
+    expect(systemRpc).not.toHaveBeenCalledWith("ca", "photos_drm_due", expect.anything());
+  });
+
+  it("queues DRM retries and the backfill, 2,000 at most, and logs give-ups by id only (ADR 0034, C8)", async () => {
+    for (const [name, value] of Object.entries({
+      STORAGE_DRIVER: "s3",
+      AWS_REGION: "ca-central-1",
+      PHOTO_BUCKET_CA: "daybell-staging-ca-photos",
+      PHOTO_QUEUE_URL_CA: "https://sqs.ca-central-1.amazonaws.com/123456789012/q",
+      AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/web",
+      DRM_KMS_KEY_ARN_CA: "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm",
+    }))
+      vi.stubEnv(name, value);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    systemRpc.mockImplementation(async (_r, fn) => {
+      if (fn === "finish_idle_batches") return { data: 0, error: null };
+      if (fn === "photos_drm_due")
+        return {
+          data: [
+            { id: JOB, studio_id: STUDIO, job_id: JOB, outcome: "failed" },
+            { id: PHOTO, studio_id: STUDIO, job_id: JOB, outcome: "retry" },
+            { id: BATCH, studio_id: STUDIO, job_id: JOB, outcome: "backfill" },
+          ],
+          error: null,
+        };
+      return { data: [], error: null };
+    });
+    queueDrm.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("SQS down"));
+    const res = await cron(`Bearer ${SECRET}`);
+    expect(await res.json()).toMatchObject({ drmQueued: 1, drmGivenUp: 1 });
+    expect(systemRpc).toHaveBeenCalledWith("ca", "photos_drm_due", { p_limit: 2000 });
+    expect(queueDrm.mock.calls).toEqual([
+      ["ca", PHOTO],
+      ["ca", BATCH],
+    ]);
+    expect(warn.mock.calls).toEqual([["drm_unavailable", JOB]]);
   });
 });

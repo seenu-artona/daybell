@@ -830,6 +830,14 @@ export const cronPhotosResponse = z.object({
     .number()
     .int()
     .meta({ description: "Upload batches tagged by the sweep (ADR 0018)." }),
+  drmQueued: z.number().int().meta({
+    description:
+      "Photos queued for DRM packaging (ADR 0034): unanswered requests again, then photos never packaged; at most 2,000.",
+  }),
+  drmGivenUp: z.number().int().meta({
+    description:
+      "DRM requests given up after 3 messages: those photos' large views stay the watermarked WebP.",
+  }),
 });
 
 // ── QR tagging and review (Phase 1 step 5, ADR 0018) ─────────────────────────────────────────────────────────────
