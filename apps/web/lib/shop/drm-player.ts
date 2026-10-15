@@ -1,5 +1,5 @@
 import { DRM_FAILURES_BEFORE_WEBP, type DrmManifestFormat } from "@daybell/core";
-import type { DrmPlan } from "./drm-probes";
+import { type DrmPlan, fairplayNeedsLegacyEme } from "./drm-probes";
 
 /**
  * The parent shop's large view under DRM (D158; ADR 0034), apart from React so it can be tested with a fake Shaka:
@@ -217,7 +217,7 @@ export interface ShakaPlayerLike extends Listenable {
   getKeyStatuses(): Record<string, string>;
 }
 export interface ShakaLike {
-  polyfill: { installAll(): void };
+  polyfill: { installAll(): void; PatchedMediaKeysApple?: { install(): void } };
   Player: { new (): ShakaPlayerLike; isBrowserSupported(): boolean };
   net: { NetworkingEngine: { RequestType: { LICENSE: number } } };
   drm: { FairPlay: { commonFairPlayResponse: unknown } };
@@ -305,8 +305,14 @@ export async function createShopDrmPlayer(args: {
   plan: Exclude<DrmPlan, "none">;
   setup: DrmSetup;
   token: (target: DrmTarget, signal: AbortSignal) => Promise<string>;
+  /** Whether FairPlay plays only through Apple's prefixed EME here (iPhone Chrome); drm-probes decides, tests fake it. */
+  needsLegacyEme?: () => Promise<boolean>;
 }): Promise<ShopDrmPlayer | null> {
   const { shaka, video } = args;
+  // Shaka installs the Apple polyfill by itself only when the standard API is missing; where the standard API exists
+  // but refuses FairPlay and the prefixed one has it, it is installed here, before anything else asks for keys.
+  if (args.plan === "fairplay" && (await (args.needsLegacyEme ?? fairplayNeedsLegacyEme)()))
+    shaka.polyfill.PatchedMediaKeysApple?.install();
   shaka.polyfill.installAll();
   if (!shaka.Player.isBrowserSupported()) return null;
   const player = new shaka.Player();
