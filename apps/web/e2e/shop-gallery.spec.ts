@@ -12,6 +12,11 @@ import { cardCodes, photo, signUpOwner } from "./helpers";
 // delivery and sees the totals; forgets the device. A draft job's code says the shop is closed, without the child's
 // name. Five wrong codes lock a phone out. Reduced motion: the cover's words don't slide. Locators are scoped to a
 // landmark and exact (code review S4).
+//
+// Round 7 (D156 C5, D157; ADR 0033), in the same studio so CI builds one selling studio: Ava is in a group "Choir" with
+// one group photo; the job sells the 5×7 print at $21, has the wallets switched off and sells a Panorama print of its
+// own. The parent uses the group photo for the Panorama (chosen already, under "Group photos"), never sees the wallets,
+// and the bag totals the job's prices.
 test.use({ reducedMotion: "reduce" });
 
 const run = `${Date.now()}`;
@@ -80,6 +85,56 @@ async function studioSellingTwoChildren(browser: Browser, baseURL: string, tag: 
     (await page.request.post("/api/dev-stripe", { data: { action: "finish" } })).status(),
   ).toBe(200);
   expect((await page.request.post(`/api/v1/jobs/${jobId}/start-selling`)).status()).toBe(200);
+
+  // Round 7: Choir with Ava and one group photo; the job's own prices and product (D157).
+  const made = await page.request.post(`/api/v1/jobs/${jobId}/groups`, { data: { name: "Choir" } });
+  expect(made.status()).toBe(201);
+  const choirId = (await made.json()).group.id as string;
+  const avaId = Object.keys(codes)[0] as string;
+  expect(
+    (
+      await page.request.post(`/api/v1/groups/${choirId}/members`, { data: { add: [avaId] } })
+    ).status(),
+  ).toBe(200);
+  const groupDay = join(folder, "Group photos");
+  mkdirSync(groupDay);
+  writeFileSync(join(groupDay, "GRP_0001.JPG"), await photo(61));
+  await page.goto(`/app/jobs/${jobId}/photos`);
+  await main.getByRole("button", { name: "Upload photos", exact: true }).click();
+  await sheet.getByRole("radio", { name: "Group photos", exact: true }).check();
+  await sheet
+    .getByRole("combobox", { name: "Group", exact: true })
+    .selectOption({ label: "Choir" });
+  await sheet.locator('input[type="file"][webkitdirectory]').setInputFiles(groupDay);
+  await expect(sheet.getByText("Done: 1 photo added", { exact: true })).toBeVisible({
+    timeout: 120_000,
+  });
+  const shopRows = (
+    (await (await page.request.get(`/api/v1/jobs/${jobId}/shop`)).json()).shop as {
+      rows: { itemId: string; name: string }[];
+    }
+  ).rows;
+  const rowId = (name: string) => shopRows.find((r) => r.name === name)?.itemId as string;
+  const prices = `/api/v1/jobs/${jobId}/shop/prices`;
+  expect(
+    (
+      await page.request.patch(`${prices}/${rowId("5×7 print")}`, { data: { priceCents: 2100 } })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await page.request.patch(`${prices}/${rowId("Wallets (sheet of 8)")}`, {
+        data: { sold: false },
+      })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await page.request.post(`/api/v1/jobs/${jobId}/shop/items`, {
+        data: { kind: "print", name: "Panorama", priceCents: 4500, printSize: "11x14" },
+      })
+    ).status(),
+  ).toBe(201);
 
   const draft = await page.request.post("/api/v1/jobs", {
     data: { name: `Spring ${tag}`, type: "school", pictureDay: pastDay() },
@@ -221,6 +276,11 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
   for (const item of ["5×7 print", "Digital download"]) {
     await docked.getByRole("link", { name: "Choose a package", exact: true }).click();
     await main.getByRole("link", { name: "Single prints and downloads", exact: true }).click();
+    // The job's own prices (D157): the 5×7 at $21, the wallets switched off.
+    await expect(main.locator("label").filter({ hasText: "5×7 print" })).toContainText("$21.00");
+    await expect(
+      main.getByRole("radio", { name: "Wallets (sheet of 8)", exact: true }),
+    ).toHaveCount(0);
     await main.getByRole("radio", { name: item, exact: true }).check();
     await docked.getByRole("link", { name: "Continue", exact: true }).click();
     await expect(header.getByRole("heading", { name: item, level: 1, exact: true })).toBeVisible();
@@ -240,17 +300,81 @@ test("parent gallery: code, cover, grid, viewer, package and pose, a sibling, a 
   const delivery = main.getByRole("group", { name: "Delivery", exact: true });
   await expect(main.getByText("Choose delivery", { exact: true })).toBeVisible();
   await delivery.getByRole("radio", { name: "Delivery to school", exact: true }).check();
-  await expect(main.getByText("Total $111.00", { exact: true })).toBeVisible();
+  await expect(main.getByText("Total $113.00", { exact: true })).toBeVisible();
   await expect(main.getByText("+ tax", { exact: true })).toBeVisible();
   await delivery.getByRole("radio", { name: "Home delivery", exact: true }).check();
-  await expect(main.getByText("Total $122.95", { exact: true })).toBeVisible();
+  await expect(main.getByText("Total $124.95", { exact: true })).toBeVisible();
   await noah
     .getByRole("group", { name: "How many: 5×7 print", exact: true })
     .getByRole("button", { name: "One more", exact: true })
     .click();
-  await expect(main.getByText("Total $141.95", { exact: true })).toBeVisible();
+  await expect(main.getByText("Total $145.95", { exact: true })).toBeVisible();
   // Paying is step 10's (shop-checkout.spec.ts): the docked Pay button is there once delivery is chosen.
   await expect(docked.getByRole("button", { name: "Pay securely", exact: true })).toBeVisible();
+
+  // 8b. Round 7 (D156 C5, D157): Ava's group photo, used for the job's own Panorama print.
+  const bagHref = (await header
+    .getByRole("link", { name: "Bag, 4 items", exact: true })
+    .getAttribute("href")) as string;
+  const q = `gallery=${new URL(bagHref, baseURL).searchParams.get("gallery")}`;
+  await header.getByRole("link", { name: "Back", exact: true }).click();
+  await children.getByRole("link", { name: "Ava P.", exact: true }).click();
+  await expect(
+    header.getByRole("heading", { name: "Ava P.", level: 1, exact: true }),
+  ).toBeVisible();
+  const avaChild = /\/shop\/c\/([0-9a-f-]{36})/.exec(page.url())?.[1] as string;
+  // The group photo shows once it is processed and tagged.
+  await expect
+    .poll(
+      async () =>
+        (
+          (await (await page.request.get(`/api/v1/shop/children/${avaChild}/gallery?${q}`)).json())
+            .groupPhotos as unknown[]
+        ).length,
+      { timeout: 150_000, intervals: [3_000] },
+    )
+    .toBe(1);
+  await page.reload();
+  await main
+    .getByRole("group", { name: "Photo sets", exact: true })
+    .getByRole("button", { name: "Group photos", exact: true })
+    .click();
+  await main
+    .getByRole("list", { name: "Ava P.’s group photos", exact: true })
+    .getByRole("button", { name: "Ava’s group photo 1 of 1", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Photo 1 of 1", exact: true })
+    .getByRole("link", { name: "Use this photo", exact: true })
+    .click();
+  await expect(
+    header.getByRole("heading", { name: "Choose a package", level: 1, exact: true }),
+  ).toBeVisible();
+  await main.getByRole("link", { name: "Single prints and downloads", exact: true }).click();
+  await main.getByRole("radio", { name: "Panorama", exact: true }).check();
+  await docked.getByRole("link", { name: "Continue", exact: true }).click();
+  await expect(
+    header.getByRole("heading", { name: "Panorama", level: 1, exact: true }),
+  ).toBeVisible();
+  const groupPoses = main.getByRole("group", { name: "Pose", exact: true });
+  await expect(
+    groupPoses
+      .getByRole("group", { name: "Group photos", exact: true })
+      .getByRole("radio", { name: "Group photo 1 of 1", exact: true }),
+  ).toBeChecked();
+  await expect(
+    groupPoses
+      .getByRole("group", { name: "Portraits", exact: true })
+      .getByRole("radio", { name: "Pose 1 of 2", exact: true }),
+  ).not.toBeChecked();
+  await docked.getByRole("button", { name: "Add to bag", exact: true }).click();
+  await expect(header.getByRole("heading", { name: "Bag", level: 1, exact: true })).toBeVisible();
+  await expect(header.getByRole("link", { name: "Bag, 5 items", exact: true })).toBeVisible();
+  await expect(
+    main.getByRole("region", { name: "For Ava P.", exact: true }).getByText("Panorama", {
+      exact: true,
+    }),
+  ).toBeVisible();
 
   // 9. Forget this device (answer 3): back to the code page; the bag is gone with it.
   await header.getByRole("button", { name: "More", exact: true }).click();
