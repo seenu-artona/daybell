@@ -532,8 +532,8 @@ select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 1,
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 1, 2), 'ok', 'and again, two more');
 select is((select quantity from public.shop_cart_lines where photo_id = pg_temp.pid(1)), 3,
   'the same package and pose is one line of 3');
-select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 8, 1), 'P0001 photo_unavailable',
-  'a group photo can''t be a pose (call 8; C5)');
+select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 9, 1), 'P0001 photo_unavailable',
+  'another group''s group photo can''t be a pose (her own group''s can: 032, ADR 0033)');
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 14, 1), 'P0001 photo_unavailable',
   'nor her brother''s photo');
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 4, 1), 'P0001 photo_unavailable',
