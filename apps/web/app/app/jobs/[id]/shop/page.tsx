@@ -50,9 +50,13 @@ export default function ShopPage() {
   const [changing, setChanging] = useState(false);
   const [product, setProduct] = useState<ProductDialogState>(null);
   const titleId = useId();
-  // Each write's answer is the whole shop; only the latest request's replaces the page.
+  // Each write's answer is the whole shop; only the latest request's replaces the page. Answers to writes that
+  // overlapped may come back in another order than the server applied them, so once they have all settled the shop is
+  // read again (tester 4): "N changes" and Change's warning always end on the server's count.
   const sent = useRef(0);
   const applied = useRef(0);
+  const inflight = useRef(0);
+  const overlapped = useRef(false);
 
   const load = useCallback(async () => {
     const mine = ++sent.current;
@@ -78,10 +82,17 @@ export default function ShopPage() {
     announce: (changes: string) => string,
   ): Promise<string | null> {
     const mine = ++sent.current;
+    if (inflight.current > 0) overlapped.current = true;
+    inflight.current += 1;
     setBusy((n) => n + 1);
     setProblem(null);
     const res = await api<JobShopResponse>(path, { method: "PATCH", body });
     setBusy((n) => n - 1);
+    inflight.current -= 1;
+    if (inflight.current === 0 && overlapped.current) {
+      overlapped.current = false;
+      void load();
+    }
     if (res.ok) {
       if (mine >= applied.current) {
         applied.current = mine;

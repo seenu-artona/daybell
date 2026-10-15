@@ -13,7 +13,8 @@ import { moneyInputClass } from "../../../products/money-input-class";
  * dollars and cents. Enter or leaving the field saves; Escape puts the saved price back. What is typed is read into
  * whole cents with parseMoneyInput, never through a float (D96). The list's own price typed back is a save too: the
  * server clears the job's price (D157's undo). The label is visually hidden ("Price for this job: Package A"); an error
- * is under the field and linked to it.
+ * is under the field, linked to it and announced. Text typed while a save runs is saved after it, never replaced by
+ * the older answer; Enter retries a refused price, leaving the field doesn't send it again.
  */
 export function PriceCell({
   name,
@@ -30,49 +31,73 @@ export function PriceCell({
 }) {
   const t = useTranslations("app.job.shop");
   const tp = useTranslations("app.products");
-  const text = useApiText();
+  const apiText = useApiText();
+  const textOf = (key: string) => apiText.field(key);
   const id = useId();
   const [value, setValue] = useState(moneyInputText(cents));
   const [error, setError] = useState<string | null>(null);
-  // Read and set synchronously, so Enter followed by the blur it causes saves once: a save is running, or the text
-  // hasn't changed since the last one was sent (a refused price isn't sent again on blur).
+  // Read and written synchronously (review fixes M2, tester 2–3):
+  // - text: what the field holds now, for a save that finishes after more was typed;
+  // - saved: the latest saved price (a save may finish before or after the page re-renders with it);
+  // - saving: a save is running; typing meanwhile sets editedWhileSaving, and the newer text is saved after it;
+  // - refused: a price the server refused, which leaving the field doesn't send again (Enter does: a retry).
+  const text = useRef(value);
+  const saved = useRef(cents);
   const saving = useRef(false);
-  const sent = useRef<number | null>(null);
+  const editedWhileSaving = useRef(false);
+  const refused = useRef<number | null>(null);
 
-  // A new saved price (this save, Undo, or another tab's change after a reload) replaces what the field shows.
+  const show = (next: string) => {
+    text.current = next;
+    setValue(next);
+  };
+
+  // A new saved price (this save, another change, or a reload) replaces what the field shows, unless newer text was
+  // typed since this save began: that text wins and is saved next.
   useEffect(() => {
-    setValue(moneyInputText(cents));
+    saved.current = cents;
+    if (editedWhileSaving.current) return;
+    show(moneyInputText(cents));
     setError(null);
-    sent.current = null;
+    refused.current = null;
   }, [cents]);
 
-  async function commit() {
+  async function commit(retry: boolean) {
     if (saving.current) return;
-    const typed = parseMoneyInput(value);
+    const typed = parseMoneyInput(text.current);
     if (typed === null || !isJobPrice(typed)) {
-      setError(text.field("validation.price") ?? null);
+      setError(textOf("validation.price") ?? null);
       return;
     }
-    if (typed === sent.current) return;
-    if (typed === cents) {
-      setValue(moneyInputText(cents));
+    if (!retry && typed === refused.current) return;
+    if (typed === saved.current) {
+      show(moneyInputText(saved.current));
       setError(null);
+      refused.current = null;
       return;
     }
     saving.current = true;
-    sent.current = typed;
+    editedWhileSaving.current = false;
     const problem = await onSave(typed);
     saving.current = false;
+    refused.current = problem ? typed : null;
+    if (!problem) saved.current = typed;
     setError(problem);
+    if (editedWhileSaving.current) {
+      editedWhileSaving.current = false;
+      await commit(false);
+    } else if (!problem) {
+      show(moneyInputText(typed));
+    }
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
-      void commit();
+      void commit(true);
     } else if (event.key === "Escape") {
       event.preventDefault();
-      setValue(moneyInputText(cents));
+      show(moneyInputText(saved.current));
       setError(null);
     }
   }
@@ -93,11 +118,11 @@ export function PriceCell({
           autoComplete="off"
           value={value}
           onChange={(e) => {
-            sent.current = null;
-            setValue(e.target.value);
+            if (saving.current) editedWhileSaving.current = true;
+            show(e.target.value);
           }}
           onKeyDown={onKeyDown}
-          onBlur={() => void commit()}
+          onBlur={() => void commit(false)}
           aria-invalid={error ? true : undefined}
           aria-describedby={`${id}-currency${error ? ` ${id}-error` : ""}`}
           className={cn(moneyInputClass(Boolean(error)), "w-28")}
@@ -107,7 +132,8 @@ export function PriceCell({
         </span>
       </div>
       {error ? (
-        <span id={`${id}-error`} className="text-caption text-danger">
+        // An alert, so a refusal is heard where it happens, also after a save made by leaving the field (code M1).
+        <span id={`${id}-error`} role="alert" className="text-caption text-danger">
           {error}
         </span>
       ) : null}
