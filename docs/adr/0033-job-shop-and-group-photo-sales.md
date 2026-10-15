@@ -11,7 +11,7 @@
 - Amends:
   - 0019: a job's price list is no longer the whole story: a job can change a list item's price, switch it off, or add
     products of its own; the shared list never changes. Every price read goes through one resolver.
-  - 0021: Start selling's "Price list chosen" means "the job sells at least one item".
+  - 0021: Start selling's "Price list chosen" means "the job sells at least one item" and reads "Something to sell".
   - 0022: group photos can be bought (a pose may be a group photo); the bag stores either a list item or a job item.
   - 0023: an order line names either a list item or a job item; "all digitals" holds group photos too.
   - 0030: C5 is built: every member can buy a group's photos.
@@ -51,15 +51,20 @@ price; job-only items live on the job.
 **Data** (`20261017000000_job_shop.sql`, `20261017000100_shop_job_prices_and_group_photos.sql`, forward only).
 
 - `job_price_overrides` (`studio_id`, `job_id`, `price_list_id`, `price_list_item_id`, `price_cents` null or
-  0–1,000,000, `sold` default true, timestamps), primary key (job, item): a row only while something differs from the
-  list (a price, or the item switched off: `price_cents is not null or not sold`). Composite keys to the studio's job
+  0–1,000,000, `sold` default true, timestamps), primary key (job, item): a row is written only while something
+  differs from the list (a price, or the item switched off: `price_cents is not null or not sold`). A row can remain
+  when the list's price is later changed to equal the job's; it then counts as no change (`changed` and "N changes"
+  are worked out from the resolved prices, not from the row being there). Composite keys to the studio's job
   and to the item **on the job's list** (both cascade, so deleting an item or a job takes its changes with it).
 - `job_shop_items` (`studio_id`, `job_id`, kind `package` or `print` only, name 1–80 and description ≤ 500 with the
   price list's text rules, `print_size` exactly for prints, `price_cents` 0–1,000,000, `sold` default true, `position`
   0–10,000, timestamps) and `job_shop_package_lines` (as `price_list_package_lines`: at most 20 lines, at most one
   digital, at least one line checked at commit). At most 100 job-only products per job, under an advisory lock.
 - Row-level security: members read; owners and admins write. The guards are SECURITY DEFINER and refuse a signed-in
-  person who isn't an owner or admin of the row's studio with 42501 **before anything is read**, then lock the job's
+  person who isn't an owner or admin of the row's studio with 42501 **before anything is read** on inserts and updates.
+  On deletes they first check that the row's parent (job, list item or product) still exists, so a cascade passes;
+  row-level security has already filtered a delete to the person's own studio's rows, so that check tells an outsider
+  nothing. Then they lock the job's
   row `FOR SHARE` and refuse a closed job (`job_closed`) and an item that isn't on the job's current list
   (`not_on_list`); studio, job, list and item never change on a row. The share lock means a list swap and a price
   change take turns: whichever commits second sees the other.
@@ -130,7 +135,8 @@ Defaults the plan asked to be listed (rule 7):
 - **N1** "N changes for this job" counts changed prices, items switched off and job-only products.
 - **N2** Shop changes don't feed Overview's Details or Progress "Changed for this job" (that line stays the template
   rules').
-- **N3** Start selling's "Price list chosen" becomes "the job sells at least one item".
+- **N3** Start selling's "Price list chosen" becomes "the job sells at least one item" (and reads "Something to sell",
+  call 17).
 - **N5** Job-only products sort after the list's items in their kind group (packages, prints).
 - **N6** Portraits first, then group photos: in the pose picker and in All digitals.
 - **N8** The price list editor's note doesn't mention per-job changes yet (a follow-up).
@@ -183,8 +189,8 @@ Screens
     opens the dialog again; Remove there asks to confirm ("Only this job sells it. Orders already placed keep it.").
 16. **Words changed:** a closed job says "This job is closed, so its shop can't change."; photographers and staff read
     "Only owners and admins can change this job's shop."
-17. **Start selling's row keeps its label "Price list chosen"** while it now means "the job sells at least one item"
-    (N3). Question for Seenu: rename it (e.g. "Something to sell")?
+17. **Start selling's row reads "Something to sell"** (it was "Price list chosen"), with the same check: the job sells at
+    least one item (N3). **Decided by Claude overnight — please review.**
 18. **More for this job** rows are plain text with a Soon tag (not buttons), like Progress's Soon steps.
 19. **Settings › Shop** reads the shop's address on the server (SHOP_URL, else this deployment's /shop, as QR cards
     print it). Its cards' words are this ADR's summaries of how things work today (ADR 0022, 0023, 0024); the Taxes
@@ -194,8 +200,36 @@ Screens
 20. **The pose picker** titles its two sets ("Portraits", "Group photos") only when the child has group photos; a group
     photo is "Group photo 2 of 4", the big preview follows the same words. "Use this photo" on a group photo opens
     Choose a package first, as for a portrait (D24). The viewer's "can't be ordered yet" line is gone.
-21. **e2e:** `shop-checkout` and `shop-gallery` buy portraits only and needed no change; `phase1-going-live` reads the
-    Start selling check through the same row label.
+21. **e2e:** `shop-checkout` buys portraits only and needed no change; `shop-gallery` also buys a group photo with the
+    job's own print (review fixes); `phase1-going-live` expects the row "Something to sell".
+22. **A group photo any family buys is sold for everyone in it:** it is marked sold and can no longer be binned by the
+    studio (see Review fixes). **Decided by Claude overnight — please review.**
+
+## Review fixes (Oct 15, 2026; tester, code and security reviews)
+
+Seenu was asleep and asked the coordinator to decide; each item marked **Decided by Claude overnight — please review**
+is provisional until he does.
+
+- **Lost update (code H1):** `set_job_price` and `reset_job_price` take a per-item advisory lock (after the job's share
+  lock) before reading the row, so a price and a Sold switch sent at the same moment both stick. `save_job_item`
+  already merges each field from the row's current values in its UPDATE.
+- **The price cell (code M1, M2; tester 2, 3):** text typed while a save runs is saved right after it and never
+  replaced by the older answer; Enter retries a refused price, leaving the field doesn't send it again; a refusal is a
+  `role="alert"` under the field. **Decided by Claude overnight — please review.**
+- **Overlapping saves (tester 4):** when saves overlap, the page reads the shop again once they have all answered, so
+  "N changes" and Change's warning end on the server's count. **Decided by Claude overnight — please review.**
+- **One offer per job per call (security L1, code L3):** the bag, quantities, delivery and checkout resolve each job's
+  offer once (`app.shop_line_available_with`), not once per line; the three-way totals test is unchanged.
+- **Leak tests (security M1)** for job products and their contents, and for another job's own product in the bag.
+- **Bidi characters (code L1)** are written as escapes in the migration and the API test.
+- **A sold group photo can't be binned (code L2), a consequence of D156 C5:** a group photo any family buys is marked
+  sold (`photos.sold_at`, ADR 0023), so the studio can no longer bin it. That holds for every child in the photo: one
+  family's purchase keeps the photo in every member's gallery. Removing a child from the group still hides it from that
+  child (ADR 0030); moving it to another group still works. **Decided by Claude overnight — please review** (listed as
+  a Call: Seenu may want a studio-only "hide" for sold group photos later).
+- **The Start selling row** reads "Something to sell" (call 17). **Decided by Claude overnight — please review.**
+- **e2e (tester 1, 5):** `phase1-templates` expects Shop in Settings' sections; the group photo checks moved into
+  `shop-gallery` so CI builds one selling studio.
 
 ## Not in this round (deferred)
 
@@ -204,14 +238,16 @@ the price list editor's note about per-job changes (N8); showing the new events 
 
 ## Tests
 
-- pgTAP `031_job_shop` (105): shape, row-level security and grants (nothing for anon; the resolver and guards for
+- pgTAP `031_job_shop` (122): shape, row-level security and grants (nothing for anon; the resolver and guards for
   nobody signed in), the resolver, this job's prices (the list's price typed back, off at the list's price, both at
   once, Undo, the same price again writing nothing), roles (photographers and staff refused with 42501, a direct write
   refused before anything is read; another studio's owner not_found and 42501), a closed job refused, job-only
   products (contents, in place, Sold, kinds, text rules, 20 lines, 100 per job, a package without lines at commit),
   `not_on_list` for the list a job had before a swap, the swap dropping the old list's changes and keeping the job's
-  products, a deleted list item and a closed job's cascade, events without amounts or names.
-- pgTAP `032_group_photo_sales` (49): what the shop offers at the job's prices; group photos as poses for a member,
+  products, a deleted list item and a closed job's cascade, events without amounts or names; review fixes: a price then
+  Sold alone keeps the price and Sold then a price keeps it off (per-item lock), and another studio reads, changes and
+  deletes none of a job's products or their contents and can't point a line at them.
+- pgTAP `032_group_photo_sales` (50; another job's own product in the same studio refused): what the shop offers at the job's prices; group photos as poses for a member,
   refused for a non-member, another group's photo and another studio; merging; the three-way totals check (the
   shop's prices, the bag, checkout) for every bag; leaving a group and a product switched off making lines unavailable,
   not deleted; order lines naming a job's product with its own contents; All digitals portraits then group photos; a
@@ -221,5 +257,7 @@ the price list editor's note about per-job changes (N8); showing the new events 
   migration's, conflicts, routes); route tests with cross-studio and cross-job leak tests, role-before-body, 409s and a
   console spy; jsdom: the price cell, the table, Change's warning, the Switch, the pose picker, the viewer, Settings ›
   Shop and its sections.
-- e2e: new `phase1-job-shop` (desktop) and `shop-group-photos` (phone); updated `phase1-price-lists` and
-  `phase1-job-page`. The e2e specs could not be run in this environment.
+- e2e: new `phase1-job-shop` (desktop); `shop-gallery` (phone) also buys a group photo with the job's own print at the
+  job's prices, in its one selling studio (review: CI minutes); updated `phase1-price-lists`, `phase1-job-page`,
+  `phase1-templates` (Settings › Shop in the sections) and `phase1-going-live` ("Something to sell"). The e2e specs
+  could not be run in this environment.
