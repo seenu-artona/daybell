@@ -232,6 +232,33 @@ describe("POST /job-templates", () => {
   });
 });
 
+describe("only owners and admins change templates", () => {
+  it("photographers and staff get 403 on change, delete, default and copy, before anything is read or written", async () => {
+    for (const role of ["photographer", "staff"]) {
+      const db = fakeDatabase({ list_job_templates: [DEFAULT_ROW, TEMPLATE_ROW] });
+      scope.mockResolvedValue({ supabase: db.supabase, studio: as(role), userId: "u" });
+      expect((await one.PATCH(send("PATCH", { name: "B" }), ctx(TEMPLATE))).status).toBe(403);
+      expect((await one.DELETE(send("DELETE"), ctx(TEMPLATE))).status).toBe(403);
+      expect((await makeDefault.POST(send("POST"), ctx(TEMPLATE))).status).toBe(403);
+      expect((await copy.POST(send("POST", { name: "C" }), ctx(TEMPLATE))).status).toBe(403);
+      expect(db.calls).toEqual([]);
+    }
+  });
+
+  it("the database's own limit (two adds at once) is the same 409", async () => {
+    const db = fakeDatabase({
+      job_templates: (c: Call) =>
+        isWrite(c)
+          ? { error: { code: "P0001", message: "template_limit" } }
+          : { data: null, count: 49 },
+    });
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("owner"), userId: "u" });
+    const res = await list.POST(send("POST", { name: "A" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.fields.form).toBe("templates.limit");
+  });
+});
+
 describe("one template", () => {
   it("another studio's template is not found (not in the caller's studio's list)", async () => {
     const db = fakeDatabase({ list_job_templates: [DEFAULT_ROW] });
@@ -331,6 +358,25 @@ describe("jobs and their templates (D154)", () => {
     expect((await res.json()).error.fields).toEqual({ templateId: "validation.template" });
     expect(has(db.calls[0], "eq", "studio_id", STUDIO)).toBe(true);
     expect(writes(db.calls)).toEqual([]);
+  });
+
+  it("school delivery is sent only when the job names it, so an explicit false wins over the template", async () => {
+    const inserted: unknown[] = [];
+    const db = fakeDatabase({
+      job_templates: [{ id: TEMPLATE }],
+      jobs: (c: Call) => {
+        const insert = c.ops.find(([op]) => op === "insert");
+        if (insert) inserted.push(insert[1][0]);
+        return { data: JOB_ROW };
+      },
+      next_job_number: "JOB00002",
+    });
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("owner"), userId: "u" });
+    const base = { name: "Fall", pictureDay: "2030-05-01", type: "school", templateId: TEMPLATE };
+    expect((await jobs.POST(send("POST", { ...base, deliverToSchool: false }))).status).toBe(201);
+    expect((await jobs.POST(send("POST", base))).status).toBe(201);
+    expect(inserted[0]).toMatchObject({ deliver_to_school: false, template_id: TEMPLATE });
+    expect(inserted[1]).not.toHaveProperty("deliver_to_school");
   });
 
   it("a job carries its template, rules and what was changed for it", async () => {
@@ -550,14 +596,15 @@ describe("a person on Subjects (D153)", () => {
   it("their card and photo dates come from the caller's studio only", async () => {
     const db = fakeDatabase({
       child_record_facts: [
-        { card_printed_at: "2026-09-20T10:00:00Z", photographed_on: "2026-09-24" },
+        { card_printed_at: "2026-09-20T10:00:00Z", photographed_at: "2026-09-24 23:40:00" },
       ],
     });
     scope.mockResolvedValue({ supabase: db.supabase, studio: as("staff"), userId: "u" });
     const res = await facts.GET(send("GET"), ctx(CHILD));
     expect((await res.json()).facts).toEqual({
       cardPrintedAt: "2026-09-20T10:00:00Z",
-      photographedOn: "2026-09-24",
+      // The camera's own clock, never shifted to UTC (late on picture day stays picture day).
+      photographedAt: "2026-09-24T23:40:00",
     });
     expect(db.calls[0]?.args).toEqual({ p_studio_id: STUDIO, p_child_id: CHILD });
     const elsewhere = fakeDatabase({ child_record_facts: [] });

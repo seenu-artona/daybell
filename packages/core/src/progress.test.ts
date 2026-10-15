@@ -117,6 +117,19 @@ describe("a job's Progress (D152)", () => {
     });
   });
 
+  it("a draft holding a closing date shows the date, not the rule (ADR 0021)", () => {
+    const withDate = jobProgress(input({}, { closesAt: "2026-11-30T05:00:00.000Z" }));
+    expect(step(withDate, "shopCloses")).toMatchObject({
+      state: "next",
+      closesAt: "2026-11-30T05:00:00.000Z",
+      afterOpeningDays: null,
+    });
+    const byHand = jobProgress(
+      input({}, { rules: DEFAULT_RULES, closesAt: "2026-11-30T05:00:00.000Z" }),
+    );
+    expect(step(byHand, "shopCloses").closesAt).toBe("2026-11-30T05:00:00.000Z");
+  });
+
   it("without a closing rule, Shop closes is a step for a person, not automatic", () => {
     const p = jobProgress(input({}, { rules: DEFAULT_RULES }));
     expect(step(p, "shopCloses")).toMatchObject({ state: "next", afterOpeningDays: null });

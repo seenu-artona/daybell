@@ -402,10 +402,10 @@ export const childFactsResponse = z.object({
         .datetime({ offset: true })
         .nullable()
         .meta({ description: "When their QR card was first printed." }),
-      photographedOn: z.iso
-        .date()
-        .nullable()
-        .meta({ description: "The camera's day of their first photo." }),
+      photographedAt: z.iso.datetime({ local: true }).nullable().meta({
+        description:
+          "The camera's clock at their first photo, as the camera wrote it (no time zone): show its day as it stands.",
+      }),
     })
     .meta({ id: "ChildFacts" }),
 });

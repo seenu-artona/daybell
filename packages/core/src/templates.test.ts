@@ -99,11 +99,24 @@ describe("changes for this job (D152)", () => {
     // Rounding between the database and the browser doesn't count.
     expect(changedRules(FALL, FALL, selling("2026-10-15T14:00:30.000Z"))).toEqual([]);
     expect(changedRules(FALL, FALL, selling("2026-10-16T04:00:00.000Z"))).toEqual(["shopCloses"]);
-    expect(changedRules(FALL, FALL, selling(null))).toEqual(["shopCloses"]);
+    expect(changedRules(FALL, FALL, selling(null), new Date("2026-10-10T00:00:00Z"))).toEqual([
+      "shopCloses",
+    ]);
     expect(changedRules(DEFAULT_RULES, DEFAULT_RULES, selling("2026-10-16T04:00:00.000Z"))).toEqual(
       ["shopCloses"],
     );
     expect(changedRules(DEFAULT_RULES, DEFAULT_RULES, selling(null))).toEqual([]);
+    // Reopened after closing (closing clears the date) once the rule's date has gone by: nobody changed anything.
+    const afterRule = new Date("2026-10-20T00:00:00Z");
+    expect(changedRules(FALL, FALL, selling(null), afterRule)).toEqual([]);
+    // Before the rule's date, a shop with no date was changed (its date was removed).
+    expect(changedRules(FALL, FALL, selling(null), new Date("2026-10-10T00:00:00Z"))).toEqual([
+      "shopCloses",
+    ]);
+    // A date set on the reopened shop is still a change.
+    expect(changedRules(FALL, FALL, selling("2026-10-30T00:00:00.000Z"), afterRule)).toEqual([
+      "shopCloses",
+    ]);
     // Once closed, the closing date is history (it is cleared when the shop closes).
     expect(
       changedRules(FALL, FALL, { status: "closed", openedAt: OPENED, closesAt: null }),

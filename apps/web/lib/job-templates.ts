@@ -81,7 +81,19 @@ export async function assertTemplateInStudio(
     });
 }
 
-/** The studio has room for one more template. */
+const TEMPLATE_LIMIT = () =>
+  new ApiError("conflict", "A studio can have at most 50 templates.", {
+    form: JOB_TEMPLATE_CONFLICTS.limit,
+  });
+
+/** The database's own limit (two adds at the same moment): its named refusal becomes the same 409. */
+export function templateInsertError(
+  error: { code?: string; message?: string } | null,
+): ApiError | null {
+  return error?.code === "P0001" && error.message === "template_limit" ? TEMPLATE_LIMIT() : null;
+}
+
+/** The studio has room for one more template (the database checks again, race-safe). */
 export async function assertTemplateRoom(
   supabase: SupabaseClient,
   studioId: string,
@@ -91,10 +103,7 @@ export async function assertTemplateRoom(
     .select("id", { count: "exact", head: true })
     .eq("studio_id", studioId);
   check(result);
-  if ((result.count ?? 0) >= MAX_JOB_TEMPLATES)
-    throw new ApiError("conflict", "A studio can have at most 50 templates.", {
-      form: JOB_TEMPLATE_CONFLICTS.limit,
-    });
+  if ((result.count ?? 0) >= MAX_JOB_TEMPLATES) throw TEMPLATE_LIMIT();
 }
 
 /** Rules that don't make a whole (days without "after picture day", or the other way round): a field error. */

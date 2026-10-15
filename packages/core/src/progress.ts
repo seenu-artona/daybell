@@ -103,9 +103,9 @@ export interface ProgressStep {
   actorId: string | null;
   /** The day it is planned for (YYYY-MM-DD): QR cards, picture day, a shop opening days after picture day. */
   planned: string | null;
-  /** Shop closes, while selling: the closing moment, or null for none. */
+  /** Shop closes, while selling or (when it holds one) a draft: the closing moment, or null for none. */
   closesAt: string | null;
-  /** Shop closes, before the shop opens: days after opening, or null for "when you close it". */
+  /** Shop closes, a draft without a date: days after opening, or null for "when you close it". */
   afterOpeningDays: number | null;
   /** Publish shop: the rule is "when photos are checked". */
   whenPhotosChecked: boolean;
@@ -150,7 +150,13 @@ export function jobProgress(input: ProgressInput): JobProgress {
   const steps: ProgressStep[] = PROGRESS_STEPS.map((key) => {
     const spec = STEPS[key];
     const done = !spec.soon && isDone(key);
-    const automatic = key === "shopCloses" && draft && input.rules.shopClosesDays !== null && !done;
+    // A draft's rule closes the shop by itself once it opens, unless the draft already holds a date (ADR 0021).
+    const automatic =
+      key === "shopCloses" &&
+      draft &&
+      input.rules.shopClosesDays !== null &&
+      input.closesAt === null &&
+      !done;
     let state: ProgressStepState;
     if (spec.soon) state = "soon";
     else if (done) state = "done";
@@ -174,8 +180,12 @@ export function jobProgress(input: ProgressInput): JobProgress {
             : key === "startSelling"
               ? planned.shopOpens
               : null,
-      closesAt: key === "shopCloses" && selling ? input.closesAt : null,
-      afterOpeningDays: key === "shopCloses" && draft ? input.rules.shopClosesDays : null,
+      // A draft may hold a closing date too (ADR 0021): it shows that date rather than the rule.
+      closesAt: key === "shopCloses" && (selling || draft) ? input.closesAt : null,
+      afterOpeningDays:
+        key === "shopCloses" && draft && input.closesAt === null
+          ? input.rules.shopClosesDays
+          : null,
       whenPhotosChecked: key === "startSelling" && input.rules.shopOpens === "photosChecked",
       // A finished step's rule is history: only steps still ahead say they were changed.
       changed: rule !== undefined && !done && input.changed.includes(rule),

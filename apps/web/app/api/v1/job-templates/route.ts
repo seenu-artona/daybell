@@ -6,6 +6,7 @@ import {
   loadTemplate,
   loadTemplates,
   TEMPLATE_NOT_FOUND,
+  templateInsertError,
 } from "@/lib/job-templates";
 import { rulesToDb } from "@/lib/jobs";
 import { assertPriceListInStudio } from "@/lib/price-lists";
@@ -32,19 +33,20 @@ export const POST = handle(async (request: Request) => {
   await assertPriceListInStudio(supabase, studio.id, input.priceListId ?? undefined);
   await assertTemplateRoom(supabase, studio.id);
   const { name, priceListId, deliverToSchool, ...rules } = input;
-  const row = check(
-    await supabase
-      .from("job_templates")
-      .insert({
-        studio_id: studio.id,
-        name,
-        price_list_id: priceListId,
-        deliver_to_school: deliverToSchool,
-        ...rulesToDb(rules),
-      })
-      .select("id")
-      .single(),
-  ) as { id: string } | null;
+  const inserted = await supabase
+    .from("job_templates")
+    .insert({
+      studio_id: studio.id,
+      name,
+      price_list_id: priceListId,
+      deliver_to_school: deliverToSchool,
+      ...rulesToDb(rules),
+    })
+    .select("id")
+    .single();
+  const limit = templateInsertError(inserted.error);
+  if (limit) throw limit;
+  const row = check(inserted) as { id: string } | null;
   if (!row) throw TEMPLATE_NOT_FOUND();
   return NextResponse.json(
     { template: await loadTemplate(supabase, studio.id, row.id) },

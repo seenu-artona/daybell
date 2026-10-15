@@ -122,12 +122,15 @@ export interface ClosingFacts {
 /**
  * The rules that differ from what the job's template gave it (D152). A job made before templates (`given` null) has
  * nothing to differ from. While the shop sells, a closing date other than the one the template's rule gives counts as
- * a change to "Shop closes" too (a date is changed on its own step).
+ * a change to "Shop closes" too (a date is changed on its own step), except when the rule's date has already gone by
+ * and the shop has none: a shop reopened after closing (closing clears its date) hasn't been changed by anyone, and
+ * Undo couldn't set a past date anyway (code review M2).
  */
 export function changedRules(
   rules: JobRules,
   given: JobRules | null,
   closing: ClosingFacts,
+  now: Date = new Date(),
 ): RuleKey[] {
   if (!given) return [];
   const differs = (key: RuleKey) => RULE_FIELDS[key].some((field) => rules[field] !== given[field]);
@@ -136,6 +139,7 @@ export function changedRules(
     if (key !== "shopCloses" || closing.status !== "selling") return false;
     const expected = closesAtByRule(given, closing.openedAt);
     const actual = closing.closesAt === null ? null : Date.parse(closing.closesAt);
+    if (expected !== null && actual === null && expected.getTime() <= now.getTime()) return false;
     if (expected === null || actual === null) return expected !== actual;
     return Math.abs(expected.getTime() - actual) > SAME_MOMENT_MS;
   });
