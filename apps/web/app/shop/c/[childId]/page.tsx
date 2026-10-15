@@ -160,6 +160,7 @@ export default function GalleryPage() {
               onClose={() => setViewer(null)}
               alt={alt}
               orderHref={(photo) => `/shop/c/${childId}/buy?photo=${encodeURIComponent(photo.id)}`}
+              drm={galleryId ? { childId, galleryId } : null}
             />
           </>
         )}

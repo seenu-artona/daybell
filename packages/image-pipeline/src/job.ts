@@ -1,4 +1,15 @@
-import { type DerivativeVariant, DOWNLOAD_VARIANT, MAX_PHOTO_BYTES, photoKey } from "@daybell/core";
+import { randomUUID } from "node:crypto";
+import {
+  type DerivativeVariant,
+  DOWNLOAD_VARIANT,
+  DRM_CONTENT_TYPES,
+  DRM_VARIANTS,
+  type DrmFailureReason,
+  drmObjectKey,
+  MAX_PHOTO_BYTES,
+  photoKey,
+} from "@daybell/core";
+import { type DrmClip, type DrmFrame, drmFrame, MAX_PROOF_BYTES } from "./drm";
 import {
   DERIVATIVE_CONTENT_TYPE,
   DOWNLOAD_CONTENT_TYPE,
@@ -26,6 +37,9 @@ export interface WorkerPhoto {
   attempt: number;
   /** For the watermark (Seenu, answer 4). Never logged. */
   studioName: string;
+  /** The large view's DRM packaging (ADR 0034): requested, ready, failed or never asked; and the request's attempt. */
+  drmStatus?: "requested" | "ready" | "failed" | null;
+  drmAttempt?: number;
 }
 
 export type WorkerResult = (
@@ -166,5 +180,103 @@ export async function runDownloadJob(
     DOWNLOAD_CACHE_CONTROL,
   );
   deps.log("download_ready", photoId);
+  return "ready";
+}
+
+// ── DRM packaging (D158; ADR 0034) ───────────────────────────────────────────────────────────────────────────────────
+
+/** What the worker reports for one packaging request (drmAttempt). The key itself never: only KMS's wrapped copy. */
+export type DrmWorkerResult = { attempt: number } & (
+  | {
+      status: "ready";
+      keyId: string;
+      /** KMS's CiphertextBlob, base64. */
+      wrappedKey: string;
+      kmsKeyArn: string;
+      width: number;
+      height: number;
+      bytes: number;
+    }
+  | { status: "failed"; reason: DrmFailureReason }
+);
+
+/** A fresh 16-byte content key from KMS, bound to its photo by the encryption context (B2, B4). */
+export interface DrmDataKey {
+  plaintext: Uint8Array;
+  wrapped: Uint8Array;
+  /** The KMS key's ARN, as KMS names it in its answer. */
+  kmsKeyArn: string;
+}
+export type DrmKeyContext = { studio: string; photo: string; key: string };
+
+export interface DrmJobDeps extends Pick<PhotoJobDeps, "photo" | "head" | "get" | "put" | "log"> {
+  dataKey(context: DrmKeyContext): Promise<DrmDataKey>;
+  packageClip(frame: DrmFrame, keyId: string, key: Uint8Array): Promise<DrmClip>;
+  reportDrm(photoId: string, result: DrmWorkerResult): Promise<void>;
+  /** For tests: the key ID (a random v4 GUID otherwise). */
+  newKeyId?: () => string;
+}
+
+/**
+ * Packages one photo's large view (B6: the same worker and queue, `{photoId, make: "drm"}`, ids only). Only a ready
+ * photo whose request is still open is packaged, for that request's attempt (a late result is ignored by the API).
+ * A missing, oversized or unreadable proof is reported as failed for good; anything else (KMS, a tool, storage, the API)
+ * throws, so SQS tries again and the cron re-queues after an hour (3 messages in all). The plaintext key exists only in
+ * memory, is zeroed once the clip is made, and is never logged, stored or reported.
+ */
+export async function runDrmJob(photoId: string, deps: DrmJobDeps): Promise<PhotoJobOutcome> {
+  const photo = await deps.photo(photoId);
+  if (photo?.status !== "ready" || photo.drmStatus !== "requested" || !photo.drmAttempt) {
+    deps.log(
+      "drm_skipped",
+      photoId,
+      !photo ? "missing" : photo.status !== "ready" ? photo.status : "not_requested",
+    );
+    return "skipped";
+  }
+  const attempt = photo.drmAttempt;
+  const ids = { studioId: photo.studioId, jobId: photo.jobId, photoId: photo.id };
+  const fail = async (reason: DrmFailureReason): Promise<PhotoJobOutcome> => {
+    deps.log("drm_failed", photoId, reason);
+    await deps.reportDrm(photoId, { status: "failed", reason, attempt });
+    return "failed";
+  };
+  const proofKey = photoKey(ids, "proof.webp");
+  const head = await deps.head(proofKey);
+  if (!head) return fail("proof_missing");
+  if (head.size > MAX_PROOF_BYTES) return fail("too_large");
+  const decoded = await drmFrame(await deps.get(proofKey));
+  if (!decoded.ok) return fail(decoded.reason);
+
+  const keyId = (deps.newKeyId ?? randomUUID)();
+  const dataKey = await deps.dataKey({ studio: photo.studioId, photo: photo.id, key: keyId });
+  let clip: DrmClip;
+  try {
+    if (dataKey.plaintext.length !== 16) throw new Error("drm_key_size");
+    clip = await deps.packageClip(decoded.frame, keyId, dataKey.plaintext);
+  } finally {
+    dataKey.plaintext.fill(0);
+  }
+  // Under this run's own key ID (drm/{keyId}.*; review H1): a second run for the photo (a repeated message, a stale
+  // request) writes its own files and never overwrites these, so the database's key always names the files it
+  // encrypted. The manifests last, so a manifest never names a clip that isn't there yet.
+  for (const variant of DRM_VARIANTS)
+    await deps.put(
+      drmObjectKey(ids, keyId, variant),
+      clip.files[variant],
+      DRM_CONTENT_TYPES[variant],
+      PREVIEW_CACHE_CONTROL,
+    );
+  await deps.reportDrm(photoId, {
+    status: "ready",
+    attempt,
+    keyId,
+    wrappedKey: Buffer.from(dataKey.wrapped).toString("base64"),
+    kmsKeyArn: dataKey.kmsKeyArn,
+    width: clip.width,
+    height: clip.height,
+    bytes: clip.files["drm.mp4"].length,
+  });
+  deps.log("drm_ready", photoId);
   return "ready";
 }

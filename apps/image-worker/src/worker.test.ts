@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cardQrPayload, photoKey, verifyWorkerRequest } from "@daybell/core";
+import { cardQrPayload, drmObjectKey, photoKey, verifyWorkerRequest } from "@daybell/core";
 import { localPhotoStorage, type PhotoStorage } from "@daybell/storage";
 import type { SQSEvent } from "aws-lambda";
 import QRCode from "qrcode";
@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   configFromEnv,
   createHandler,
+  kmsDataKey,
   photoIdsFromMessage,
   photoTasksFromMessage,
   secretsFromJson,
@@ -73,12 +74,22 @@ describe("photoTasksFromMessage (ADR 0023)", () => {
     expect(
       photoTasksFromMessage(JSON.stringify({ photoId: ids.photoId, make: "download" }), BUCKET),
     ).toEqual([{ photoId: ids.photoId, make: "download" }]);
+    // The large view's DRM clip (ADR 0034, B6): the same queue, ids only.
+    expect(
+      photoTasksFromMessage(JSON.stringify({ photoId: ids.photoId, make: "drm" }), BUCKET),
+    ).toEqual([{ photoId: ids.photoId, make: "drm" }]);
     // Anything else asks for nothing (never a guess at what was meant).
     expect(
       photoTasksFromMessage(JSON.stringify({ photoId: ids.photoId, make: "delete" }), BUCKET),
     ).toEqual([]);
-    // A download.jpg landing in S3 is not an original.
+    // A download.jpg or a DRM clip landing in S3 is not an original.
     expect(photoTasksFromMessage(s3Event(photoKey(ids, "download.jpg")), BUCKET)).toEqual([]);
+    expect(
+      photoTasksFromMessage(
+        s3Event(drmObjectKey(ids, "2b0e6a4c-9f6e-4f0a-8d2b-3c4d5e6f7a8b", "drm.mp4")),
+        BUCKET,
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -98,7 +109,21 @@ describe("configFromEnv and the secret", () => {
       region: "ca",
       bucket: BUCKET,
       secretArn: ARN,
+      drmKmsKeyArn: null,
     });
+  });
+  it("reads the DRM key's ARN when set, in ca-central-1 only (ADR 0034)", () => {
+    const key = "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
+    expect(configFromEnv({ ...env, DRM_KMS_KEY_ARN: key }).drmKmsKeyArn).toBe(key);
+    expect(() =>
+      configFromEnv({
+        ...env,
+        DRM_KMS_KEY_ARN: "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm",
+      }),
+    ).toThrow(/^DRM_KMS_KEY_ARN must be a KMS key ARN in ca-central-1$/);
+    expect(() =>
+      configFromEnv({ ...env, DRM_KMS_KEY_ARN: key.replace("ca-central-1", "us-east-1") }),
+    ).toThrow(/^DRM_KMS_KEY_ARN must be a KMS key ARN in ca-central-1$/);
   });
   it("runs only in Canada for Canadian data (D113), and names what's wrong, never a value", () => {
     expect(() => configFromEnv({ ...env, AWS_REGION: "us-east-1" })).toThrow(/^AWS_REGION must be/);
@@ -137,6 +162,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
   let storage: PhotoStorage;
   let original: Uint8Array;
   let status = "processing";
+  let drmFields: Record<string, unknown> = {};
   const reports: unknown[] = [];
 
   /** The API: checks every call's signature like the internal routes do, and answers. */
@@ -167,6 +193,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
         byteSize: original.length,
         attempt: 2,
         studioName: "North Peak",
+        ...drmFields,
       },
     });
   });
@@ -179,6 +206,7 @@ describe("the Lambda handler (S3 and the API faked)", () => {
       .toBuffer();
     await storage.put(photoKey(ids, "original"), original, { contentType: "image/jpeg" });
     status = "processing";
+    drmFields = {};
     reports.length = 0;
     fetchFake.mockClear();
   });
@@ -235,6 +263,83 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     expect(await storage.head(photoKey(ids, "thumb.webp"))).toBeNull();
     expect(reports).toEqual([]);
     expect(logs).toEqual([["download_ready", ids.photoId]]);
+  });
+
+  it("packages a photo's large view for DRM when the API asks, reporting only the wrapped key (ADR 0034)", async () => {
+    status = "ready";
+    drmFields = { drmStatus: "requested", drmAttempt: 3 };
+    const proof = await sharp({
+      create: { width: 320, height: 213, channels: 3, background: "#468" },
+    })
+      .webp()
+      .toBuffer();
+    await storage.put(photoKey(ids, "proof.webp"), proof, { contentType: "image/webp" });
+    const plaintext = new Uint8Array(16).fill(7);
+    const ARN = "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
+    const logs: unknown[][] = [];
+    const packageClip = vi.fn(async (frame: { width: number; height: number }) => ({
+      files: {
+        "drm.mp4": new Uint8Array(10),
+        "drm.mpd": new Uint8Array(1),
+        "drm.m3u8": new Uint8Array(1),
+        "drm-video.m3u8": new Uint8Array(1),
+      },
+      width: frame.width,
+      height: frame.height,
+    }));
+    const handler = createHandler({
+      qrWasmFile,
+      config,
+      storage,
+      fetch: fetchFake as typeof fetch,
+      log: (...args) => void logs.push(args),
+      drm: {
+        dataKey: async () => ({ plaintext, wrapped: new Uint8Array([1, 2, 3]), kmsKeyArn: ARN }),
+        packageClip,
+      },
+    });
+    expect(await handler(sqs(JSON.stringify({ photoId: ids.photoId, make: "drm" })))).toEqual({
+      batchItemFailures: [],
+    });
+    // Under the reported key's own names (review H1).
+    const keyId = (reports[0] as { keyId: string }).keyId;
+    for (const variant of ["drm.mp4", "drm.mpd", "drm.m3u8", "drm-video.m3u8"] as const)
+      expect(await storage.head(drmObjectKey(ids, keyId, variant))).not.toBeNull();
+    expect(fetchFake.mock.calls.map(([url]) => String(url)).at(-1)).toBe(
+      `${config.callbackBaseUrl}/api/v1/internal/photo-worker/photos/${ids.photoId}/drm`,
+    );
+    expect(reports).toEqual([
+      {
+        status: "ready",
+        attempt: 3,
+        keyId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        wrappedKey: "AQID",
+        kmsKeyArn: ARN,
+        width: 320,
+        height: 212,
+        bytes: 10,
+      },
+    ]);
+    expect([...plaintext].every((b) => b === 0)).toBe(true);
+    expect(logs).toEqual([["drm_ready", ids.photoId]]);
+  });
+
+  it("hands a DRM task back to SQS where DRM isn't set up (no DRM_KMS_KEY_ARN)", async () => {
+    status = "ready";
+    drmFields = { drmStatus: "requested", drmAttempt: 1 };
+    const logs: unknown[][] = [];
+    const handler = createHandler({
+      qrWasmFile,
+      config,
+      storage,
+      fetch: fetchFake as typeof fetch,
+      log: (...args) => void logs.push(args),
+    });
+    expect(await handler(sqs(JSON.stringify({ photoId: ids.photoId, make: "drm" })))).toEqual({
+      batchItemFailures: [{ itemIdentifier: "m0" }],
+    });
+    expect(logs).toEqual([["photo_error", ids.photoId, "DrmNotConfigured"]]);
+    expect(reports).toEqual([]);
   });
 
   it("acknowledges a repeated message without doing the work again", async () => {
@@ -376,5 +481,38 @@ describe("the Lambda handler (S3 and the API faked)", () => {
     expect((await handler(sqs(s3Event(photoKey(ids, "original"))))).batchItemFailures).toHaveLength(
       1,
     );
+  });
+});
+
+describe("kmsDataKey (B2, B4)", () => {
+  const ARN = "arn:aws:kms:ca-central-1:123456789012:alias/daybell-staging-ca-drm";
+  const context = {
+    studio: ids.studioId,
+    photo: ids.photoId,
+    key: "2b0e6a4c-9f6e-4f0a-8d2b-3c4d5e6f7a8b",
+  };
+  it("asks for 16 bytes on the DRM key, bound to the photo by the encryption context", async () => {
+    const send = vi.fn(async () => ({
+      Plaintext: new Uint8Array(16),
+      CiphertextBlob: new Uint8Array([5]),
+      KeyId: "arn:aws:kms:ca-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+    }));
+    const key = await kmsDataKey({ send }, ARN, (input) => ({ input }))(context);
+    expect(send).toHaveBeenCalledWith({
+      input: { KeyId: ARN, NumberOfBytes: 16, EncryptionContext: context },
+    });
+    expect(key.kmsKeyArn).toMatch(/:key\//);
+    expect(key.wrapped).toEqual(new Uint8Array([5]));
+  });
+
+  it("refuses an answer without a 16-byte key, a wrapped copy and the key's ARN", async () => {
+    for (const answer of [
+      { Plaintext: new Uint8Array(32), CiphertextBlob: new Uint8Array([1]), KeyId: "k" },
+      { Plaintext: new Uint8Array(16), KeyId: "k" },
+      { Plaintext: new Uint8Array(16), CiphertextBlob: new Uint8Array([1]) },
+    ])
+      await expect(
+        kmsDataKey({ send: async () => answer }, ARN, (input) => input)(context),
+      ).rejects.toThrow(/^kms_data_key$/);
   });
 });

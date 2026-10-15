@@ -230,3 +230,215 @@ export function shopThrottleKey(
       throw new Error(`SHOP_THROTTLE_KEY must be different from ${other}`);
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
+
+// ── DRM screenshot protection, test page (spike; D158; ADR 0032) ─────────────────────────────────────────────────────
+
+/**
+ * DRM_TEST_PAGE_ENABLED: "true" turns on /dev/drm-test and its token route for owners and admins. Anything else (the
+ * default, unset) and both answer as if they didn't exist. Never in Vercel Production (VERCEL_ENV=production), which
+ * is staging today: the test runs on the branch's Preview deployment only (Seenu, Oct 14, 2026; ADR 0032). The web
+ * app's build step refuses the same way (lib/drm-test-build.mjs).
+ */
+export function drmTestPageEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return env.DRM_TEST_PAGE_ENABLED?.trim() === "true" && env.VERCEL_ENV !== "production";
+}
+
+/**
+ * What the DRM test page's token route needs (D158; ADR 0032), all server-only and never NEXT_PUBLIC_*:
+ * - AXINOM_COM_KEY_ID: the communication key's ID (a GUID), from Axinom's portal. Not secret, but kept with its key.
+ * - AXINOM_COM_KEY: the communication key itself, base64 of 32 bytes, from the same place. Secret: it signs license
+ *   tokens and wraps content keys.
+ * - AXINOM_LICENSE_PREFIX: the tenant part of Axinom's license server addresses,
+ *   https://<prefix>.drm-{widevine,playready,fairplay}-licensing.axprod.net/AcquireLicense.
+ * - AXINOM_FAIRPLAY_CERT_URL: optional; the HTTPS address of the studio's FairPlay (FPS) certificate. Unset, FairPlay
+ *   is off and Safari gets the fallback.
+ * - DRM_TEST_KEY_ID: the test clip's key ID, a random GUID (not secret: it is in the clip's manifest).
+ * - DRM_TEST_CONTENT_KEY: the test clip's content key, 32 random hex digits. Secret. Set in Vercel only: the web app's
+ *   build encrypts the clip with this same pair (apps/web/scripts/encrypt-drm-test.mjs; scripts/drm/README.md).
+ * Read on first use, never at build time. Errors name the variable, never the value.
+ */
+export interface DrmTestSettings {
+  comKeyId: string;
+  comKey: Uint8Array<ArrayBuffer>;
+  licensePrefix: string;
+  fairplayCertificateUrl: string | null;
+  keyId: string;
+  contentKey: Uint8Array<ArrayBuffer>;
+}
+
+const GUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+
+/** A GUID with or without dashes, as lowercase with dashes. */
+function guidSetting(env: Record<string, string | undefined>, name: string): string {
+  const value = required(env, name);
+  if (!GUID.test(value)) throw new Error(`${name} must be a GUID`);
+  const hex = value.replaceAll("-", "").toLowerCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function hexBytes(hex: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(hex.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16));
+}
+
+export function drmTestSettings(
+  env: Record<string, string | undefined> = process.env,
+): DrmTestSettings {
+  const comKeyId = guidSetting(env, "AXINOM_COM_KEY_ID");
+
+  const comKeyProblem = new Error("AXINOM_COM_KEY must be 32 bytes, base64-encoded");
+  const comKeyText = required(env, "AXINOM_COM_KEY");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(comKeyText)) throw comKeyProblem;
+  let binary: string;
+  try {
+    binary = atob(comKeyText);
+  } catch {
+    throw comKeyProblem;
+  }
+  if (binary.length !== 32) throw comKeyProblem;
+  const comKey = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+
+  const licensePrefix = required(env, "AXINOM_LICENSE_PREFIX").toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(licensePrefix))
+    throw new Error("AXINOM_LICENSE_PREFIX must be the tenant part of Axinom's license address");
+
+  const certText = env.AXINOM_FAIRPLAY_CERT_URL?.trim() ?? "";
+  let fairplayCertificateUrl: string | null = null;
+  if (certText) {
+    let url: URL | null = null;
+    try {
+      url = new URL(certText);
+    } catch {
+      url = null;
+    }
+    if (url?.protocol !== "https:")
+      throw new Error("AXINOM_FAIRPLAY_CERT_URL must be an https:// address");
+    fairplayCertificateUrl = url.href;
+  }
+
+  const keyId = guidSetting(env, "DRM_TEST_KEY_ID");
+  const contentKeyText = required(env, "DRM_TEST_CONTENT_KEY").replaceAll("-", "");
+  if (!/^[0-9a-f]{32}$/i.test(contentKeyText))
+    throw new Error("DRM_TEST_CONTENT_KEY must be 16 bytes as 32 hex digits");
+  if (contentKeyText.toLowerCase() === keyId.replaceAll("-", ""))
+    throw new Error("DRM_TEST_CONTENT_KEY must be different from DRM_TEST_KEY_ID");
+
+  return {
+    comKeyId,
+    comKey,
+    licensePrefix,
+    fairplayCertificateUrl,
+    keyId,
+    contentKey: hexBytes(contentKeyText),
+  };
+}
+
+// ── DRM in the parent shop's large view (D158; ADR 0034) ─────────────────────────────────────────────────────────────
+
+/**
+ * What the shop's DRM routes need to sign Axinom license tokens (D158; ADR 0034), all server-only, never NEXT_PUBLIC_*,
+ * read on first use (never at build time):
+ * - SHOP_DRM_COM_KEY_ID: the shop's communication key ID (a GUID), from Axinom's portal.
+ * - SHOP_DRM_COM_KEY: that communication key, base64 of 32 bytes. Secret (Sensitive in Vercel): it signs tokens and
+ *   wraps content keys. Must never be the DRM test page's AXINOM_COM_KEY (ADR 0032: a separate key for testing).
+ * - SHOP_DRM_LICENSE_PREFIX: the tenant part of https://<prefix>.drm-{widevine,playready,fairplay}-licensing.axprod.net.
+ * - SHOP_DRM_FAIRPLAY_CERT: optional; the FairPlay (FPS) certificate as base64 of its DER bytes, served from our own
+ *   origin (C10). Unset, FairPlay is off and Safari keeps the watermarked WebP.
+ * Null when none of the three required settings is set (DRM isn't set up in this environment: the shop keeps the
+ * WebP); one set without the others, or a malformed one, throws. Errors name the variable, never the value.
+ */
+export interface ShopDrmSettings {
+  comKeyId: string;
+  comKey: Uint8Array<ArrayBuffer>;
+  licensePrefix: string;
+  fairplayCertificate: Uint8Array<ArrayBuffer> | null;
+}
+
+/** A FairPlay certificate is about 1 KB; anything over this isn't one. */
+const MAX_FAIRPLAY_CERT_BYTES = 16 * 1024;
+
+function base64Bytes(text: string): Uint8Array<ArrayBuffer> | null {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(text)) return null;
+  try {
+    return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+export function shopDrmSettings(
+  env: Record<string, string | undefined> = process.env,
+): ShopDrmSettings | null {
+  const names = ["SHOP_DRM_COM_KEY_ID", "SHOP_DRM_COM_KEY", "SHOP_DRM_LICENSE_PREFIX"] as const;
+  if (names.every((name) => !env[name]?.trim())) return null;
+  const comKeyId = guidSetting(env, "SHOP_DRM_COM_KEY_ID");
+  const comKeyText = required(env, "SHOP_DRM_COM_KEY");
+  const comKey = base64Bytes(comKeyText);
+  if (comKey?.length !== 32) throw new Error("SHOP_DRM_COM_KEY must be 32 bytes, base64-encoded");
+  const testKey = base64Bytes(env.AXINOM_COM_KEY?.trim() ?? "");
+  if (testKey?.length === comKey.length && testKey.every((b, i) => b === comKey[i]))
+    throw new Error("SHOP_DRM_COM_KEY must be different from AXINOM_COM_KEY");
+  const licensePrefix = required(env, "SHOP_DRM_LICENSE_PREFIX").toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(licensePrefix))
+    throw new Error("SHOP_DRM_LICENSE_PREFIX must be the tenant part of Axinom's license address");
+  const certText = env.SHOP_DRM_FAIRPLAY_CERT?.trim() ?? "";
+  let fairplayCertificate: Uint8Array<ArrayBuffer> | null = null;
+  if (certText) {
+    fairplayCertificate = base64Bytes(certText);
+    // DER starts with a SEQUENCE (0x30).
+    if (
+      !fairplayCertificate ||
+      fairplayCertificate.length < 64 ||
+      fairplayCertificate.length > MAX_FAIRPLAY_CERT_BYTES ||
+      fairplayCertificate[0] !== 0x30
+    )
+      throw new Error(
+        "SHOP_DRM_FAIRPLAY_CERT must be the FairPlay certificate's DER bytes, base64",
+      );
+  }
+  return { comKeyId, comKey, licensePrefix, fairplayCertificate };
+}
+
+const IAM_ROLE = /^arn:aws:iam::\d{12}:role\/[\w+=,.@/-]{1,128}$/;
+
+/**
+ * AWS_DRM_ROLE_ARN (ADR 0034, B4): the role only the shop's DRM token route assumes (Vercel's OIDC token, like
+ * AWS_ROLE_ARN) to unwrap a photo's content key: kms:Decrypt on the DRM key, with the encryption context required, and
+ * nothing else. Distinct from AWS_ROLE_ARN and AWS_DOWNLOAD_ROLE_ARN, so neither of those can ever unwrap a key. Null
+ * with the local driver and for regions without photo storage. Named, never shown, when it is missing.
+ */
+export function awsDrmRoleArn(
+  region: DataRegion,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const settings = photoStorageSettings(region, env);
+  if (settings?.driver !== "s3") return null;
+  const value = required(env, "AWS_DRM_ROLE_ARN");
+  if (!IAM_ROLE.test(value)) throw new Error("AWS_DRM_ROLE_ARN must be an IAM role ARN");
+  if (value === settings.roleArn)
+    throw new Error("AWS_DRM_ROLE_ARN must be a different role from AWS_ROLE_ARN");
+  if (value === env.AWS_DOWNLOAD_ROLE_ARN?.trim())
+    throw new Error("AWS_DRM_ROLE_ARN must be a different role from AWS_DOWNLOAD_ROLE_ARN");
+  return value;
+}
+
+/**
+ * DRM_KMS_KEY_ARN_CA (ADR 0034): the KMS key that wraps each photo's content key, in ca-central-1 like the photos
+ * (D113). Its key ARN, not its alias: the token route refuses any wrapped key whose KMS key isn't exactly this one
+ * (review L3). Its being set is what turns DRM packaging on in this environment: unset, nothing is packaged and the shop
+ * keeps the WebP. Null with the local driver (no packaging locally) and for regions without photo storage. Anything
+ * else throws, naming the variable.
+ */
+export function drmKmsKeyArn(
+  region: DataRegion,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const settings = photoStorageSettings(region, env);
+  if (settings?.driver !== "s3") return null;
+  const name = `DRM_KMS_KEY_ARN_${region.toUpperCase()}`;
+  const value = env[name]?.trim() ?? "";
+  if (!value) return null;
+  const pattern = new RegExp(`^arn:aws:kms:${settings.awsRegion}:\\d{12}:key/[0-9a-f-]{36}$`);
+  if (!pattern.test(value))
+    throw new Error(`${name} must be a KMS key ARN in ${settings.awsRegion}`);
+  return value;
+}

@@ -66,6 +66,7 @@ import {
   searchInput,
   shopCartLineInput,
   shopCodeInput,
+  shopDrmManifestQuery,
   shopGalleryQuery,
   shopQuantityInput,
   shopShippingInput,
@@ -80,6 +81,7 @@ import {
   undoCardPhotosInput,
   uploadBatchInput,
   uploadFilesInput,
+  workerDrmResultInput,
   workerResultInput,
 } from "./schemas";
 import {
@@ -100,6 +102,7 @@ import {
   cronJobsResponse,
   cronPhotosResponse,
   downloadLinkResponse,
+  drmTestTokenResponse,
   groupDeletedResponse,
   groupMembersChangedResponse,
   groupMembersResponse,
@@ -143,6 +146,8 @@ import {
   salesResponse,
   searchResponse,
   shopCartResponse,
+  shopDrmConfigResponse,
+  shopDrmTokenResponse,
   shopGalleryResponse,
   shopOpenedResponse,
   shopOrderResponse,
@@ -219,7 +224,12 @@ export interface RouteSpec {
     schema?: z.ZodType;
     description: string;
     /** A file instead of JSON (e.g. the QR card PDF, an order's zip). */
-    contentType?: "application/pdf" | "application/zip";
+    contentType?:
+      | "application/pdf"
+      | "application/zip"
+      | "application/dash+xml"
+      | "application/vnd.apple.mpegurl"
+      | "application/octet-stream";
     /** Response headers worth knowing, by name. */
     headers?: Record<string, string>;
   };
@@ -1667,6 +1677,18 @@ export const ROUTES: RouteSpec[] = [
   },
   {
     method: "POST",
+    path: "/internal/photo-worker/photos/{id}/drm",
+    group: "Internal",
+    summary: "The image worker reports a photo's DRM clip",
+    description:
+      "Not for integrations (D158; ADR 0034). Signed like the read; at most 4 KB. For one packaging request (attempt): the clip's key ID, the content key as wrapped by KMS in ca-central-1 (never the key itself) and the clip's size; or failed for good with a reason. A late result of an earlier request, or for a photo that can no longer be shown, changes nothing (recorded: false). Writes no event.",
+    access: "internal",
+    body: workerDrmResultInput,
+    success: { status: 200, schema: workerRecordedResponse, description: "Recorded." },
+    errors: ["invalid_input", "not_signed_in", "region_unavailable"],
+  },
+  {
+    method: "POST",
     path: "/webhooks/stripe",
     group: "Internal",
     summary: "Stripe's webhook",
@@ -1780,6 +1802,76 @@ export const ROUTES: RouteSpec[] = [
     query: shopGalleryQuery,
     success: { status: 200, schema: shopGalleryResponse, description: "The gallery." },
     errors: ["shop_session_required", "not_found", "rate_limited", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/shop/drm",
+    group: "Shop",
+    summary: "Whether large views are protected here",
+    description:
+      "D158; ADR 0034. Whether large views may be protected by DRM (the switch is on and DRM is set up), Axinom's license servers and this site's FairPlay certificate address. Off, every large view is the watermarked preview. Nothing about the parent or child.",
+    access: "parent",
+    query: shopGalleryQuery,
+    success: { status: 200, schema: shopDrmConfigResponse, description: "The DRM setup." },
+    errors: ["shop_session_required", "rate_limited", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/shop/drm/fairplay-certificate",
+    group: "Shop",
+    summary: "The FairPlay certificate",
+    description:
+      "D158; ADR 0034 (C10). The FairPlay (FPS) certificate Safari needs before asking for a license, served from this site. Not found while FairPlay isn't set up.",
+    access: "parent",
+    query: shopGalleryQuery,
+    success: {
+      status: 200,
+      description: "The certificate's DER bytes.",
+      contentType: "application/octet-stream",
+    },
+    errors: ["shop_session_required", "not_found", "rate_limited", "region_unavailable"],
+  },
+  {
+    method: "GET",
+    path: "/shop/children/{childId}/photos/{photoId}/drm-manifest",
+    group: "Shop",
+    summary: "A large view's DRM manifest",
+    description:
+      "D158; ADR 0034. The protected large view's DASH manifest or HLS playlists, with the clip's address signed for 10 minutes (the master playlist names this route again for its media playlist). Only for a photo the child's parent may see (exactly the gallery's photos); anything else is not found, as is a child not in the gallery. 409 shop.drmUnavailable while the large view isn't protected (show viewUrl).",
+    access: "parent",
+    query: shopDrmManifestQuery,
+    success: {
+      status: 200,
+      description: "The manifest (format=dash) or playlist (hls, hls-media).",
+      contentType: "application/dash+xml",
+    },
+    errors: [
+      "shop_session_required",
+      "not_found",
+      "invalid_input",
+      "conflict",
+      "rate_limited",
+      "region_unavailable",
+    ],
+  },
+  {
+    method: "POST",
+    path: "/shop/children/{childId}/photos/{photoId}/drm-token",
+    group: "Shop",
+    summary: "A license token for one large view",
+    description:
+      "D158; ADR 0034. A token for Axinom's license server, good for 60 seconds, carrying this photo's content key wrapped for Axinom and a hardware-only policy; ask for a fresh one for each license request. No name, code, studio, child or photo id is in it. Only for a photo the child's parent may see; anything else is not found. 409 shop.drmUnavailable while the large view isn't protected. At most 60 a minute and 1,500 a day per gallery (429 with Retry-After). Never cached.",
+    access: "parent",
+    query: shopGalleryQuery,
+    success: { status: 200, schema: shopDrmTokenResponse, description: "A token." },
+    errors: [
+      "shop_session_required",
+      "not_found",
+      "conflict",
+      "rate_limited",
+      "region_unavailable",
+      "internal",
+    ],
   },
   {
     method: "GET",
@@ -2245,6 +2337,25 @@ export const ROUTES: RouteSpec[] = [
     ],
   },
   {
+    method: "POST",
+    path: "/dev/drm-test/token",
+    group: "Internal",
+    summary: "A license token for the DRM test page",
+    description:
+      "Not for integrations; a spike (D158; ADR 0032). Only when DRM_TEST_PAGE_ENABLED is true in this environment (otherwise not_found), for owners and admins. A JWT for Axinom's license servers, good for at most 60 seconds, carrying the test clip's wrapped content key and a hardware-only policy; plus the license and FairPlay certificate addresses. No studio data and nothing about the person is in it. Never cached. 409 with setup: drmTest.notConfigured when a setting is missing. At most 30 a minute per person; more get rate_limited with Retry-After.",
+    access: "owner-admin",
+    success: { status: 200, schema: drmTestTokenResponse, description: "A token." },
+    errors: [
+      "not_signed_in",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "region_unavailable",
+      "rate_limited",
+      "internal",
+    ],
+  },
+  {
     method: "GET",
     path: "/internal/cron/jobs",
     group: "Internal",
@@ -2261,7 +2372,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "Daily photo clean-up",
     description:
-      "Not for integrations. Vercel Cron with CRON_SECRET, as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged.",
+      "Not for integrations. Vercel Cron with CRON_SECRET, as a bearer token. Deletes every stored version of photos in the bin for more than 30 days (storage first, then rows), drops uploads never finished after 7 days, finishes batches idle for a day and tags upload batches whose photos changed since they were last tagged. Where DRM packaging is set up (ADR 0034), queues up to 2,000 photos' large views a day: requests unanswered for an hour again (3 messages in all, then given up), then photos never packaged.",
     access: "internal",
     success: { status: 200, schema: cronPhotosResponse, description: "What was cleaned up." },
     errors: ["not_signed_in", "internal"],

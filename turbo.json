@@ -3,9 +3,12 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "public/drm-test/**"],
       "env": [
         "NEXT_PUBLIC_SUPABASE_*",
+        "DRM_TEST_PAGE_ENABLED",
+        "DRM_TEST_KEY_ID",
+        "DRM_TEST_CONTENT_KEY",
         "SITE_URL",
         "SHOP_URL",
         "STORAGE_DRIVER",

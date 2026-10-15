@@ -2,7 +2,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { S3Client } from "@aws-sdk/client-s3";
-import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
+import { SendMessageBatchCommand, SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { ApiError } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
 import {
@@ -167,4 +167,55 @@ export async function queueDownloadForProcessing(
       MessageBody: JSON.stringify({ photoId, make: "download" }),
     }),
   );
+}
+
+/**
+ * Asks for a photo's large view to be packaged for DRM (D158; ADR 0034, B6): the same queue and worker, with
+ * `{photoId, make: "drm"}` (ids only, D113). With the local driver nothing is queued: nothing is packaged locally and
+ * the shop shows the watermarked WebP.
+ */
+export async function queueDrmForProcessing(region: DataRegion, photoId: string): Promise<void> {
+  const { settings, sqs } = regionStorage(region);
+  if (settings.driver !== "s3" || !sqs) return;
+  await sqs.send(
+    new SendMessageCommand({
+      QueueUrl: settings.queueUrl,
+      MessageBody: JSON.stringify({ photoId, make: "drm" }),
+    }),
+  );
+}
+
+/**
+ * Queues several photos' DRM packaging at once (the daily cron; ADR 0034, review #12): SendMessageBatch, 10 a call.
+ * Returns the ids whose message wasn't sent (the caller undoes their marks). With the local driver, every id (nothing
+ * is packaged locally).
+ */
+export async function queueDrmBatch(
+  region: DataRegion,
+  photoIds: readonly string[],
+): Promise<string[]> {
+  const { settings, sqs } = regionStorage(region);
+  if (settings.driver !== "s3" || !sqs) return [...photoIds];
+  const unsent: string[] = [];
+  for (let i = 0; i < photoIds.length; i += 10) {
+    const chunk = photoIds.slice(i, i + 10);
+    try {
+      const out = await sqs.send(
+        new SendMessageBatchCommand({
+          QueueUrl: settings.queueUrl,
+          Entries: chunk.map((photoId, n) => ({
+            Id: String(n),
+            MessageBody: JSON.stringify({ photoId, make: "drm" }),
+          })),
+        }),
+      );
+      for (const failed of out.Failed ?? []) {
+        const id = chunk[Number(failed.Id)];
+        if (id) unsent.push(id);
+      }
+    } catch {
+      unsent.push(...chunk);
+    }
+  }
+  return unsent;
 }

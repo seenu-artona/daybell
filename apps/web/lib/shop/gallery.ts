@@ -48,6 +48,8 @@ interface DbPhoto {
   id: string;
   width: number | null;
   height: number | null;
+  /** The large view is protected (ADR 0034): the switch on and the clip ready. Absent in older rows: false. */
+  drm?: boolean;
 }
 
 async function signPhotos(
@@ -63,7 +65,14 @@ async function signPhotos(
         signParentPreview(storage, ids, "proof-thumb.webp"),
         signParentPreview(storage, ids, "proof.webp"),
       ]);
-      return { id: p.id, thumbUrl, viewUrl, width: p.width, height: p.height };
+      return {
+        id: p.id,
+        thumbUrl,
+        viewUrl,
+        width: p.width,
+        height: p.height,
+        drm: p.drm === true,
+      };
     }),
   );
 }

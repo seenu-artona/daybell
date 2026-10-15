@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import type { ReactNode } from "react";
+import { DrmProvider } from "./_components/drm-provider";
 import { ProtectionProvider } from "./_components/protection";
 import { ShopProvider } from "./_components/shop-context";
 
@@ -26,7 +27,9 @@ export default function ShopLayout({ children }: { children: ReactNode }) {
     <div className="min-h-dvh bg-surface">
       <ShopProvider>
         <ProtectionProvider>
-          <div className="mx-auto min-h-dvh max-w-[480px] bg-surface">{children}</div>
+          <DrmProvider>
+            <div className="mx-auto min-h-dvh max-w-[480px] bg-surface">{children}</div>
+          </DrmProvider>
         </ProtectionProvider>
       </ShopProvider>
     </div>

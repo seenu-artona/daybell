@@ -830,6 +830,14 @@ export const cronPhotosResponse = z.object({
     .number()
     .int()
     .meta({ description: "Upload batches tagged by the sweep (ADR 0018)." }),
+  drmQueued: z.number().int().meta({
+    description:
+      "Photos queued for DRM packaging (ADR 0034): unanswered requests again, then photos never packaged; at most 2,000.",
+  }),
+  drmGivenUp: z.number().int().meta({
+    description:
+      "DRM requests given up after 3 messages: those photos' large views stay the watermarked WebP.",
+  }),
 });
 
 // ── QR tagging and review (Phase 1 step 5, ADR 0018) ─────────────────────────────────────────────────────────────
@@ -1736,6 +1744,10 @@ export const shopPhoto = z
       .meta({ description: "A 1600 px watermarked preview (WebP), signed for 10 minutes." }),
     width: z.number().int().nullable(),
     height: z.number().int().nullable(),
+    drm: z.boolean().meta({
+      description:
+        "Whether the large view is protected (D158; ADR 0034): a DRM clip of the same watermarked preview, played after GET /shop/drm, …/drm-manifest and …/drm-token. viewUrl stays the fallback.",
+    }),
   })
   .meta({
     id: "ShopPhoto",
@@ -1891,6 +1903,9 @@ export const SHOP_CONFLICTS = {
   cancelLimit: "shop.cancelLimit",
   /** More files than one zip holds: download them one at a time. */
   zipTooBig: "shop.zipTooBig",
+  // DRM in the large view (D158; ADR 0034).
+  /** The large view isn't protected (switched off, or not packaged yet): show the watermarked preview. */
+  drmUnavailable: "shop.drmUnavailable",
 } as const;
 export type ShopConflict = (typeof SHOP_CONFLICTS)[keyof typeof SHOP_CONFLICTS];
 
@@ -2395,3 +2410,59 @@ export const listFiltersResponse = z.object({
   chips: z.array(listFilterChip).meta({ description: "In the order shown; at most 8." }),
 });
 export type ListFiltersResponse = z.infer<typeof listFiltersResponse>;
+
+// ── DRM test page (spike; D158; ADR 0032) ────────────────────────────────────────────────────────────────────────────
+
+export const drmTestTokenResponse = z
+  .object({
+    token: z.string().meta({
+      description:
+        "A signed Axinom license token (JWT). Send it as the X-AxDRM-Message header of one license request; never store or log it.",
+    }),
+    expiresAt: z.iso.datetime({ offset: true }).meta({ description: "At most 60 seconds away." }),
+    licenseUrls: z.object({
+      widevine: z.url(),
+      playready: z.url(),
+      fairplay: z.url().nullable().meta({ description: "Null until FairPlay is set up." }),
+    }),
+    fairplayCertificateUrl: z.url().nullable(),
+  })
+  .meta({ id: "DrmTestToken" });
+export type DrmTestTokenResponse = z.infer<typeof drmTestTokenResponse>;
+
+// ── DRM in the parent shop's large view (D158; ADR 0034) ─────────────────────────────────────────────────────────────
+
+export const shopDrmConfigResponse = z
+  .object({
+    enabled: z.boolean().meta({
+      description:
+        "Whether large views may be protected here: the switch is on and DRM is set up. Off, every large view is the watermarked preview.",
+    }),
+    licenseUrls: z
+      .object({
+        widevine: z.url(),
+        playready: z.url(),
+        fairplay: z.url().nullable().meta({ description: "Null until FairPlay is set up." }),
+      })
+      .nullable()
+      .meta({ description: "Axinom's license servers; null when not enabled." }),
+    fairplayCertificateUrl: z.string().nullable().meta({
+      description: "This site's address of the FairPlay certificate; null without FairPlay.",
+    }),
+    codec: z
+      .string()
+      .meta({ description: 'The clips\' codec, e.g. "avc1.640028" (H.264 High 4.0).' }),
+  })
+  .meta({ id: "ShopDrmConfig" });
+export type ShopDrmConfigResponse = z.infer<typeof shopDrmConfigResponse>;
+
+export const shopDrmTokenResponse = z
+  .object({
+    token: z.string().meta({
+      description:
+        "A signed Axinom license token (JWT) for this photo's key, hardware DRM only. Send it as the X-AxDRM-Message header of one license request; never store or log it.",
+    }),
+    expiresAt: z.iso.datetime({ offset: true }).meta({ description: "At most 60 seconds away." }),
+  })
+  .meta({ id: "ShopDrmToken" });
+export type ShopDrmTokenResponse = z.infer<typeof shopDrmTokenResponse>;

@@ -11,72 +11,72 @@ import {
   useRef,
   useState,
 } from "react";
+import { useBlackout, useDesktopPointer } from "@/app/_components/blackout";
 
 /**
- * Screenshot and copy deterrents (D60). Deterrents only: no browser can stop a screenshot. Photos blur while the page
- * is hidden or not focused, on the Print Screen key and on Cmd/Win+Shift (the start of the screenshot shortcuts); they
- * are left out of printing; right-click, long-press and dragging are blocked, and the attempt says why in one quiet
- * line. The previews themselves are already low resolution and watermarked, made at upload (ADR 0016).
+ * Screenshot and copy deterrents (D60), and Blackout on computers (D158; ADR 0034, C1). Deterrents only: no browser can
+ * stop a screenshot; DRM in the large view is what actually blacks out.
+ *
+ * One set of listeners for the whole shop (useBlackout), whatever the DRM switch says:
+ * - On a computer (a pointer that hovers and points finely): the spike's Blackout signs (ADR 0032): the window losing
+ *   focus or the page hidden, a pure Shift+Cmd/Win or Ctrl chord (and 1.5 s after; a chord with another key in it, or
+ *   typed in a field, is an ordinary shortcut), Print Screen, Cmd/Ctrl+P, printing and the context menu. Every photo
+ *   (grid, viewer fallback, pose picker, bag) turns to an ink panel saying why (an icon only on small thumbnails), and
+ *   keyboard screenshot signs empty the clipboard, best effort (never the window losing focus: C14). The words are
+ *   announced once, politely, for the whole page.
+ * - On phones and tablets: exactly round 7's blur (ADR 0022 §5), and the clipboard is left alone.
+ * Photos are left out of printing; right-click, long-press and dragging are blocked, and the attempt says why in one
+ * quiet line. The previews themselves are low resolution and watermarked, made at upload (ADR 0016).
  */
+export type ProtectionMode = "blackout" | "blur";
+
 interface Protection {
-  blurred: boolean;
+  /** A screenshot sign is on: photos are dark (blackout) or blurred (blur). */
+  concealed: boolean;
+  mode: ProtectionMode;
   /** A copy attempt (right-click, long-press, drag): say why it didn't work. */
   attempted: () => void;
 }
 
-const ProtectionContext = createContext<Protection>({ blurred: false, attempted: () => {} });
+const ProtectionContext = createContext<Protection>({
+  concealed: false,
+  mode: "blur",
+  attempted: () => {},
+});
 
-const BRIEF_MS = 1500;
-
-export function ProtectionProvider({ children }: { children: ReactNode }) {
+export function ProtectionProvider({
+  children,
+  write,
+}: {
+  children: ReactNode;
+  /** Replaces the browser's clipboard (tests). */
+  write?: (text: string) => Promise<void>;
+}) {
   const t = useTranslations("shop.gallery");
-  const [hidden, setHidden] = useState(false);
-  const [brief, setBrief] = useState(false);
+  const desktop = useDesktopPointer();
+  const mode: ProtectionMode = desktop ? "blackout" : "blur";
+  // One set of listeners for the shop: Blackout's on computers, round 7's on phones (review #6c). Independent of the DRM
+  // switch: Blackout is D158's fallback wherever DRM isn't playing (#6d).
+  const { shown } = useBlackout({ clearClipboard: desktop, write, mode });
   const [notice, setNotice] = useState(false);
-  const timers = useRef<{ brief?: number; notice?: number }>({});
+  const timer = useRef<number | undefined>(undefined);
 
-  useEffect(() => {
-    const flash = () => {
-      setBrief(true);
-      window.clearTimeout(timers.current.brief);
-      timers.current.brief = window.setTimeout(() => setBrief(false), BRIEF_MS);
-    };
-    const onVisibility = () => setHidden(document.visibilityState === "hidden");
-    const onBlur = () => setHidden(true);
-    const onFocus = () => setHidden(document.visibilityState === "hidden");
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "PrintScreen" || (e.shiftKey && (e.metaKey || e.key === "Meta"))) flash();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKey);
-    window.addEventListener("beforeprint", flash);
-    const current = timers.current;
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keyup", onKey);
-      window.removeEventListener("beforeprint", flash);
-      window.clearTimeout(current.brief);
-      window.clearTimeout(current.notice);
-    };
-  }, []);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
 
   const attempted = useCallback(() => {
     setNotice(true);
-    window.clearTimeout(timers.current.notice);
-    timers.current.notice = window.setTimeout(() => setNotice(false), 4000);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setNotice(false), 4000);
   }, []);
 
-  const blurred = hidden || brief;
-  const value = useMemo(() => ({ blurred, attempted }), [blurred, attempted]);
+  const concealed = !shown;
+  const value = useMemo(() => ({ concealed, mode, attempted }), [concealed, mode, attempted]);
   return (
     <ProtectionContext.Provider value={value}>
-      <div data-shop-protection={blurred ? "blurred" : "clear"} className="contents">
+      <div
+        data-shop-protection={concealed ? (mode === "blackout" ? "dark" : "blurred") : "clear"}
+        className="contents"
+      >
         {children}
       </div>
       <div
@@ -89,6 +89,10 @@ export function ProtectionProvider({ children }: { children: ReactNode }) {
           </p>
         ) : null}
       </div>
+      {/* Always rendered, so going dark is announced once for the page; the panels' own words are aria-hidden. */}
+      <p role="status" className="sr-only">
+        {concealed && mode === "blackout" ? t("hiddenForScreenshot") : ""}
+      </p>
     </ProtectionContext.Provider>
   );
 }

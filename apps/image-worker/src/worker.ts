@@ -6,8 +6,14 @@ import {
   WORKER_SIGNATURE_HEADER,
 } from "@daybell/core";
 import {
+  type DrmClip,
+  type DrmDataKey,
+  type DrmFrame,
+  type DrmKeyContext,
+  type DrmWorkerResult,
   type PhotoJobDeps,
   runDownloadJob,
+  runDrmJob,
   runPhotoJob,
   type WorkerPhoto,
   type WorkerResult,
@@ -51,9 +57,16 @@ export interface EnvConfig {
   bucket: string;
   /** The Secrets Manager secret holding the signing secret and Vercel's bypass, in ca-central-1. */
   secretArn: string;
+  /**
+   * DRM_KMS_KEY_ARN (ADR 0034): the KMS key that makes each photo's content key, in ca-central-1. Unset, the worker
+   * packages nothing: a DRM task fails (SQS tries again) and the shop keeps the WebP.
+   */
+  drmKmsKeyArn: string | null;
 }
 
 const SECRET_ARN = /^arn:aws:secretsmanager:ca-central-1:\d{12}:secret:[A-Za-z0-9/_+=.@-]+$/;
+const KMS_KEY_ARN = /^arn:aws:kms:ca-central-1:\d{12}:key\/[0-9a-f-]{36}$/;
+/^arn:aws:kms:ca-central-1:\d{12}:(key\/[0-9a-f-]{36}|alias\/[A-Za-z0-9/_-]{1,250})$/;
 
 /** Every value a variable must have, by name only, so a misconfigured worker fails loudly and never quietly. */
 export function configFromEnv(env: Record<string, string | undefined>): EnvConfig {
@@ -71,7 +84,10 @@ export function configFromEnv(env: Record<string, string | undefined>): EnvConfi
     throw new Error("PHOTO_WORKER_SECRETS_ARN must be a Secrets Manager secret in ca-central-1");
   const base = need("CALLBACK_BASE_URL").replace(/\/+$/, "");
   if (!base.startsWith("https://")) throw new Error("CALLBACK_BASE_URL must be https");
-  return { callbackBaseUrl: base, region, bucket: need("PHOTO_BUCKET"), secretArn };
+  const drmKmsKeyArn = env.DRM_KMS_KEY_ARN?.trim() || null;
+  if (drmKmsKeyArn && !KMS_KEY_ARN.test(drmKmsKeyArn))
+    throw new Error("DRM_KMS_KEY_ARN must be a KMS key ARN in ca-central-1");
+  return { callbackBaseUrl: base, region, bucket: need("PHOTO_BUCKET"), secretArn, drmKmsKeyArn };
 }
 
 /**
@@ -97,18 +113,20 @@ export function secretsFromJson(text: string | undefined): {
 }
 
 /**
- * What a queue message asks for: `process` a photo (its previews, reported back), or make only its paid `download`
- * once it is sold (made lazily: ADR 0023, security review N1).
+ * What a queue message asks for: `process` a photo (its previews, reported back), make only its paid `download` once
+ * it is sold (made lazily: ADR 0023, security review N1), or package its large view for DRM (`drm`, ADR 0034, B6).
  */
 export interface PhotoTask {
   photoId: string;
-  make: "process" | "download";
+  make: "process" | "download" | "drm";
 }
+
+const MAKES = new Set(["download", "drm"]);
 
 /**
  * The work a queue message asks for. S3 events name the original's key (IDs only): process it. The API names a photo:
- * process it (a retry), or with `make: "download"` make only its paid download (a sold photo). S3's test event and
- * anything else ask for nothing.
+ * process it (a retry), with `make: "download"` make only its paid download (a sold photo), or with `make: "drm"`
+ * package its large view. S3's test event and anything else ask for nothing.
  */
 export function photoTasksFromMessage(body: string, bucket: string): PhotoTask[] {
   let message: unknown;
@@ -127,9 +145,12 @@ export function photoTasksFromMessage(body: string, bucket: string): PhotoTask[]
   };
   if (typeof m.photoId === "string") {
     if (!isUuid(m.photoId)) return [];
-    if (m.make !== undefined && m.make !== "download") return [];
+    if (m.make !== undefined && !(typeof m.make === "string" && MAKES.has(m.make))) return [];
     return [
-      { photoId: m.photoId.toLowerCase(), make: m.make === "download" ? "download" : "process" },
+      {
+        photoId: m.photoId.toLowerCase(),
+        make: (m.make as PhotoTask["make"] | undefined) ?? "process",
+      },
     ];
   }
   if (!Array.isArray(m.Records)) return [];
@@ -190,6 +211,49 @@ export function workerApi(config: WorkerConfig, fetchImpl: typeof fetch = fetch)
       const res = await call("POST", `${API_PATH}/${photoId}/result`, JSON.stringify(result));
       if (!res.ok) throw new Error(`api_${res.status}`);
     },
+    /** A DRM packaging result (ADR 0034): the key ID and KMS's wrapped key, never the key. */
+    async reportDrm(photoId: string, result: DrmWorkerResult): Promise<void> {
+      const res = await call("POST", `${API_PATH}/${photoId}/drm`, JSON.stringify(result));
+      if (!res.ok) throw new Error(`api_${res.status}`);
+    },
+  };
+}
+
+export class DrmNotConfigured extends Error {
+  constructor() {
+    super("drm_not_configured");
+    this.name = "DrmNotConfigured";
+  }
+}
+
+/** What the worker needs from KMS's client: one command, sent. */
+export interface KmsLike {
+  send(
+    command: unknown,
+  ): Promise<{ Plaintext?: Uint8Array; CiphertextBlob?: Uint8Array; KeyId?: string }>;
+}
+
+/**
+ * A fresh 16-byte content key per photo from KMS (B2, B4): GenerateDataKey on the DRM key with the encryption context
+ * {studio, photo, key}, so the wrapped copy unwraps only for that very photo and key (the API's DRM role must name the
+ * same context). `command` builds the SDK's command (tests pass a plain object).
+ */
+export function kmsDataKey(
+  client: KmsLike,
+  keyArn: string,
+  command: (input: {
+    KeyId: string;
+    NumberOfBytes: number;
+    EncryptionContext: Record<string, string>;
+  }) => unknown,
+): (context: DrmKeyContext) => Promise<DrmDataKey> {
+  return async (context) => {
+    const out = await client.send(
+      command({ KeyId: keyArn, NumberOfBytes: 16, EncryptionContext: { ...context } }),
+    );
+    if (out.Plaintext?.length !== 16 || !out.CiphertextBlob || !out.KeyId)
+      throw new Error("kms_data_key");
+    return { plaintext: out.Plaintext, wrapped: out.CiphertextBlob, kmsKeyArn: out.KeyId };
   };
 }
 
@@ -205,6 +269,11 @@ export function createHandler(parts: {
   sleep?: (ms: number) => Promise<void>;
   /** zxing's reader .wasm next to the bundle (ADR 0018); tests use the one in node_modules. */
   qrWasmFile: string;
+  /** DRM packaging (ADR 0034): KMS's data keys and the pinned tools. Absent when DRM_KMS_KEY_ARN isn't set. */
+  drm?: {
+    dataKey(context: DrmKeyContext): Promise<DrmDataKey>;
+    packageClip(frame: DrmFrame, keyId: string, key: Uint8Array): Promise<DrmClip>;
+  };
 }) {
   const api = workerApi(parts.config, parts.fetch);
   const write = parts.log ?? log;
@@ -227,7 +296,15 @@ export function createHandler(parts: {
       for (const task of tasks) {
         try {
           if (task.make === "download") await runDownloadJob(task.photoId, deps);
-          else await runPhotoJob(task.photoId, deps, { qrWasmFile: parts.qrWasmFile });
+          else if (task.make === "drm") {
+            // Not set up here: fail the message, so SQS tries again (and, after five, the dead-letter queue).
+            if (!parts.drm) throw new DrmNotConfigured();
+            await runDrmJob(task.photoId, {
+              ...deps,
+              ...parts.drm,
+              reportDrm: (id, result) => api.reportDrm(id, result),
+            });
+          } else await runPhotoJob(task.photoId, deps, { qrWasmFile: parts.qrWasmFile });
         } catch (err) {
           // The error's name only: messages from libraries can quote URLs or bodies.
           write("photo_error", task.photoId, err instanceof Error ? err.name : "unknown");

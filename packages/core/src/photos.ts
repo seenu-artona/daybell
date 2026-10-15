@@ -132,7 +132,7 @@ export function partsComplete(
  * (the studio's name tiled across) for parents (D60); and the file a parent downloads once they have paid
  * (`download.jpg`: full resolution, upright, sRGB, every bit of metadata stripped; ADR 0023, call 10). Previews are
  * made once, at upload (D100); the download only once the photo is sold (security review N1). Parents never get the
- * original.
+ * original. The large view's DRM clips live in the photo's `drm/` folder under their key IDs (./drm, drmObjectKey).
  */
 export const PHOTO_VARIANTS = [
   "original",

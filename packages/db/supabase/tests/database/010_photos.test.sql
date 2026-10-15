@@ -191,8 +191,8 @@ select ok(not public.record_photo_result((select (v -> 1 ->> 'photo_id')::uuid f
 select is((select public.photo_for_worker((select (v -> 0 ->> 'photo_id')::uuid from out where k = 'r1')) - 'id'),
   jsonb_build_object('studio_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_id', 'a0000000-0000-4000-8000-000000000001',
     'status', 'ready', 'sha256', encode(extensions.digest('two', 'sha256'), 'hex'), 'byte_size', 1000,
-    'attempt', 1, 'studio_name', 'Studio A'),
-  'the worker reads ids, the hash, the size and the studio''s name for the watermark, never the filename');
+    'attempt', 1, 'studio_name', 'Studio A', 'drm_status', null, 'drm_attempt', 0),
+  'the worker reads ids, the hash, the size and the studio''s name for the watermark, never the filename (and the DRM request, ADR 0034)');
 
 -- Retry: only unreadable failures, or photos stuck processing.
 select lives_ok($$ select public.mark_photo_uploaded('33333333-3333-4333-8333-333333333333',

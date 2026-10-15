@@ -453,11 +453,12 @@ select is(public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-00000
   jsonb_build_object('state', 'open', 'studio_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     'job_id', 'a0000000-0000-4000-8000-000000000001',
     'portraits', jsonb_build_array(
-      jsonb_build_object('id', pg_temp.pid(1), 'width', 1200, 'height', 1500),
-      jsonb_build_object('id', pg_temp.pid(2), 'width', 1200, 'height', 1500),
-      jsonb_build_object('id', pg_temp.pid(11), 'width', 1200, 'height', 1500)),
-    'group_photos', jsonb_build_array(jsonb_build_object('id', pg_temp.pid(8), 'width', 1200, 'height', 1500))),
-  'Ava sees her own visible portraits in tagging order and her group''s group photo; no card, other-card, flagged, binned, processing, Leftovers, blank-card, unconfirmed or stale photo');
+      jsonb_build_object('id', pg_temp.pid(1), 'width', 1200, 'height', 1500, 'drm', false),
+      jsonb_build_object('id', pg_temp.pid(2), 'width', 1200, 'height', 1500, 'drm', false),
+      jsonb_build_object('id', pg_temp.pid(11), 'width', 1200, 'height', 1500, 'drm', false)),
+    'group_photos', jsonb_build_array(
+      jsonb_build_object('id', pg_temp.pid(8), 'width', 1200, 'height', 1500, 'drm', false))),
+  'Ava sees her own visible portraits in tagging order and her group''s group photo; no card, other-card, flagged, binned, processing, Leftovers, blank-card, unconfirmed or stale photo (no DRM while it is off, ADR 0034)');
 select is((select jsonb_agg(x -> 'id') from jsonb_array_elements(
     public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000006') -> 'group_photos') x),
   jsonb_build_array(pg_temp.pid(9)), 'a member of Room 2''s group sees its photo, not Room 1''s');

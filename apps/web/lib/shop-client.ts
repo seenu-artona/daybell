@@ -4,6 +4,8 @@ import type {
   DownloadLinkResponse,
   ShopCartLineInput,
   ShopCartResponse,
+  ShopDrmConfigResponse,
+  ShopDrmTokenResponse,
   ShopGalleryResponse,
   ShopOpenedResponse,
   ShopOrderResponse,
@@ -30,7 +32,12 @@ export type ShopResult<T> =
       fields: Record<string, string>;
     };
 
-async function call<T>(path: string, method = "GET", body?: unknown): Promise<ShopResult<T>> {
+async function call<T>(
+  path: string,
+  method = "GET",
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<ShopResult<T>> {
   let res: Response;
   try {
     res = await fetch(`/api/v1/shop${path}`, {
@@ -39,9 +46,11 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<Sh
       body: body === undefined ? null : JSON.stringify(body),
       credentials: "same-origin",
       cache: "no-store",
+      ...(signal ? { signal } : {}),
     });
   } catch {
-    return { ok: false, status: 0, code: "network", form: null, retryAfter: null, fields: {} };
+    const code = signal?.aborted ? "aborted" : "network";
+    return { ok: false, status: 0, code, form: null, retryAfter: null, fields: {} };
   }
   if (res.ok) return { ok: true, data: (res.status === 204 ? undefined : await res.json()) as T };
   const error = ((await res.json().catch(() => null)) as ApiErrorBody | null)?.error;
@@ -64,6 +73,13 @@ export const isShopId = (id: string | undefined | null): id is string => UUID.te
 export const isGalleryId = (id: string | undefined | null): id is string => GALLERY.test(id ?? "");
 
 const path = (id: string) => encodeURIComponent(id);
+
+/** The large view's calls give up with the viewer (its signal) and never wait longer than its whole budget. */
+const DRM_FETCH_TIMEOUT_MS = 8000;
+const drmSignal = (signal?: AbortSignal) =>
+  signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(DRM_FETCH_TIMEOUT_MS)])
+    : AbortSignal.timeout(DRM_FETCH_TIMEOUT_MS);
 const inGallery = (gallery: string) => `?gallery=${encodeURIComponent(gallery)}`;
 
 /** The shop's calls. Everything after opening a code names the gallery (the studio's) it is for (S6). */
@@ -74,6 +90,16 @@ export const shopApi = {
     call<undefined>(`/session${gallery ? inGallery(gallery) : ""}`, "DELETE"),
   gallery: (gallery: string, childId: string) =>
     call<ShopGalleryResponse>(`/children/${path(childId)}/gallery${inGallery(gallery)}`),
+  // The large view's DRM (ADR 0034): whether it is on, and a token per license request.
+  drm: (gallery: string, signal?: AbortSignal) =>
+    call<ShopDrmConfigResponse>(`/drm${inGallery(gallery)}`, "GET", undefined, drmSignal(signal)),
+  drmToken: (gallery: string, childId: string, photoId: string, signal?: AbortSignal) =>
+    call<ShopDrmTokenResponse>(
+      `/children/${path(childId)}/photos/${path(photoId)}/drm-token${inGallery(gallery)}`,
+      "POST",
+      undefined,
+      drmSignal(signal),
+    ),
   priceList: (gallery: string, childId: string) =>
     call<ShopPriceListResponse>(`/children/${path(childId)}/price-list${inGallery(gallery)}`),
   cart: (gallery: string) => call<ShopCartResponse>(`/cart${inGallery(gallery)}`),

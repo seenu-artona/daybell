@@ -2652,7 +2652,8 @@
       "checkoutNotConfigured": "Payments aren’t set up here.",
       "cannotCancel": "This order can’t be canceled here. Contact the studio.",
       "cancelLimit": "Too many cancellations. Try again later, or contact the studio.",
-      "zipTooBig": "There are too many photos for one zip. Download them one at a time."
+      "zipTooBig": "There are too many photos for one zip. Download them one at a time.",
+      "drmUnavailable": "This photo can't be shown with screenshot protection right now. It shows with its watermark instead."
     },
     "header": {
       "bag": "Bag, {count, plural, =0 {empty} one {# item} other {# items}}",
@@ -2688,6 +2689,7 @@
       "photoAlt": "{name}, photo {n} of {total}",
       "groupAlt": "{name}’s group photo {n} of {total}",
       "protected": "Photos are protected and shown at low resolution with a watermark.",
+      "hiddenForScreenshot": "Photo hidden while a screenshot may be taken. It comes back in a moment.",
       "closed": "This shop is closed. Contact {studio}.",
       "unavailable": "Photos aren’t available yet. Contact {studio}.",
       "orderAndDelivery": "<strong>Order by {date}</strong> · Free delivery to school",
@@ -2699,7 +2701,10 @@
       "close": "Close",
       "previous": "Previous photo",
       "next": "Next photo",
-      "use": "Use this photo"
+      "use": "Use this photo",
+      "drm": {
+        "loading": "Loading photo"
+      }
     },
     "buy": {
       "packagesTitle": "Choose a package",
@@ -2871,6 +2876,74 @@
       "pay": "Pay",
       "cancel": "Back to the shop",
       "failed": "The payment didn’t go through. Try again."
+    }
+  },
+  "photoBlackout": {
+    "hidden": "Photo hidden while a screenshot may be taken. It comes back in a moment."
+  },
+  "drmTest": {
+    "metaTitle": "DRM screenshot test",
+    "title": "DRM screenshot test",
+    "intro": "Checks whether this device shows the test photo with hardware DRM, which should make it black in screenshots. The photo is a synthetic colour chart.",
+    "instruction": "Take a screenshot and a screen recording; note whether the photo is black.",
+    "capabilities": {
+      "title": "What this device supports",
+      "checking": "Checking…",
+      "result": {
+        "supported": "Supported",
+        "notSupported": "Not supported",
+        "noEme": "Not checked: this browser has no DRM support"
+      },
+      "probe": {
+        "widevineHwAll": "Widevine, hardware (HW_SECURE_ALL)",
+        "widevineHwDecode": "Widevine, hardware decoding (HW_SECURE_DECODE)",
+        "widevineSwDecode": "Widevine, software (SW_SECURE_DECODE)",
+        "playready3000": "PlayReady, hardware (SL3000)",
+        "playready2000": "PlayReady, software (SL2000)",
+        "playready3000KeySystem": "PlayReady, hardware key system (recommendation.3000)",
+        "fairplay": "FairPlay"
+      }
+    },
+    "player": {
+      "title": "Protected photo",
+      "videoLabel": "Protected test photo: a colour chart with the words DRM TEST",
+      "loading": "Loading the protected photo…",
+      "playing": "Showing the protected photo with {system}.",
+      "system": {
+        "widevine": "Widevine",
+        "playready": "PlayReady",
+        "fairplay": "FairPlay",
+        "other": "another DRM system ({keySystem})"
+      },
+      "retry": "Try again"
+    },
+    "fallback": {
+      "title": "Fallback photo",
+      "noHardware": "This device has no hardware DRM the test can use, so it shows today’s watermarked photo instead.",
+      "fairplayOff": "FairPlay isn’t set up yet, so Safari shows today’s watermarked photo instead.",
+      "notConfigured": "The DRM test isn’t set up in this deployment yet: it needs the Axinom and test key settings, then a new deployment so the protected clip is built. Today’s watermarked photo is shown instead.",
+      "failed": "The protected photo couldn’t be shown ({detail}), so this is today’s watermarked photo instead.",
+      "desktop": "On a computer the photo goes dark on signs of a screenshot (the window losing focus, screenshot keys, printing, the context menu) and comes back a moment later. Screenshot keys also empty the clipboard where the browser allows it.",
+      "phone": "On a phone or tablet the photo blurs when you leave the page.",
+      "alt": "Watermarked test photo: a colour chart with the words DRM TEST"
+    },
+    "errors": {
+      "token": "the license token couldn’t be made: {code}",
+      "unsupported": "this browser can’t play protected video",
+      "timeout": "nothing was shown within 15 seconds",
+      "outputRestricted": "the device won’t show it on this screen or connection (output restricted)",
+      "keyError": "the DRM system reported an internal error",
+      "player": "player error {code}",
+      "media": "the browser couldn’t decode it (media error {code})"
+    },
+    "diagnostics": {
+      "title": "Diagnostics",
+      "intro": "A timeline of what the browser and player did, to copy and send to the team. It holds no keys or tokens.",
+      "label": "Diagnostics timeline",
+      "empty": "Nothing recorded yet.",
+      "copy": "Copy diagnostics",
+      "copied": "Copied.",
+      "copyFailed": "Couldn’t copy. Select the text and copy it instead."
     }
   }
 }
