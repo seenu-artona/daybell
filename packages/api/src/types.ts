@@ -1313,6 +1313,68 @@ export const PRICE_LIST_CONFLICTS = {
 } as const;
 export type PriceListConflict = (typeof PRICE_LIST_CONFLICTS)[keyof typeof PRICE_LIST_CONFLICTS];
 
+// ── Job › Shop (D157; ADR 0033) ───────────────────────────────────────────────────────────────────────────────────
+export const jobShopRow = z
+  .object({
+    itemId: z.uuid().meta({ description: "The list item's id, or the job's own product's id." }),
+    source: z.enum(["list", "job"]).meta({
+      description: "list: an item of the job's price list; job: a product only this job sells.",
+    }),
+    kind: z.enum(PRICE_ITEM_KINDS),
+    name: z.string(),
+    description: z.string().nullable(),
+    printSize: z.enum(PRINT_SIZES).nullable().meta({ description: "Prints only." }),
+    contents: z.array(packageLine).meta({ description: "Packages only; empty otherwise." }),
+    listPrice: money.nullable().meta({
+      description: "The price list's price; null for a product only this job sells.",
+    }),
+    price: money.meta({ description: "What this job sells it for, before tax." }),
+    sold: z.boolean().meta({ description: "False when switched off for this job." }),
+    changed: z.boolean().meta({
+      description:
+        "A price other than the list's, switched off, or a product only this job sells (one of the job's changes).",
+    }),
+  })
+  .meta({ id: "JobShopRow" });
+export type JobShopRow = z.infer<typeof jobShopRow>;
+
+export const jobShop = z
+  .object({
+    jobId: z.uuid(),
+    priceList: z.object({
+      id: z.uuid(),
+      name: z.string(),
+      homeShipping: money.meta({ description: "The list's flat home shipping fee." }),
+    }),
+    rows: z.array(jobShopRow).meta({
+      description:
+        "Packages, prints, then digital downloads; in each, the list's items in their order, then the job's own.",
+    }),
+    changes: z.number().int().meta({
+      description:
+        "How many rows are changes for this job: changed prices, items switched off and products only it sells.",
+    }),
+  })
+  .meta({
+    id: "JobShop",
+    description:
+      "What a job sells (D157): its price list with this job's own prices and Sold switches, and products only it sells. The shared list never changes.",
+  });
+export type JobShop = z.infer<typeof jobShop>;
+export const jobShopResponse = z.object({ shop: jobShop });
+export type JobShopResponse = z.infer<typeof jobShopResponse>;
+
+/** Why a Job › Shop request was refused with 409, in the error's `fields.form`. */
+export const JOB_SHOP_CONFLICTS = {
+  /** A closed job's shop doesn't change. */
+  jobClosed: "jobShop.jobClosed",
+  /** The item isn't on the job's price list (the list was swapped meanwhile). */
+  notOnList: "jobShop.notOnList",
+  /** At most 100 products of its own per job (B2). */
+  itemLimit: "jobShop.itemLimit",
+} as const;
+export type JobShopConflict = (typeof JOB_SHOP_CONFLICTS)[keyof typeof JOB_SHOP_CONFLICTS];
+
 // ── Payouts with Stripe Connect (Phase 1 step 7, ADR 0020) ─────────────────────────────────────────────────────────
 export const payoutSchedule = z
   .object({
@@ -1693,7 +1755,7 @@ export const shopGalleryResponse = z
       .meta({ description: "The child's own photos, in tagging order." }),
     groupPhotos: z.array(shopPhoto).meta({
       description:
-        "The group photos of every group the child is in, once each, in tagging order; to view only until the Shop round (C5).",
+        "The group photos of every group the child is in, once each, in tagging order. Any product works with one as its pose (D156 C5).",
     }),
   })
   .meta({ id: "ShopGallery" });
@@ -1711,7 +1773,8 @@ export const shopItem = z
   })
   .meta({
     id: "ShopItem",
-    description: "Something the child's job sells, priced now, before tax.",
+    description:
+      "Something the child's job sells, at the job's own price now, before tax: an item of its price list, or a product only this job sells.",
   });
 export type ShopItem = z.infer<typeof shopItem>;
 
@@ -1723,7 +1786,10 @@ export const shopPriceListResponse = z
         currency: z.enum(CURRENCIES),
         homeShipping: money,
         deliverToSchool: z.boolean(),
-        items: z.array(shopItem).meta({ description: "In the studio's order." }),
+        items: z.array(shopItem).meta({
+          description:
+            "What the job sells, in the studio's order: packages, prints, then downloads; the job's own after the list's in each. Items switched off for the job aren't listed.",
+        }),
       })
       .nullable()
       .meta({ description: "The job's current list; null unless open." }),

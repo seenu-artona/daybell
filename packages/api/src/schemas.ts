@@ -10,6 +10,7 @@ import {
   ITEM_DESCRIPTION_MAX,
   ITEM_NAME_MAX,
   isGroupNameText,
+  JOB_ITEM_KINDS,
   JOB_STATUSES,
   JOB_TYPES,
   MAX_BLANK_CARDS,
@@ -1316,6 +1317,63 @@ export const itemOrderInput = z.strictObject(
 );
 export type ItemOrderInput = z.infer<typeof itemOrderInput>;
 
+// ── Job › Shop (D157; Seenu's answers B2 and N4; ADR 0033) ───────────────────────────────────────────────────────
+// Whole cents only, as price lists. The shared list never changes through these.
+
+/**
+ * This job's price, or whether it sells the item, for one of its list's items. The list's own price sent back clears
+ * the job's (D157: "type the list price back to undo"); undo with DELETE.
+ */
+export const jobPriceInput = z
+  .strictObject(
+    {
+      priceCents: cents("validation.price", MAX_ITEM_PRICE_CENTS).optional().meta({
+        description:
+          "This job's price in whole cents, before tax, 0–1000000. The list's own price clears the job's.",
+      }),
+      sold: z
+        .boolean({ error: "validation.invalid" })
+        .optional()
+        .meta({ description: "False switches the item off for this job; parents don't see it." }),
+    },
+    { error: "validation.unknownField" },
+  )
+  .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
+export type JobPriceInput = z.infer<typeof jobPriceInput>;
+
+/** A product only this job sells (B2): a package (with its contents) or a print (with its size). */
+export const jobItemInput = z
+  .strictObject(
+    {
+      kind: z.enum(JOB_ITEM_KINDS, { error: "validation.invalid" }).meta({
+        description:
+          "package or print only: the single download and all digitals stay one per price list.",
+      }),
+      ...itemFields,
+    },
+    { error: "validation.unknownField" },
+  )
+  .superRefine((value, ctx) => {
+    for (const issue of itemKindIssues(value.kind, value, true))
+      ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
+  });
+export type JobItemInput = z.infer<typeof jobItemInput>;
+
+/** Change some fields of a job's own product, or switch it off. Its kind never changes. */
+export const jobItemPatch = z
+  .strictObject(
+    {
+      ...z.object(itemFields).partial().shape,
+      sold: z
+        .boolean({ error: "validation.invalid" })
+        .optional()
+        .meta({ description: "False switches it off; parents don't see it." }),
+    },
+    { error: "validation.unknownField" },
+  )
+  .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
+export type JobItemPatch = z.infer<typeof jobItemPatch>;
+
 /** Turns zod issues into `{ field: messageKey }` for forms. */
 export function fieldErrors(error: z.ZodError): Record<string, string> {
   const out: Record<string, string> = {};
@@ -1419,11 +1477,10 @@ export const shopCartLineInput = z.strictObject(
   {
     childId: z.uuid({ error: "validation.invalid" }),
     itemId: z.uuid({ error: "validation.invalid" }),
-    photoId: z
-      .uuid({ error: "validation.invalid" })
-      .nullable()
-      .default(null)
-      .meta({ description: "The pose: one of the child's portraits. Null for all digitals." }),
+    photoId: z.uuid({ error: "validation.invalid" }).nullable().default(null).meta({
+      description:
+        "The pose: one of the child's portraits, or a group photo of a group the child is in. Null for all digitals.",
+    }),
     quantity: shopQuantity
       .default(1)
       .meta({ description: "1 to 99; digital downloads are bought once." }),
