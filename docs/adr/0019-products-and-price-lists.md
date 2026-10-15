@@ -214,3 +214,9 @@ Ten items in all. The names are seeded in English and become the studio's own da
 - Seeding from the API instead of the database: studios created any other way would have no list.
 - A currency per item: the list (and the studio's region) decides it.
 - A "Choose a price list" job task that is always done (call 3).
+
+## Amendment (Oct 14, 2026, Seenu; D157, ADR 0033)
+
+A job can now change a list item's price or switch it off for itself, and add packages and prints of its own; the
+shared list never changes. Every price read (the parent shop, the bag, checkout, Start selling) goes through one
+resolver, `app.job_offer`. Swapping a job's list drops the old list's changes for that job (with a confirm).

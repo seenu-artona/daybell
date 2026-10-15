@@ -538,3 +538,9 @@ and dates, or only `{id, state}`. 409 keys in `SHOP_CONFLICTS` (`shop.galleryLim
 - The lockout numbers (call 26) on mobile carriers: thousands of phones can share one IPv4 address; known devices
   (call 27) soften it, but a busy carrier address can still lock new devices for 15 minutes. Worth a look before
   launch.
+
+## Amendment (Oct 14, 2026, Seenu; D156 C5, D157, ADR 0033)
+
+Group photos can be bought: a pose may be a group photo of a group the child is in (call 8's "view only" ends). A bag
+line names either a list item or a job's own product, priced through `app.job_offer`; a line whose group the child has
+left reads "No longer available".
