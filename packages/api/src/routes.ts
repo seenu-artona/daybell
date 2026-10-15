@@ -87,6 +87,7 @@ import {
   cronJobsResponse,
   cronPhotosResponse,
   downloadLinkResponse,
+  drmTestTokenResponse,
   groupResponse,
   groupsResponse,
   inviteCreatedResponse,
@@ -1959,6 +1960,17 @@ export const ROUTES: RouteSpec[] = [
       "region_unavailable",
       "internal",
     ],
+  },
+  {
+    method: "POST",
+    path: "/dev/drm-test/token",
+    group: "Internal",
+    summary: "A license token for the DRM test page",
+    description:
+      "Not for integrations; a spike (D158; ADR 0032). Only when DRM_TEST_PAGE_ENABLED is true in this environment (otherwise not_found), for owners and admins. A JWT for Axinom's license servers, good for at most 60 seconds, carrying the test clip's wrapped content key and a hardware-only policy; plus the license and FairPlay certificate addresses. No studio data and nothing about the person is in it. Never cached.",
+    access: "owner-admin",
+    success: { status: 200, schema: drmTestTokenResponse, description: "A token." },
+    errors: ["not_signed_in", "forbidden", "not_found", "region_unavailable", "internal"],
   },
   {
     method: "GET",

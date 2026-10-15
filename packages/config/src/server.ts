@@ -230,3 +230,102 @@ export function shopThrottleKey(
       throw new Error(`SHOP_THROTTLE_KEY must be different from ${other}`);
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
+
+// ── DRM screenshot protection, test page (spike; D158; ADR 0032) ─────────────────────────────────────────────────────
+
+/**
+ * DRM_TEST_PAGE_ENABLED: "true" turns on /dev/drm-test and its token route for owners and admins. Anything else (the
+ * default, unset) and both answer as if they didn't exist. Meant for staging only.
+ */
+export function drmTestPageEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return env.DRM_TEST_PAGE_ENABLED?.trim() === "true";
+}
+
+/**
+ * What the DRM test page's token route needs (D158; ADR 0032), all server-only and never NEXT_PUBLIC_*:
+ * - AXINOM_COM_KEY_ID: the communication key's ID (a GUID), from Axinom's portal. Not secret, but kept with its key.
+ * - AXINOM_COM_KEY: the communication key itself, base64 of 32 bytes, from the same place. Secret: it signs license
+ *   tokens and wraps content keys.
+ * - AXINOM_LICENSE_PREFIX: the tenant part of Axinom's license server addresses,
+ *   https://<prefix>.drm-{widevine,playready,fairplay}-licensing.axprod.net/AcquireLicense.
+ * - AXINOM_FAIRPLAY_CERT_URL: optional; the HTTPS address of the studio's FairPlay (FPS) certificate. Unset, FairPlay
+ *   is off and Safari gets the fallback.
+ * - DRM_TEST_KEY_ID: the test clip's key ID (a GUID; not secret, it is in the clip's manifest).
+ * - DRM_TEST_CONTENT_KEY: the test clip's content key, 32 hex digits. Secret. It must be the key the clip in
+ *   apps/web/public/drm-test was packaged with (scripts/drm/README.md).
+ * Read on first use, never at build time. Errors name the variable, never the value.
+ */
+export interface DrmTestSettings {
+  comKeyId: string;
+  comKey: Uint8Array<ArrayBuffer>;
+  licensePrefix: string;
+  fairplayCertificateUrl: string | null;
+  keyId: string;
+  contentKey: Uint8Array<ArrayBuffer>;
+}
+
+const GUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+
+/** A GUID with or without dashes, as lowercase with dashes. */
+function guidSetting(env: Record<string, string | undefined>, name: string): string {
+  const value = required(env, name);
+  if (!GUID.test(value)) throw new Error(`${name} must be a GUID`);
+  const hex = value.replaceAll("-", "").toLowerCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function hexBytes(hex: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(hex.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16));
+}
+
+export function drmTestSettings(
+  env: Record<string, string | undefined> = process.env,
+): DrmTestSettings {
+  const comKeyId = guidSetting(env, "AXINOM_COM_KEY_ID");
+
+  const comKeyProblem = new Error("AXINOM_COM_KEY must be 32 bytes, base64-encoded");
+  const comKeyText = required(env, "AXINOM_COM_KEY");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(comKeyText)) throw comKeyProblem;
+  let binary: string;
+  try {
+    binary = atob(comKeyText);
+  } catch {
+    throw comKeyProblem;
+  }
+  if (binary.length !== 32) throw comKeyProblem;
+  const comKey = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+
+  const licensePrefix = required(env, "AXINOM_LICENSE_PREFIX").toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(licensePrefix))
+    throw new Error("AXINOM_LICENSE_PREFIX must be the tenant part of Axinom's license address");
+
+  const certText = env.AXINOM_FAIRPLAY_CERT_URL?.trim() ?? "";
+  let fairplayCertificateUrl: string | null = null;
+  if (certText) {
+    let url: URL | null = null;
+    try {
+      url = new URL(certText);
+    } catch {
+      url = null;
+    }
+    if (url?.protocol !== "https:")
+      throw new Error("AXINOM_FAIRPLAY_CERT_URL must be an https:// address");
+    fairplayCertificateUrl = url.href;
+  }
+
+  const keyId = guidSetting(env, "DRM_TEST_KEY_ID");
+  const contentKeyText = required(env, "DRM_TEST_CONTENT_KEY").replaceAll("-", "");
+  if (!/^[0-9a-f]{32}$/i.test(contentKeyText))
+    throw new Error("DRM_TEST_CONTENT_KEY must be 16 bytes as 32 hex digits");
+  if (contentKeyText.toLowerCase() === keyId.replaceAll("-", ""))
+    throw new Error("DRM_TEST_CONTENT_KEY must be different from DRM_TEST_KEY_ID");
+
+  return {
+    comKeyId,
+    comKey,
+    licensePrefix,
+    fairplayCertificateUrl,
+    keyId,
+    contentKey: hexBytes(contentKeyText),
+  };
+}

@@ -2226,3 +2226,22 @@ export const listFiltersResponse = z.object({
   chips: z.array(listFilterChip).meta({ description: "In the order shown; at most 8." }),
 });
 export type ListFiltersResponse = z.infer<typeof listFiltersResponse>;
+
+// ── DRM test page (spike; D158; ADR 0032) ────────────────────────────────────────────────────────────────────────────
+
+export const drmTestTokenResponse = z
+  .object({
+    token: z.string().meta({
+      description:
+        "A signed Axinom license token (JWT). Send it as the X-AxDRM-Message header of one license request; never store or log it.",
+    }),
+    expiresAt: z.iso.datetime({ offset: true }).meta({ description: "At most 60 seconds away." }),
+    licenseUrls: z.object({
+      widevine: z.url(),
+      playready: z.url(),
+      fairplay: z.url().nullable().meta({ description: "Null until FairPlay is set up." }),
+    }),
+    fairplayCertificateUrl: z.url().nullable(),
+  })
+  .meta({ id: "DrmTestToken" });
+export type DrmTestTokenResponse = z.infer<typeof drmTestTokenResponse>;
