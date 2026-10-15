@@ -2,12 +2,15 @@ import type { ListFilterChip } from "@daybell/api";
 import type { PeopleFilter } from "@daybell/core";
 
 /**
- * Subjects' chips (D147, amends D144 and D145): All, Not ordered (for people who see orders), No photos and Possible
- * duplicates built in; a class, No class, Do not photograph and Do not publish added by the person (saved), and a grade
- * (kept in this browser only: never saved, never in the address). One chip at a time, in the address as ?show=<word>
- * or ?class=<id>, with the open child in &child=<id> (enum words and ids only, never search text: D113).
+ * Subjects' chips (D153, amending D147): All, Not photographed (no photos and not Do not photograph) and Not ordered
+ * (for people who see orders) built in; a class, No class, Possible duplicates, No photos, Do not photograph and Do not
+ * publish added by the person through "+ Add filter" (saved), and a grade (kept in this browser only: never saved, never
+ * in the address). One chip at a time, in the address as ?show=<word> or ?class=<id>, with the open person in
+ * &child=<id> (enum words and ids only, never search text: D113). ?show=duplicates (the duplicates notice's link) keeps
+ * working as an address chip even when it isn't saved.
  */
 export const SUBJECT_SHOWS = [
+  "notPhotographed",
   "notOrdered",
   "noPhotos",
   "duplicates",
@@ -17,10 +20,16 @@ export const SUBJECT_SHOWS = [
 ] as const;
 export type SubjectShow = (typeof SUBJECT_SHOWS)[number];
 
-/** Built in after All, in order. */
-export const BUILT_IN_SHOWS = ["notOrdered", "noPhotos", "duplicates"] as const;
-/** What "+ Add filter" offers beside each class and a grade. */
-export const SAVED_SHOWS = ["noClass", "doNotPhotograph", "doNotPublish"] as const;
+/** Built in after All, in order (D153). */
+export const BUILT_IN_SHOWS = ["notPhotographed", "notOrdered"] as const;
+/** What "+ Add filter" offers beside each class and a grade (D153: Possible duplicates and No photos moved here). */
+export const SAVED_SHOWS = [
+  "noClass",
+  "duplicates",
+  "noPhotos",
+  "doNotPhotograph",
+  "doNotPublish",
+] as const;
 
 export type SubjectChip =
   | { kind: "all" }

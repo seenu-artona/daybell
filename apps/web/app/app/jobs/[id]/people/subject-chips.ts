@@ -101,7 +101,8 @@ export function useSubjectChips({
         return t("chips.gradeChip", { grade: c.grade });
       case "show":
         if (c.show === "noClass") return tr("noGroup", { group: word });
-        if (c.show === "notOrdered" || c.show === "noPhotos") return t(`chips.${c.show}`);
+        if (c.show === "notOrdered" || c.show === "noPhotos" || c.show === "notPhotographed")
+          return t(`chips.${c.show}`);
         return t(`flags.${c.show}`);
     }
   };
@@ -211,7 +212,8 @@ export function useSubjectChips({
           },
         ]
       : [];
-  // The classes, No class, then Grade… (when the roster has grades), then the two flags, as the mockup lists them.
+  // The classes, No class, Possible duplicates and No photos (moved here by D153), then Grade… (when the roster has
+  // grades), then the two flags, as the D147 mockup lists them.
   const flags = savedChoices.filter((c) => c.id === "doNotPhotograph" || c.id === "doNotPublish");
   const choices = [...savedChoices.filter((c) => !flags.includes(c)), ...gradeChoice, ...flags];
 

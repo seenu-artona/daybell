@@ -1,15 +1,18 @@
 "use client";
 
-import { Button, buttonVariants } from "@daybell/ui";
+import { buttonVariants } from "@daybell/ui";
 import { ChevronDown, Plus, QrCode, Upload } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { MENU_ROW, Popover } from "../../../popover";
 import { JobTabActions } from "../job-context";
 
+const WHITE = `${buttonVariants({ variant: "white", shape: "pill" })} [&_svg]:size-4`;
+
 /**
- * Subjects' actions at the right end of the job's tab row (D147, amends D145): a white Print QR cards once the roster
- * has children, then the green Add subjects menu (Add child, Import roster), for roster editors only.
+ * Subjects' actions at the right end of the job's tab row (D153, amending D147): a white "Print ▾" (QR cards, once the
+ * roster has subjects) and a white "Add subjects ▾" (Upload a list, Add one by one), for roster editors only. The
+ * job's one green action stays in its header (D151).
  */
 export function SubjectsActions({
   hasRows,
@@ -26,16 +29,34 @@ export function SubjectsActions({
   onAdd: () => void;
 }) {
   const t = useTranslations("app.people");
-  const tr = useTranslations("app.roster");
-  const tq = useTranslations("app.qrCards");
   if (!canEdit) return null;
   return (
     <JobTabActions>
       {hasRows ? (
-        <Button variant="white" shape="pill" onClick={onPrint}>
-          <QrCode aria-hidden="true" />
-          {tq("button")}
-        </Button>
+        <Popover
+          trigger={
+            <>
+              <span>{t("print")}</span>
+              <ChevronDown aria-hidden="true" />
+            </>
+          }
+          triggerClassName={WHITE}
+          panelClassName="w-60"
+        >
+          {(close) => (
+            <button
+              type="button"
+              className={MENU_ROW}
+              onClick={() => {
+                close();
+                onPrint();
+              }}
+            >
+              <QrCode aria-hidden="true" />
+              {t("printQrCards")}
+            </button>
+          )}
+        </Popover>
       ) : null}
       <Popover
         trigger={
@@ -44,11 +65,15 @@ export function SubjectsActions({
             <ChevronDown aria-hidden="true" />
           </>
         }
-        triggerClassName={`${buttonVariants({ shape: "pill" })} hover:bg-primary-hover [&_svg]:size-4`}
+        triggerClassName={WHITE}
         panelClassName="w-60"
       >
         {(close) => (
           <>
+            <Link href={importHref} className={MENU_ROW} onClick={close}>
+              <Upload aria-hidden="true" />
+              {t("uploadList")}
+            </Link>
             <button
               type="button"
               className={MENU_ROW}
@@ -58,12 +83,8 @@ export function SubjectsActions({
               }}
             >
               <Plus aria-hidden="true" />
-              {tr("add")}
+              {t("addOneByOne")}
             </button>
-            <Link href={importHref} className={MENU_ROW} onClick={close}>
-              <Upload aria-hidden="true" />
-              {tr("import")}
-            </Link>
           </>
         )}
       </Popover>

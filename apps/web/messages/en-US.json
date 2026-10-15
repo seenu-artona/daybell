@@ -1202,7 +1202,8 @@
         "grade": "Grade",
         "gradeChip": "Grade {grade}",
         "gradePlaceholder": "Search grades…",
-        "gradeList": "Grades"
+        "gradeList": "Grades",
+        "notPhotographed": "Not photographed"
       },
       "columns": {
         "photos": "Photos",
@@ -1210,7 +1211,8 @@
       },
       "ordered": {
         "yes": "Ordered",
-        "no": "Not yet"
+        "no": "Not yet",
+        "notOrdered": "Not ordered"
       },
       "rename": "Rename",
       "renameLabel": "{group, select, class {Rename class} team {Rename team} other {Rename group}} {name}",
@@ -1220,6 +1222,36 @@
         "title": "{group, select, class {This job's classes} team {This job's teams} other {This job's groups}}",
         "meta": "Rename one; its children stay in it.",
         "children": "{count, plural, one {# child} other {# children}}"
+      },
+      "print": "Print",
+      "printQrCards": "QR cards",
+      "uploadList": "Upload a list",
+      "addOneByOne": "Add one by one",
+      "listLabel": "Subjects",
+      "record": {
+        "edit": "Edit {name}",
+        "moreActions": "More actions for {name}",
+        "unfold": "Back to the full list",
+        "possibleDuplicate": "Possible duplicate",
+        "photos": "Photos",
+        "addPhotos": "Add photos",
+        "photoAlt": "Photo {number} of {name}",
+        "noPhotos": "No photos yet.",
+        "photosUnavailable": "Photos can’t be shown here right now.",
+        "orders": "Orders",
+        "noOrders": "No orders yet.",
+        "noOrdersCloses": "No orders yet. The shop closes {date}.",
+        "ordersUnavailable": "Orders can’t be shown here right now.",
+        "details": "Details",
+        "parentEmail": "Parent email",
+        "photographed": "Photographed",
+        "qrCard": "QR card",
+        "printed": "Printed",
+        "printAgain": "Print again",
+        "printCard": "Print QR card",
+        "noCard": "No QR card: marked Do not photograph.",
+        "none": "–",
+        "loading": "Loading…"
       }
     },
     "qrCards": {

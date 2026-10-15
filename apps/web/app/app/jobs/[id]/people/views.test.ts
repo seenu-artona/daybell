@@ -7,9 +7,10 @@ const CHILD = "c0000000-0000-4000-8000-000000000001";
 const from = (query: string, seesOrders = true) =>
   subjectChipFrom(new URLSearchParams(query), { seesOrders });
 
-describe("Subjects chips (D147)", () => {
+describe("Subjects chips (D147, D153)", () => {
   it("reads one chip from the address and round-trips it with the open child", () => {
     for (const query of [
+      "show=notPhotographed",
       "show=notOrdered",
       "show=noPhotos",
       "show=duplicates",
@@ -46,6 +47,9 @@ describe("Subjects chips (D147)", () => {
     expect(subjectFilters({ kind: "all" })).toEqual([]);
     expect(subjectFilters({ kind: "show", show: "noClass" })).toEqual([{ kind: "noGroup" }]);
     expect(subjectFilters({ kind: "show", show: "notOrdered" })).toEqual([{ kind: "notOrdered" }]);
+    expect(subjectFilters({ kind: "show", show: "notPhotographed" })).toEqual([
+      { kind: "notPhotographed" },
+    ]);
     expect(subjectFilters({ kind: "class", id: CLASS })).toEqual([{ kind: "group", id: CLASS }]);
     expect(subjectFilters({ kind: "grade", grade: "K" })).toEqual([{ kind: "grade", value: "K" }]);
   });
@@ -59,7 +63,16 @@ describe("Subjects chips (D147)", () => {
       kind: "show",
       show: "doNotPublish",
     });
-    expect(subjectChipFromSaved({ key: "noPhotos", value: null })).toBeNull();
+    // D153: Possible duplicates and No photos are added through "+ Add filter" now, so they are saved.
+    expect(subjectChipFromSaved({ key: "noPhotos", value: null })).toEqual({
+      kind: "show",
+      show: "noPhotos",
+    });
+    expect(subjectChipFromSaved({ key: "duplicates", value: null })).toEqual({
+      kind: "show",
+      show: "duplicates",
+    });
+    expect(subjectChipFromSaved({ key: "notPhotographed", value: null })).toBeNull();
     expect(subjectChipFromSaved({ key: "grade", value: null })).toBeNull();
   });
 });
