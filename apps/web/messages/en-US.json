@@ -2626,7 +2626,8 @@
       "desktop": "On a computer the photo shows only while you point at it or move to it with Tab, and goes dark on signs of a screenshot.",
       "phone": "On a phone or tablet the photo blurs when you leave the page.",
       "label": "Fallback test photo",
-      "alt": "Watermarked test photo: a colour chart with the words DRM TEST"
+      "alt": "Watermarked test photo: a colour chart with the words DRM TEST",
+      "notConfigured": "The DRM test isn’t set up in this deployment yet: it needs the Axinom and test key settings, then a new deployment so the protected clip is built. Today’s watermarked photo is shown instead."
     },
     "errors": {
       "token": "the license token couldn't be made: {code}",

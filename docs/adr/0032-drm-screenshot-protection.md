@@ -16,11 +16,22 @@ hardware DRM get today's watermarked image, plus a short blackout on detected sc
 
 This step only answers "does it work on real devices?":
 
-- **A test clip.** `scripts/drm/package-test-asset.mjs` draws a synthetic SMPTE chart ("DRM TEST"; never a real photo
-  or a child), encodes 2 all-intra frames of H.264 High 4.0 at 1600×1066, and encrypts them with Shaka Packager 3.9.3
-  as CMAF cbcs with a DASH manifest and HLS playlists, raw key from the environment, `--clear_lead 0`. The output in
-  `apps/web/public/drm-test/` is committed: it is useless without the key. A watermarked JPEG of the same chart is the
-  fallback. Regenerating: `scripts/drm/README.md`.
+- **A test clip, encrypted at build time.** No key passes through the repo, a developer's machine or chat:
+  - The repo holds the **clear** clip, `apps/web/assets/drm-test/clear.mp4`: a synthetic SMPTE chart ("DRM TEST";
+    never a real photo or a child), 2 all-intra frames of H.264 High 4.0 at 1600×1066, made by
+    `scripts/drm/make-test-chart.mjs` with ffmpeg. It sits outside `public/` and is never served (checked: 404 at
+    every path). Beside it, the committed fallback `public/drm-test/fallback.jpg`, the same chart watermarked.
+  - `apps/web/scripts/encrypt-drm-test.mjs` runs before `next build`. Only when `DRM_TEST_PAGE_ENABLED=true` and
+    both `DRM_TEST_KEY_ID` and `DRM_TEST_CONTENT_KEY` are set, it runs Shaka Packager 3.9.3 (the pinned
+    `shaka-packager` dev dependency; its npm package carries the Linux binary Vercel's build image runs) to write CMAF
+    cbcs with a DASH manifest and HLS playlists, raw key, `--clear_lead 0`, into `public/drm-test/` (git-ignored).
+    Otherwise it writes nothing (and removes any earlier output), and the page says the test isn't set up. A malformed
+    key fails the build naming the variable; the packager's errors are scrubbed of the key before printing.
+  - `turbo.json` declares the three variables (so a change rebuilds) and keeps `public/drm-test/**` as build output
+    (so a cache hit restores the clip).
+  - Checked locally with throwaway keys, since deleted: the build's output decodes with the key to exactly the clear
+    frame and to flat grey without it, the key appears in no output file or build log, and a production build serves
+    the manifests and segments but not the clear clip.
 - **A token route.** `POST /api/v1/dev/drm-test/token` (Node, `preferredRegion = "yul1"`). Not found unless
   `DRM_TEST_PAGE_ENABLED=true`, read before anything else; then signed-in owners and admins only. It answers a JWT
   (HS256, signed with the communication key's bytes) valid 60 seconds (`begin_date`/`expiration_date`), the license
@@ -67,10 +78,14 @@ listeners), `useDesktopPointer()` and `BlackoutPhoto`.
 | `AXINOM_COM_KEY` | the communication key, base64 of 32 bytes | **yes** |
 | `AXINOM_LICENSE_PREFIX` | tenant part of `https://<prefix>.drm-<system>-licensing.axprod.net/AcquireLicense` | no |
 | `AXINOM_FAIRPLAY_CERT_URL` | optional https address of the FPS certificate; unset turns FairPlay off | no |
-| `DRM_TEST_KEY_ID` | the clip's key ID (GUID) | no |
-| `DRM_TEST_CONTENT_KEY` | the clip's content key, 32 hex digits | **yes** |
+| `DRM_TEST_KEY_ID` | the clip's key ID: a random GUID (`uuidgen`) | no |
+| `DRM_TEST_CONTENT_KEY` | the clip's content key: 32 random hex digits (`openssl rand -hex 16`) | **yes** |
 
-Errors name the variable, never the value. None is needed at build time.
+Seenu makes the two test key values himself and sets them **in Vercel only**: they never go in the repo, a file, a log
+or a chat (`scripts/drm/README.md`). `DRM_TEST_PAGE_ENABLED` and both test key values are read at build time too (the
+encryption step) and must be set before the deployment is built; the Axinom settings are read only at run time. Errors
+name the variable, never the value. A missing or malformed setting makes the token route answer 409 with
+`setup: drmTest.notConfigured`, and the page says the test isn't set up, as it does when the build made no clip.
 
 ## What reaches Axinom
 
@@ -94,13 +109,16 @@ id. Our server talks to Axinom not at all; it signs tokens in Montréal.
 - How Axinom's FairPlay server expects the SPC and the `skd://` URI (here `skd://<key ID GUID>`); Shaka's default
   raw SPC body is sent, and wrapped CKC responses are unwrapped.
 - Whether PlayReady SL3000 devices play `cbcs` (PlayReady 4+ does; older hardware may want `cenc`).
-- Any real playback: only the packaging was checked here (the clip decodes with the key and not without it).
+- Any real playback: only the packaging was checked here (the build's clip decodes with the key and not without it).
+- Vercel's build itself: the Linux x64 packager binary ran here; that the same runs in Vercel's build image is expected
+  but untested until the first staging deployment with the keys set.
 
 ## Calls for Seenu
 
-1. **The test key.** A key pair was generated for the committed clip and kept outside the repo on the build machine;
-   it is not in any commit or message. Either use that file, or make your own key and regenerate the clip
-   (`scripts/drm/README.md`), then add both values to Vercel staging.
+1. **The test key.** Seenu generates `DRM_TEST_KEY_ID` (a random GUID) and `DRM_TEST_CONTENT_KEY` (32 random hex
+   digits, `openssl rand -hex 16`), sets both in Vercel staging only, then redeploys. An earlier draft of this branch
+   committed a clip encrypted with a key made on the build machine; that key has been deleted and was never used
+   anywhere else, so the clip left in the branch's history can't be decrypted.
 2. **Token lifetime.** 60 seconds, fresh per license request, without `prevent_drm_message_reuse` until its name is
    confirmed in Axinom's docs.
 3. **Route and page under `/dev`.** The route is listed in the API docs under Internal ("Not for integrations"), like

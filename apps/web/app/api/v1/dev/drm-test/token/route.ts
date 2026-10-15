@@ -11,13 +11,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "yul1";
 
+/** The conflict's field value when a setting is missing or malformed (the variable is named in the log only). */
+const DRM_TEST_NOT_CONFIGURED = "drmTest.notConfigured";
+
 function settings(): DrmTestSettings {
   try {
     return drmTestSettings();
   } catch (err) {
     // The message names the variable, never its value (packages/config).
     console.error("drm_test_config", err instanceof Error ? err.message : "unknown");
-    throw new ApiError("internal", "The DRM test page isn't set up here.");
+    // A named conflict, so the page can say "not set up" rather than "something went wrong".
+    throw new ApiError("conflict", "The DRM test isn't set up here.", {
+      setup: DRM_TEST_NOT_CONFIGURED,
+    });
   }
 }
 

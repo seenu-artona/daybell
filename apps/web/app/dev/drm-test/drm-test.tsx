@@ -23,7 +23,7 @@ const TOKEN_PATH = "/dev/drm-test/token";
 type Status =
   | { kind: "loading" }
   | { kind: "playing"; keySystem: string }
-  | { kind: "fallback"; reason: "noHardware" | "fairplayOff" }
+  | { kind: "fallback"; reason: "noHardware" | "fairplayOff" | "notConfigured" }
   | { kind: "failed"; detail: string };
 
 type ShakaModule = typeof import("shaka-player/dist/shaka-player.compiled").default;
@@ -60,7 +60,12 @@ export function DrmTest() {
       const first = await api<DrmTestTokenResponse>(TOKEN_PATH, { method: "POST" });
       if (isCancelled()) return;
       if (!first.ok) {
-        setStatus({ kind: "failed", detail: t("errors.token", { code: first.code }) });
+        // 409: a setting is missing in this deployment (the route names it in its log).
+        setStatus(
+          first.code === "conflict"
+            ? { kind: "fallback", reason: "notConfigured" }
+            : { kind: "failed", detail: t("errors.token", { code: first.code }) },
+        );
         return;
       }
       const config = first.data;
@@ -68,6 +73,16 @@ export function DrmTest() {
       if (plan.kind === "none") {
         const fairplayOff = probed.fairplay === "supported" && !config.fairplayCertificateUrl;
         setStatus({ kind: "fallback", reason: fairplayOff ? "fairplayOff" : "noHardware" });
+        return;
+      }
+
+      // The protected clip is made at build time only when the flag and both keys were set then (ADR 0032).
+      const built = await fetch(plan.manifest, { method: "HEAD", cache: "no-store" }).catch(
+        () => null,
+      );
+      if (isCancelled()) return;
+      if (!built?.ok) {
+        setStatus({ kind: "fallback", reason: "notConfigured" });
         return;
       }
 

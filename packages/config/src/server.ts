@@ -250,9 +250,9 @@ export function drmTestPageEnabled(env: Record<string, string | undefined> = pro
  *   https://<prefix>.drm-{widevine,playready,fairplay}-licensing.axprod.net/AcquireLicense.
  * - AXINOM_FAIRPLAY_CERT_URL: optional; the HTTPS address of the studio's FairPlay (FPS) certificate. Unset, FairPlay
  *   is off and Safari gets the fallback.
- * - DRM_TEST_KEY_ID: the test clip's key ID (a GUID; not secret, it is in the clip's manifest).
- * - DRM_TEST_CONTENT_KEY: the test clip's content key, 32 hex digits. Secret. It must be the key the clip in
- *   apps/web/public/drm-test was packaged with (scripts/drm/README.md).
+ * - DRM_TEST_KEY_ID: the test clip's key ID, a random GUID (not secret: it is in the clip's manifest).
+ * - DRM_TEST_CONTENT_KEY: the test clip's content key, 32 random hex digits. Secret. Set in Vercel only: the web app's
+ *   build encrypts the clip with this same pair (apps/web/scripts/encrypt-drm-test.mjs; scripts/drm/README.md).
  * Read on first use, never at build time. Errors name the variable, never the value.
  */
 export interface DrmTestSettings {

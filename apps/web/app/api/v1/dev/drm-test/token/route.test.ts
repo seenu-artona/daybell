@@ -122,12 +122,13 @@ describe("POST /api/v1/dev/drm-test/token", () => {
     expect(body.fairplayCertificateUrl).toBe("https://certs.example.test/fps.der");
   });
 
-  it("names a missing setting in the log, never a value, and answers 500", async () => {
+  it("names a missing setting in the log, never a value, and answers a named 409", async () => {
     configure({ DRM_TEST_CONTENT_KEY: "" });
     scope.mockResolvedValue(as("owner"));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await call();
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.fields).toEqual({ setup: "drmTest.notConfigured" });
     expect(log).toHaveBeenCalledWith("drm_test_config", "DRM_TEST_CONTENT_KEY is not set");
     const logged = JSON.stringify(log.mock.calls);
     expect(logged).not.toContain(COM_KEY.toString("base64"));
