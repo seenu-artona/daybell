@@ -79,23 +79,31 @@ async function openGallery(page: Page, code: string) {
   return main.getByRole("list", { name: "Photos of Ava P.", exact: true });
 }
 
-/** One large view: tried under DRM first, then the WebP within 8 seconds, with no words about it. */
-async function fallsBackWithin8s(page: Page, n: number) {
+/**
+ * One large view: tried under DRM first, then the WebP within 8 seconds, with no words about it. "Loading photo" is
+ * there twice on purpose: the words over the proof (aria-hidden, seen) and the viewer's sr-only status (heard, once
+ * per viewer, so only when `announced`). Each is checked on its own, never by text alone (strict mode).
+ */
+async function fallsBackWithin8s(page: Page, n: number, announced: boolean) {
   const viewer = page.getByRole("dialog", { name: `Photo ${n} of 2`, exact: true });
   await expect(viewer).toBeVisible();
   const started = Date.now();
+  const words = viewer.locator('span[aria-hidden="true"]', { hasText: /^Loading photo$/ });
+  const status = viewer.getByRole("status");
   await expect(viewer.locator('[data-drm-photo="loading"]')).toBeVisible();
   await expect(
     viewer.getByRole("img", { name: `Ava, photo ${n} of 2`, exact: true }),
   ).toBeVisible();
   await expect(viewer.locator('img[src*="/proof-thumb.webp?"]')).toBeVisible();
-  await expect(viewer.getByText("Loading photo", { exact: true })).toBeVisible();
+  await expect(words).toBeVisible();
+  await expect(status).toHaveText(announced ? "Loading photo" : "");
   const webp = viewer.locator('img[src*="/proof.webp?"]');
   await expect(webp).toBeVisible({ timeout: 10_000 });
   expect(Date.now() - started).toBeLessThan(9_500);
   await expect(webp).toHaveAttribute("alt", `Ava, photo ${n} of 2`);
   await expect(viewer.locator("[data-drm-photo]")).toHaveCount(0);
-  await expect(viewer.getByText("Loading photo", { exact: true })).toHaveCount(0);
+  await expect(words).toHaveCount(0);
+  await expect(status).toHaveText("");
   return viewer;
 }
 
@@ -142,9 +150,10 @@ test.describe
       const grid = await openGallery(page, code);
 
       await grid.getByRole("button", { name: "Ava, photo 1 of 2", exact: true }).click();
-      const first = await fallsBackWithin8s(page, 1);
+      const first = await fallsBackWithin8s(page, 1, true);
       await first.getByRole("button", { name: "Next photo", exact: true }).click();
-      const second = await fallsBackWithin8s(page, 2);
+      // Same viewer: "Loading photo" isn't said again (only shown).
+      const second = await fallsBackWithin8s(page, 2, false);
       expect(manifests).toHaveLength(2);
       for (const url of manifests)
         expect(url).toMatch(/drm-manifest\?format=dash&gallery=[0-9a-f]{32}$/);
@@ -158,7 +167,8 @@ test.describe
       // Phones keep round 7's blur, never Blackout's panel (C1, review #6c).
       await page.evaluate(() => window.dispatchEvent(new Event("blur")));
       await expect(page.locator('[data-shop-protection="blurred"]')).toHaveCount(1);
-      await expect(again.getByText(HIDDEN, { exact: true })).toHaveCount(0);
+      await expect(again.locator("[data-blackout-panel]")).toHaveCount(0);
+      await expect(page.getByText(HIDDEN, { exact: true })).toHaveCount(0);
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
       await expect(page.locator('[data-shop-protection="clear"]')).toHaveCount(1);
       await cleanEnd(page, errors);
@@ -173,7 +183,7 @@ test.describe
       const manifests = await routeDrm(page, { setupHangs: true });
       const grid = await openGallery(page, code);
       await grid.getByRole("button", { name: "Ava, photo 1 of 2", exact: true }).click();
-      await fallsBackWithin8s(page, 1);
+      await fallsBackWithin8s(page, 1, true);
       expect(manifests).toHaveLength(0);
       await cleanEnd(page, errors);
     });
@@ -192,16 +202,22 @@ test.describe
       const grid = await openGallery(page, code);
 
       await grid.getByRole("button", { name: "Ava, photo 1 of 2", exact: true }).click();
-      const viewer = await fallsBackWithin8s(page, 1);
+      const viewer = await fallsBackWithin8s(page, 1, true);
       expect(manifests).toHaveLength(1);
 
-      // Blackout on the fallback (C1): dark with words while the window has no focus, back after.
+      // Blackout on the fallback (C1): dark with words while the window has no focus, back after. The words are there
+      // twice on purpose too: on the panel (aria-hidden, seen) and in the shop's one sr-only status (heard).
+      const panelWords = viewer.locator("[data-blackout-words]");
+      const heard = page.getByRole("status").filter({ hasText: HIDDEN });
       await page.evaluate(() => window.dispatchEvent(new Event("blur")));
       await expect(page.locator('[data-shop-protection="dark"]')).toHaveCount(1);
-      await expect(viewer.getByText(HIDDEN, { exact: true })).toBeVisible();
+      await expect(panelWords).toHaveText(HIDDEN);
+      await expect(panelWords).toBeVisible();
+      await expect(heard).toHaveCount(1);
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
       await expect(page.locator('[data-shop-protection="clear"]')).toHaveCount(1);
-      await expect(viewer.getByText(HIDDEN, { exact: true })).toHaveCount(0);
+      await expect(viewer.locator("[data-blackout-panel]")).toHaveCount(0);
+      await expect(heard).toHaveCount(0);
 
       await cleanEnd(page, errors);
       await context.close();
