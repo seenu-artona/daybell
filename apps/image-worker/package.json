@@ -8,9 +8,11 @@
     "build": "node scripts/build.mjs",
     "package": "node scripts/build.mjs --package",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "layer": "node layer/build-layer.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1141.0",
     "@aws-sdk/client-s3": "3.1141.0",
     "@aws-sdk/client-secrets-manager": "3.1141.0",
     "@daybell/core": "workspace:*",
@@ -23,6 +25,7 @@
     "@types/qrcode": "1.5.6",
     "esbuild": "0.28.2",
     "qrcode": "1.5.4",
+    "shaka-packager": "3.9.3",
     "sharp": "0.35.5",
     "vitest": "5.0.2"
   }

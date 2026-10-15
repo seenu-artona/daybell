@@ -15,6 +15,8 @@ next-env.d.ts
 # Photos stored by the local storage driver (STORAGE_DRIVER=local) and the image worker's Lambda zip.
 .storage/
 apps/image-worker/image-worker.zip
+apps/image-worker/image-worker-drm-layer.zip
+apps/image-worker/dist-layer/
 
 # The DRM test page's encrypted clip, made at build time from apps/web/assets/drm-test/clear.mp4 (ADR 0032). Only the
 # committed fallback picture stays.

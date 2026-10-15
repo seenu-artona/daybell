@@ -438,6 +438,10 @@ describe("runDrmJob (B6)", () => {
 // picture. The clip decrypts with the key to the picture and to nothing usable without it, and the key is in no file.
 const FFMPEG = process.env.DRM_TEST_FFMPEG?.trim();
 const PACKAGER = process.env.DRM_TEST_PACKAGER?.trim();
+// CI sets DRM_TEST_REQUIRED, so a misnamed path can't make the check pass by skipping it.
+it.runIf(process.env.DRM_TEST_REQUIRED === "1")("has the tools it was asked to run", () => {
+  expect(FFMPEG && PACKAGER && existsSync(FFMPEG) && existsSync(PACKAGER)).toBeTruthy();
+});
 describe.runIf(FFMPEG && PACKAGER)("packaging with the pinned binaries", () => {
   const decode = (
     file: string,

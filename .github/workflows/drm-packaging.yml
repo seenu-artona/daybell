@@ -1,0 +1,52 @@
+name: DRM packaging
+
+# The large view's DRM packaging with the real, pinned tools (D158; ADR 0034). Only when something it depends on
+# changes, to save Actions minutes: the layer must build reproducibly from its SHA-256 pins (and fit Lambda's 250 MB),
+# and a clip made with a throwaway key must decrypt with that key, show nothing usable without it, and hold no key.
+# The x64 builds of the same ffmpeg and Shaka Packager versions run here; Lambda runs the arm64 ones in the layer.
+on:
+  pull_request:
+    paths:
+      - "packages/image-pipeline/**"
+      - "packages/core/src/drm.ts"
+      - "apps/image-worker/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/drm-packaging.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/image-pipeline/**"
+      - "packages/core/src/drm.ts"
+      - "apps/image-worker/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/drm-packaging.yml"
+
+concurrency:
+  group: drm-packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drm-packaging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the arm64 tools layer from its pins (reproducible; fails on a hash mismatch or over 250 MB)
+        run: pnpm --filter @daybell/image-worker layer
+      - name: The same versions for x64, to run here
+        run: node apps/image-worker/layer/build-layer.mjs --tools x64 "$RUNNER_TEMP/drm-tools"
+      - name: A throwaway key's clip decrypts with it only, and no key is in any file
+        env:
+          DRM_TEST_FFMPEG: ${{ runner.temp }}/drm-tools/bin/ffmpeg
+          DRM_TEST_PACKAGER: ${{ runner.temp }}/drm-tools/bin/packager
+          DRM_TEST_REQUIRED: "1"
+        run: pnpm --filter @daybell/image-pipeline exec vitest run src/drm.test.ts

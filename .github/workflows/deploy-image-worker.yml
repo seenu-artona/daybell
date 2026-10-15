@@ -4,8 +4,17 @@ name: Deploy image worker (staging)
 # Two jobs: `build` tests and packages the zip with no AWS access at all; `deploy` (environment `staging`, Seenu
 # approves) only downloads that zip, exchanges GitHub's OIDC token for a role that may update this one function's
 # code, and uploads it. No secrets in the repository. Production is deployed by Seenu alone (CLAUDE.md).
+#
+# With "Publish the DRM tools layer" ticked (ADR 0034), `build` also makes the ffmpeg + Shaka Packager layer from its
+# SHA-256 pins, and `deploy` publishes it as a new version of daybell-staging-ca-drm-tools and attaches it to the
+# function before uploading the code. The function's DRM_KMS_KEY_ARN is set by Seenu in AWS, never here.
 on:
   workflow_dispatch:
+    inputs:
+      publish_drm_layer:
+        description: "Publish the DRM tools layer (ffmpeg + Shaka Packager) and attach it"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,10 +40,15 @@ jobs:
       - run: pnpm --filter @daybell/image-worker test
       - name: Build the Lambda zip (sharp for Linux arm64 from the locked install, no install scripts)
         run: pnpm --filter @daybell/image-worker package
+      - name: Build the DRM tools layer from its pins (ADR 0034)
+        if: ${{ inputs.publish_drm_layer }}
+        run: pnpm --filter @daybell/image-worker layer
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: image-worker
-          path: apps/image-worker/image-worker.zip
+          path: |
+            apps/image-worker/image-worker.zip
+            apps/image-worker/image-worker-drm-layer.zip
           retention-days: 7
           if-no-files-found: error
 
@@ -47,6 +61,7 @@ jobs:
       id-token: write
     env:
       FUNCTION_NAME: daybell-staging-ca-image-worker
+      LAYER_NAME: daybell-staging-ca-drm-tools
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -56,6 +71,17 @@ jobs:
           # An environment variable (not a secret): arn:aws:iam::<account>:role/daybell-staging-github-image-worker-deploy
           role-to-assume: ${{ vars.AWS_IMAGE_WORKER_DEPLOY_ROLE_ARN }}
           aws-region: ca-central-1
+      - name: Publish the DRM tools layer and attach it (ADR 0034)
+        if: ${{ inputs.publish_drm_layer }}
+        run: |
+          layer_arn=$(aws lambda publish-layer-version --layer-name "$LAYER_NAME" \
+            --description "ffmpeg 7.0.2 + Shaka Packager 3.9.3 (ADR 0034)" \
+            --zip-file fileb://image-worker-drm-layer.zip \
+            --compatible-architectures arm64 --compatible-runtimes nodejs22.x \
+            --output text --query 'LayerVersionArn')
+          aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers "$layer_arn" \
+            --output text --query 'LastUpdateStatus'
+          aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
       - name: Update the function's code
         run: |
           aws lambda update-function-code --function-name "$FUNCTION_NAME" \
