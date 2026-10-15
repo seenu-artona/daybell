@@ -137,7 +137,65 @@ Defaults the plan asked to be listed (rule 7):
 - **N9** School delivery is drawn as a Switch (same data and API as the checkbox).
 - **N10** Photographers keep seeing prices on Job › Shop (ADR 0019 answer 8).
 
-Calls made in this round: (added as the build settles; see the final list below)
+Calls made in this round (each **New: needs Seenu**):
+
+Data and API
+
+1. **Who writes, and how.** Like price lists (ADR 0019): row-level security with owners and admins writing through
+   SECURITY INVOKER functions, and SECURITY DEFINER guards that refuse with 42501 before anything is read. The parent
+   shop's functions stay service-role only. `job_shop` is SECURITY DEFINER (it reads through the resolver) with one
+   membership check.
+2. **Events' subjects.** `job_price.*` events are about the job (subject: the job; data names the list item);
+   `job_item.*` events are about the product (subject: the product; data names the job). `job_item.deleted` carries
+   `{job_id, kind}` (the plan named the event only).
+3. **Typing the list's price back** (while the item is sold) deletes the row and writes `job_price.reset`, as Undo
+   does. A list swap and a deleted list item remove the job's changes with no `job_price.reset` (the first is already
+   `job.updated {fields: ["price_list_id"]}`).
+4. **An order line for a job's own product** keeps `price_list_id` (not null) as the job's list at checkout.
+5. **404 or 409.** A list item that isn't the studio's is 404 (another studio's id says nothing); one of the studio's
+   items that isn't on the job's list is 409 `jobShop.notOnList`.
+6. **Sold for a job's own product** is `PATCH /jobs/{id}/shop/items/{itemId} {sold}`; the prices route is for list
+   items only. `DELETE /jobs/{id}/shop/prices/{itemId}` (Undo) is in the API; the screen undoes by typing the list's
+   price back (D157), so it has no Undo button.
+7. **Every Job › Shop write answers with the whole shop** (200, and 201 for a new product), so the screen and API users
+   always see the job's resolved prices and its count of changes.
+8. **A job's own products keep the order they were added in** (each after the last); there is no Move up or Move down
+   for them this round.
+9. **Bag fingerprints now name the job's product too**, so a checkout begun before this migration isn't reused by the
+   next Pay (it expires as usual).
+
+Screens
+
+10. **One table, no group headings.** Packages, prints and downloads keep their order (N5) without sub-headings in the
+    table (D157: one table).
+11. **A row switched off is dimmed with muted text, not transparency**, so its words keep AA contrast; its switch says
+    Off.
+12. **The price cell** shows the $ sign and the price in dollars and cents ("85.00"); a price that isn't one says the
+    price list's own message under the field ("Enter a price from $0 to $10,000, like 25 or 25.00."); a refused save
+    shows under the field, and leaving the field doesn't send the same refused price again.
+13. **Change** is a button (named "Change price list") opening a dialog: the list select, the warning in a live region
+    when another list is chosen ("2 changes for this job will be removed." and "Products only this job sells stay."),
+    Cancel and "Change price list". The old "Edit this price list" / "View this price list" link stays beside it.
+14. **"N changes for this job"** sits on the "Prices before tax" line; none reads "No changes for this job". Saves are
+    announced as "Saved. 2 changes for this job".
+15. **Add a product** asks Package or Print first, then shows the price list editor's item dialog with one more line,
+    "Only this job sells it. The price list doesn't change." A job's own product's name (a button, "Edit Panorama")
+    opens the dialog again; Remove there asks to confirm ("Only this job sells it. Orders already placed keep it.").
+16. **Words changed:** a closed job says "This job is closed, so its shop can't change."; photographers and staff read
+    "Only owners and admins can change this job's shop."
+17. **Start selling's row keeps its label "Price list chosen"** while it now means "the job sells at least one item"
+    (N3). Question for Seenu: rename it (e.g. "Something to sell")?
+18. **More for this job** rows are plain text with a Soon tag (not buttons), like Progress's Soon steps.
+19. **Settings › Shop** reads the shop's address on the server (SHOP_URL, else this deployment's /shop, as QR cards
+    print it). Its cards' words are this ADR's summaries of how things work today (ADR 0022, 0023, 0024); the Taxes
+    and Stripe links show only to owners and admins (only they can open those sections); Price lists shows to
+    everyone. Look says the shop shows only the studio, never Silverback's name or logo (D62). Its icon is a shop
+    front (`Store`).
+20. **The pose picker** titles its two sets ("Portraits", "Group photos") only when the child has group photos; a group
+    photo is "Group photo 2 of 4", the big preview follows the same words. "Use this photo" on a group photo opens
+    Choose a package first, as for a portrait (D24). The viewer's "can't be ordered yet" line is gone.
+21. **e2e:** `shop-checkout` and `shop-gallery` buy portraits only and needed no change; `phase1-going-live` reads the
+    Start selling check through the same row label.
 
 ## Not in this round (deferred)
 
@@ -146,6 +204,22 @@ the price list editor's note about per-job changes (N8); showing the new events 
 
 ## Tests
 
-pgTAP `031_job_shop` and `032_group_photo_sales`; updated `018`, `021`, `022`, `029`; core `job-shop`, API contracts,
-route tests with cross-studio and cross-job leak tests, screen tests (jsdom), e2e `phase1-job-shop` (desktop) and
-`shop-group-photos` (phone). The e2e specs could not be run in this environment.
+- pgTAP `031_job_shop` (105): shape, row-level security and grants (nothing for anon; the resolver and guards for
+  nobody signed in), the resolver, this job's prices (the list's price typed back, off at the list's price, both at
+  once, Undo, the same price again writing nothing), roles (photographers and staff refused with 42501, a direct write
+  refused before anything is read; another studio's owner not_found and 42501), a closed job refused, job-only
+  products (contents, in place, Sold, kinds, text rules, 20 lines, 100 per job, a package without lines at commit),
+  `not_on_list` for the list a job had before a swap, the swap dropping the old list's changes and keeping the job's
+  products, a deleted list item and a closed job's cascade, events without amounts or names.
+- pgTAP `032_group_photo_sales` (49): what the shop offers at the job's prices; group photos as poses for a member,
+  refused for a non-member, another group's photo and another studio; merging; the three-way totals check (the
+  shop's prices, the bag, checkout) for every bag; leaving a group and a product switched off making lines unavailable,
+  not deleted; order lines naming a job's product with its own contents; All digitals portraits then group photos; a
+  sold group photo not binned, its download and print files; Groups' Ordered; N7. Canadian studios (CAD).
+- Updated: `018` (N3, 78), `021` (another group's photo refused), `022` (All digitals with the group photo, 194).
+- Core `job-shop` and the pose rules in `shop`; API contracts (whole cents only, kinds and limit equal to the
+  migration's, conflicts, routes); route tests with cross-studio and cross-job leak tests, role-before-body, 409s and a
+  console spy; jsdom: the price cell, the table, Change's warning, the Switch, the pose picker, the viewer, Settings ›
+  Shop and its sections.
+- e2e: new `phase1-job-shop` (desktop) and `shop-group-photos` (phone); updated `phase1-price-lists` and
+  `phase1-job-page`. The e2e specs could not be run in this environment.
