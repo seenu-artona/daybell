@@ -217,7 +217,11 @@
     "timeZone": "Your time zone wasn’t recognized.",
     "filterChips": "Those filters can't be saved. Reload the page and try again.",
     "contactEmpty": "Enter a name, an email or a phone number.",
-    "mainContactStays": "To change the main contact, make someone else main."
+    "mainContactStays": "To change the main contact, make someone else main.",
+    "ruleDays": "Enter a whole number of days in the allowed range.",
+    "shopOpensDays": "Enter the days after picture day, or choose “When photos are checked”.",
+    "templateName": "Give the template a name.",
+    "template": "Choose one of your templates."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -1078,7 +1082,8 @@
         "notSelling": "This shop isn’t selling, so it can’t be closed.",
         "notClosed": "This shop isn’t closed, so it can’t be reopened.",
         "closed": "This shop is closed. Reopen it first.",
-        "closesAtPassed": "The closing date has passed. Change or remove it first."
+        "closesAtPassed": "The closing date has passed. Change or remove it first.",
+        "noTemplate": "This job wasn’t made from a template, so there’s nothing to go back to."
       },
       "closeDialog": {
         "title": "Close the shop?",

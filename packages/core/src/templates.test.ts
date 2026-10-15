@@ -9,6 +9,7 @@ import {
   RULE_KEYS,
   rulesValid,
   undoRule,
+  withRules,
 } from "./templates";
 
 const FALL: JobRules = {
@@ -47,6 +48,17 @@ describe("template rules (D154)", () => {
     expect(rulesValid({ ...FALL, shopClosesDays: 0 })).toBe(false);
     expect(rulesValid({ ...FALL, shopClosesDays: 365 })).toBe(true);
     expect(rulesValid({ ...FALL, shopClosesDays: 366 })).toBe(false);
+  });
+
+  it("applies a change, dropping the days when the shop opens once photos are checked", () => {
+    const later = { ...FALL, shopOpens: "afterPictureDay", shopOpensDays: 7 } as const;
+    expect(withRules(later, { shopOpens: "photosChecked" })).toEqual(FALL);
+    expect(withRules(FALL, { shopClosesDays: undefined, qrCardsDaysBefore: null })).toEqual({
+      ...FALL,
+      qrCardsDaysBefore: null,
+    });
+    // Days named with "photos checked" stay, so the whole is refused rather than quietly fixed.
+    expect(rulesValid(withRules(FALL, { shopOpensDays: 3 }))).toBe(false);
   });
 
   it("plans days from picture day", () => {

@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 export const preferredRegion = "yul1";
 
 /**
- * GET /api/v1/orders?jobId=&status=&stage=&delivery=&q=&cursor=&limit= — the studio's paid orders, newest first, a
+ * GET /api/v1/orders?jobId=&childId=&status=&stage=&delivery=&q=&cursor=&limit= — the studio's paid orders, newest first, a
  * page at a time (ADR 0024): reference, date, children (first name and last initial), items, total, status, delivery
  * and the refund badge. Owners, admins and staff (Q4); the database's row-level security says so too. `q` is the start
  * of a reference only: names are never searched, and never in a URL. ?stage=done is Orders' Done chip (D147).
@@ -22,7 +22,10 @@ export const GET = handle(async (request: Request) => {
   const { supabase, studio } = await studioScope();
   assertCanSeeOrders(studio);
   assertFunctionRegion(studio.region);
-  const { jobId, status, stage, delivery, q, limit, cursor } = parseQuery(request, orderListQuery);
+  const { jobId, childId, status, stage, delivery, q, limit, cursor } = parseQuery(
+    request,
+    orderListQuery,
+  );
   // One status, or a stage's statuses (D147: done is shipped, delivered or complete); never both.
   if (status && stage)
     throw new ApiError("invalid_input", "Please check the query parameters.", {
@@ -40,6 +43,18 @@ export const GET = handle(async (request: Request) => {
     );
     if (!job) throw new ApiError("not_found", "Job not found.");
   }
+  if (childId) {
+    // One person's orders (D153): only one of the studio's people; another studio's is simply not found.
+    const child = check(
+      await supabase
+        .from("children")
+        .select("id")
+        .eq("studio_id", studio.id)
+        .eq("id", childId)
+        .maybeSingle(),
+    );
+    if (!child) throw new ApiError("not_found", "Child not found.");
+  }
   const rows = check(
     await supabase.rpc("studio_orders", {
       p_studio_id: studio.id,
@@ -49,6 +64,7 @@ export const GET = handle(async (request: Request) => {
       p_delivery: delivery ?? null,
       p_limit: limit + 1,
       p_cursor: cursor ?? null,
+      p_child_id: childId ?? null,
     }),
   ) as DbStudioOrder[];
   return NextResponse.json(toOrdersPage(rows, limit), { headers: NO_STORE });

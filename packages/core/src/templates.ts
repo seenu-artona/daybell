@@ -60,6 +60,24 @@ export function rulesValid(rules: JobRules): boolean {
   );
 }
 
+/** Some rules to change (undefined: unchanged). */
+export type RulesPatch = { [K in keyof JobRules]?: JobRules[K] | undefined };
+
+/**
+ * Rules with a change applied. Switching to "when photos are checked" drops the days that went with "after picture
+ * day", unless the change names days itself (then rulesValid refuses the whole).
+ */
+export function withRules(base: JobRules, patch: RulesPatch): JobRules {
+  const next = { ...base };
+  for (const key of Object.keys(patch) as (keyof JobRules)[]) {
+    const value = patch[key];
+    if (value !== undefined) (next as Record<keyof JobRules, unknown>)[key] = value;
+  }
+  if (patch.shopOpens === "photosChecked" && patch.shopOpensDays === undefined)
+    next.shopOpensDays = null;
+  return next;
+}
+
 /** The calendar day `days` after (or before, if negative) a YYYY-MM-DD day. */
 export function addDays(day: string, days: number): string {
   const at = new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000);

@@ -32,7 +32,10 @@ import {
   planParts,
   REFUND_REASONS,
   REVIEW_CHILDREN_PAGE,
+  RULE_KEYS,
+  RULE_LIMITS,
   SHOP_MAX_QUANTITY,
+  SHOP_OPENS,
   SHOP_SHIPPING_METHODS,
   STATUS_UNDO_REASONS,
 } from "@daybell/core";
@@ -240,14 +243,140 @@ const jobFields = {
     }),
 };
 
-export const jobInput = z.object(jobFields);
+// ── Job templates and a job's own rules (D152, D154; ADR 0029) ────────────────────────────────────────────────────
+const ruleDays = (limits: { min: number; max: number }) =>
+  z
+    .number({ error: "validation.ruleDays" })
+    .int({ error: "validation.ruleDays" })
+    .min(limits.min, { error: "validation.ruleDays" })
+    .max(limits.max, { error: "validation.ruleDays" });
+
+/** The rules a template gives a new job, and a job may change for itself. Counted from picture day. */
+const ruleFields = {
+  qrCardsDaysBefore: ruleDays(RULE_LIMITS.qrCardsDaysBefore).nullable().meta({
+    description: "QR cards ready this many days before picture day, 0–60; null: no day planned.",
+  }),
+  shopOpens: z.enum(SHOP_OPENS, { error: "validation.invalid" }).meta({
+    description:
+      "photosChecked: once the job's photos are checked (someone publishes the shop); afterPictureDay: planned shopOpensDays after picture day.",
+  }),
+  shopOpensDays: ruleDays(RULE_LIMITS.shopOpensDays).nullable().meta({
+    description: "With afterPictureDay, 0–180 days after picture day; null otherwise.",
+  }),
+  shopClosesDays: ruleDays(RULE_LIMITS.shopClosesDays).nullable().meta({
+    description:
+      "The shop closes this many days after it first opens, 1–365 (its closing date is set when it opens); null: when someone closes it.",
+  }),
+};
+const RULE_FIELD_NAMES = Object.keys(ruleFields) as (keyof typeof ruleFields)[];
+
+/** Days after picture day go with "after picture day", and only with it. */
+function checkOpensDays(
+  value: { shopOpens?: string | undefined; shopOpensDays?: number | null | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.shopOpens === undefined) return;
+  if ((value.shopOpens === "afterPictureDay") !== (value.shopOpensDays != null))
+    ctx.addIssue({ code: "custom", path: ["shopOpensDays"], message: "validation.shopOpensDays" });
+}
+
+const templateName = z
+  .string()
+  .trim()
+  .min(1, { error: "validation.templateName" })
+  .max(80, { error: "validation.tooLong" })
+  .meta({ description: "Only the studio sees it, e.g. School Fall." });
+
+/** A new template: a name, and any rules (the rest start as today's defaults: nothing planned, closed by hand). */
+export const jobTemplateInput = z
+  .strictObject(
+    {
+      name: templateName,
+      qrCardsDaysBefore: ruleFields.qrCardsDaysBefore.default(null),
+      shopOpens: ruleFields.shopOpens.default("photosChecked"),
+      shopOpensDays: ruleFields.shopOpensDays.default(null),
+      shopClosesDays: ruleFields.shopClosesDays.default(null),
+      priceListId: z.uuid({ error: "validation.priceList" }).nullable().default(null).meta({
+        description:
+          "One of the studio's price lists; null: the studio's default when the job is made.",
+      }),
+      deliverToSchool: z.boolean({ error: "validation.invalid" }).default(false).meta({
+        description: "New jobs offer free delivery to the school as well as home shipping.",
+      }),
+    },
+    { error: "validation.unknownField" },
+  )
+  .superRefine(checkOpensDays);
+export type JobTemplateInput = z.infer<typeof jobTemplateInput>;
+
+/** Change some of a template's fields; jobs already made from it keep theirs (D154). */
+export const jobTemplatePatch = z
+  .strictObject(
+    {
+      name: templateName.optional(),
+      qrCardsDaysBefore: ruleFields.qrCardsDaysBefore.optional(),
+      shopOpens: ruleFields.shopOpens.optional(),
+      shopOpensDays: ruleFields.shopOpensDays.optional(),
+      shopClosesDays: ruleFields.shopClosesDays.optional(),
+      priceListId: z.uuid({ error: "validation.priceList" }).nullable().optional(),
+      deliverToSchool: z.boolean({ error: "validation.invalid" }).optional(),
+    },
+    { error: "validation.unknownField" },
+  )
+  .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
+export type JobTemplatePatch = z.infer<typeof jobTemplatePatch>;
+
+/** Duplicate a template under a new name (the screens send it from the locale files). */
+export const jobTemplateCopyInput = z.strictObject(
+  { name: templateName },
+  { error: "validation.unknownField" },
+);
+
+export const jobInput = z.object({
+  ...jobFields,
+  templateId: z.uuid({ error: "validation.template" }).optional().meta({
+    description:
+      "One of the studio's job templates (D154): the new job copies its rules, price list and delivery. Left out, the studio's default template. Only when the job is made.",
+  }),
+});
 export type JobInput = z.infer<typeof jobInput>;
 
-/** Change some fields of a job. A job's status is never changed here: Start selling, Close shop and Reopen shop do it. */
+/**
+ * Change some fields of a job, and its own rules (D152: "Changed for this job"). A job's status is never changed here:
+ * Start selling, Close shop and Reopen shop do it. Its template is chosen when it is made.
+ */
 export const jobPatch = z
-  .strictObject(z.object(jobFields).partial().shape, { error: "validation.unknownField" })
+  .strictObject(
+    {
+      ...z.object(jobFields).partial().shape,
+      ...z.object(ruleFields).partial().shape,
+    },
+    { error: "validation.unknownField" },
+  )
   .refine((value) => Object.keys(value).length > 0, { error: "validation.nothingToChange" });
 export type JobPatch = z.infer<typeof jobPatch>;
+/** The rule fields of a job patch. */
+export type JobRulesPatch = Partial<Pick<JobPatch, (typeof RULE_FIELD_NAMES)[number]>>;
+/** Splits a job patch into the job's details and its rules. */
+export function splitJobPatch(patch: JobPatch): {
+  details: Omit<JobPatch, keyof JobRulesPatch>;
+  rules: JobRulesPatch;
+} {
+  const details: Record<string, unknown> = {};
+  const rules: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch))
+    ((RULE_FIELD_NAMES as string[]).includes(key) ? rules : details)[key] = value;
+  return { details, rules } as {
+    details: Omit<JobPatch, keyof JobRulesPatch>;
+    rules: JobRulesPatch;
+  };
+}
+
+/** Undo a job's own change to one rule: back to what its template gave it (D152). */
+export const jobRuleResetInput = z.strictObject(
+  { rule: z.enum(RULE_KEYS, { error: "validation.invalid" }) },
+  { error: "validation.unknownField" },
+);
 
 /** Keyset pagination: pass the last item's id as `cursor` to get the next page. */
 export const listQuery = z.object({
@@ -1217,6 +1346,9 @@ export const orderListQuery = listQuery.extend({
     description:
       "done: orders with nothing left to do (shipped, delivered to school or complete; D147). Not with status.",
   }),
+  childId: z.uuid({ error: "validation.invalid" }).optional().meta({
+    description: "Only orders with a line for this person (a subject on a job's roster; D153).",
+  }),
 });
 export type OrderListQuery = z.infer<typeof orderListQuery>;
 
@@ -1252,7 +1384,14 @@ export const LIST_FILTER_KEYS = {
   jobs: { closingThisWeek: false, pictureDayThisMonth: false, client: true },
   orders: { deliveryHome: false, deliverySchool: false, job: true },
   job_orders: { deliveryHome: false, deliverySchool: false },
-  job_subjects: { class: true, noClass: false, doNotPhotograph: false, doNotPublish: false },
+  job_subjects: {
+    class: true,
+    noClass: false,
+    doNotPhotograph: false,
+    doNotPublish: false,
+    duplicates: false,
+    noPhotos: false,
+  },
   job_photos: {},
   people_clients: {},
   people_contacts: { client: true },
