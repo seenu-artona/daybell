@@ -210,3 +210,10 @@ above, these win.
 6. **Clients and Price lists** show the All chip only; Clients keeps its search.
 7. **Class rename** moves from Group by's headings to a "Classes N ›" row under the Subjects list and its panel.
 8. **Home's Selling now** says "Closes in N days" in amber with words when the shop closes in two days or fewer.
+
+## Amendment (Oct 14, 2026): D151, D152, D153 (ADR 0029)
+
+The job header has no details line (no job number under the title); its white shop pill is replaced by one green
+action (Publish shop on a draft, View shop while selling) and Close or Reopen moves into ⋯ More. Subjects' columns are
+Name with small tags, Class, Photos and Ordered; the floating child panel is replaced by the person's record beside the
+folded list (the classes panel still floats). ADR 0029 lists the calls.

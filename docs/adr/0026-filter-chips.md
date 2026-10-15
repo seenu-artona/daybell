@@ -166,3 +166,9 @@ None: class rename and Home's Selling now were answered on Oct 14 (answers 6 and
 
 The Jobs list shows the job's name only, one line per row: the job number no longer sits under it (here and in
 0025's layout). The number stays searchable and is on the job's own page.
+
+## Amendment (Oct 14, 2026, Seenu; D153, ADR 0029)
+
+Subjects' built-in chips are All, Not photographed (no photos and not Do not photograph) and Not ordered; Possible
+duplicates and No photos move to "+ Add filter" and can be saved (`save_list_filters` takes them). The duplicates
+notice's link still opens `?show=duplicates`.
