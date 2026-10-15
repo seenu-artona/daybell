@@ -1,6 +1,6 @@
 "use client";
 
-import type { ClientsResponse, Job } from "@daybell/api";
+import type { ClientsResponse, Job, JobTemplate, JobTemplatesResponse } from "@daybell/api";
 import { JOB_TYPES, type JobType } from "@daybell/core";
 import { Banner, Button, Field } from "@daybell/ui";
 import { ChevronDown } from "lucide-react";
@@ -11,7 +11,7 @@ import { api } from "@/lib/client-api";
 import { Combobox } from "../combobox";
 import { Dialog, SelectField } from "../dialog";
 import { ClientForm } from "../people/client-form";
-import { ClosingDateField, closesAtFor, closingFieldValue } from "./closing-date";
+import { templateSentenceValues } from "../templates/rules";
 
 type ClientRef = NonNullable<Job["client"]>;
 
@@ -53,9 +53,10 @@ function ClientCombobox({
 }
 
 /**
- * Create or edit a job in one form (D133 form rules): name; picture day | type; client; and under "More options" the
- * internal number (pre-filled with the next one) | subjects expected, and for an existing draft or selling job its
- * closing date (ADR 0021).
+ * Create or edit a job in one dialog (D154; ADR 0029; D133 form rules): name, client, picture day and, for a new job,
+ * the template (the studio's default chosen) with one sentence saying what it will do; under "More options" the job
+ * type, the internal number (pre-filled with the next one) and subjects expected. A job's template is chosen when it is
+ * made, so editing shows it as text. The closing date is changed on the Overview's Shop closes step (D152).
  */
 export function JobForm({
   job,
@@ -69,7 +70,6 @@ export function JobForm({
   const t = useTranslations("app.jobs");
   const ta = useTranslations("app");
   const tc = useTranslations("app.contacts");
-  const tClosing = useTranslations("app.job.closing");
   const text = useApiText();
   const [name, setName] = useState(job?.name ?? "");
   const [pictureDay, setPictureDay] = useState(job?.pictureDay ?? "");
@@ -77,10 +77,8 @@ export function JobForm({
   const [internalNumber, setInternalNumber] = useState(job?.internalNumber ?? "");
   const [type, setType] = useState<JobType>(job?.type ?? "school");
   const [subjects, setSubjects] = useState(job?.subjectsExpected?.toString() ?? "");
-  // The closing date (ADR 0021): only for existing draft and selling jobs; sent only when it changed.
-  const initialClosing = closingFieldValue(job?.closesAt ?? null);
-  const [closing, setClosing] = useState(initialClosing);
-  const showClosing = job !== null && job.status !== "closed";
+  const [templates, setTemplates] = useState<JobTemplate[] | null>(null);
+  const [templateId, setTemplateId] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [newClientName, setNewClientName] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -90,6 +88,19 @@ export function JobForm({
   // (and retries if another job takes it at the same moment).
   const [suggested, setSuggested] = useState<string | null>(null);
   const isNew = job === null;
+
+  // The studio's templates, the default first (it is chosen to start with).
+  useEffect(() => {
+    if (!isNew) return;
+    void api<JobTemplatesResponse>("/job-templates").then((res) => {
+      if (!res.ok) return;
+      setTemplates(res.data.templates);
+      setTemplateId(
+        (current) => current || (res.data.templates.find((tp) => tp.isDefault)?.id ?? ""),
+      );
+    });
+  }, [isNew]);
+  const template = templates?.find((tp) => tp.id === templateId) ?? null;
 
   const suggest = useCallback(async (replace: boolean) => {
     const res = await api<{ internalNumber: string }>("/jobs/next-number");
@@ -105,7 +116,7 @@ export function JobForm({
   function showErrors(fields: Record<string, string>) {
     setErrors(fields);
     // Errors inside "More options" must be seen.
-    if (fields.internalNumber || fields.subjectsExpected || fields.closesAt) setMoreOpen(true);
+    if (fields.internalNumber || fields.subjectsExpected || fields.type) setMoreOpen(true);
   }
 
   async function save(e: FormEvent) {
@@ -126,7 +137,7 @@ export function JobForm({
       ...(usesSuggestion ? {} : { internalNumber }),
       type,
       subjectsExpected: count ? Number(count) : null,
-      ...(showClosing && closing !== initialClosing ? { closesAt: closesAtFor(closing) } : {}),
+      ...(isNew && templateId ? { templateId } : {}),
     };
     const res = await api<{ job: Job }>(isNew ? "/jobs" : `/jobs/${job.id}`, {
       method: isNew ? "POST" : "PATCH",
@@ -161,30 +172,42 @@ export function JobForm({
           error={text.field(errors.name)}
           required
         />
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field
-            label={t("form.pictureDay")}
-            type="date"
-            value={pictureDay}
-            onChange={(e) => setPictureDay(e.target.value)}
-            error={text.field(errors.pictureDay)}
-            required
-          />
-          <SelectField
-            label={t("form.type")}
-            value={type}
-            onChange={(v) => setType(v as JobType)}
-            options={JOB_TYPES.map((jt) => ({ value: jt, label: t(`types.${jt}`) }))}
-            error={text.field(errors.type)}
-            required
-          />
-        </div>
         <ClientCombobox
           value={client}
           onChange={setClient}
           onAddNew={(typed) => setNewClientName(typed)}
           error={text.field(errors.clientId)}
         />
+        <Field
+          label={t("form.pictureDay")}
+          type="date"
+          value={pictureDay}
+          onChange={(e) => setPictureDay(e.target.value)}
+          error={text.field(errors.pictureDay)}
+          required
+        />
+        {isNew ? (
+          <div className="flex flex-col gap-2">
+            <SelectField
+              label={t("form.template")}
+              value={templateId}
+              onChange={setTemplateId}
+              options={(templates ?? []).map((tp) => ({ value: tp.id, label: tp.name }))}
+              error={text.field(errors.templateId)}
+            />
+            {template ? (
+              <p className="m-0 text-sm text-muted">
+                {t("form.templateSentence", templateSentenceValues(template.name, template.rules))}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <span className="text-label text-ink">{t("form.template")}</span>
+            <span className="text-sm">{job.template?.name ?? t("form.noTemplate")}</span>
+            <span className="text-caption text-muted">{t("form.templateFixed")}</span>
+          </div>
+        )}
         <details
           open={moreOpen}
           onToggle={(e) => setMoreOpen(e.currentTarget.open)}
@@ -198,6 +221,14 @@ export function JobForm({
             {t("form.moreOptions")}
           </summary>
           <div className="grid gap-5 pt-3 sm:grid-cols-2">
+            <SelectField
+              label={t("form.type")}
+              value={type}
+              onChange={(v) => setType(v as JobType)}
+              options={JOB_TYPES.map((jt) => ({ value: jt, label: t(`types.${jt}`) }))}
+              error={text.field(errors.type)}
+              required
+            />
             <Field
               label={t("form.internalNumber")}
               value={internalNumber}
@@ -218,16 +249,6 @@ export function JobForm({
               onChange={(e) => setSubjects(e.target.value)}
               error={text.field(errors.subjectsExpected)}
             />
-            {showClosing ? (
-              <div className="sm:col-span-2">
-                <ClosingDateField
-                  label={ta("optionalLabel", { label: tClosing("label") })}
-                  value={closing}
-                  onChange={setClosing}
-                  error={text.field(errors.closesAt)}
-                />
-              </div>
-            ) : null}
           </div>
         </details>
         <div className="flex flex-col-reverse gap-3 pt-1 sm:flex-row sm:justify-end">

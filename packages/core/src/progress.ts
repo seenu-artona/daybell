@@ -209,7 +209,9 @@ export function stepStage(key: ProgressStepKey): ProgressStage {
 }
 
 /** The latest moment (or planned day) among a finished stage's steps, for its folded line ("Done Sep 20"). */
-export function stageDoneOn(stage: ProgressStageView): string | null {
+export function stageDoneOn(stage: {
+  steps: readonly Pick<ProgressStep, "state" | "at" | "planned">[];
+}): string | null {
   const days = stage.steps
     .filter((s) => s.state === "done")
     .map((s) => s.at ?? s.planned)
