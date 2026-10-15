@@ -6,7 +6,7 @@
 -- resets the count; a session holds up to 5 children of one studio for a fixed 30 days, a device up to 3 sessions, a
 -- child at most 10 (sparing bags) and 10 new a day, 3 new known devices a day; closed children show no name; parents
 -- see exactly the photos
--- photo_parent_visible allows, a child's own portraits and their own class's set, nothing for closed, draft or
+-- photo_parent_visible allows, a child's own portraits and their groups' group photos (ADR 0030), nothing for closed, draft or
 -- unavailable children; the bag is priced from the job's current list and refuses what parents may not buy; another
 -- studio's session reads or changes nothing of this one's; nothing writes events or stores a code, name or address.
 begin;
@@ -78,8 +78,8 @@ insert into fx values
   (5,  'e1000000-0000-4000-8000-000000000001', 'ready', 'none', true, 'child', 'c0000000-0000-4000-8000-000000000001', null, null, null, 'auto'),
   (6,  'e1000000-0000-4000-8000-000000000001', 'processing', null, false, 'child', 'c0000000-0000-4000-8000-000000000001', null, null, null, 'auto'),
   (7,  'e1000000-0000-4000-8000-000000000001', 'ready', 'none', false, 'leftovers', null, null, null, null, 'auto'),
-  (8,  'e1000000-0000-4000-8000-000000000001', 'ready', 'none', false, 'class_set', null, 'a1000000-0000-4000-8000-000000000001', null, null, 'auto'),
-  (9,  'e1000000-0000-4000-8000-000000000001', 'ready', 'none', false, 'class_set', null, 'a1000000-0000-4000-8000-000000000002', null, null, 'auto'),
+  (8,  'e1000000-0000-4000-8000-000000000001', 'ready', 'none', false, 'group_photo', null, 'a2000000-0000-4000-8000-000000000001', null, null, 'auto'),
+  (9,  'e1000000-0000-4000-8000-000000000001', 'ready', 'none', false, 'group_photo', null, 'a2000000-0000-4000-8000-000000000002', null, null, 'auto'),
   (10, 'e1000000-0000-4000-8000-000000000001', 'ready', 'unreadable', false, 'child', 'c0000000-0000-4000-8000-000000000001', null, null, null, 'auto'),
   (11, 'e1000000-0000-4000-8000-000000000001', 'ready', 'unreadable', false, 'child', 'c0000000-0000-4000-8000-000000000001', null, null, null, 'manual'),
   (12, 'e1000000-0000-4000-8000-000000000002', 'ready', 'none', false, 'child', 'c0000000-0000-4000-8000-000000000001', null, null, null, 'auto'),
@@ -100,11 +100,24 @@ select pg_temp.pid(f.n), b.studio_id, b.job_id, b.id, b.seq, f.status::public.ph
   case when f.status = 'ready' then 1200 end, case when f.status = 'ready' then 1500 end, f.qr,
   case when f.binned then now() end, case when f.binned then b.created_by end, b.created_by
 from fx f join public.upload_batches b on b.id = f.batch::uuid;
-insert into public.photo_tags (photo_id, studio_id, job_id, place, child_id, group_id, card_id, flag, source, tagged_by)
-select pg_temp.pid(f.n), p.studio_id, p.job_id, f.place::public.photo_place, f.child::uuid, f.grp::uuid,
+insert into public.photo_tags (photo_id, studio_id, job_id, place, child_id, card_id, flag, source, tagged_by)
+select pg_temp.pid(f.n), p.studio_id, p.job_id, f.place::public.photo_place, f.child::uuid,
   f.card::uuid, f.flag::public.photo_flag, f.source,
   case when f.source = 'manual' then '11111111-1111-4111-8111-111111111111'::uuid end
 from fx f join public.photos p on p.id = pg_temp.pid(f.n);
+-- Two photo groups (ADR 0030): Room 1's (Ava, her brother and Leo) and Room 2's (Eli), each showing one group photo.
+insert into public.photo_groups (id, studio_id, job_id, name) values
+  ('a2000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'Room 1 photo'),
+  ('a2000000-0000-4000-8000-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'Room 2 photo');
+insert into public.photo_group_members (studio_id, job_id, group_id, child_id)
+select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', v.g::uuid, v.c::uuid
+from (values ('a2000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001'),
+             ('a2000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000002'),
+             ('a2000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000004'),
+             ('a2000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-000000000006')) v (g, c);
+insert into public.photo_group_photos (studio_id, job_id, group_id, photo_id)
+select p.studio_id, p.job_id, f.grp::uuid, p.id
+from fx f join public.photos p on p.id = pg_temp.pid(f.n) where f.place = 'group_photo';
 update public.upload_batches set tagged_round = tag_round;
 update public.upload_batches set tag_round = tag_round + 1 where id = 'e1000000-0000-4000-8000-000000000002';
 update public.jobs set status = 'selling' where id in ('a0000000-0000-4000-8000-000000000001',
@@ -188,7 +201,7 @@ select is((select count(*) from shop_fns, unnest(array['anon', 'authenticated'])
   where has_function_privilege(r, f, 'execute')), 0::bigint, 'browsers and logged-out visitors can run none');
 select ok((select bool_and(has_function_privilege('service_role', f, 'execute')) from shop_fns),
   'the service role runs them all');
-select is((select count(*) from unnest(array['app.parent_visible_photos(uuid, uuid, uuid)',
+select is((select count(*) from unnest(array['app.parent_visible_photos(uuid, uuid, boolean)',
     'app.shop_child_state(uuid)', 'app.shop_code_failed(text, text, integer, interval, integer)',
     'app.shop_session_row(text, boolean)', 'app.shop_breaker_failed(integer)',
     'app.shop_issue_device(text, text, text)', 'app.shop_mark_known(text, uuid)',
@@ -443,17 +456,18 @@ select is(public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-00000
       jsonb_build_object('id', pg_temp.pid(1), 'width', 1200, 'height', 1500),
       jsonb_build_object('id', pg_temp.pid(2), 'width', 1200, 'height', 1500),
       jsonb_build_object('id', pg_temp.pid(11), 'width', 1200, 'height', 1500)),
-    'class_photos', jsonb_build_array(jsonb_build_object('id', pg_temp.pid(8), 'width', 1200, 'height', 1500))),
-  'Ava sees her own visible portraits in tagging order and her class''s set; no card, other-card, flagged, binned, processing, Leftovers, blank-card, unconfirmed or stale photo');
+    'group_photos', jsonb_build_array(jsonb_build_object('id', pg_temp.pid(8), 'width', 1200, 'height', 1500))),
+  'Ava sees her own visible portraits in tagging order and her group''s group photo; no card, other-card, flagged, binned, processing, Leftovers, blank-card, unconfirmed or stale photo');
 select is((select jsonb_agg(x -> 'id') from jsonb_array_elements(
-    public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000006') -> 'class_photos') x),
-  jsonb_build_array(pg_temp.pid(9)), 'a child of Room 2 sees Room 2''s set, not Room 1''s');
+    public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000006') -> 'group_photos') x),
+  jsonb_build_array(pg_temp.pid(9)), 'a member of Room 2''s group sees its photo, not Room 1''s');
 select is((select jsonb_agg(x -> 'id') from jsonb_array_elements(
     public.shop_gallery(pg_temp.h('tok-a'), 'c0000000-0000-4000-8000-000000000002') -> 'portraits') x),
   jsonb_build_array(pg_temp.pid(14)), 'her brother sees only his own portraits');
-select is((select count(*) from public.photos p left join public.photo_tags t on t.photo_id = p.id
+select is((select count(*) from public.photos p
   where public.photo_parent_visible(p.id) is distinct from exists (
-    select 1 from app.parent_visible_photos(p.job_id, t.child_id, t.group_id) v where v.id = p.id)), 0::bigint,
+    select 1 from public.children c cross join lateral app.parent_visible_photos(p.job_id, c.id, true) v
+    where c.job_id = p.job_id and v.id = p.id)), 0::bigint,
   'parent_visible_photos agrees with photo_parent_visible on every photo');
 select is((select count(*) from public.photos p where public.photo_parent_visible(p.id)), 11::bigint,
   '(11 of the 20 photos are visible to someone)');
@@ -519,7 +533,7 @@ select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 1,
 select is((select quantity from public.shop_cart_lines where photo_id = pg_temp.pid(1)), 3,
   'the same package and pose is one line of 3');
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 8, 1), 'P0001 photo_unavailable',
-  'a class photo can''t be a pose (call 8)');
+  'a group photo can''t be a pose (call 8; C5)');
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 14, 1), 'P0001 photo_unavailable',
   'nor her brother''s photo');
 select is(pg_temp.add('tok-a', 'c0000000-0000-4000-8000-000000000001', 'pkg', 4, 1), 'P0001 photo_unavailable',

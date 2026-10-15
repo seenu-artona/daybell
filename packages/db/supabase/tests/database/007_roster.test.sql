@@ -4,7 +4,7 @@
 -- the import RPC, the roster list with duplicate flags, and events without personal data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(101);
+select plan(102);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -322,6 +322,9 @@ select pg_temp.as_user('44444444-4444-4444-8444-444444444444') as signed_in;
 select is((select count(*) from public.children), 3::bigint, 'staff see the studio''s children');
 select is((public.list_children((select id from ids where k = 'job')) ->> 'total')::int, 3,
   'staff can list the roster');
+select is((select count(*) from jsonb_array_elements(public.list_children((select id from ids where k = 'job')) -> 'children') c
+           where c -> 'photo_groups' = '[]'::jsonb), 3::bigint,
+  'each child comes with their photo groups (none yet; ADR 0030), and a class is not a group');
 select throws_ok($$
   insert into public.children (studio_id, job_id, first_name, last_name, access_code_hash, access_code_ciphertext)
   values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (select id from ids where k = 'job'), 'Staff', 'Child',

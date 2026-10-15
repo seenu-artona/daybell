@@ -4,7 +4,7 @@
 -- chips go with their job and with their person's membership; the event holds the page and the count only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(40);
+select plan(43);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -34,6 +34,9 @@ insert into public.clients (id, studio_id, name) values
 insert into public.job_groups (id, studio_id, job_id, name) values
   ('d0000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'Room 1'),
   ('d0000000-0000-4000-8000-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000003', 'Room 3');
+-- A photo group in job A1 (ADR 0030).
+insert into public.photo_groups (id, studio_id, job_id, name) values
+  ('d9000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'Choir');
 
 create function pg_temp.as_user(p_user uuid) returns boolean language sql as $$
   select set_config('request.jwt.claims', jsonb_build_object('sub', p_user, 'role', 'authenticated')::text, true)
@@ -87,6 +90,15 @@ select lives_ok($$
 select is((select count(*) from public.list_filter_chips
   where page = 'job_subjects' and job_id = 'a0000000-0000-4000-8000-000000000001'), 2::bigint,
   'saving one job''s chips doesn''t touch another job''s');
+select lives_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_photos',
+    'a0000000-0000-4000-8000-000000000001', '[{"key": "group", "value": "d9000000-0000-4000-8000-000000000001"}]') $$,
+  'a job''s Photos takes one of its groups (ADR 0030)');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_photos',
+    'a0000000-0000-4000-8000-000000000001', '[{"key": "class", "value": "d0000000-0000-4000-8000-000000000001"}]') $$,
+  '22023', 'list_filters_invalid', 'but no class chip');
+select throws_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'job_subjects',
+    'a0000000-0000-4000-8000-000000000003', '[{"key": "group", "value": "d9000000-0000-4000-8000-000000000001"}]') $$,
+  '22023', 'list_filters_record', 'and another job''s group is refused on Subjects');
 select lives_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'orders', null, '[]') $$,
   'an empty list clears a page');
 select lives_ok($$ select public.save_list_filters('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'orders', null,
@@ -161,7 +173,7 @@ where studio_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and user_id = '55555555
 select is((select count(*) from public.list_filter_chips where user_id = '55555555-5555-4555-8555-555555555555'),
   0::bigint, 'and a person who leaves the studio takes theirs');
 select is((select count(*) from public.list_filter_chips where user_id = '11111111-1111-4111-8111-111111111111'),
-  13::bigint, 'the owner''s other chips stay (Jobs 8, job A1''s Subjects 2, Orders 2, job A3''s Orders 1)');
+  14::bigint, 'the owner''s other chips stay (Jobs 8, job A1''s Subjects 2 and Photos 1, Orders 2, job A3''s Orders 1)');
 
 -- ── Events ────────────────────────────────────────────────────────────────────────────────────────────────────────
 select results_eq($$

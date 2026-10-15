@@ -5,7 +5,7 @@
 -- changes nothing.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(188);
+select plan(187);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -80,7 +80,7 @@ create function pg_temp.p(n int) returns uuid language sql as $$
 create function pg_temp.w(n int, place text, child uuid default null, grp uuid default null, card uuid default null,
   flag text default null) returns jsonb language sql as $$
   select jsonb_strip_nulls(jsonb_build_object('photo_id', pg_temp.p(n), 'place', place, 'child_id', child,
-    'group_id', grp, 'card_id', card, 'flag', flag)) $$;
+    'card_id', card, 'flag', flag)) $$;
 create function pg_temp.round() returns bigint language sql as $$
   select tag_round from public.upload_batches where id = 'a2000000-0000-4000-8000-000000000001' $$;
 create function pg_temp.place(n int) returns text language sql as $$
@@ -97,9 +97,9 @@ select ok((select bool_and(c.relrowsecurity) from pg_class c
 select ok((select condeferrable and not condeferred from pg_constraint where conname = 'qr_cards_child_fk'),
   'a card''s child FK can be deferred for claiming a blank card, and is checked at once otherwise');
 select has_column('public', 'photos', 'qr_kind', 'photos record what the worker read');
-select has_column('public', 'upload_batches', 'group_id', 'an upload can be a class photo set');
+select has_column('public', 'upload_batches', 'kind', 'an upload is individual photos or group photos (ADR 0030)');
 select is((select count(*) from unnest(array[
-    'public.create_upload_batch(uuid, uuid, uuid)', 'public.tagging_inputs(uuid)',
+    'public.create_upload_batch(uuid, uuid, text, uuid, uuid)', 'public.tagging_inputs(uuid)',
     'public.apply_batch_tags(uuid, bigint, jsonb)', 'public.batches_to_tag(int)', 'public.batches_of_photos(uuid[])',
     'public.move_photos(uuid, uuid, uuid[], jsonb)', 'public.confirm_photos(uuid, uuid, uuid[], boolean)',
     'public.blank_card_code(uuid, uuid, uuid)', 'public.claim_blank_card(uuid, uuid, uuid, jsonb)',
@@ -110,7 +110,7 @@ select is((select count(*) from unnest(array[
   where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
   0::bigint, 'no tagging write, worker or system function is executable by browsers');
 select is((select count(*) from unnest(array['public.job_tagging_overview(uuid)',
-    'public.tagging_photos(uuid, text, uuid, uuid, int)', 'public.tagging_no_photos(uuid)',
+    'public.tagging_photos(uuid, text, uuid, uuid, int)', 'public.photo_people(uuid, uuid, uuid, int, int)',
     'public.tagging_blank_cards(uuid)', 'public.photo_parent_visible(uuid)']) f
   where has_function_privilege('anon', f, 'execute')), 0::bigint, 'logged-out visitors run no tagging read');
 select ok((select tag_round > tagged_round from public.upload_batches where id = 'a2000000-0000-4000-8000-000000000001'),
@@ -286,12 +286,13 @@ select is((select data - 'photo_ids' from public.events where type = 'photos.mov
 select is(public.move_photos('33333333-3333-4333-8333-333333333333', 'a0000000-0000-4000-8000-000000000001',
   array[pg_temp.p(1)], '{"kind":"child","id":"c1000000-0000-4000-8000-000000000002"}'), 0,
   'moving it there again changes nothing');
+select throws_ok($$ select public.move_photos('33333333-3333-4333-8333-333333333333',
+  'a0000000-0000-4000-8000-000000000001', array[pg_temp.p(4)],
+  '{"kind":"class_set","id":"e1000000-0000-4000-8000-000000000001"}') $$, '22023', null,
+  'a class is no longer a place for photos (D156, C1)');
 select is(public.move_photos('33333333-3333-4333-8333-333333333333', 'a0000000-0000-4000-8000-000000000001',
-  array[pg_temp.p(4)], '{"kind":"class_set","id":"e1000000-0000-4000-8000-000000000001"}'), 1,
-  'a photo can go to a class photo set');
-select ok(public.photo_parent_visible(pg_temp.p(4)), 'which every child of the class will see (answer 3)');
-select is(public.move_photos('33333333-3333-4333-8333-333333333333', 'a0000000-0000-4000-8000-000000000001',
-  array[pg_temp.p(4)], '{"kind":"child","id":"c1000000-0000-4000-8000-000000000001"}'), 1, 'and back to Maya');
+  array[pg_temp.p(4)], '{"kind":"child","id":"c1000000-0000-4000-8000-000000000001"}'), 1, 'a photo goes to Maya');
+select ok(public.photo_parent_visible(pg_temp.p(4)), 'which her parents will see');
 
 -- ── Confirming flagged photos (plan answer 1) ─────────────────────────────────────────────────────────────────────
 select throws_ok($$ select public.confirm_photos('44444444-4444-4444-8444-444444444444',
@@ -462,13 +463,16 @@ select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as owner_a;
 select is((select row(tagging_pending, leftovers, flagged, blank_cards_pending, tagging_reviewed)::text
            from public.job_checklist_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', array['a0000000-0000-4000-8000-000000000001'::uuid])),
   '(f,0,0,0,t)', 'the checklist sees a reviewed, clean job');
-select is((select (public.job_tagging_overview('a0000000-0000-4000-8000-000000000001') ->> 'no_photos')::int), 0,
-  'every child has photos');
-select is((select jsonb_array_length(public.tagging_children('a0000000-0000-4000-8000-000000000001',
-  'e1000000-0000-4000-8000-000000000001', false, null, 100, 12))), 3, 'Room 4''s album lists its three children');
-select is((select x -> 'strip' -> 0 ->> 'place' from jsonb_array_elements(public.tagging_children(
-  'a0000000-0000-4000-8000-000000000001', 'e1000000-0000-4000-8000-000000000001', false, null, 100, 12)) x
-  where x ->> 'id' = 'c1000000-0000-4000-8000-000000000001'), 'card', 'Maya''s strip starts with her card photo');
+select is((select jsonb_agg(x ->> 'last_name' order by o) from jsonb_array_elements(public.photo_people(
+  'a0000000-0000-4000-8000-000000000001', null, null, 50, 12) -> 'people') with ordinality y (x, o)),
+  '["Chen", "Johnson", "New"]'::jsonb, 'People lists everyone with photos by last name (C15)');
+select is((select x -> 'strip' -> 0 ->> 'place' from jsonb_array_elements(public.photo_people(
+  'a0000000-0000-4000-8000-000000000001', null, null, 50, 12) -> 'people') x
+  where x ->> 'id' = 'c1000000-0000-4000-8000-000000000001'), 'card', 'Maya''s line starts with her card photo');
+select is((select (x ->> 'photos') || '+' || (x ->> 'card_photos') from jsonb_array_elements(public.photo_people(
+  'a0000000-0000-4000-8000-000000000001', null, null, 50, 12) -> 'people') x
+  where x ->> 'id' = 'c1000000-0000-4000-8000-000000000001'), '2+3',
+  'and counts her own photos apart from her card photos (5 in all, as below)');
 select is((select count(*) from public.tagging_photos('a0000000-0000-4000-8000-000000000001', 'child',
   'c1000000-0000-4000-8000-000000000001', null, 100)), 5::bigint, 'Maya has her three photos and her two card photos');
 
@@ -495,14 +499,16 @@ select is((select x ->> 'binned' from jsonb_array_elements(
            where x ->> 'id' = pg_temp.p(6)::text), 'true',
   'tagging still reads a binned photo, marked binned, so it still marks where cards were (security review 1)');
 
--- A class photo upload must name one of the job's classes.
+-- A group upload must name one of the job's groups (ADR 0030); a class is not a group.
+insert into public.photo_groups (id, studio_id, job_id, name) values
+  ('e9000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'Choir');
 select throws_ok($$ select public.create_upload_batch('33333333-3333-4333-8333-333333333333',
-  'a0000000-0000-4000-8000-000000000001', 'e2000000-0000-4000-8000-000000000001') $$, '22023', null,
-  'another job''s class is refused');
-create temp table class_batch as select public.create_upload_batch('33333333-3333-4333-8333-333333333333',
-  'a0000000-0000-4000-8000-000000000001', 'e1000000-0000-4000-8000-000000000001') as id;
-select is((select group_id from public.upload_batches where id = (select id from class_batch)),
-  'e1000000-0000-4000-8000-000000000001'::uuid, 'a class photo upload remembers its class (answer 3)');
+  'a0000000-0000-4000-8000-000000000001', 'group', 'e1000000-0000-4000-8000-000000000001') $$, 'P0001',
+  'group_not_in_job', 'a class is not a group');
+create temp table group_batch as select public.create_upload_batch('33333333-3333-4333-8333-333333333333',
+  'a0000000-0000-4000-8000-000000000001', 'group', 'e9000000-0000-4000-8000-000000000001') as id;
+select is((select kind || ':' || photo_group_id from public.upload_batches where id = (select id from group_batch)),
+  'group:e9000000-0000-4000-8000-000000000001', 'a group upload remembers its group');
 
 -- ── Another studio sees nothing (D96) ─────────────────────────────────────────────────────────────────────────────
 reset role;
@@ -514,9 +520,8 @@ select is((select count(*) from public.tagging_photos('a0000000-0000-4000-8000-0
   'c1000000-0000-4000-8000-000000000001', null, 100)), 0::bigint, 'nor A''s photos by child');
 select is((select (public.job_tagging_overview('a0000000-0000-4000-8000-000000000001') ->> 'photos')::int), 0,
   'nor A''s counts');
-select is(public.tagging_children('a0000000-0000-4000-8000-000000000001', 'e1000000-0000-4000-8000-000000000001',
-  false, null, 100, 12), '[]'::jsonb, 'nor A''s albums');
-select is(public.tagging_no_photos('a0000000-0000-4000-8000-000000000001'), '[]'::jsonb, 'nor its missing children');
+select is(public.photo_people('a0000000-0000-4000-8000-000000000001', null, null, 50, 12),
+  '{"total": 0, "people": []}'::jsonb, 'nor A''s people');
 select is(public.tagging_blank_cards('a0000000-0000-4000-8000-000000000001'), '[]'::jsonb, 'nor its blank cards');
 select is((select count(*) from public.job_checklist_facts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   array['a0000000-0000-4000-8000-000000000001'::uuid])), 0::bigint, 'nor its checklist facts');
