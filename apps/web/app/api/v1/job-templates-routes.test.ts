@@ -84,6 +84,7 @@ const TEMPLATE_ROW = {
   shop_closes_days: 10,
   price_list_id: null,
   deliver_to_school: false,
+  class_label: "Class",
   created_at: "2026-10-14T00:00:00Z",
   updated_at: "2026-10-14T00:00:00Z",
 };
@@ -209,6 +210,8 @@ describe("POST /job-templates", () => {
       shop_opens: "after_picture_day",
       shop_opens_days: 7,
       shop_closes_days: 10,
+      // New jobs call the class field "Class" unless the template says otherwise (ADR 0030, call 29).
+      class_label: "Class",
     });
     expect((await res.json()).template.id).toBe(TEMPLATE);
   });
@@ -295,6 +298,26 @@ describe("one template", () => {
       shop_closes_days: null,
       shop_opens_days: null,
     });
+  });
+
+  it("names the class field for new jobs, trimmed, 1 to 30 characters (ADR 0030, call 29)", async () => {
+    const db = fakeDatabase({
+      list_job_templates: [DEFAULT_ROW, TEMPLATE_ROW],
+      job_templates: [{ id: TEMPLATE }],
+    });
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("owner"), userId: "u" });
+    const bad = await one.PATCH(send("PATCH", { classLabel: "x".repeat(31) }), ctx(TEMPLATE));
+    expect((await bad.json()).error.fields).toEqual({ classLabel: "validation.classLabel" });
+    expect(writes(db.calls)).toEqual([]);
+    const ok = await one.PATCH(send("PATCH", { classLabel: " Homeroom " }), ctx(TEMPLATE));
+    expect(ok.status).toBe(200);
+    expect(writes(db.calls)[0]?.ops.find(([op]) => op === "update")?.[1][0]).toMatchObject({
+      class_label: "Homeroom",
+    });
+    scope.mockResolvedValue({ supabase: db.supabase, studio: as("photographer"), userId: "u" });
+    expect((await one.PATCH(send("PATCH", { classLabel: "Team" }), ctx(TEMPLATE))).status).toBe(
+      403,
+    );
   });
 
   it("the default can't be deleted; another can", async () => {

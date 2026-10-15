@@ -1,16 +1,17 @@
 "use client";
 
-import type { Group, GroupsResponse } from "@daybell/api";
 import { Button, Card, CardRow, IconButton } from "@daybell/ui";
 import { FolderOpen, Images, RotateCcw, Square, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
+import { MENU_ROW } from "../../../popover";
 import {
   type DropFile,
   filesFromDrop,
   filesFromInput,
   putPart,
+  type UploadChoice,
   type UploadProgress,
   UploadRun,
   whenOnline,
@@ -38,8 +39,9 @@ const ANNOUNCE_MS = 5000;
  * The Photos tab's upload sheet (D39, D91, D140; ADR 0016): a drop zone that takes whole folders, and two buttons for
  * people who don't drag (Choose folder, Choose photos). Each drop becomes an upload with its progress in words and a
  * bar, read out politely and not too often. Uploads keep going while the sheet is closed; leaving the page warns.
- * First, what the photos are (ADR 0018; Seenu, answer 3): individual photos, tagged to children by their QR cards, or a
- * class photo for one of the job's classes, which every child of that class will see.
+ * First, what the photos are (D156; ADR 0030): individual photos, split by their QR cards as each upload finishes,
+ * optionally adding everyone in the upload to a group (C7); or group photos for one group, which every member sees.
+ * Other ways to upload are listed and marked Soon (C14).
  */
 export function UploadSheet({
   jobId,
@@ -47,6 +49,8 @@ export function UploadSheet({
   setRuns,
   onClose,
   onUploaded,
+  groups,
+  presetGroupId = null,
 }: {
   jobId: string;
   runs: RunView[];
@@ -54,9 +58,14 @@ export function UploadSheet({
   onClose: () => void;
   /** An upload finished: the page reloads its photos and the job's counts. */
   onUploaded: () => void;
+  /** The job's groups (by name); null while they load. */
+  groups: readonly { id: string; name: string }[] | null;
+  /** Opened from a group's page: group photos for that group (D156: "uploaded into a group"). */
+  presetGroupId?: string | null;
 }) {
   const t = useTranslations("app.photos.uploader");
   const tc = useTranslations("app.photos.conflicts");
+  const tg = useTranslations("app.photos.groups");
   const headingId = useId();
   const folderInput = useRef<HTMLInputElement>(null);
   const photosInput = useRef<HTMLInputElement>(null);
@@ -66,27 +75,25 @@ export function UploadSheet({
   const lastAnnounced = useRef(0);
   const nextId = useRef(1);
   const kindName = useId();
-  const classSelect = useId();
-  const [kind, setKind] = useState<"individual" | "classPhoto">("individual");
-  const [groupId, setGroupId] = useState("");
-  const [groups, setGroups] = useState<Group[]>([]);
-
-  useEffect(() => {
-    let live = true;
-    void api<GroupsResponse>(`/jobs/${encodeURIComponent(jobId)}/groups`).then((res) => {
-      if (live && res.ok) setGroups(res.data.groups);
-    });
-    return () => {
-      live = false;
-    };
-  }, [jobId]);
+  const groupSelect = useId();
+  const addSelect = useId();
+  const individualHint = useId();
+  const groupHint = useId();
+  const [kind, setKind] = useState<UploadChoice["kind"]>(presetGroupId ? "group" : "individual");
+  const [groupId, setGroupId] = useState(presetGroupId ?? "");
+  const [addToGroupId, setAddToGroupId] = useState("");
+  const list = groups ?? [];
 
   function start(files: DropFile[]) {
     setNotice("");
-    if (kind === "classPhoto" && !groupId) {
-      setNotice(t("chooseClassFirst"));
+    if (kind === "group" && !groupId) {
+      setNotice(t("chooseGroupFirst"));
       return;
     }
+    const choice: UploadChoice =
+      kind === "group"
+        ? { kind: "group", groupId }
+        : { kind: "individual", addToGroupId: addToGroupId || null };
     const hasher = workerHasher();
     const id = nextId.current++;
     const run = new UploadRun(
@@ -108,7 +115,7 @@ export function UploadSheet({
           setAnnouncement(t("announce", { uploaded: progress.uploaded, total: progress.total }));
         }
       },
-      kind === "classPhoto" ? { groupId } : {},
+      choice,
     );
     if (run.progress.total === 0) {
       setNotice(t("nothing"));
@@ -124,6 +131,8 @@ export function UploadSheet({
 
   const problem = (code: string | null) => {
     if (!code) return null;
+    // The group was deleted meanwhile (ADR 0030).
+    if (code === "groups.notInJob") return tg("conflicts.notInJob");
     const key = code.startsWith("photos.") ? code.slice("photos.".length) : null;
     if (
       key &&
@@ -152,38 +161,63 @@ export function UploadSheet({
               type="radio"
               name={kindName}
               checked={kind === "individual"}
+              aria-describedby={individualHint}
               onChange={() => setKind("individual")}
               className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             />
             {t("kind.individual")}
           </label>
+          <p id={individualHint} className="m-0 pl-8 text-caption text-muted">
+            {t("kind.individualHint")}
+          </p>
+          {kind === "individual" && list.length > 0 ? (
+            <div className="flex flex-col gap-1 pl-8">
+              <label htmlFor={addSelect} className="text-label font-semibold text-ink">
+                {t("kind.addToGroup")}
+              </label>
+              <select
+                id={addSelect}
+                value={addToGroupId}
+                onChange={(e) => setAddToGroupId(e.target.value)}
+                className={SELECT}
+              >
+                <option value="">{t("kind.noGroup")}</option>
+                {list.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
             <input
               type="radio"
               name={kindName}
-              checked={kind === "classPhoto"}
-              disabled={groups.length === 0}
-              onChange={() => setKind("classPhoto")}
+              checked={kind === "group"}
+              disabled={list.length === 0}
+              aria-describedby={groupHint}
+              onChange={() => setKind("group")}
               className="size-5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             />
-            {t("kind.classPhoto")}
+            {t("kind.group")}
           </label>
-          {groups.length === 0 ? (
-            <p className="m-0 text-caption text-muted">{t("kind.noClasses")}</p>
-          ) : null}
-          {kind === "classPhoto" ? (
+          <p id={groupHint} className="m-0 pl-8 text-caption text-muted">
+            {list.length === 0 && groups !== null ? t("kind.noGroups") : t("kind.groupHint")}
+          </p>
+          {kind === "group" ? (
             <div className="flex flex-col gap-1 pl-8">
-              <label htmlFor={classSelect} className="text-label font-semibold text-ink">
-                {t("kind.class")}
+              <label htmlFor={groupSelect} className="text-label font-semibold text-ink">
+                {t("kind.groupSelect")}
               </label>
               <select
-                id={classSelect}
+                id={groupSelect}
                 value={groupId}
                 onChange={(e) => setGroupId(e.target.value)}
-                className="min-h-11 max-w-80 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className={SELECT}
               >
-                <option value="">{t("kind.chooseClass")}</option>
-                {groups.map((g) => (
+                <option value="">{t("kind.chooseGroup")}</option>
+                {list.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
                   </option>
@@ -254,6 +288,8 @@ export function UploadSheet({
         <p role="status" aria-live="polite" className="sr-only">
           {announcement}
         </p>
+
+        <SoonTools />
 
         {runs.length > 0 ? (
           <ul aria-label={t("title")} className="m-0 list-none p-0">
@@ -332,6 +368,36 @@ export function UploadSheet({
         ) : null}
       </section>
     </Card>
+  );
+}
+
+const SELECT =
+  "min-h-11 max-w-80 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
+
+/** Other ways to upload (C14): listed, marked Soon, not available; in the tab order so they are heard (D91). */
+function SoonTools() {
+  const t = useTranslations("app.photos.uploader.tools");
+  const tools = ["desktop", "ftp", "lightroom", "folderPerGroup"] as const;
+  return (
+    <section aria-label={t("label")} className="flex flex-col gap-1">
+      <h3 className="m-0 text-label font-semibold text-muted">{t("label")}</h3>
+      <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1 p-0">
+        {tools.map((tool) => (
+          <li key={tool}>
+            <button
+              type="button"
+              aria-disabled="true"
+              className={`${MENU_ROW} cursor-default text-muted hover:bg-transparent`}
+            >
+              <span className="flex-1">{t(tool)}</span>{" "}
+              <span className="rounded-full border border-line-strong px-2 text-micro text-muted">
+                {t("soon")}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -33,7 +33,7 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
   const current = await loadTemplate(supabase, studio.id, id);
-  const { name, priceListId, deliverToSchool, ...rulePatch } = patch;
+  const { name, priceListId, deliverToSchool, classLabel, ...rulePatch } = patch;
   const rules = withRules(current.rules, rulePatch);
   assertRulesWhole(rules);
   await assertPriceListInStudio(supabase, studio.id, priceListId ?? undefined);
@@ -41,6 +41,7 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
     ...(name !== undefined ? { name } : {}),
     ...(priceListId !== undefined ? { price_list_id: priceListId } : {}),
     ...(deliverToSchool !== undefined ? { deliver_to_school: deliverToSchool } : {}),
+    ...(classLabel !== undefined ? { class_label: classLabel } : {}),
     ...rulesToDb({ ...rulePatch, shopOpensDays: rules.shopOpensDays }),
   };
   const rows = check(

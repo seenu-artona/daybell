@@ -66,7 +66,7 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   await expect(sheet.getByText("Done: 2 photos added", { exact: true })).toBeVisible({
     timeout: 90_000,
   });
-  await page.goto(`/app/jobs/${jobId}/photos/review`);
+  await page.goto(`/app/jobs/${jobId}/photos?show=review`);
   await expect(
     main.getByText("2 photos · 0 in Leftovers · 0 to check", { exact: true }),
   ).toBeVisible({

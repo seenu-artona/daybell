@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRows,
   canEditRoster,
-  countNewGroups,
+  countNewClasses,
   type DuplicateEntry,
   findDuplicates,
   guessColumns,
@@ -40,6 +40,16 @@ describe("guessing columns", () => {
     expect(normalizeHeader("  First_Name ")).toBe("first name");
   });
 
+  it("reads the job's own name for the class field as the class column (ADR 0030, call 29)", () => {
+    expect(guessColumns(["First name", "Cohort"])).toEqual({ 0: "firstName", 1: null });
+    expect(guessColumns(["First name", "Cohort"], "Cohort")).toEqual({
+      0: "firstName",
+      1: "class",
+    });
+    // The job's word wins over another column that only looks like a class.
+    expect(guessColumns(["Teacher", "Pod"], "Pod")).toEqual({ 0: null, 1: "class" });
+  });
+
   it("maps a typical export", () => {
     expect(
       guessColumns([
@@ -55,7 +65,7 @@ describe("guessing columns", () => {
     ).toEqual({
       0: "firstName",
       1: "lastName",
-      2: "group",
+      2: "class",
       3: "studentId",
       4: "grade",
       5: "parentEmail",
@@ -74,8 +84,8 @@ describe("guessing columns", () => {
   });
 
   it("never assigns a target twice, and earlier synonyms win", () => {
-    // "class" comes before "teacher" in the group list, so Class wins and Teacher is left out.
-    expect(guessColumns(["Teacher", "Class"])).toEqual({ 0: null, 1: "group" });
+    // "class" comes before "teacher" in the class list, so Class wins and Teacher is left out.
+    expect(guessColumns(["Teacher", "Class"])).toEqual({ 0: null, 1: "class" });
     expect(guessColumns(["First", "First Name"])).toEqual({ 0: null, 1: "firstName" });
     const twice = guessColumns(["Email", "Email"]);
     expect(Object.values(twice).filter((t) => t === "parentEmail")).toHaveLength(1);
@@ -101,7 +111,7 @@ describe("buildRows", () => {
       {
         0: "firstName",
         1: "lastName",
-        2: "group",
+        2: "class",
         3: "studentId",
         4: "grade",
         5: "parentEmail",
@@ -112,7 +122,7 @@ describe("buildRows", () => {
       {
         firstName: "Maya",
         lastName: "Van der Berg",
-        group: "4B",
+        class: "4B",
         studentId: null,
         grade: null,
         parentEmail: "maya.parent@example.com",
@@ -127,7 +137,7 @@ describe("buildRows", () => {
       {
         firstName: "Liam",
         lastName: "",
-        group: null,
+        class: null,
         studentId: null,
         grade: null,
         parentEmail: null,
@@ -142,7 +152,7 @@ const entry = (e: Partial<DuplicateEntry>): DuplicateEntry => ({
   firstName: "Maya",
   lastName: "Johnson",
   studentId: null,
-  group: null,
+  class: null,
   ...e,
 });
 
@@ -163,19 +173,19 @@ describe("duplicates", () => {
   it("match the same name in the same class without IDs", () => {
     expect(
       findDuplicates([
-        entry({ group: "4B" }),
-        entry({ group: " 4b ", firstName: "MAYA", lastName: "john son" }),
+        entry({ class: "4B" }),
+        entry({ class: " 4b ", firstName: "MAYA", lastName: "john son" }),
       ]),
     ).toEqual(new Set([0, 1]));
   });
 
   it("don't match the same name in different classes", () => {
-    expect(findDuplicates([entry({ group: "4B" }), entry({ group: "4C" })]).size).toBe(0);
+    expect(findDuplicates([entry({ class: "4B" }), entry({ class: "4C" })]).size).toBe(0);
   });
 
   it("treat no class as a class", () => {
-    expect(findDuplicates([entry({}), entry({ group: "" })])).toEqual(new Set([0, 1]));
-    expect(findDuplicates([entry({}), entry({ group: "4B" })]).size).toBe(0);
+    expect(findDuplicates([entry({}), entry({ class: "" })])).toEqual(new Set([0, 1]));
+    expect(findDuplicates([entry({}), entry({ class: "4B" })]).size).toBe(0);
   });
 
   it("compare accented names case-insensitively", () => {
@@ -188,7 +198,7 @@ describe("duplicates", () => {
 const row = (r: Partial<RosterRowDraft>): RosterRowDraft => ({
   firstName: "Maya",
   lastName: "Johnson",
-  group: null,
+  class: null,
   studentId: null,
   grade: null,
   parentEmail: null,
@@ -199,10 +209,10 @@ const row = (r: Partial<RosterRowDraft>): RosterRowDraft => ({
 
 describe("planRosterImport", () => {
   const existing = [
-    { id: "c1", studentId: "S-1", firstName: "Maya", lastName: "Johnson", groupName: "4B" },
-    { id: "c2", studentId: "S-2", firstName: "Liam", lastName: "Chen", groupName: "4B" },
-    { id: "c3", studentId: "S-2", firstName: "Lena", lastName: "Chen", groupName: "4C" },
-    { id: "c4", studentId: null, firstName: "Ava", lastName: "Patel", groupName: null },
+    { id: "c1", studentId: "S-1", firstName: "Maya", lastName: "Johnson", className: "4B" },
+    { id: "c2", studentId: "S-2", firstName: "Liam", lastName: "Chen", className: "4B" },
+    { id: "c3", studentId: "S-2", firstName: "Lena", lastName: "Chen", className: "4C" },
+    { id: "c4", studentId: null, firstName: "Ava", lastName: "Patel", className: null },
   ];
 
   it("updates the one child with a matching student ID", () => {
@@ -235,7 +245,7 @@ describe("planRosterImport", () => {
   it("flags rows that duplicate a child already on the roster", () => {
     const plan = planRosterImport(existing, [
       row({ firstName: "ava", lastName: "PATEL" }),
-      row({ firstName: "Ava", lastName: "Patel", group: "4B" }),
+      row({ firstName: "Ava", lastName: "Patel", class: "4B" }),
     ]);
     expect(plan.actions).toEqual([{ kind: "add" }, { kind: "add" }]);
     expect(plan.duplicate).toEqual([true, false]);
@@ -251,9 +261,9 @@ describe("planRosterImport", () => {
 
   it("counts classes the job doesn't have yet", () => {
     expect(
-      countNewGroups(
+      countNewClasses(
         ["4B", "Room 5"],
-        [{ group: "4b" }, { group: "4C" }, { group: "4c " }, { group: null }],
+        [{ class: "4b" }, { class: "4C" }, { class: "4c " }, { class: null }],
       ),
     ).toBe(1);
   });

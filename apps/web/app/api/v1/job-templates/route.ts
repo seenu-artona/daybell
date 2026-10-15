@@ -32,7 +32,7 @@ export const POST = handle(async (request: Request) => {
   assertCanManage(studio);
   await assertPriceListInStudio(supabase, studio.id, input.priceListId ?? undefined);
   await assertTemplateRoom(supabase, studio.id);
-  const { name, priceListId, deliverToSchool, ...rules } = input;
+  const { name, priceListId, deliverToSchool, classLabel, ...rules } = input;
   const inserted = await supabase
     .from("job_templates")
     .insert({
@@ -40,6 +40,7 @@ export const POST = handle(async (request: Request) => {
       name,
       price_list_id: priceListId,
       deliver_to_school: deliverToSchool,
+      class_label: classLabel,
       ...rulesToDb(rules),
     })
     .select("id")

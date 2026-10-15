@@ -4,9 +4,10 @@ import type { PeopleFilter } from "@daybell/core";
 /**
  * Subjects' chips (D153, amending D147): All, Not photographed (no photos and not Do not photograph) and Not ordered
  * (for people who see orders) built in; a class, No class, Possible duplicates, No photos, Do not photograph and Do not
- * publish added by the person through "+ Add filter" (saved), and a grade (kept in this browser only: never saved, never
- * in the address). One chip at a time, in the address as ?show=<word> or ?class=<id>, with the open person in
- * &child=<id> (enum words and ids only, never search text: D113). ?show=duplicates (the duplicates notice's link) keeps
+ * publish added by the person through "+ Add filter" (saved), a photo group through "+ Add filter › Group…" (saved; D156,
+ * ADR 0030), and a grade (kept in this browser only: never saved, never in the address). One chip at a time, in the
+ * address as ?show=<word>, ?class=<id> or ?group=<id>, with the open person in &child=<id> (enum words and ids only,
+ * never search text: D113). ?show=duplicates (the duplicates notice's link) keeps
  * working as an address chip even when it isn't saved.
  */
 export const SUBJECT_SHOWS = [
@@ -35,6 +36,7 @@ export type SubjectChip =
   | { kind: "all" }
   | { kind: "show"; show: SubjectShow }
   | { kind: "class"; id: string }
+  | { kind: "group"; id: string }
   | { kind: "grade"; grade: string };
 
 export const ALL_SUBJECTS: SubjectChip = { kind: "all" };
@@ -51,13 +53,19 @@ export function subjectChipFrom(
 ): { chip: SubjectChip; clean: boolean } {
   const show = params.get("show");
   const id = params.get("class");
-  if (show === null && id === null) return { chip: ALL_SUBJECTS, clean: false };
-  if (show !== null && id === null && (SUBJECT_SHOWS as readonly string[]).includes(show)) {
-    if (show !== "notOrdered" || seesOrders)
-      return { chip: { kind: "show", show: show as SubjectShow }, clean: false };
+  const group = params.get("group");
+  const given = [show, id, group].filter((v) => v !== null).length;
+  if (given === 0) return { chip: ALL_SUBJECTS, clean: false };
+  if (given === 1) {
+    if (show !== null && (SUBJECT_SHOWS as readonly string[]).includes(show)) {
+      if (show !== "notOrdered" || seesOrders)
+        return { chip: { kind: "show", show: show as SubjectShow }, clean: false };
+    }
+    if (id !== null && UUID.test(id))
+      return { chip: { kind: "class", id: id.toLowerCase() }, clean: false };
+    if (group !== null && UUID.test(group))
+      return { chip: { kind: "group", id: group.toLowerCase() }, clean: false };
   }
-  if (id !== null && show === null && UUID.test(id))
-    return { chip: { kind: "class", id: id.toLowerCase() }, clean: false };
   return { chip: ALL_SUBJECTS, clean: true };
 }
 
@@ -66,6 +74,7 @@ export function subjectsHref(base: string, chip: SubjectChip, childId?: string |
   const params = new URLSearchParams();
   if (chip.kind === "show") params.set("show", chip.show);
   if (chip.kind === "class") params.set("class", chip.id);
+  if (chip.kind === "group") params.set("group", chip.id);
   if (childId) params.set("child", childId);
   const query = params.toString();
   return query ? `${base}?${query}` : base;
@@ -80,6 +89,7 @@ export function sameSubjectChip(a: SubjectChip, b: SubjectChip): boolean {
 /** A saved chip's filter, or null for a key Subjects doesn't take. */
 export function subjectChipFromSaved(saved: ListFilterChip): SubjectChip | null {
   if (saved.key === "class" && saved.value) return { kind: "class", id: saved.value };
+  if (saved.key === "group" && saved.value) return { kind: "group", id: saved.value };
   if ((SAVED_SHOWS as readonly string[]).includes(saved.key) && !saved.value)
     return { kind: "show", show: saved.key as SubjectShow };
   return null;
@@ -91,10 +101,12 @@ export function subjectFilters(chip: SubjectChip): PeopleFilter[] {
     case "all":
       return [];
     case "class":
+      return [{ kind: "class", id: chip.id }];
+    case "group":
       return [{ kind: "group", id: chip.id }];
     case "grade":
       return [{ kind: "grade", value: chip.grade }];
     case "show":
-      return [chip.show === "noClass" ? { kind: "noGroup" } : { kind: chip.show }];
+      return [{ kind: chip.show }];
   }
 }

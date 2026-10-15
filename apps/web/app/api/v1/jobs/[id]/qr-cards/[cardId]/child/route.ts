@@ -6,7 +6,7 @@ import { accessCodeCryptoKeys } from "@/lib/access-codes";
 import { check, handle, parseBody } from "@/lib/api";
 import { assertFunctionRegion } from "@/lib/region-guard";
 import {
-  assertGroupInJob,
+  assertClassInJob,
   CHILD_COLUMNS,
   type ChildRow,
   isDuplicate,
@@ -42,7 +42,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   assertFunctionRegion(studio.region);
   const input = await parseBody(request, claimBlankCardInput);
   await loadRosterJob(supabase, studio.id, jobId);
-  const group = await assertGroupInJob(supabase, studio.id, jobId, input.groupId);
+  const klass = await assertClassInJob(supabase, studio.id, jobId, input.classId);
 
   const cardCopy = taggingResult<string>(
     await codeWriteRpc(studio.region, "blank_card_code", userId, {
@@ -68,7 +68,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
         id: childId,
         first_name: input.firstName,
         last_name: input.lastName,
-        group_id: group?.id ?? null,
+        group_id: klass?.id ?? null,
         access_code_ciphertext: await encryptAccessCode(code, childId, keys.encryption),
       },
     }),
@@ -89,7 +89,7 @@ export const POST = handle(async (request: Request, ctx: Ctx) => {
   ) as ChildRow;
   const roster = await loadRoster(supabase, studio.id, jobId);
   const child = await toChild(
-    { ...row, group_name: group?.name ?? null, duplicate: isDuplicate(roster.children, childId) },
+    { ...row, group_name: klass?.name ?? null, duplicate: isDuplicate(roster.children, childId) },
     keys,
   );
   return NextResponse.json({ child }, { status: 201 });

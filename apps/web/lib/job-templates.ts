@@ -16,6 +16,7 @@ export interface TemplateRow extends DbRules {
   used_by: number | string;
   price_list_id: string | null;
   deliver_to_school: boolean;
+  class_label: string;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +30,7 @@ export function toTemplate(row: TemplateRow): JobTemplate {
     rules: rulesFromDb(row),
     priceListId: row.price_list_id,
     deliverToSchool: row.deliver_to_school,
+    classLabel: row.class_label,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

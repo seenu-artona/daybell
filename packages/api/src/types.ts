@@ -226,6 +226,10 @@ export const job = z
       description:
         "When the shop first opened; null while a draft and for shops opened before templates.",
     }),
+    classLabel: z.string().meta({
+      description:
+        "What this job calls the roster's class field (Class, Team, Homeroom…), from its template when it was made.",
+    }),
     template: z.object({ id: z.uuid(), name: z.string() }).nullable().meta({
       description:
         "The template the job was made from (D154); null for jobs made before templates, or when it was deleted.",
@@ -304,6 +308,9 @@ export const jobTemplate = z
       .nullable()
       .meta({ description: "The price list new jobs get; null: the studio's default." }),
     deliverToSchool: z.boolean(),
+    classLabel: z.string().meta({
+      description: "What new jobs call the roster's class field (Class, Team, Homeroom…).",
+    }),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
   })
@@ -519,20 +526,27 @@ export type SearchResponse = z.infer<typeof searchResponse>;
 export type ClientRef = z.infer<typeof clientRef>;
 
 // ── Roster (Phase 1 step 2, ADR 0011) ─────────────────────────────────────────────────────────────────────────────
-export const group = z
+/** A job's class (or team): a roster field (C1). Not a photo group (C6; ADR 0030). */
+export const classSchema = z
   .object({
     id: z.uuid(),
     name: z.string(),
     childCount: z.number().int().meta({ description: "Children in it." }),
   })
-  .meta({ id: "Group", description: "A class, team or group of children in a job." });
-export type Group = z.infer<typeof group>;
+  .meta({
+    id: "Class",
+    description: "A class or team of a job's roster (a roster field; photo groups are PhotoGroup).",
+  });
+export type Class = z.infer<typeof classSchema>;
 
 export const child = z
   .object({
     id: z.uuid(),
     jobId: z.uuid(),
-    group: z.object({ id: z.uuid(), name: z.string() }).nullable(),
+    class: z
+      .object({ id: z.uuid(), name: z.string() })
+      .nullable()
+      .meta({ description: "Their class or team, if any." }),
     firstName: z.string(),
     lastName: z.string(),
     studentId: z.string().nullable(),
@@ -574,8 +588,14 @@ export const rosterChild = child
       description:
         "A paid order that is neither canceled nor refunded in full has a line for the child in this job. Null for people who don't see orders (photographers).",
     }),
+    groups: z
+      .array(z.object({ id: z.uuid(), name: z.string() }))
+      .meta({ description: "The photo groups they are in (D156), by name." }),
   })
-  .meta({ id: "RosterChild", description: "A child in the roster list, with photos and orders." });
+  .meta({
+    id: "RosterChild",
+    description: "A child in the roster list, with photos, orders and photo groups.",
+  });
 export type RosterChild = z.infer<typeof rosterChild>;
 
 export const childrenResponse = z.object({
@@ -586,16 +606,17 @@ export const childrenResponse = z.object({
 });
 export type ChildrenResponse = z.infer<typeof childrenResponse>;
 export const childResponse = z.object({ child });
-export const groupsResponse = z.object({ groups: z.array(group) });
-export type GroupsResponse = z.infer<typeof groupsResponse>;
-export const groupResponse = z.object({ group });
+export const classesResponse = z.object({ classes: z.array(classSchema) });
+export type ClassesResponse = z.infer<typeof classesResponse>;
+export const classResponse = z.object({ class: classSchema });
+export type ClassResponse = z.infer<typeof classResponse>;
 
 export const rosterImportResponse = z
   .object({
     dryRun: z.boolean(),
     added: z.number().int(),
     updated: z.number().int(),
-    groupsAdded: z.number().int(),
+    classesAdded: z.number().int(),
     duplicates: z.number().int().meta({ description: "Rows flagged as duplicates." }),
     rows: z
       .array(
@@ -700,16 +721,6 @@ export const photosResponse = z.object({
     .meta({ description: "Pass as ?cursor= for the next page; null on the last page." }),
 });
 export type PhotosResponse = z.infer<typeof photosResponse>;
-
-export const photoDetailResponse = z.object({
-  photo: photo.extend({
-    viewUrl: z.url().nullable().meta({
-      description:
-        "A 1600 px preview (WebP, unwatermarked, studio only), signed for up to an hour.",
-    }),
-  }),
-});
-export type PhotoDetailResponse = z.infer<typeof photoDetailResponse>;
 
 export const photoCounts = z
   .object({
@@ -825,13 +836,25 @@ export const cronPhotosResponse = z.object({
 export const photoPlace = z.enum(PHOTO_PLACES).meta({
   id: "PhotoPlace",
   description:
-    "child, classSet (a class's Class photo set), leftovers, card (a card photo, never shown to parents), blankCard (waiting for the studio to name a blank card's child).",
+    "child, groupPhoto (a group photo, shown through the groups it is in: D156), leftovers, card (a card photo, never shown to parents), blankCard (waiting for the studio to name a blank card's child).",
 });
 export const photoFlag = z.enum(PHOTO_FLAGS).meta({
   id: "PhotoFlag",
   description:
     "Why to check a photo: unreadableCard (looks like a card, couldn't be read, or a card photo mark undone), otherCard (another job's card), afterUnreadable or afterFailed (after one of those, or after a photo that couldn't be processed), afterPurge (near photos deleted from the bin, where what they did can't be placed for sure). Flagged photos are hidden from parents until confirmed.",
 });
+
+const reviewActionsSchema = z
+  .object({
+    move: z.boolean(),
+    confirm: z.boolean(),
+    markCard: z.boolean(),
+    undoCard: z.boolean(),
+  })
+  .meta({
+    description:
+      "What review allows (for people who fix tagging): give it to a person (move); confirm it where it is (Looks right / It's a normal photo); mark it a card photo; undo a person's card photo mark (owners and admins only). A photo that may be a card is confirmed before it moves; another job's card can only be marked a card photo; a photo whose card was read stays a card photo; a group photo is never given to a person (C8).",
+  });
 
 export const taggedPhoto = z
   .object({
@@ -840,7 +863,6 @@ export const taggedPhoto = z
     place: photoPlace,
     flag: photoFlag.nullable(),
     childId: z.uuid().nullable().meta({ description: "Where tagging (or a person) put it." }),
-    groupId: z.uuid().nullable(),
     cardId: z.uuid().nullable(),
     manual: z
       .boolean()
@@ -852,23 +874,30 @@ export const taggedPhoto = z
       description:
         "What the image worker read: none, card (one of the job's cards), unreadable (looks like a card), otherCard (another job's card), removedCard (one of the job's cards, since removed with its child); null: no result that reads cards.",
     }),
-    actions: z
-      .object({
-        move: z.boolean(),
-        confirm: z.boolean(),
-        markCard: z.boolean(),
-        undoCard: z.boolean(),
-      })
-      .meta({
-        description:
-          "What review allows (for people who fix tagging): move it; confirm it where it is (Looks right / It's a normal photo); mark it a card photo; undo a person's card photo mark (owners and admins only). A photo that may be a card is confirmed before it moves; another job's card can only be marked a card photo; a photo whose card was read stays a card photo.",
-      }),
+    actions: reviewActionsSchema,
     thumbUrl: z.url().nullable().meta({
       description: "A 400 px preview (studio only), signed for up to an hour; null until ready.",
     }),
   })
   .meta({ id: "TaggedPhoto", description: "A photo on the review screen. Never its filename." });
 export type TaggedPhoto = z.infer<typeof taggedPhoto>;
+
+export const photoDetailResponse = z.object({
+  photo: photo.extend({
+    viewUrl: z.url().nullable().meta({
+      description:
+        "A 1600 px preview (WebP, unwatermarked, studio only), signed for up to an hour.",
+    }),
+    tagging: z
+      .object({ place: photoPlace, flag: photoFlag.nullable(), actions: reviewActionsSchema })
+      .nullable()
+      .meta({
+        description:
+          "Where tagging (or a person) put it and what review allows, for the panel's Give to a person (ADR 0030); null before it is tagged.",
+      }),
+  }),
+});
+export type PhotoDetailResponse = z.infer<typeof photoDetailResponse>;
 
 export const NOT_REVIEWABLE_REASONS = [
   "noPhotos",
@@ -877,18 +906,6 @@ export const NOT_REVIEWABLE_REASONS = [
   "flagged",
   "blankCards",
 ] as const;
-
-export const taggingAlbum = z
-  .object({
-    groupId: z.uuid().nullable().meta({ description: "Null for children without a class." }),
-    name: z.string().nullable(),
-    children: z.number().int(),
-    childrenWithPhotos: z.number().int(),
-    photos: z.number().int().meta({ description: "Photos tagged to its children." }),
-    classPhotos: z.number().int().meta({ description: "Photos in its Class photo set." }),
-  })
-  .meta({ id: "TaggingAlbum", description: "A class (or No class) on the review screen." });
-export type TaggingAlbum = z.infer<typeof taggingAlbum>;
 
 export const blankCardGroup = z
   .object({
@@ -924,22 +941,17 @@ export const taggingSummary = z
       description:
         "Card photos linked to none of the job's cards (such as photos marked card photos in Leftovers), listed on their own.",
     }),
-    noPhotos: z.number().int().meta({
-      description:
-        "Children with no photos yet (not counting Do not photograph). Doesn't block selling.",
-    }),
     reviewedAt: z.iso.datetime({ offset: true }).nullable(),
     canMarkReviewed: z.boolean(),
     notReviewable: z.enum(NOT_REVIEWABLE_REASONS).nullable().meta({
       description: "Why Mark reviewed is disabled, first reason first.",
     }),
     done: z.boolean().meta({ description: "The checklist's Review tagging task is done." }),
-    albums: z.array(taggingAlbum).meta({ description: "Each class, then No class." }),
     blankCardGroups: z.array(blankCardGroup),
   })
   .meta({
     id: "TaggingSummary",
-    description: "The review screen's header, albums and blank cards.",
+    description: "Photos' To review: its counts, Mark reviewed's state and the blank cards.",
   });
 export type TaggingSummary = z.infer<typeof taggingSummary>;
 export const taggingSummaryResponse = z.object({ tagging: taggingSummary });
@@ -954,40 +966,6 @@ export const taggedPhotosResponse = z.object({
 });
 export type TaggedPhotosResponse = z.infer<typeof taggedPhotosResponse>;
 
-export const taggingChild = z
-  .object({
-    id: z.uuid(),
-    firstName: z.string(),
-    lastName: z.string(),
-    groupId: z.uuid().nullable(),
-    doNotPhotograph: z.boolean(),
-    photos: z
-      .number()
-      .int()
-      .meta({ description: "Photos tagged to the child (card photos not counted)." }),
-    strip: z
-      .array(taggedPhoto)
-      .meta({ description: "The first 12, card photos included, in tagging order." }),
-  })
-  .meta({ id: "TaggingChild", description: "A child in an album on the review screen." });
-export type TaggingChild = z.infer<typeof taggingChild>;
-export const taggingChildrenResponse = z.object({
-  children: z.array(taggingChild),
-  nextCursor: z.uuid().nullable(),
-});
-export type TaggingChildrenResponse = z.infer<typeof taggingChildrenResponse>;
-
-export const noPhotosChild = z
-  .object({
-    id: z.uuid(),
-    firstName: z.string(),
-    lastName: z.string(),
-    group: z.object({ id: z.uuid(), name: z.string() }).nullable(),
-  })
-  .meta({ id: "NoPhotosChild" });
-export const noPhotosResponse = z.object({ children: z.array(noPhotosChild) });
-export type NoPhotosResponse = z.infer<typeof noPhotosResponse>;
-
 export const photosConfirmedResponse = z.object({
   confirmed: z.number().int().meta({ description: "Photos that changed." }),
 });
@@ -998,6 +976,126 @@ export const cardPhotosUndoneResponse = z.object({
 export type CardPhotosUndoneResponse = z.infer<typeof cardPhotosUndoneResponse>;
 export const taggingReviewedResponse = z.object({ reviewedAt: z.iso.datetime({ offset: true }) });
 export type TaggingReviewedResponse = z.infer<typeof taggingReviewedResponse>;
+
+// ── Photos: People and Groups (D156, ADR 0030) ───────────────────────────────────────────────────────────────────
+export const photoPerson = z
+  .object({
+    id: z.uuid().meta({ description: "The child's id in the job's roster." }),
+    firstName: z.string(),
+    lastName: z.string(),
+    photos: z.number().int().meta({ description: "Their photos (card photos not counted)." }),
+    cardPhotos: z.number().int().meta({ description: "Photos of their QR card." }),
+    strip: z.array(taggedPhoto).meta({
+      description:
+        "Their first photos: the first card photo first, then their photos in shot order (card photos included), up to 12.",
+    }),
+  })
+  .meta({
+    id: "PhotoPerson",
+    description:
+      "One line of Photos' People view: a person with photos (C15). Names are personal data.",
+  });
+export type PhotoPerson = z.infer<typeof photoPerson>;
+export const photoPeopleResponse = z.object({
+  people: z.array(photoPerson).meta({ description: "By last name, then first name." }),
+  nextCursor: z
+    .uuid()
+    .nullable()
+    .meta({ description: "Pass as ?cursor= for the next page; null on the last page." }),
+  total: z.number().int().meta({ description: "People with photos (in the group, with groupId)." }),
+});
+export type PhotoPeopleResponse = z.infer<typeof photoPeopleResponse>;
+
+export const photoGroup = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    members: z.number().int().meta({ description: "People in the group." }),
+    photos: z.number().int().meta({ description: "Its group photos (out of the bin)." }),
+    ordered: z.number().int().nullable().meta({
+      description:
+        "Paid orders holding any of its photos (C16). Null for people who don't see it (photographers and staff).",
+    }),
+  })
+  .meta({
+    id: "PhotoGroup",
+    description:
+      "A group of a job's people and its group photos (D156). Not a class: a person can be in several groups.",
+  });
+export type PhotoGroup = z.infer<typeof photoGroup>;
+export const photoGroupsResponse = z.object({
+  groups: z.array(photoGroup).meta({ description: "By name, numbers in order." }),
+  notInGroup: z
+    .number()
+    .int()
+    .meta({ description: "Group photos in no group, which no parent sees (C2)." }),
+});
+export type PhotoGroupsResponse = z.infer<typeof photoGroupsResponse>;
+export const photoGroupResponse = z.object({ group: photoGroup });
+export type PhotoGroupResponse = z.infer<typeof photoGroupResponse>;
+
+export const groupMember = z
+  .object({
+    id: z.uuid(),
+    firstName: z.string(),
+    lastName: z.string(),
+    class: z.object({ id: z.uuid(), name: z.string() }).nullable(),
+  })
+  .meta({ id: "GroupMember", description: "A person in a group. Names are personal data." });
+export type GroupMember = z.infer<typeof groupMember>;
+export const groupMembersResponse = z.object({
+  members: z.array(groupMember).meta({ description: "By last name, then first name." }),
+  nextCursor: z.uuid().nullable(),
+});
+export type GroupMembersResponse = z.infer<typeof groupMembersResponse>;
+export const groupMembersChangedResponse = z.object({
+  added: z.number().int().meta({ description: "People who joined (already members don't count)." }),
+  removed: z.number().int(),
+  members: z.number().int().meta({ description: "People in the group now." }),
+});
+export type GroupMembersChangedResponse = z.infer<typeof groupMembersChangedResponse>;
+export const groupsMadeResponse = z.object({
+  made: z.number().int().meta({ description: "Groups made." }),
+  members: z.number().int().meta({ description: "People added to them." }),
+  skipped: z
+    .number()
+    .int()
+    .meta({ description: "Values whose name is already a group's (left alone)." }),
+});
+export type GroupsMadeResponse = z.infer<typeof groupsMadeResponse>;
+export const groupPhotosMovedResponse = z.object({
+  moved: z.number().int().meta({ description: "Photos moved to the group." }),
+});
+export type GroupPhotosMovedResponse = z.infer<typeof groupPhotosMovedResponse>;
+export const photosShownResponse = z.object({
+  added: z
+    .number()
+    .int()
+    .meta({ description: "Photo and group pairs added (ones already shown don't count)." }),
+});
+export type PhotosShownResponse = z.infer<typeof photosShownResponse>;
+export const groupDeletedResponse = z.object({
+  moved: z.number().int().meta({ description: "Photos moved to the other group." }),
+  binned: z.number().int().meta({ description: "Photos moved to the bin." }),
+});
+export type GroupDeletedResponse = z.infer<typeof groupDeletedResponse>;
+
+/** Why a group request was refused with 409, in the error's `fields.form` (ADR 0030). */
+export const GROUP_CONFLICTS = {
+  /** Another group of the job has the name, ignoring case (C10). */
+  nameTaken: "groups.nameTaken",
+  /** A job holds at most 500 groups (C10). */
+  limit: "groups.limit",
+  /** A sold photo can't be binned: move the group's photos to another group (C4). */
+  photoSold: "groups.photoSold",
+  /** Closed jobs take no group changes (C11). */
+  jobClosed: "groups.jobClosed",
+  /** A person, photo or group that isn't this job's (or isn't where the change says). */
+  notInJob: "groups.notInJob",
+  /** A group with photos is deleted only once its photos have somewhere to go (ADR 0030, call 3). */
+  hasPhotos: "groups.hasPhotos",
+} as const;
+export type GroupConflict = (typeof GROUP_CONFLICTS)[keyof typeof GROUP_CONFLICTS];
 
 /** Why a tagging request was refused with 409, in the error's `fields.form`. */
 export const TAGGING_CONFLICTS = {
@@ -1011,6 +1109,10 @@ export const TAGGING_CONFLICTS = {
   otherCard: "tagging.otherCard",
   /** Only photos a person marked as card photos can be unmarked. */
   notMarkedCard: "tagging.notMarkedCard",
+  /** A group photo is never given to a person (D156, C8). */
+  groupPhoto: "tagging.groupPhoto",
+  /** Leftovers are given to a person or binned, never confirmed where they are (C9). */
+  leftovers: "tagging.leftovers",
 } as const;
 export type TaggingConflict = (typeof TAGGING_CONFLICTS)[keyof typeof TAGGING_CONFLICTS];
 
@@ -1589,8 +1691,9 @@ export const shopGalleryResponse = z
     portraits: z
       .array(shopPhoto)
       .meta({ description: "The child's own photos, in tagging order." }),
-    classPhotos: z.array(shopPhoto).meta({
-      description: "The child's class photo set, to view only in Phase 1; empty without a class.",
+    groupPhotos: z.array(shopPhoto).meta({
+      description:
+        "The group photos of every group the child is in, once each, in tagging order; to view only until the Shop round (C5).",
     }),
   })
   .meta({ id: "ShopGallery" });

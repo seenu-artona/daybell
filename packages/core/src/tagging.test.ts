@@ -112,14 +112,14 @@ function photo(c: string, n: number): TaggingPhoto {
 }
 
 /** A readable summary of each photo's tag: "child-a", "leftovers!afterFailed", "card:card-a", "-" (untagged). */
-function show(spec: string, classGroupId: string | null = null): string[] {
-  return tagBatch(batch(spec), { classGroupId }).map(({ tag }) => {
+function show(spec: string, groupPhotos = false): string[] {
+  return tagBatch(batch(spec), { groupPhotos }).map(({ tag }) => {
     if (!tag) return "-";
     const where =
       tag.place === "child"
         ? tag.childId
-        : tag.place === "classSet"
-          ? `class:${tag.groupId}`
+        : tag.place === "groupPhoto"
+          ? "group"
           : tag.place === "card"
             ? `card:${tag.cardId}`
             : tag.place === "blankCard"
@@ -238,12 +238,12 @@ describe("tagBatch: the sequence rules (D32, F16)", () => {
       "card:card-b",
       "child-b",
     ]);
-    expect(show("pop", "g1")).toEqual(["class:g1", "class:g1!unreadableCard", "class:g1"]);
-    expect(show("ooo", "g1")).toEqual(["class:g1", "class:g1", "class:g1"]);
+    expect(show("pop", true)).toEqual(["group", "group!unreadableCard", "group"]);
+    expect(show("ooo", true)).toEqual(["group", "group", "group"]);
   });
 
   it("tags an empty batch as nothing", () => {
-    expect(tagBatch([], { classGroupId: null })).toEqual([]);
+    expect(tagBatch([], { groupPhotos: false })).toEqual([]);
   });
 });
 
@@ -275,7 +275,7 @@ describe("tagBatch: photos in the bin still mark where cards were (security revi
   });
 
   it("gives binned photos no result, and binning a plain photo changes nothing else", () => {
-    const tags = tagBatch(batch("A~pp"), { classGroupId: null });
+    const tags = tagBatch(batch("A~pp"), { groupPhotos: false });
     expect(tags.map((t) => t.photoId)).toEqual(["p1", "p3"]);
     expect(show("A~pp")).toEqual(["card:card-a", "child-a"]);
   });
@@ -285,7 +285,7 @@ describe("tagBatch: photos in the bin still mark where cards were (security revi
   });
 
   it("ignores binned photos in class-photo uploads", () => {
-    expect(show("p~Ap", "g1")).toEqual(["class:g1", "class:g1"]);
+    expect(show("p~Ap", true)).toEqual(["group", "group"]);
   });
 });
 
@@ -311,7 +311,7 @@ describe("tagBatch: photos purged from the bin leave their step on the next phot
     const photos = batch("Appp");
     // Photos 5 (card B) and 6 were purged; photo 7 carries what they did.
     photos.push({ ...photo("p", 7), before: steps("B", "p") }, photo("p", 8));
-    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag)).toEqual([
+    expect(tagBatch(photos, { groupPhotos: false }).map((r) => r.tag)).toEqual([
       { place: "card", cardId: "card-a", flag: null },
       { place: "child", childId: "child-a", flag: null },
       { place: "child", childId: "child-a", flag: null },
@@ -323,7 +323,7 @@ describe("tagBatch: photos purged from the bin leave their step on the next phot
 
   it("a purged failed photo still flags the photos after it", () => {
     const photos = [photo("A", 1), { ...photo("p", 3), before: steps("F") }];
-    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag?.flag)).toEqual([
+    expect(tagBatch(photos, { groupPhotos: false }).map((r) => r.tag?.flag)).toEqual([
       null,
       "afterFailed",
     ]);
@@ -337,7 +337,7 @@ describe("tagBatch: photos purged from the bin leave their step on the next phot
       photo("B", 5),
       photo("p", 6),
     ];
-    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag)).toEqual([
+    expect(tagBatch(photos, { groupPhotos: false }).map((r) => r.tag)).toEqual([
       { place: "card", cardId: "card-a", flag: null },
       { place: "child", childId: "child-a", flag: "afterPurge" },
       { place: "child", childId: "child-a", flag: "afterPurge" },
@@ -348,7 +348,7 @@ describe("tagBatch: photos purged from the bin leave their step on the next phot
 
   it("applies before the photo itself, so a card right after a purged flag clears it", () => {
     const photos = [{ ...photo("A", 2), before: steps("?") }, photo("p", 3)];
-    expect(tagBatch(photos, { classGroupId: null }).map((r) => r.tag?.flag)).toEqual([null, null]);
+    expect(tagBatch(photos, { groupPhotos: false }).map((r) => r.tag?.flag)).toEqual([null, null]);
   });
 
   it("knows a batch from before cards were read", () => {
@@ -362,7 +362,7 @@ describe("tagBatch: purge edge cases are flagged, never guessed (Seenu, answer 1
   const purged = (spec: string, n: number) => tagStep(photo(spec, n), false);
   const late = (c: string, n: number): TaggingPhoto => ({ ...photo(c, n), afterPurge: true });
   const flags = (photos: TaggingPhoto[], purgeTail = false) =>
-    tagBatch(photos, { classGroupId: null, purgeTail }).map(({ tag }) =>
+    tagBatch(photos, { groupPhotos: false, purgeTail }).map(({ tag }) =>
       tag
         ? `${tag.place === "child" ? tag.childId : tag.place}${tag.flag ? `!${tag.flag}` : ""}`
         : "-",
@@ -447,23 +447,17 @@ describe("tagBatch: purge edge cases are flagged, never guessed (Seenu, answer 1
 
 describe("tagBatch: class-photo uploads (answer 3)", () => {
   it("puts every photo in the class's set; cards are hidden and otherwise ignored (plan answer 8)", () => {
-    expect(show("pApKp", "g1")).toEqual([
-      "class:g1",
-      "card:card-a",
-      "class:g1",
-      "card:card-k",
-      "class:g1",
-    ]);
+    expect(show("pApKp", true)).toEqual(["group", "card:card-a", "group", "card:card-k", "group"]);
   });
 
   it("flags only the unreadable photo itself, and leaves failed ones untagged", () => {
-    expect(show("p?pFpX", "g1")).toEqual([
-      "class:g1",
-      "class:g1!unreadableCard",
-      "class:g1",
+    expect(show("p?pFpX", true)).toEqual([
+      "group",
+      "group!unreadableCard",
+      "group",
       "-",
-      "class:g1",
-      "class:g1!otherCard",
+      "group",
+      "group!otherCard",
     ]);
   });
 });
@@ -482,7 +476,7 @@ describe("tagging order (D142 #7)", () => {
     };
     const tags = tagBatch(
       rows.map((r) => ({ id: r.id, status: "ready", qr: qr[r.id] ?? null })),
-      { classGroupId: null },
+      { groupPhotos: false },
     );
     expect(tags.map((t) => [t.photoId, t.tag?.place])).toEqual([
       ["p1", "card"],
@@ -493,7 +487,7 @@ describe("tagging order (D142 #7)", () => {
 });
 
 describe("planTagWrites: manual moves are never overwritten", () => {
-  const computed = tagBatch(batch("App"), { classGroupId: null });
+  const computed = tagBatch(batch("App"), { groupPhotos: false });
   const stored = (tags: [string, StoredTag][]) => new Map(tags);
   const childA: Tag = { place: "child", childId: "child-a", flag: null };
 
@@ -528,7 +522,7 @@ describe("planTagWrites: manual moves are never overwritten", () => {
   });
 
   it("removes an automatic tag from a photo that can't be tagged any more, but never a manual one", () => {
-    const failed = tagBatch(batch("AF"), { classGroupId: null });
+    const failed = tagBatch(batch("AF"), { groupPhotos: false });
     expect(
       planTagWrites(
         stored([["p2", { ...childA, source: "auto" }]]),
@@ -562,7 +556,7 @@ describe("planTagWrites: manual moves are never overwritten", () => {
 
 describe("tagCounts", () => {
   it("counts cards, Leftovers, flags and blank cards (distinct)", () => {
-    const tags = tagBatch(batch("pK?pKpA"), { classGroupId: null }).map((r) => r.tag);
+    const tags = tagBatch(batch("pK?pKpA"), { groupPhotos: false }).map((r) => r.tag);
     expect(tagCounts([...tags, null])).toEqual({
       cards: 3,
       leftovers: 1,
@@ -630,7 +624,14 @@ describe("reviewActions (security review 3-4, code review M1)", () => {
   it("lets a plain photo be moved, confirmed or marked a card photo", () => {
     expect(reviewActions(ready)).toEqual(all);
     expect(reviewActions({ ...ready, flag: "afterUnreadable" })).toEqual(all);
-    expect(reviewActions({ ...ready, qrKind: null, place: "leftovers" })).toEqual(all);
+    // Leftovers: given to someone or binned, never "Looks right" where they are (C9).
+    expect(reviewActions({ ...ready, qrKind: null, place: "leftovers" })).toEqual({
+      ...all,
+      confirm: false,
+    });
+    expect(
+      reviewActions({ ...ready, place: "leftovers", qrKind: "unreadable", flag: "unreadableCard" }),
+    ).toEqual({ move: false, confirm: true, markCard: true, undoCard: false });
   });
 
   it("never moves or confirms a card photo, read or marked by a person", () => {
@@ -654,6 +655,14 @@ describe("reviewActions (security review 3-4, code review M1)", () => {
     expect(
       reviewActions({ ...ready, qrKind: "none", flag: "unreadableCard", manual: true }),
     ).toEqual({ ...none, confirm: true, markCard: true });
+  });
+
+  it("never gives a group photo to a person (D156, C8): it is confirmed or marked a card photo", () => {
+    const keepOrCard = { move: false, confirm: true, markCard: true, undoCard: false };
+    expect(reviewActions({ ...ready, place: "groupPhoto" })).toEqual(keepOrCard);
+    expect(reviewActions({ ...ready, place: "groupPhoto", flag: "unreadableCard" })).toEqual(
+      keepOrCard,
+    );
   });
 
   it("treats a photo flagged near a purge like any flagged photo", () => {

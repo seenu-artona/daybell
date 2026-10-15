@@ -85,12 +85,12 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const combobox = add.getByRole("combobox", { name: "Class (optional)" });
   await combobox.fill("4B");
   await add
-    .getByRole("listbox", { name: "Classes" })
-    .getByRole("option", { name: "Add new class" })
+    .getByRole("listbox", { name: "Class list" })
+    .getByRole("option", { name: "Add new Class" })
     .click();
-  const addClass = page.getByRole("dialog", { name: "Add class" });
+  const addClass = page.getByRole("dialog", { name: "Add Class" });
   await expect(addClass.getByLabel("Name", { exact: true })).toHaveValue("4B");
-  await addClass.getByRole("button", { name: "Add class", exact: true }).click();
+  await addClass.getByRole("button", { name: "Add Class", exact: true }).click();
   await expect(addClass).toBeHidden();
   await expect(combobox).toHaveValue("4B");
   await add.getByText("More options", { exact: true }).click();
@@ -106,7 +106,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await expect(classOf("Maya Johnson")).toHaveText("4B");
   await expect(main.getByRole("heading", { name: "1 child", level: 2 })).toBeVisible();
   // The count is in the list card's footer, not on the tab (D144).
-  await expect(main.getByText("1 child · 1 class · no duplicates", { exact: true })).toBeVisible();
+  await expect(main.getByText("1 child · Class: 1 · no duplicates", { exact: true })).toBeVisible();
 
   // 3. Open her record: the list folds to its Name column in the same card, her row grey with aria-current, and the
   // record beside it. Only her id goes in the URL; it survives a refresh. Her access code is on her QR card (D153), and
@@ -127,6 +127,12 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const details = main.getByRole("region", { name: "Details", exact: true });
   await expect(details.getByText("m•••@example.test", { exact: true })).toBeVisible();
   await expect(details.getByText("maya.parent@example.test")).toHaveCount(0);
+  // The photo groups she is in (D156): none yet.
+  await expect(
+    main.getByRole("region", { name: "Groups", exact: true }).getByText("In no group yet.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   expect(page.url()).not.toContain("Maya");
   await page.reload();
   await expect(main.getByRole("heading", { name: "Maya Johnson", level: 2 })).toBeVisible();
@@ -168,13 +174,13 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
     buffer: Buffer.from(CSV),
   });
   await expect(main.getByLabel("Import “Student First Name” as")).toHaveValue("firstName");
-  await expect(main.getByLabel("Import “Homeroom” as")).toHaveValue("group");
+  await expect(main.getByLabel("Import “Homeroom” as")).toHaveValue("class");
   await expect(main.getByLabel("Import “Student #” as")).toHaveValue("studentId");
   await expect(main.getByLabel("Import “Photo Opt Out” as")).toHaveValue("doNotPhotograph");
   await main.getByRole("button", { name: "Check rows" }).click();
   await expect(
     main.getByText(
-      "4 will be added · 1 updated · 1 new class · 4 duplicates · 1 row can't be imported",
+      "4 will be added · 1 updated · Class: 1 new · 4 duplicates · 1 row can't be imported",
       { exact: true },
     ),
   ).toBeVisible();
@@ -202,7 +208,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   expect(mayaAfter?.grade).toBe("5");
   await expect(main.getByText("4 possible duplicates", { exact: true })).toBeVisible();
   await expect(main.getByRole("heading", { name: "5 children", level: 2 })).toBeVisible();
-  await expect(main.getByText(/^5 children · \d+ classes · 4 possible duplicates$/)).toBeVisible();
+  await expect(main.getByText(/^5 children · Class: \d+ · 4 possible duplicates$/)).toBeVisible();
 
   // 5. Import an Excel file.
   await main.getByRole("button", { name: "Add subjects", exact: true }).click();
@@ -212,7 +218,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   await main.getByRole("button", { name: "Check rows" }).click();
   await expect(
     main.getByText(
-      "5 will be added · 0 updated · 1 new class · 0 duplicates · 0 rows can't be imported",
+      "5 will be added · 0 updated · Class: 1 new · 0 duplicates · 0 rows can't be imported",
       { exact: true },
     ),
   ).toBeVisible();
@@ -251,8 +257,14 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   const searchBox = await main.getByRole("button", { name: "Search children" }).boundingBox();
   expect(searchBox?.width).toBe(44);
   expect(searchBox?.height).toBe(44);
-  // Name, Class, Photos and Ordered columns (D153): nobody has photos or orders yet.
-  await expect(main.getByRole("columnheader")).toHaveText(["Name", "Class", "Photos", "Ordered"]);
+  // Name, Class, Groups (D156), Photos and Ordered columns (D153): nobody has photos, groups or orders yet.
+  await expect(main.getByRole("columnheader")).toHaveText([
+    "Name",
+    "Class",
+    "Groups",
+    "Photos",
+    "Ordered",
+  ]);
   await expect(row("Olivia Brown").getByText("Not ordered", { exact: true })).toBeVisible();
   await expect(classOf("Sophia Wilson")).toHaveText("Room 5");
   expect(jobLoads).toBeLessThanOrEqual(2);
@@ -304,7 +316,7 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
   for (const choice of [
     "4C",
     "Room 5",
-    "No class",
+    "No Class",
     "Possible duplicates",
     "No photos",
     "Grade…",
@@ -365,17 +377,17 @@ test("owner builds a roster in People by hand and from CSV and Excel files", asy
 
   // 7. Rename a class from the Classes row under the list (D147: Group by is gone): it opens the job's classes in the
   // panel, each with Rename; focus comes back to the class's Rename button.
-  const classesRow = main.getByRole("button", { name: /^Classes \d+$/ });
+  const classesRow = main.getByRole("button", { name: /^Class list \d+$/ });
   await classesRow.click();
   await expect(classesRow).toHaveAttribute("aria-expanded", "true");
-  const classesPanel = page.getByRole("complementary", { name: "This job's classes" });
-  await classesPanel.getByRole("button", { name: "Rename class 4C", exact: true }).click();
-  const rename = page.getByRole("dialog", { name: "Rename class" });
+  const classesPanel = page.getByRole("complementary", { name: "This job's Class list" });
+  await classesPanel.getByRole("button", { name: "Rename Class 4C", exact: true }).click();
+  const rename = page.getByRole("dialog", { name: "Rename Class" });
   await rename.getByLabel("Name", { exact: true }).fill("Room 4C");
   await rename.getByRole("button", { name: "Save changes" }).click();
   await expect(rename).toBeHidden();
   await expect(
-    classesPanel.getByRole("button", { name: "Rename class Room 4C", exact: true }),
+    classesPanel.getByRole("button", { name: "Rename Class Room 4C", exact: true }),
   ).toBeFocused();
   await expect(classOf("Olivia Brown")).toHaveText("Room 4C");
   await page.keyboard.press("Escape");

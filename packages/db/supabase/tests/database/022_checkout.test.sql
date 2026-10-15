@@ -12,7 +12,7 @@
 -- owner changes the fee, and who did is kept (S1); the merchant of record is checked (N5).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(192);
+select plan(193);
 
 insert into app.config (key, value) values ('data_region', 'ca') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -82,6 +82,22 @@ from fx f join public.upload_batches b on b.id = f.batch::uuid;
 insert into public.photo_tags (photo_id, studio_id, job_id, place, child_id, source)
 select pg_temp.pid(f.n), p.studio_id, p.job_id, 'child', f.child::uuid, 'auto'
 from fx f join public.photos p on p.id = pg_temp.pid(f.n);
+-- Photo 7: a group photo Ava sees through her group (ADR 0030); never a pose, never part of all digitals (C5).
+insert into public.photos (id, studio_id, job_id, batch_id, batch_seq, status, original_filename, byte_size, sha256,
+  width, height, qr_kind, created_by)
+select pg_temp.pid(70), b.studio_id, b.job_id, b.id, b.seq, 'ready', 'IMG_70.JPG', 1, extensions.digest('70', 'sha256'),
+  1200, 1500, 'none', b.created_by
+from public.upload_batches b where b.id = 'e1000000-0000-4000-8000-000000000001';
+insert into public.photo_tags (photo_id, studio_id, job_id, place, source) values
+  (pg_temp.pid(70), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'group_photo', 'auto');
+insert into public.photo_groups (id, studio_id, job_id, name) values
+  ('99000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'Choir');
+insert into public.photo_group_members (studio_id, job_id, group_id, child_id) values
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001',
+   '99000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001');
+insert into public.photo_group_photos (studio_id, job_id, group_id, photo_id) values
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001',
+   '99000000-0000-4000-8000-000000000001', pg_temp.pid(70));
 update public.upload_batches set tagged_round = tag_round;
 update public.jobs set status = 'selling'
 where id in ('a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001');
@@ -440,7 +456,10 @@ select is(pg_temp.try($$ select public.bin_photos('11111111-1111-4111-8111-11111
   'a0000000-0000-4000-8000-000000000001', array[pg_temp.pid(3)]) $$), 'P0001 photo_sold',
   'so a photo bought as part of all digitals can''t be binned');
 select is((select count(*) from public.order_line_photos lp join public.order_lines l on l.id = lp.order_line_id
-  where l.order_id = pg_temp.v('o3')), 3::bigint, 'all digitals is fixed to Ava''s 3 visible portraits (call 9)');
+  where l.order_id = pg_temp.v('o3')), 3::bigint,
+  'all digitals is fixed to Ava''s 3 visible portraits (call 9), never her group photo (ADR 0030, C5)');
+select is((select sold_at from public.photos where id = pg_temp.pid(70)), null,
+  'her group photo isn''t sold with them');
 select is((select count(*) from public.shop_cart_lines where session_id = 'd1000000-0000-4000-8000-000000000001'),
   0::bigint, 'what was bought leaves the bag');
 select ok(pg_temp.try($$ update public.order_lines set quantity = 5 $$) like '23514%', 'lines never change');

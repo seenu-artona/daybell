@@ -15,6 +15,10 @@ import {
   type WorkerPhoto,
 } from "./index";
 
+// Decoding, resizing and watermarking real JPEGs (and loading zxing's WebAssembly the first time) can take longer
+// than vitest's 5 s default on a busy CI runner; the work itself doesn't change (CI flake on more than one PR).
+vi.setConfig({ testTimeout: 30_000 });
+
 /** zxing's reader, from node_modules (the Lambda passes its own copy; ADR 0018). */
 const WASM = createRequire(import.meta.url).resolve("zxing-wasm/reader/zxing_reader.wasm");
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");

@@ -27,7 +27,7 @@ test(
       Array.from({ length: n }, (_, i) => ({
         firstName: "Load",
         lastName: `Test ${String(i).padStart(4, "0")}`,
-        group: `Load ${i % 20}`,
+        class: `Load ${i % 20}`,
         studentId: `L-${i}`,
       }));
     expect(
@@ -47,7 +47,7 @@ test(
       timeout: 120_000,
     });
     expect(imported.status()).toBe(200);
-    expect(await imported.json()).toMatchObject({ added: 5000, updated: 0, groupsAdded: 20 });
+    expect(await imported.json()).toMatchObject({ added: 5000, updated: 0, classesAdded: 20 });
 
     // 5,020 hidden child and class events don't push the shown ones out of the latest 50 (filtered before the limit).
     await page.goto("/app");
@@ -61,7 +61,7 @@ test(
     // People loads every page (10 × 500) and draws all 5,000 rows; grouped by class, they fall into 20 classes.
     await page.goto(`/app/jobs/${bigJob}/people`);
     // The roster's size is in the list card's footer (D144).
-    await expect(main.getByText(/^5,000 children · 20 classes · /)).toBeVisible({
+    await expect(main.getByText(/^5,000 children · Class: 20 · /)).toBeVisible({
       timeout: 60_000,
     });
     // The first page must be drawn before "Loading more…" can mean anything: before it, the text isn't there yet.

@@ -1,7 +1,6 @@
 "use client";
 
-import type { Group } from "@daybell/api";
-import type { GroupLabel } from "@daybell/core";
+import type { Class } from "@daybell/api";
 import { Button } from "@daybell/ui";
 import { ChevronRight, Pencil } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -17,7 +16,7 @@ export const renameButtonId = (groupId: string) => `rename-class-${groupId}`;
  */
 export const ClassesRow = forwardRef<
   HTMLButtonElement,
-  { count: number; word: GroupLabel; open: boolean; onOpen: () => void }
+  { count: number; word: string; open: boolean; onOpen: () => void }
 >(function ClassesRow({ count, word, open, onOpen }, ref) {
   const t = useTranslations("app.people.classes");
   return (
@@ -50,11 +49,11 @@ export function ClassesPanel({
   onClose,
   onRename,
 }: {
-  groups: readonly Group[];
-  word: GroupLabel;
+  groups: readonly Class[];
+  word: string;
   focusKey: string | null;
   onClose: () => void;
-  onRename: (group: Group) => void;
+  onRename: (group: Class) => void;
 }) {
   const t = useTranslations("app.people");
   return (

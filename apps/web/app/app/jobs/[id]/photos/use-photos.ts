@@ -12,8 +12,14 @@ const POLL_MS = 4000;
  * A job's photos (or its bin) for the Photos tab, a page of 200 at a time in tagging order, and the job's counts.
  * While photos are processing (or an upload runs), the counts are checked every few seconds; when they change, every
  * page already shown is loaded again (review CR6), so new previews appear without losing the place or the open photo.
+ * With `rows: false` only the counts are read (People shows each person's photos instead: D156).
  */
-export function usePhotos(jobId: string, bin: boolean, busy: boolean) {
+export function usePhotos(
+  jobId: string,
+  bin: boolean,
+  busy: boolean,
+  { rows: listRows = true }: { rows?: boolean } = {},
+) {
   const [rows, setRows] = useState<Photo[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [counts, setCounts] = useState<PhotoCounts | null>(null);
@@ -40,15 +46,16 @@ export function usePhotos(jobId: string, bin: boolean, busy: boolean) {
     const collected: Photo[] = [];
     let cursor: string | null = null;
     let ok = true;
-    do {
-      const res = await page(cursor);
-      if (!res.ok) {
-        ok = false;
-        break;
-      }
-      collected.push(...res.data.photos);
-      cursor = res.data.nextCursor;
-    } while (cursor && collected.length < want);
+    if (listRows)
+      do {
+        const res = await page(cursor);
+        if (!res.ok) {
+          ok = false;
+          break;
+        }
+        collected.push(...res.data.photos);
+        cursor = res.data.nextCursor;
+      } while (cursor && collected.length < want);
     const counted = await summary;
     if (mine !== generation.current) return;
     setRefreshing(false);
@@ -61,7 +68,7 @@ export function usePhotos(jobId: string, bin: boolean, busy: boolean) {
     shown.current = collected.length;
     setRows(collected);
     setNextCursor(cursor);
-  }, [base, page]);
+  }, [base, page, listRows]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor) return;

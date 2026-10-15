@@ -6,8 +6,15 @@ import type {
   JobTemplateResponse,
   PriceListsResponse,
 } from "@daybell/api";
-import { RULE_KEYS, type RuleKey, type RulesPatch } from "@daybell/core";
-import { Badge, Banner, Button, IconButton, iconButtonVariants } from "@daybell/ui";
+import {
+  classLabelValid,
+  cleanClassLabel,
+  MAX_CLASS_LABEL,
+  RULE_KEYS,
+  type RuleKey,
+  type RulesPatch,
+} from "@daybell/core";
+import { Badge, Banner, Button, Field, IconButton, iconButtonVariants } from "@daybell/ui";
 import {
   ArrowLeft,
   ChevronRight,
@@ -306,6 +313,7 @@ function TemplatePage() {
             </Group>
           ) : (
             <Group title={t("sections.subjects")}>
+              <ClassLabelForm template={template} canManage={canManage} onSave={save} />
               <InfoCard label={t("subjects.accessCodes")} value={t("subjects.accessCodesValue")} />
               <InfoCard label={t("subjects.watermark")} value={t("subjects.watermarkValue")} />
             </Group>
@@ -510,6 +518,58 @@ function StepsSection({
         </Group>
       ))}
     </>
+  );
+}
+
+/**
+ * What new jobs call the roster's class field (Seenu's answer to ADR 0030 call 29): free text, 1 to 30 characters,
+ * "Class" unless changed. Jobs copy it when they are made; jobs already made keep theirs.
+ */
+function ClassLabelForm({
+  template,
+  canManage,
+  onSave,
+}: {
+  template: JobTemplate;
+  canManage: boolean;
+  onSave: (patch: JobTemplatePatch) => Promise<string | null>;
+}) {
+  const t = useTranslations("app.templates.subjects");
+  const [value, setValue] = useState(template.classLabel);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const busy = useRef(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (busy.current) return;
+    const label = cleanClassLabel(value);
+    if (!classLabelValid(label)) return setError(t("classLabelInvalid", { max: MAX_CLASS_LABEL }));
+    busy.current = true;
+    setError((await onSave({ classLabel: label })) ?? undefined);
+    busy.current = false;
+  }
+
+  if (!canManage) return <InfoCard label={t("classLabel")} value={template.classLabel} />;
+  return (
+    <form
+      onSubmit={submit}
+      noValidate
+      className="flex flex-col gap-4 rounded-lg bg-surface px-6 py-5 shadow-sm"
+    >
+      <Field
+        label={t("classLabel")}
+        help={t("classLabelHelp")}
+        error={error}
+        value={value}
+        maxLength={MAX_CLASS_LABEL}
+        autoComplete="off"
+        onChange={(e) => setValue(e.target.value)}
+        className="max-w-80"
+      />
+      <div>
+        <Button type="submit">{t("save")}</Button>
+      </div>
+    </form>
   );
 }
 

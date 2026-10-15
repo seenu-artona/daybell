@@ -8,6 +8,7 @@ import {
   type UploadDeps,
   type UploadProgress,
   UploadRun,
+  uploadBatchRequest,
 } from "./upload-run";
 
 // The browser's upload engine (ADR 0016) against a fake API and storage: what is registered, which parts are sent,
@@ -174,15 +175,23 @@ describe("UploadRun", () => {
     });
   });
 
-  it("starts a class-photo upload for its class, and an individual upload with no body (ADR 0018)", async () => {
+  it("starts a group upload for its group, and an individual upload with no body (ADR 0030)", async () => {
     const server = fakeServer();
     const upload = new UploadRun(JOB, [file("IMG_0001.JPG", "one")], deps(server), () => {}, {
+      kind: "group",
       groupId: "g-1",
     });
     await upload.start();
     expect(server.api).toHaveBeenCalledWith(`/jobs/${JOB}/upload-batches`, {
       method: "POST",
-      body: { groupId: "g-1" },
+      body: { kind: "group", groupId: "g-1" },
+    });
+    expect(uploadBatchRequest({ kind: "individual", addToGroupId: "g-2" })).toEqual({
+      method: "POST",
+      body: { kind: "individual", addToGroupId: "g-2" },
+    });
+    expect(uploadBatchRequest({ kind: "individual", addToGroupId: null })).toEqual({
+      method: "POST",
     });
     const plain = fakeServer();
     await run([file("IMG_0002.JPG", "two")], deps(plain));

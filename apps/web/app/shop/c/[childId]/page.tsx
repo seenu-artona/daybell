@@ -33,7 +33,7 @@ export default function GalleryPage() {
   const { childId, galleryId, child, studio, data, failed, reload, onImageError } =
     useChildData<ShopGalleryResponse>(shopApi.gallery);
   const [showCover, setShowCover] = useState<boolean | null>(null);
-  const [set, setSet] = useState<"portraits" | "classPhotos">("portraits");
+  const [set, setSet] = useState<"portraits" | "groupPhotos">("portraits");
   const [viewer, setViewer] = useState<number | null>(null);
   const heading = useRef<HTMLDivElement>(null);
   const focusHeading = useRef(false);
@@ -91,12 +91,12 @@ export default function GalleryPage() {
       </>
     );
 
-  const photos: ShopPhoto[] = set === "portraits" ? data.portraits : data.classPhotos;
+  const photos: ShopPhoto[] = set === "portraits" ? data.portraits : data.groupPhotos;
   const firstName = child.state === "open" ? child.firstName : name;
   const alt = (n: number, total: number) =>
     set === "portraits"
       ? t("gallery.photoAlt", { name: firstName, n, total })
-      : t("gallery.classAlt", { name: firstName, n, total });
+      : t("gallery.groupAlt", { name: firstName, n, total });
 
   return (
     <>
@@ -112,9 +112,9 @@ export default function GalleryPage() {
           <MessageScreen>{t("gallery.unavailable", { studio })}</MessageScreen>
         ) : (
           <>
-            {data.classPhotos.length > 0 ? (
+            {data.groupPhotos.length > 0 ? (
               <div role="group" aria-label={t("gallery.sets")} className="mt-4 flex gap-5">
-                {(["portraits", "classPhotos"] as const).map((key) => (
+                {(["portraits", "groupPhotos"] as const).map((key) => (
                   <button
                     key={key}
                     type="button"
@@ -145,7 +145,7 @@ export default function GalleryPage() {
               label={
                 set === "portraits"
                   ? t("gallery.portraitsGrid", { name: child.displayName })
-                  : t("gallery.classGrid", { name: child.displayName })
+                  : t("gallery.groupGrid", { name: child.displayName })
               }
               photos={photos}
               alt={alt}

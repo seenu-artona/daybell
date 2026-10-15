@@ -8,6 +8,10 @@ import { type ApiResult, api } from "@/lib/client-api";
 /** The drag-and-drop payload type: photo ids only, never names (D96). */
 export const DRAG_TYPE = "application/x-daybell-photos";
 
+/**
+ * What Photos' People view and To review share (ADR 0018, 0030): who may fix tagging, the ticked photos, and moves.
+ * Photos open in the floating panel through `openPhoto`.
+ */
 export interface ReviewContextValue {
   jobId: string;
   /** Owners, admins and photographers fix tagging; staff only look (plan answer 10). */
@@ -19,10 +23,12 @@ export interface ReviewContextValue {
   /** The ticked photos, with what each allows (the selection bar offers what every one of them allows). */
   checked: ReadonlyMap<string, TaggedPhoto>;
   toggle: (photo: TaggedPhoto, on: boolean) => void;
-  /** Moves photos (from a drop, or the Move to… dialog) and announces the result. */
+  /** Gives photos to a person (from a drop, or the Give to a person dialog) and announces the result. */
   move: (photoIds: string[], target: MoveTarget, targetName: string) => Promise<void>;
-  /** Opens Move to… for these photos (the non-drag way, WCAG 2.5.7). */
-  openMove: (photoIds: string[]) => void;
+  /** Opens Give to a person for these photos (the non-drag way, WCAG 2.5.7). */
+  openGive: (photoIds: string[]) => void;
+  /** Opens a photo in the floating panel (?photo=<id>), with its alt text from where it was opened. */
+  openPhoto: (photoId: string, alt: string) => void;
   /** A section's photos loaded again: drop ticked photos that left it, refresh the rest (reconcileChecked). */
   reconcile: (before: readonly TaggedPhoto[] | null, after: readonly TaggedPhoto[]) => void;
   /** A section starts loading; call the returned function when it ends (load-tracker.ts). The selection bar waits. */
@@ -33,7 +39,7 @@ export const ReviewContext = createContext<ReviewContextValue | null>(null);
 
 export function useReview(): ReviewContextValue {
   const value = useContext(ReviewContext);
-  if (!value) throw new Error("useReview must be used inside the review page");
+  if (!value) throw new Error("useReview must be used inside Photos");
   return value;
 }
 
@@ -92,22 +98,26 @@ export function useReconcileSelection(photos: readonly TaggedPhoto[] | null, sou
 }
 
 /**
- * The photos in one place (Leftovers, flagged, a child, a class set, a blank card), a page at a time in tagging order,
- * loaded again whenever the review changes. Ids only in the URL.
+ * The photos in one place (Leftovers, flagged, a person, a blank card), a page at a time in tagging order, loaded again
+ * whenever the review changes. Ids only in the URL. `path` reads another list of tagged photos instead, such as a
+ * group's photos (/groups/{id}/photos).
  */
 export function usePlacePhotos(
   jobId: string,
   query: string | null,
   version: number,
   pageSize = PHOTO_PAGE_SIZE,
+  path: string | null = null,
 ) {
   const [photos, setPhotos] = useState<TaggedPhoto[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const startLoad = useContext(ReviewContext)?.startLoad;
-  const base = query
-    ? `/jobs/${encodeURIComponent(jobId)}/tagging/photos?${query}&limit=${pageSize}`
-    : null;
+  const base = path
+    ? `${path}?limit=${pageSize}`
+    : query
+      ? `/jobs/${encodeURIComponent(jobId)}/tagging/photos?${query}&limit=${pageSize}`
+      : null;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: version is the reload signal.
   useEffect(() => {

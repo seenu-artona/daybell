@@ -33,7 +33,19 @@ describe("job template input (D154)", () => {
       shopClosesDays: null,
       priceListId: null,
       deliverToSchool: false,
+      classLabel: "Class",
     });
+  });
+
+  it("names the class field in free text: trimmed, 1 to 30 characters (ADR 0030, call 29)", () => {
+    expect(jobTemplateInput.parse({ name: "Sports", classLabel: "  Team " }).classLabel).toBe(
+      "Team",
+    );
+    expect(jobTemplatePatch.parse({ classLabel: "Homeroom" })).toEqual({ classLabel: "Homeroom" });
+    for (const bad of ["", "   ", "x".repeat(31), "Room\u0007", 4])
+      expect(
+        jobTemplateInput.safeParse({ name: "A", classLabel: bad }).error?.issues[0]?.message,
+      ).toBe("validation.classLabel");
   });
 
   it("days after picture day go with afterPictureDay, and only with it", () => {

@@ -1,7 +1,6 @@
 "use client";
 
-import type { Group, ListFilterChip } from "@daybell/api";
-import type { GroupLabel } from "@daybell/core";
+import type { Class, ListFilterChip } from "@daybell/api";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
@@ -25,13 +24,15 @@ const fold = (text: string) =>
 
 /**
  * Subjects' chips (D147, ADR 0026): the selected chip (from the address, or a grade kept in this browser), the row's
- * items and what "+ Add filter" offers. Classes and grades come from the loaded roster: a saved class that is gone is
- * dropped (and saved), and a class or grade that leaves the roster stops filtering (back to All).
+ * items and what "+ Add filter" offers. Classes and grades come from the loaded roster, photo groups from the job's
+ * groups (D156; ADR 0030): a saved class or group that is gone is dropped (and saved), and a class, group or grade that
+ * goes stops filtering (back to All).
  */
 export function useSubjectChips({
   base,
   jobId,
-  groups,
+  classes,
+  photoGroups,
   grades,
   loaded,
   word,
@@ -40,11 +41,13 @@ export function useSubjectChips({
   /** The Subjects tab's path. */
   base: string;
   jobId: string;
-  groups: readonly Group[];
+  classes: readonly Class[];
+  /** The job's photo groups; null until loaded (a group missing from them is then really gone). */
+  photoGroups: readonly { id: string; name: string }[] | null;
   grades: readonly string[];
   /** The roster and its classes have loaded (so a class missing from them is really gone). */
   loaded: boolean;
-  word: GroupLabel;
+  word: string;
   seesOrders: boolean;
 }): {
   chip: SubjectChip;
@@ -57,6 +60,7 @@ export function useSubjectChips({
   const t = useTranslations("app.people");
   const tr = useTranslations("app.roster");
   const tc = useTranslations("app.chips");
+  const tp = useTranslations("app.people.chips");
   const router = useRouter();
   const params = useSearchParams();
   const query = params.toString();
@@ -76,27 +80,46 @@ export function useSubjectChips({
       ? { kind: "grade", grade: activeGrade }
       : urlChip;
 
-  const classGone = loaded && urlChip.kind === "class" && !groups.some((g) => g.id === urlChip.id);
+  const classGone = loaded && urlChip.kind === "class" && !classes.some((g) => g.id === urlChip.id);
+  const groupGone =
+    photoGroups !== null &&
+    urlChip.kind === "group" &&
+    !photoGroups.some((g) => g.id === urlChip.id);
   useEffect(() => {
-    if (clean || classGone)
+    if (clean || classGone || groupGone)
       router.replace(subjectsHref(base, ALL_SUBJECTS, childId), { scroll: false });
-  }, [clean, classGone, router, base, childId]);
+  }, [clean, classGone, groupGone, router, base, childId]);
 
   const { forget } = saved;
   useEffect(() => {
-    if (!loaded || !saved.chips) return;
+    if (!saved.chips) return;
     const gone = saved.chips.filter(
-      (c) => c.key === "class" && c.value !== null && !groups.some((g) => g.id === c.value),
+      (c) =>
+        c.value !== null &&
+        ((loaded && c.key === "class" && !classes.some((g) => g.id === c.value)) ||
+          (photoGroups !== null &&
+            c.key === "group" &&
+            !photoGroups.some((g) => g.id === c.value))),
     );
     if (gone.length > 0) forget(gone);
-  }, [loaded, saved.chips, groups, forget]);
+  }, [loaded, saved.chips, classes, photoGroups, forget]);
+
+  /** A class or group chip whose name isn't known yet, named by its kind rather than "…". */
+  const unnamed = (c: SubjectChip): string | null =>
+    c.kind === "class" && !classes.some((g) => g.id === c.id)
+      ? tr("columns.group", { group: word })
+      : c.kind === "group" && !photoGroups?.some((g) => g.id === c.id)
+        ? tp("group")
+        : null;
 
   const label = (c: SubjectChip): string => {
     switch (c.kind) {
       case "all":
         return tc("all");
       case "class":
-        return groups.find((g) => g.id === c.id)?.name ?? tc("loadingName");
+        return classes.find((g) => g.id === c.id)?.name ?? tc("loadingName");
+      case "group":
+        return photoGroups?.find((g) => g.id === c.id)?.name ?? tc("loadingName");
       case "grade":
         return t("chips.gradeChip", { grade: c.grade });
       case "show":
@@ -106,31 +129,30 @@ export function useSubjectChips({
         return t(`flags.${c.show}`);
     }
   };
-  const linkItem = (c: SubjectChip, remove?: ListFilterChip): ChipItem => ({
-    id: subjectsHref("", c),
-    label: label(c),
-    selected: sameSubjectChip(c, chip),
-    href: subjectsHref(base, c, childId),
-    // Until the record's name is known, the chip is named by its kind rather than "…".
-    ...(c.kind === "class" && !groups.some((g) => g.id === c.id)
-      ? { ariaLabel: tr("columns.group", { group: word }) }
-      : {}),
-    // Any chip with an address takes over from a grade chosen in this browser.
-    onSelect: () => setGrade(null),
-    ...(remove
-      ? {
-          onRemove: () => {
-            void saved.remove(remove);
-            if (sameSubjectChip(c, chip))
-              router.push(subjectsHref(base, ALL_SUBJECTS, childId), { scroll: false });
-          },
-          // Until the roster's classes are loaded, the button says what kind of chip it removes.
-          ...(c.kind === "class" && !groups.some((g) => g.id === c.id)
-            ? { removeLabel: tc("remove", { name: tr("columns.group", { group: word }) }) }
-            : {}),
-        }
-      : {}),
-  });
+  const linkItem = (c: SubjectChip, remove?: ListFilterChip): ChipItem => {
+    const kindName = unnamed(c);
+    return {
+      id: subjectsHref("", c),
+      label: label(c),
+      selected: sameSubjectChip(c, chip),
+      href: subjectsHref(base, c, childId),
+      // Until the record's name is known, the chip is named by its kind rather than "…".
+      ...(kindName ? { ariaLabel: kindName } : {}),
+      // Any chip with an address takes over from a grade chosen in this browser.
+      onSelect: () => setGrade(null),
+      ...(remove
+        ? {
+            onRemove: () => {
+              void saved.remove(remove);
+              if (sameSubjectChip(c, chip))
+                router.push(subjectsHref(base, ALL_SUBJECTS, childId), { scroll: false });
+            },
+            // Until the roster's classes (or the job's groups) are loaded, the button says what kind of chip it removes.
+            ...(kindName ? { removeLabel: tc("remove", { name: kindName }) } : {}),
+          }
+        : {}),
+    };
+  };
   const added = (saved.chips ?? []).flatMap((s) => {
     const c = subjectChipFromSaved(s);
     return c ? [{ chip: c, saved: s }] : [];
@@ -172,7 +194,7 @@ export function useSubjectChips({
     saved.chips === null || saved.full
       ? []
       : [
-          ...groups
+          ...classes
             .filter((g) => !has("class", g.id))
             .map(
               (g): AddFilterChoice => ({
@@ -212,10 +234,35 @@ export function useSubjectChips({
           },
         ]
       : [];
+  const groupsLeft = (photoGroups ?? []).filter((g) => !has("group", g.id));
+  const groupChoice: AddFilterChoice[] =
+    saved.chips === null || saved.full || groupsLeft.length === 0
+      ? []
+      : [
+          {
+            kind: "search",
+            id: "group",
+            label: tp("groupMenu"),
+            fieldLabel: tp("group"),
+            placeholder: tp("groupPlaceholder"),
+            listLabel: tp("groupList"),
+            search: async (q) =>
+              groupsLeft
+                .filter((g) => fold(g.name).includes(fold(q)))
+                .map((g) => ({ id: g.id, name: g.name })),
+            onPick: (option) =>
+              addSaved({ key: "group", value: option.id }, { kind: "group", id: option.id }),
+          },
+        ];
   // The classes, No class, Possible duplicates and No photos (moved here by D153), then Grade… (when the roster has
-  // grades), then the two flags, as the D147 mockup lists them.
+  // grades) and Group… (when the job has photo groups, D156), then the two flags, as the D147 mockup lists them.
   const flags = savedChoices.filter((c) => c.id === "doNotPhotograph" || c.id === "doNotPublish");
-  const choices = [...savedChoices.filter((c) => !flags.includes(c)), ...gradeChoice, ...flags];
+  const choices = [
+    ...savedChoices.filter((c) => !flags.includes(c)),
+    ...gradeChoice,
+    ...groupChoice,
+    ...flags,
+  ];
 
   return { chip, childId, items, choices, saved };
 }

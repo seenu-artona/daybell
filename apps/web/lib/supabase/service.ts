@@ -85,6 +85,29 @@ export function photoWriteRpc(
 }
 
 /**
+ * Photo group writes (D156; ADR 0030): browsers never write groups, members or group photo links, so these run as the
+ * service role, only from route handlers after studioScope(), the uploader check and a check that the job or group is
+ * the studio's; each function acts for the person and checks their role again (owners, admins and photographers).
+ */
+export type GroupWriteRpc =
+  | "create_photo_group"
+  | "rename_photo_group"
+  | "delete_photo_group"
+  | "make_photo_groups_from_column"
+  | "set_photo_group_members"
+  | "move_group_photos"
+  | "also_show_photos";
+
+export function groupWriteRpc(
+  region: DataRegion,
+  fn: GroupWriteRpc,
+  actorId: string,
+  args: Record<string, unknown>,
+) {
+  return serviceClient(region).rpc(fn, { p_actor: actorId, ...args });
+}
+
+/**
  * Photo work nobody signed in does: the image worker's read and result (only from the HMAC-checked internal routes),
  * the daily clean-up (only from the CRON_SECRET-checked cron route), and tagging upload batches (ADR 0018), which runs
  * after those and after a signed-in person's own checked write (finishing an upload, the bin), for that batch only.

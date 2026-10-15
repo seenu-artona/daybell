@@ -1,13 +1,7 @@
 "use client";
 
-import { type Child, type Group, QR_CARD_HEADERS } from "@daybell/api";
-import {
-  CARDS_PER_PAGE,
-  type CardScope,
-  cardChildren,
-  type GroupLabel,
-  MAX_BLANK_CARDS,
-} from "@daybell/core";
+import { type Child, type Class, QR_CARD_HEADERS } from "@daybell/api";
+import { CARDS_PER_PAGE, type CardScope, cardChildren, MAX_BLANK_CARDS } from "@daybell/core";
 import { Banner, Button, Field } from "@daybell/ui";
 import { Download } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -46,8 +40,8 @@ export function PrintQrCardsDialog({
   onClose: () => void;
   jobId: string;
   roster: readonly Child[];
-  groups: readonly Group[];
-  word: GroupLabel;
+  groups: readonly Class[];
+  word: string;
   onPrinted: () => void;
 }) {
   const t = useTranslations("app.qrCards");
@@ -69,9 +63,9 @@ export function PrintQrCardsDialog({
     mode === "all"
       ? { kind: "job" }
       : {
-          kind: "groups",
-          groupIds: [...chosen].filter((g) => g !== NO_GROUP),
-          noGroup: chosen.has(NO_GROUP),
+          kind: "classes",
+          classIds: [...chosen].filter((g) => g !== NO_GROUP),
+          noClass: chosen.has(NO_GROUP),
         };
   const children = cardChildren(roster, scope).length;
   const cards = children + (blankValid ? blankCards : 0);
@@ -81,7 +75,7 @@ export function PrintQrCardsDialog({
   const perGroup = useMemo(() => {
     const counts = new Map<string, number>();
     for (const c of cardChildren(roster, { kind: "job" })) {
-      const key = c.group?.id ?? NO_GROUP;
+      const key = c.class?.id ?? NO_GROUP;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return counts;
@@ -113,13 +107,13 @@ export function PrintQrCardsDialog({
     setPrinted(null);
     const errors: Record<string, string> = {};
     if (!blankValid) errors.blankCards = tv("blankCards");
-    if (mode === "choose" && chosen.size === 0) errors.groupIds = tv("qrCardsGroups");
+    if (mode === "choose" && chosen.size === 0) errors.classIds = tv("qrCardsClasses");
     setFields(errors);
     if (Object.keys(errors).length > 0) return;
     if (cards === 0) return setProblem(t("nothing"));
     setBusy(true);
     const res = await download(`/jobs/${encodeURIComponent(jobId)}/qr-cards`, {
-      ...(mode === "choose" ? { groupIds: [...chosen] } : {}),
+      ...(mode === "choose" ? { classIds: [...chosen] } : {}),
       blankCards,
     });
     setBusy(false);
@@ -174,7 +168,7 @@ export function PrintQrCardsDialog({
         {mode === "choose" ? (
           <fieldset
             className="m-0 flex max-h-60 flex-col overflow-y-auto border-0 py-0 pr-0 pl-8"
-            aria-describedby={fields.groupIds ? `${id}-groups-note` : undefined}
+            aria-describedby={fields.classIds ? `${id}-groups-note` : undefined}
           >
             <legend className="sr-only">{t("groupsLegend", { group: word })}</legend>
             {groups.map((g) => (
@@ -192,9 +186,9 @@ export function PrintQrCardsDialog({
                 onChange={(on) => toggle(NO_GROUP, on)}
               />
             ) : null}
-            {fields.groupIds ? (
+            {fields.classIds ? (
               <span id={`${id}-groups-note`} className="text-caption text-danger">
-                {fields.groupIds}
+                {fields.classIds}
               </span>
             ) : null}
           </fieldset>

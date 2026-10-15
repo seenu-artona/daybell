@@ -41,7 +41,7 @@ const photo = (
 
 const inputs = (photos: Inputs["photos"], over: Partial<Inputs> = {}): Inputs => ({
   batch_id: BATCH,
-  group_id: null,
+  kind: "individual",
   tag_round: 3,
   tagged_round: 2,
   processing: 0,
@@ -87,25 +87,22 @@ describe("planBatch and writeRow", () => {
         photo_id: "p1",
         place: "leftovers",
         child_id: null,
-        group_id: null,
         card_id: null,
         flag: null,
       },
-      { photo_id: "p2", place: "card", child_id: null, group_id: null, card_id: CARD, flag: null },
+      { photo_id: "p2", place: "card", child_id: null, card_id: CARD, flag: null },
       {
         photo_id: "p3",
         place: "child",
         child_id: CHILD,
-        group_id: null,
         card_id: null,
         flag: null,
       },
-      { photo_id: "p4", place: "card", child_id: null, group_id: null, card_id: BLANK, flag: null },
+      { photo_id: "p4", place: "card", child_id: null, card_id: BLANK, flag: null },
       {
         photo_id: "p5",
         place: "blank_card",
         child_id: null,
-        group_id: null,
         card_id: BLANK,
         flag: "unreadable_card",
       },
@@ -116,7 +113,6 @@ describe("planBatch and writeRow", () => {
     const tag = (place: string, source: "auto" | "manual", child: string | null = null) => ({
       place,
       child_id: child,
-      group_id: null,
       card_id: null,
       flag: null,
       source,
@@ -211,23 +207,15 @@ describe("planBatch and writeRow", () => {
     expect(writes.map((w) => w.flag)).toEqual([null, "unreadable_card", "after_unreadable"]);
   });
 
-  it("puts a class-photo upload in the class's set", () => {
-    const writes = planBatch(inputs([photo("p1")], { group_id: "g1" })).map(writeRow);
+  it("makes a group upload's photos group photos, with no group in the tag (ADR 0030)", () => {
+    const writes = planBatch(inputs([photo("p1")], { kind: "group" })).map(writeRow);
     expect(writes).toEqual([
-      {
-        photo_id: "p1",
-        place: "class_set",
-        child_id: null,
-        group_id: "g1",
-        card_id: null,
-        flag: null,
-      },
+      { photo_id: "p1", place: "group_photo", child_id: null, card_id: null, flag: null },
     ]);
   });
 
   it("maps move targets to ids only", () => {
     expect(targetRow({ kind: "child", childId: CHILD })).toEqual({ kind: "child", id: CHILD });
-    expect(targetRow({ kind: "classSet", groupId: "g" })).toEqual({ kind: "class_set", id: "g" });
     expect(targetRow({ kind: "leftovers" })).toEqual({ kind: "leftovers" });
   });
 });
@@ -254,7 +242,6 @@ describe("tagBatchNow", () => {
           photo_id: "p1",
           place: "leftovers",
           child_id: null,
-          group_id: null,
           card_id: null,
           flag: null,
         },
@@ -335,7 +322,6 @@ describe("toTaggedPhoto", () => {
       place: "blankCard",
       flag: "afterFailed",
       childId: null,
-      groupId: null,
       cardId: BLANK,
       manual: false,
       cardRead: false,

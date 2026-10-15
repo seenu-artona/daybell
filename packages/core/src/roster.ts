@@ -17,7 +17,7 @@ export const ROSTER_MAX_ROWS = 5000;
 export const ROSTER_TARGETS = [
   "firstName",
   "lastName",
-  "group",
+  "class",
   "studentId",
   "grade",
   "parentEmail",
@@ -50,7 +50,7 @@ export const ROSTER_SYNONYMS: Record<RosterTarget, readonly string[]> = {
     "legal last name",
     "lname",
   ],
-  group: [
+  class: [
     "class",
     "class name",
     "classroom",
@@ -108,13 +108,22 @@ export function normalizeHeader(header: string): string {
     .trim();
 }
 
-/** For each column (by index), what it most likely holds, or null for "Don't import". */
-export function guessColumns(headers: readonly string[]): Record<number, RosterTarget | null> {
+/**
+ * For each column (by index), what it most likely holds, or null for "Don't import". `classLabel`, the job's own name
+ * for the class field (ADR 0030, call 29: e.g. Homeroom or Section), is the class column's first synonym.
+ */
+export function guessColumns(
+  headers: readonly string[],
+  classLabel?: string,
+): Record<number, RosterTarget | null> {
   const normalized = headers.map(normalizeHeader);
   const out: Record<number, RosterTarget | null> = {};
   for (let i = 0; i < headers.length; i++) out[i] = null;
+  const own = classLabel ? normalizeHeader(classLabel) : "";
   for (const target of ROSTER_TARGETS) {
-    for (const synonym of ROSTER_SYNONYMS[target]) {
+    const synonyms =
+      target === "class" && own !== "" ? [own, ...ROSTER_SYNONYMS.class] : ROSTER_SYNONYMS[target];
+    for (const synonym of synonyms) {
       const column = normalized.findIndex((h, i) => h === synonym && out[i] === null);
       if (column >= 0) {
         out[column] = target;
@@ -136,7 +145,8 @@ export function parseYesNo(cell: string): boolean {
 export interface RosterRowDraft {
   firstName: string;
   lastName: string;
-  group: string | null;
+  /** The class's name (C6: the API calls it class). */
+  class: string | null;
   studentId: string | null;
   grade: string | null;
   parentEmail: string | null;
@@ -170,7 +180,7 @@ export function buildRows(
   return rows.map((row) => ({
     firstName: text(row, "firstName"),
     lastName: text(row, "lastName"),
-    group: optional(row, "group"),
+    class: optional(row, "class"),
     studentId: optional(row, "studentId"),
     grade: optional(row, "grade"),
     parentEmail: optional(row, "parentEmail")?.toLowerCase() ?? null,
@@ -183,12 +193,12 @@ export interface DuplicateEntry {
   firstName: string;
   lastName: string;
   studentId: string | null;
-  /** The class, team or group name; null for none. */
-  group: string | null;
+  /** The class (or team) name; null for none. */
+  class: string | null;
 }
 
 const squash = (s: string) => s.replace(/\s/g, "").toLowerCase();
-const groupKey = (s: string | null) =>
+const classKey = (s: string | null) =>
   s?.trim() ? s.replace(/\s+/g, " ").trim().toLowerCase() : null;
 
 /**
@@ -199,7 +209,7 @@ const groupKey = (s: string | null) =>
 export function duplicateKey(entry: DuplicateEntry): string {
   if (entry.studentId?.trim()) return `id:${squash(entry.studentId)}`;
   // A NUL separates the class from the names, so no class name can run into them.
-  return `name:${groupKey(entry.group) ?? "-"}\u0000${squash(entry.firstName)}|${squash(entry.lastName)}`;
+  return `name:${classKey(entry.class) ?? "-"}\u0000${squash(entry.firstName)}|${squash(entry.lastName)}`;
 }
 
 /** Indexes of entries that share a duplicate key with another entry. */
@@ -219,7 +229,7 @@ export interface ExistingChild {
   studentId: string | null;
   firstName: string;
   lastName: string;
-  groupName: string | null;
+  className: string | null;
 }
 
 export type RosterAction = { kind: "add" } | { kind: "update"; id: string };
@@ -265,7 +275,7 @@ export function planRosterImport(
       firstName: row.firstName,
       lastName: row.lastName,
       studentId: child.studentId,
-      group: row.group ?? child.groupName,
+      class: row.class ?? child.className,
     };
   });
   for (const child of existing) {
@@ -274,7 +284,7 @@ export function planRosterImport(
         firstName: child.firstName,
         lastName: child.lastName,
         studentId: child.studentId,
-        group: child.groupName,
+        class: child.className,
       });
     }
   }
@@ -283,14 +293,14 @@ export function planRosterImport(
 }
 
 /** How many classes the rows name that the job doesn't have yet (names compared ignoring case and extra spaces). */
-export function countNewGroups(
+export function countNewClasses(
   existingNames: readonly string[],
-  rows: readonly { group: string | null }[],
+  rows: readonly { class: string | null }[],
 ): number {
-  const known = new Set(existingNames.map((n) => groupKey(n)));
+  const known = new Set(existingNames.map((n) => classKey(n)));
   const fresh = new Set<string>();
   for (const row of rows) {
-    const key = groupKey(row.group);
+    const key = classKey(row.class);
     if (key && !known.has(key)) fresh.add(key);
   }
   return fresh.size;

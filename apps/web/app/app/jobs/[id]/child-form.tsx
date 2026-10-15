@@ -1,7 +1,6 @@
 "use client";
 
-import type { Child, Group, GroupsResponse, Job } from "@daybell/api";
-import type { GroupLabel } from "@daybell/core";
+import type { Child, Class, ClassesResponse, ClassResponse, Job } from "@daybell/api";
 import { Banner, Button, Field } from "@daybell/ui";
 import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -28,10 +27,10 @@ export function GroupForm({
 }: {
   jobId: string;
   group: GroupRef | null;
-  word: GroupLabel;
+  word: string;
   initialName?: string;
   onCancel: () => void;
-  onSaved: (group: Group) => void;
+  onSaved: (group: Class) => void;
 }) {
   const t = useTranslations("app.roster.groupForm");
   const text = useApiText();
@@ -47,15 +46,16 @@ export function GroupForm({
     setBusy(true);
     setErrors({});
     setProblem(null);
-    const res = await api<{ group: Group }>(
-      group ? `/groups/${group.id}` : `/jobs/${jobId}/groups`,
+    // Classes are /classes in the API (C6; ADR 0030); the UI word follows the job type.
+    const res = await api<ClassResponse>(
+      group ? `/classes/${group.id}` : `/jobs/${jobId}/classes`,
       {
         method: group ? "PATCH" : "POST",
         body: { name },
       },
     );
     setBusy(false);
-    if (res.ok) return onSaved(res.data.group);
+    if (res.ok) return onSaved(res.data.class);
     setErrors(res.fields);
     if (Object.keys(res.fields).length === 0) setProblem(text.error(res.code));
   }
@@ -101,7 +101,7 @@ export function ChildForm({
   onRemoved,
 }: {
   job: Pick<Job, "id" | "status">;
-  word: GroupLabel;
+  word: string;
   child: Child | null;
   onCancel: () => void;
   onSaved: (child: Child) => void;
@@ -114,14 +114,14 @@ export function ChildForm({
   const optional = (label: string) => ta("optionalLabel", { label });
   const [firstName, setFirstName] = useState(child?.firstName ?? "");
   const [lastName, setLastName] = useState(child?.lastName ?? "");
-  const [group, setGroup] = useState<GroupRef | null>(child?.group ?? null);
+  const [group, setGroup] = useState<GroupRef | null>(child?.class ?? null);
   const [studentId, setStudentId] = useState(child?.studentId ?? "");
   const [grade, setGrade] = useState(child?.grade ?? "");
   const [parentEmail, setParentEmail] = useState(child?.parentEmail ?? "");
   const [doNotPhotograph, setDoNotPhotograph] = useState(child?.doNotPhotograph ?? false);
   const [doNotPublish, setDoNotPublish] = useState(child?.doNotPublish ?? false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [groups, setGroups] = useState<Group[] | null>(null);
+  const [groups, setGroups] = useState<Class[] | null>(null);
   const [newGroupName, setNewGroupName] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -130,8 +130,8 @@ export function ChildForm({
 
   // The job's groups are loaded once and filtered here as people type.
   useEffect(() => {
-    api<GroupsResponse>(`/jobs/${job.id}/groups`).then((res) => {
-      if (res.ok) setGroups(res.data.groups);
+    api<ClassesResponse>(`/jobs/${job.id}/classes`).then((res) => {
+      if (res.ok) setGroups(res.data.classes);
     });
   }, [job.id]);
 
@@ -163,7 +163,7 @@ export function ChildForm({
         body: {
           firstName,
           lastName,
-          groupId: group?.id ?? null,
+          classId: group?.id ?? null,
           studentId: orNull(studentId),
           grade: orNull(grade),
           parentEmail: orNull(parentEmail),
@@ -227,7 +227,7 @@ export function ChildForm({
           search={search}
           addNewLabel={t("addGroup", { group: word })}
           onAddNew={(typed) => setNewGroupName(typed)}
-          error={text.field(errors.groupId)}
+          error={text.field(errors.classId)}
         />
         <details
           open={moreOpen}

@@ -622,7 +622,7 @@ describe("GET /shop/children/:childId/gallery (D60, D119)", () => {
           studio_id: STUDIO,
           job_id: JOB,
           portraits: [photo(1), photo(2)],
-          class_photos: [photo(3)],
+          group_photos: [photo(3)],
         },
       },
     });
@@ -631,7 +631,7 @@ describe("GET /shop/children/:childId/gallery (D60, D119)", () => {
     const body = await res.json();
     expect(body.cover.id).toBe(PHOTO(1));
     expect(body.portraits.map((p: { id: string }) => p.id)).toEqual([PHOTO(1), PHOTO(2)]);
-    expect(body.classPhotos.map((p: { id: string }) => p.id)).toEqual([PHOTO(3)]);
+    expect(body.groupPhotos.map((p: { id: string }) => p.id)).toEqual([PHOTO(3)]);
     expect(signed).toHaveLength(6);
     for (const s of signed) {
       expect(s.key).toMatch(new RegExp(`^${STUDIO}/${JOB}/f0000000-[^/]+/proof(-thumb)?\\.webp$`));
@@ -664,7 +664,7 @@ describe("GET /shop/children/:childId/gallery (D60, D119)", () => {
     for (const state of ["closed", "unavailable"]) {
       database({ shop_gallery: { data: { state } } });
       const res = await (await gallery())(withSession("GET"), child());
-      expect(await res.json()).toEqual({ state, cover: null, portraits: [], classPhotos: [] });
+      expect(await res.json()).toEqual({ state, cover: null, portraits: [], groupPhotos: [] });
     }
     expect(signed).toHaveLength(0);
   });

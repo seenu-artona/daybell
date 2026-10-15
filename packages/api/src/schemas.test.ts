@@ -15,11 +15,11 @@ import {
   childInput,
   childPatch,
   claimBlankCardInput,
+  classInput,
   clientInput,
   clientPatch,
   confirmPhotosInput,
   fieldErrors,
-  groupInput,
   inviteInput,
   isPriceText,
   itemKindIssues,
@@ -40,7 +40,6 @@ import {
   searchInput,
   signUpInput,
   suggestSlug,
-  taggingChildrenQuery,
   taggingPhotosQuery,
   undoCardPhotosInput,
   uploadBatchInput,
@@ -280,8 +279,8 @@ describe("children", () => {
     const grade = childInput.safeParse({ ...ok, grade: "x".repeat(21) });
     expect(grade.success).toBe(false);
     if (!grade.success) expect(fieldErrors(grade.error).grade).toBe("validation.grade");
-    expect(groupInput.safeParse({ name: "x".repeat(61) }).success).toBe(false);
-    expect(groupInput.parse({ name: " Room   4B " }).name).toBe("Room 4B");
+    expect(classInput.safeParse({ name: "x".repeat(61) }).success).toBe(false);
+    expect(classInput.parse({ name: " Room   4B " }).name).toBe("Room 4B");
   });
 
   it("refuse control characters and lone surrogates; tabs and line breaks in names become spaces", () => {
@@ -304,8 +303,8 @@ describe("children", () => {
       expect(result.success, JSON.stringify(patch)).toBe(false);
       if (!result.success) expect(Object.keys(fieldErrors(result.error))).toEqual([field]);
     }
-    expect(groupInput.safeParse({ name: "Room\u00004B" }).success).toBe(false);
-    expect(rosterRow.safeParse({ ...ok, group: "4B\uD83D" }).success).toBe(false);
+    expect(classInput.safeParse({ name: "Room\u00004B" }).success).toBe(false);
+    expect(rosterRow.safeParse({ ...ok, class: "4B\uD83D" }).success).toBe(false);
   });
 
   it("patches need a known field and can never touch codes or the school tag", () => {
@@ -340,15 +339,15 @@ describe("roster import", () => {
 
   it("allows unmapped opt-outs (null) and blank classes", () => {
     expect(
-      rosterRow.parse({ ...row, group: null, doNotPhotograph: null, doNotPublish: true }),
-    ).toMatchObject({ group: null, doNotPhotograph: null, doNotPublish: true });
+      rosterRow.parse({ ...row, class: null, doNotPhotograph: null, doNotPublish: true }),
+    ).toMatchObject({ class: null, doNotPhotograph: null, doNotPublish: true });
   });
 
   it("lists pages of up to 500, filtered by class or by no class", () => {
     expect(rosterQuery.parse({})).toEqual({ limit: 200 });
     expect(rosterQuery.safeParse({ limit: "501" }).success).toBe(false);
-    expect(rosterQuery.parse({ groupId: "none" }).groupId).toBe("none");
-    expect(rosterQuery.safeParse({ groupId: "4B" }).success).toBe(false);
+    expect(rosterQuery.parse({ classId: "none" }).classId).toBe("none");
+    expect(rosterQuery.safeParse({ classId: "4B" }).success).toBe(false);
   });
 });
 
@@ -382,7 +381,7 @@ describe("roster limits match the database", () => {
       false,
     );
     expect(accepts(childInput, { ...base, grade: "x".repeat(limits.grade + 1) })).toBe(false);
-    expect(accepts(groupInput, { name: "x".repeat(limits.name + 1) })).toBe(false);
+    expect(accepts(classInput, { name: "x".repeat(limits.name + 1) })).toBe(false);
   });
 
   it("uses the same duplicate rule and a global code index", () => {
@@ -433,13 +432,13 @@ describe("QR cards (ADR 0015)", () => {
   });
 
   it('takes chosen classes (and "none" for no class), once each', () => {
-    expect(qrCardsInput.parse({ groupIds: [id, "none"], blankCards: 3 })).toEqual({
-      groupIds: [id, "none"],
+    expect(qrCardsInput.parse({ classIds: [id, "none"], blankCards: 3 })).toEqual({
+      classIds: [id, "none"],
       blankCards: 3,
     });
-    expect(errors({ groupIds: [] })?.groupIds).toBe("validation.qrCardsGroups");
-    expect(errors({ groupIds: [id, id] })?.groupIds).toBe("validation.group");
-    expect(errors({ groupIds: ["Room 4"] })).not.toBeNull();
+    expect(errors({ classIds: [] })?.classIds).toBe("validation.qrCardsClasses");
+    expect(errors({ classIds: [id, id] })?.classIds).toBe("validation.class");
+    expect(errors({ classIds: ["Room 4"] })).not.toBeNull();
   });
 
   it("allows 0 to 100 whole blank cards (Seenu, answer 3)", () => {
@@ -450,7 +449,7 @@ describe("QR cards (ADR 0015)", () => {
 
   it("prints one child's card alone: no classes and no blank cards with it", () => {
     expect(qrCardsInput.parse({ childId: id })).toEqual({ childId: id, blankCards: 0 });
-    expect(errors({ childId: id, groupIds: [other] })?.groupIds).toBe("validation.invalid");
+    expect(errors({ childId: id, classIds: [other] })?.classIds).toBe("validation.invalid");
     expect(errors({ childId: id, blankCards: 2 })?.blankCards).toBe("validation.blankCards");
   });
 });
@@ -499,16 +498,15 @@ describe("QR tagging and review (ADR 0018)", () => {
     expect(claimBlankCardInput.safeParse({ firstName: "", lastName: "New" }).success).toBe(false);
   });
 
-  it("lists photos by place, with an id only for a child, a class or a blank card", () => {
+  it("lists photos by place, with an id only for a child or a blank card", () => {
     expect(taggingPhotosQuery.safeParse({ place: "leftovers" }).success).toBe(true);
     expect(taggingPhotosQuery.safeParse({ place: "child", id: child }).success).toBe(true);
     expect(taggingPhotosQuery.safeParse({ place: "child" }).success).toBe(false);
     expect(taggingPhotosQuery.safeParse({ place: "flagged", id: child }).success).toBe(false);
     expect(taggingPhotosQuery.safeParse({ place: "unlinkedCards" }).success).toBe(true);
     expect(taggingPhotosQuery.safeParse({ place: "unlinkedCards", id: child }).success).toBe(false);
-    expect(taggingChildrenQuery.parse({ noGroup: "true" }).noGroup).toBe(true);
-    expect(taggingChildrenQuery.safeParse({}).success).toBe(false);
-    expect(taggingChildrenQuery.safeParse({ groupId: child, noGroup: "true" }).success).toBe(false);
+    // Class photo sets are gone (D156): group photos are listed by group.
+    expect(taggingPhotosQuery.safeParse({ place: "classSet", id: child }).success).toBe(false);
   });
 
   it("takes the worker's reading of a card: a code only for a card, never anything else", () => {
@@ -533,10 +531,33 @@ describe("QR tagging and review (ADR 0018)", () => {
     );
   });
 
-  it("starts a class-photo upload with one class, or an individual upload with nothing", () => {
-    expect(uploadBatchInput.parse({})).toEqual({});
-    expect(uploadBatchInput.parse({ groupId: child })).toEqual({ groupId: child });
-    expect(uploadBatchInput.safeParse({ groupId: "Room 4" }).success).toBe(false);
+  it("starts an individual upload (by default, optionally adding everyone to a group) or one group's photos", () => {
+    expect(uploadBatchInput.parse({})).toEqual({ kind: "individual" });
+    expect(uploadBatchInput.parse({ addToGroupId: child })).toEqual({
+      kind: "individual",
+      addToGroupId: child,
+    });
+    expect(uploadBatchInput.parse({ kind: "group", groupId: child })).toEqual({
+      kind: "group",
+      groupId: child,
+    });
+    // Group photos need their group; individual photos name none (an old class-photo body is refused).
+    expect(uploadBatchInput.safeParse({ kind: "group" }).success).toBe(false);
+    expect(uploadBatchInput.safeParse({ groupId: child }).success).toBe(false);
+    expect(
+      uploadBatchInput.safeParse({ kind: "group", groupId: child, addToGroupId: child }).success,
+    ).toBe(false);
+    expect(uploadBatchInput.safeParse({ kind: "group", groupId: "Choir" }).success).toBe(false);
+  });
+
+  it("moves photos to a person or Leftovers only, never a class photo set (C8)", () => {
+    expect(
+      movePhotosInput.safeParse({ photoIds: [child], target: { kind: "leftovers" } }).success,
+    ).toBe(true);
+    expect(
+      movePhotosInput.safeParse({ photoIds: [child], target: { kind: "classSet", groupId: child } })
+        .success,
+    ).toBe(false);
   });
 });
 
