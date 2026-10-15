@@ -125,7 +125,7 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
 
   // 5. A rule changed for this job: the step says so, Details counts it, and Undo puts the template's rule back.
   await step(/^Automatic: Shop closes/)
-    .getByRole("button", { name: /^Change/ })
+    .getByRole("button", { name: "Change Shop closes", exact: true })
     .click();
   const jobRule = page.getByRole("dialog", { name: "Shop closes", exact: true });
   await expect(
@@ -143,6 +143,19 @@ test("job templates: Settings, a template's steps, a new job from it, and its ch
   await expect(step(/^Automatic: Shop closes/)).toContainText("10 days after the shop opens");
   await expect(step(/^Automatic: Shop closes/)).not.toContainText("Changed for this job");
   await expect(details.getByText(/changes? for this job/)).toHaveCount(0);
+
+  // 5b. A draft can hold a closing date (ADR 0021): Change date on Shop closes sets one, and the step shows the date
+  // instead of the rule (review fix H1).
+  await step(/^Automatic: Shop closes/)
+    .getByRole("button", { name: "Change date", exact: true })
+    .click();
+  const closing = page.getByRole("dialog", { name: "Closing date", exact: true });
+  const inTwentyDays = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
+  await closing.getByLabel("Last day to order", { exact: true }).fill(inTwentyDays);
+  await closing.getByRole("button", { name: "Save closing date", exact: true }).click();
+  await expect(closing).toBeHidden();
+  await expect(step(/^Next: Shop closes/)).toContainText(/in (19|20) days/);
+  await expect(step(/^Next: Shop closes/)).not.toContainText("after the shop opens");
 
   // 6. The template counts the job; template changes reach new jobs only.
   await page.goto(templateUrl);

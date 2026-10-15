@@ -81,16 +81,26 @@ Data and rules
 3. **"Shop opens N days after picture day" plans a day only.** Nothing opens a shop by itself; Publish shop and its
    server checks stay manual. "When photos are checked" reads as a condition, not an automation.
 4. **"Shop closes N days after opening"** sets the closing date when a draft first opens (the opening moment plus N
-   whole days, not the end of a local day), unless a date is already set. Reopening a closed shop sets none.
+   days of 24 hours counted in UTC, as core counts them, so a daylight-saving change never moves it; not the end of a
+   local day), unless a date is already set. Reopening a closed shop sets none.
 5. **A selling job's closing date other than its template rule's counts as a change** to Shop closes (so a date set by
-   hand on a job whose template closes by hand shows "Changed for this job"); Undo puts the rule's date back and is
-   refused when that date has passed.
-6. **At most 50 templates per studio**; names up to 80 characters; rule days 0–60 (cards), 0–180 (opening), 1–365
+   hand on a job whose template closes by hand shows "Changed for this job"). Undo puts the rule's date back; when that
+   date has already passed, Undo is refused and **nothing is reset** (neither the rule nor the date). A shop reopened
+   after its rule's date has passed (closing clears the date) is **not** marked changed (code review M2).
+5a. **The closing date is set, moved or removed on Progress's Shop closes step whenever the job is a draft or selling,
+   whatever the step's state** (Change date, owners and admins), so a selling job whose photos need checking again can
+   still change it, and a draft can hold a date again as ADR 0021 allowed. A draft holding a date shows that date, not
+   its rule (the rule then sets nothing when the shop opens). Drafts also keep the rule's Change.
+6. **At most 50 templates per studio**, checked by the API and again by the database (a trigger that locks the
+   studio's row, so two adds at once can't pass 50); names up to 80 characters; rule days 0–60 (cards), 0–180 (opening), 1–365
    (closing).
 7. **A template some jobs use can be deleted** (not the default): its jobs keep their copy and Details says None.
 8. **Template events aren't in the activity log** (they are written to the outbox).
 9. **Job sales**: the paid orders with a line in this job, as its Orders tab lists them; an order with lines in two jobs
    counts in both. The Orders count is paid orders; "since" is the first one's payment day; the percent is rounded.
+   The currency is the orders' own; a job with no orders yet (all zeros) shows the region's currency.
+9a. **School delivery on a new job**: the job's own choice wins, even an explicit false; left out, the template's
+   (code review M3). The column lost its `false` default so "left out" can be told apart; the trigger fills it in.
 
 Screens
 
@@ -119,6 +129,9 @@ Screens
 19. **Subjects' columns** drop the avatar, Student ID, Grade and Access code (D153's columns); the access code is on the
     record's QR card. The record also shows **Grade** when the person has one, and Do not publish and Possible
     duplicate as tags (D153's Details list doesn't name them; kept so nothing is lost).
+19a. **"Photographed"** is the camera's own clock at the first photo (it has no time zone), shown as its day as it
+    stands, never shifted through UTC. The record reads the card's Printed date again after a print there or of the
+    whole job.
 20. **The record**: Escape goes back to the full list, as the floating panel did; the card's link reads "Print QR card"
     before the first print and "Print again" after; up to 12 photos and 20 orders show, each order linking to its page.
     US studios' photos can't be shown yet (no US storage), so the record says so.
@@ -129,6 +142,14 @@ Screens
 23. **`GET /children/:id/facts` isn't pinned to Montréal**: it returns two dates and nothing personal.
 24. **A template's section is in its address** as `?section=` (an enum word); the name is edited in place by a pencil
     that turns the heading into a field (Save, Cancel, Escape).
+25. **The roster API still gives the whole team full parent emails and access codes**; the masking is on screen only.
+    Question for Seenu: strip them server-side for roles that can't edit the roster (staff)?
+26. **`GET /jobs/:id/progress` returns team members' emails to owners and admins and isn't pinned to Montréal**, like
+    `/studio/team` and `/studio/activity`. Question for Seenu: are team (adult staff) emails in D113's pinning scope?
+27. **⋯ More on a job has five rows** (Preview as a parent and View as photographer marked Soon, Edit, Close or Reopen,
+    History), more than D151's "at most 3 secondary".
+28. **Picture day changes only through the Edit job pencil**, not on its own Progress step (D152's "a date is changed
+    on its own step" is followed for the closing date and the rules).
 
 ## Not in this round (deferred)
 
