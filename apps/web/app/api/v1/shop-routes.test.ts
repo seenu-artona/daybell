@@ -621,7 +621,7 @@ describe("GET /shop/children/:childId/gallery (D60, D119)", () => {
           state: "open",
           studio_id: STUDIO,
           job_id: JOB,
-          portraits: [photo(1), photo(2)],
+          portraits: [{ ...photo(1), drm: true }, photo(2)],
           group_photos: [photo(3)],
         },
       },
@@ -630,6 +630,8 @@ describe("GET /shop/children/:childId/gallery (D60, D119)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.cover.id).toBe(PHOTO(1));
+    // Which large views are protected (ADR 0034); the WebP is signed for every photo either way (C11).
+    expect(body.portraits.map((p: { drm: boolean }) => p.drm)).toEqual([true, false]);
     expect(body.portraits.map((p: { id: string }) => p.id)).toEqual([PHOTO(1), PHOTO(2)]);
     expect(body.groupPhotos.map((p: { id: string }) => p.id)).toEqual([PHOTO(3)]);
     expect(signed).toHaveLength(6);

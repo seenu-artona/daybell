@@ -2,8 +2,8 @@ import { ApiError, type DrmTestTokenResponse } from "@daybell/api";
 import { type DrmTestSettings, drmTestPageEnabled, drmTestSettings } from "@daybell/config/server";
 import { NextResponse } from "next/server";
 import { ApiErrorLater, handle } from "@/lib/api";
-import { licenseToken, licenseUrls } from "@/lib/drm-test";
 import { drmTokenBudget } from "@/lib/drm-test-throttle";
+import { licenseToken, licenseUrls } from "@/lib/shop/drm-token";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
 // Signing runs in Montréal like the rest of Canada's work (D113). No studio data is read or sent: the token carries
@@ -49,7 +49,7 @@ export const POST = handle(async (_request: Request) => {
     );
   }
   const config = settings();
-  const { token, expiresAt } = licenseToken(config);
+  const { token, expiresAt } = licenseToken(config, config);
   const body: DrmTestTokenResponse = {
     token,
     expiresAt,

@@ -12,6 +12,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1141.0",
     "@aws-sdk/client-s3": "3.1141.0",
     "@aws-sdk/client-sqs": "3.1141.0",
     "@daybell/api": "workspace:*",

@@ -1,7 +1,7 @@
 import { createDecipheriv, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
-// License tokens for the DRM test page (D158; ADR 0032). Keys are made at run time; none is ever written in a file.
+// License tokens for the shop's large view (ADR 0034) and the DRM test page (D158; ADR 0032). Keys are made at run time; none is ever written in a file.
 vi.mock("server-only", () => ({}));
 const {
   DRM_TOKEN_TTL_SECONDS,
@@ -10,8 +10,9 @@ const {
   guidBytes,
   licenseToken,
   licenseUrls,
-} = await import("./drm-test");
-const { drmTestIvHex } = await import("./drm-test-build.mjs");
+} = await import("./drm-token");
+const { drmTestIvHex } = await import("../drm-test-build.mjs");
+const { drmIvHex } = await import("@daybell/core");
 
 const settings = () => ({
   comKeyId: randomUUID(),
@@ -19,6 +20,8 @@ const settings = () => ({
   keyId: randomUUID(),
   contentKey: new Uint8Array(randomBytes(16)),
 });
+/** The signer and the key, as the shop and the test page pass them. */
+const token = (s: ReturnType<typeof settings>, now?: Date) => licenseToken(s, s, now);
 
 function decode(token: string) {
   const [header, payload, signature] = token.split(".");
@@ -61,8 +64,7 @@ describe("encryptContentKey", () => {
 describe("licenseToken", () => {
   it("is an HS256 JWT whose signature verifies with the communication key's bytes", () => {
     const s = settings();
-    const { token } = licenseToken(s);
-    const { header, signed, signature } = decode(token);
+    const { header, signed, signature } = decode(token(s).token);
     expect(header).toEqual({ alg: "HS256", typ: "JWT" });
     expect(createHmac("sha256", s.comKey).update(signed).digest("base64url")).toBe(signature);
     // Not with any other key, and not with the key's base64 text.
@@ -78,7 +80,7 @@ describe("licenseToken", () => {
 
   it("carries one inline key under a hardware-only policy", () => {
     const s = settings();
-    const { payload } = decode(licenseToken(s).token);
+    const { payload } = decode(token(s).token);
     expect(payload).toMatchObject({
       version: 1,
       com_key_id: s.comKeyId,
@@ -104,8 +106,9 @@ describe("licenseToken", () => {
 
   it("is good from 5 seconds before now (clock skew) until at most 60 seconds after", () => {
     const now = new Date("2026-10-14T12:00:00.750Z");
-    const { token, expiresAt } = licenseToken(settings(), now);
-    const { payload } = decode(token);
+    const made = token(settings(), now);
+    const { payload } = decode(made.token);
+    const expiresAt = made.expiresAt;
     expect(DRM_TOKEN_TTL_SECONDS).toBeLessThanOrEqual(60);
     expect(payload.begin_date).toBe("2026-10-14T11:59:55.000Z");
     expect(payload.expiration_date).toBe("2026-10-14T12:01:00.000Z");
@@ -115,7 +118,7 @@ describe("licenseToken", () => {
 
   it("never holds a key in the clear", () => {
     const s = settings();
-    const text = Buffer.from(licenseToken(s).token.split(".")[1] as string, "base64url").toString();
+    const text = Buffer.from(token(s).token.split(".")[1] as string, "base64url").toString();
     for (const key of [s.contentKey, s.comKey]) {
       expect(text).not.toContain(Buffer.from(key).toString("hex"));
       expect(text).not.toContain(Buffer.from(key).toString("base64"));
@@ -132,7 +135,7 @@ describe("the IV (FairPlay: Axinom requires one with every inline key)", () => {
 
   it("is on every inline key in the token, and is exactly the IV the build packaged with", () => {
     const s = settings();
-    const { payload } = decode(licenseToken(s).token);
+    const { payload } = decode(token(s).token);
     const keys = payload.message.content_keys_source.inline as { id: string; iv: string }[];
     expect(keys.length).toBeGreaterThan(0);
     for (const key of keys) {
@@ -140,6 +143,8 @@ describe("the IV (FairPlay: Axinom requires one with every inline key)", () => {
       expect(Buffer.from(key.iv, "base64").toString("hex")).toBe(
         drmTestIvHex(key.id.replaceAll("-", "")),
       );
+      // …and the IV the shop's worker packages with (core's drmIvHex, ADR 0034).
+      expect(Buffer.from(key.iv, "base64").toString("hex")).toBe(drmIvHex(key.id));
     }
   });
 });
@@ -161,5 +166,24 @@ describe("licenseUrls", () => {
     expect(licenseUrls("t1", true).fairplay).toBe(
       "https://t1.drm-fairplay-licensing.axprod.net/AcquireLicense",
     );
+  });
+});
+
+describe("a shop token (ADR 0034)", () => {
+  it("names nothing but the communication key's ID and the photo's key ID", () => {
+    const signer = { comKeyId: randomUUID(), comKey: new Uint8Array(randomBytes(32)) };
+    const key = { keyId: randomUUID(), contentKey: new Uint8Array(randomBytes(16)) };
+    const { payload } = decode(licenseToken(signer, key).token);
+    const uuids = JSON.stringify(payload).match(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
+    );
+    expect([...new Set(uuids)].sort()).toEqual([signer.comKeyId, key.keyId].sort());
+    expect(Object.keys(payload).sort()).toEqual([
+      "begin_date",
+      "com_key_id",
+      "expiration_date",
+      "message",
+      "version",
+    ]);
   });
 });

@@ -285,6 +285,7 @@ describe("the viewer (code review N5)", () => {
     viewUrl: `https://photos.example.test/${n}/proof.webp`,
     width: 1200,
     height: 1500,
+    drm: false,
   });
   beforeEach(() => {
     HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {

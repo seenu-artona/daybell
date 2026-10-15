@@ -2652,7 +2652,8 @@
       "checkoutNotConfigured": "Payments aren’t set up here.",
       "cannotCancel": "This order can’t be canceled here. Contact the studio.",
       "cancelLimit": "Too many cancellations. Try again later, or contact the studio.",
-      "zipTooBig": "There are too many photos for one zip. Download them one at a time."
+      "zipTooBig": "There are too many photos for one zip. Download them one at a time.",
+      "drmUnavailable": "This photo can't be shown with screenshot protection right now. It shows with its watermark instead."
     },
     "header": {
       "bag": "Bag, {count, plural, =0 {empty} one {# item} other {# items}}",

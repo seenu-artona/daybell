@@ -112,6 +112,11 @@ const NAMED: Record<string, () => ApiError> = {
   fees_pending: () =>
     new ConflictLater(30, "This order is still being confirmed. Try again in a moment."),
   zip_limit: () => new RetryLater(600, "Too many downloads. Wait a few minutes and try again."),
+  // DRM in the large view (ADR 0034).
+  drm_unavailable: () =>
+    conflict("This photo isn't protected here.", SHOP_CONFLICTS.drmUnavailable),
+  region_unavailable: () =>
+    new ApiError("region_unavailable", "Photos can't be shown in this region yet."),
 };
 
 type DbError = { code?: string; message?: string } | null;

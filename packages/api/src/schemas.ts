@@ -5,6 +5,7 @@ import {
   cleanGroupName,
   DEFAULT_CLASS_LABEL,
   DRM_FAILURE_REASONS,
+  DRM_MANIFEST_FORMATS,
   GROUP_COLUMNS,
   GROUP_PHOTOS_TO,
   HEAD_OFFICE_PROVINCES,
@@ -1549,6 +1550,14 @@ export const shopGalleryQuery = z.object({
     }),
 });
 export type ShopGalleryQuery = z.infer<typeof shopGalleryQuery>;
+
+/** A large view's DRM manifest (ADR 0034): the DASH manifest, the HLS master playlist or its media playlist. */
+export const shopDrmManifestQuery = shopGalleryQuery.extend({
+  format: z.enum(DRM_MANIFEST_FORMATS, { error: "validation.invalid" }).meta({
+    description:
+      "dash (Widevine and PlayReady), hls (FairPlay's master playlist) or hls-media (the playlist the master names).",
+  }),
+});
 
 // ── Checkout and taxes (Phase 1 step 10, ADR 0023) ────────────────────────────────────────────────────────────────
 

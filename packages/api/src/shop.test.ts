@@ -32,6 +32,7 @@ import {
   fieldErrors,
   shopCartLineInput,
   shopCodeInput,
+  shopDrmManifestQuery,
   shopGalleryQuery,
   shopQuantityInput,
   shopShippingInput,
@@ -84,6 +85,8 @@ describe("the parent shop matches the database (ADR 0022)", () => {
         "cancelLimit",
         "cannotCancel",
         "zipTooBig",
+        // DRM in the large view (ADR 0034; drm.test.ts checks it against its migration).
+        "drmUnavailable",
       ].sort(),
     );
     expect([SHOP_CODE_NOT_FOUND, SHOP_LOCKED]).toEqual(["shop.codeNotFound", "shop.locked"]);
@@ -195,6 +198,10 @@ describe("shop routes", () => {
       "GET /shop/session",
       "DELETE /shop/session",
       "GET /shop/children/{childId}/gallery",
+      "GET /shop/drm",
+      "GET /shop/drm/fairplay-certificate",
+      "GET /shop/children/{childId}/photos/{photoId}/drm-manifest",
+      "POST /shop/children/{childId}/photos/{photoId}/drm-token",
       "GET /shop/children/{childId}/price-list",
       "GET /shop/cart",
       "POST /shop/cart/lines",
@@ -225,7 +232,11 @@ describe("shop routes", () => {
     for (const r of shop.filter(
       (r) => r.path !== "/shop/access" && !(r.method === "GET" && r.path === "/shop/session"),
     ))
-      expect(r.query, `${r.method} ${r.path}`).toBe(shopGalleryQuery);
+      expect(r.query, `${r.method} ${r.path}`).toBe(
+        r.path.endsWith("/drm-manifest") ? shopDrmManifestQuery : shopGalleryQuery,
+      );
+    // The DRM manifest's query is the gallery's plus its format (ADR 0034).
+    expect(Object.keys(shopDrmManifestQuery.shape).sort()).toEqual(["format", "gallery"]);
     expect(shopGalleryQuery.parse({ gallery: "0123456789abcdef0123456789abcdef" })).toEqual({
       gallery: "0123456789abcdef0123456789abcdef",
     });

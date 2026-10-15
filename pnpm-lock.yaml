@@ -69,6 +69,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@aws-sdk/client-kms':
+        specifier: 3.1141.0
+        version: 3.1141.0
       '@aws-sdk/client-s3':
         specifier: 3.1141.0
         version: 3.1141.0

@@ -17,6 +17,7 @@ const photo = (n: number): ShopPhoto => ({
   viewUrl: `https://photos.example.test/${n}/proof.webp`,
   width: 1200,
   height: 1500,
+  drm: false,
 });
 
 let container: HTMLDivElement;
