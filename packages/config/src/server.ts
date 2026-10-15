@@ -331,3 +331,115 @@ export function drmTestSettings(
     contentKey: hexBytes(contentKeyText),
   };
 }
+
+// ── DRM in the parent shop's large view (D158; ADR 0034) ─────────────────────────────────────────────────────────────
+
+/**
+ * What the shop's DRM routes need to sign Axinom license tokens (D158; ADR 0034), all server-only, never NEXT_PUBLIC_*,
+ * read on first use (never at build time):
+ * - SHOP_DRM_COM_KEY_ID: the shop's communication key ID (a GUID), from Axinom's portal.
+ * - SHOP_DRM_COM_KEY: that communication key, base64 of 32 bytes. Secret (Sensitive in Vercel): it signs tokens and
+ *   wraps content keys. Must never be the DRM test page's AXINOM_COM_KEY (ADR 0032: a separate key for testing).
+ * - SHOP_DRM_LICENSE_PREFIX: the tenant part of https://<prefix>.drm-{widevine,playready,fairplay}-licensing.axprod.net.
+ * - SHOP_DRM_FAIRPLAY_CERT: optional; the FairPlay (FPS) certificate as base64 of its DER bytes, served from our own
+ *   origin (C10). Unset, FairPlay is off and Safari keeps the watermarked WebP.
+ * Null when none of the three required settings is set (DRM isn't set up in this environment: the shop keeps the
+ * WebP); one set without the others, or a malformed one, throws. Errors name the variable, never the value.
+ */
+export interface ShopDrmSettings {
+  comKeyId: string;
+  comKey: Uint8Array<ArrayBuffer>;
+  licensePrefix: string;
+  fairplayCertificate: Uint8Array<ArrayBuffer> | null;
+}
+
+/** A FairPlay certificate is about 1 KB; anything over this isn't one. */
+const MAX_FAIRPLAY_CERT_BYTES = 16 * 1024;
+
+function base64Bytes(text: string): Uint8Array<ArrayBuffer> | null {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(text)) return null;
+  try {
+    return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+export function shopDrmSettings(
+  env: Record<string, string | undefined> = process.env,
+): ShopDrmSettings | null {
+  const names = ["SHOP_DRM_COM_KEY_ID", "SHOP_DRM_COM_KEY", "SHOP_DRM_LICENSE_PREFIX"] as const;
+  if (names.every((name) => !env[name]?.trim())) return null;
+  const comKeyId = guidSetting(env, "SHOP_DRM_COM_KEY_ID");
+  const comKeyText = required(env, "SHOP_DRM_COM_KEY");
+  const comKey = base64Bytes(comKeyText);
+  if (comKey?.length !== 32) throw new Error("SHOP_DRM_COM_KEY must be 32 bytes, base64-encoded");
+  const testKey = base64Bytes(env.AXINOM_COM_KEY?.trim() ?? "");
+  if (testKey?.length === comKey.length && testKey.every((b, i) => b === comKey[i]))
+    throw new Error("SHOP_DRM_COM_KEY must be different from AXINOM_COM_KEY");
+  const licensePrefix = required(env, "SHOP_DRM_LICENSE_PREFIX").toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(licensePrefix))
+    throw new Error("SHOP_DRM_LICENSE_PREFIX must be the tenant part of Axinom's license address");
+  const certText = env.SHOP_DRM_FAIRPLAY_CERT?.trim() ?? "";
+  let fairplayCertificate: Uint8Array<ArrayBuffer> | null = null;
+  if (certText) {
+    fairplayCertificate = base64Bytes(certText);
+    // DER starts with a SEQUENCE (0x30).
+    if (
+      !fairplayCertificate ||
+      fairplayCertificate.length < 64 ||
+      fairplayCertificate.length > MAX_FAIRPLAY_CERT_BYTES ||
+      fairplayCertificate[0] !== 0x30
+    )
+      throw new Error(
+        "SHOP_DRM_FAIRPLAY_CERT must be the FairPlay certificate's DER bytes, base64",
+      );
+  }
+  return { comKeyId, comKey, licensePrefix, fairplayCertificate };
+}
+
+const IAM_ROLE = /^arn:aws:iam::\d{12}:role\/[\w+=,.@/-]{1,128}$/;
+
+/**
+ * AWS_DRM_ROLE_ARN (ADR 0034, B4): the role only the shop's DRM token route assumes (Vercel's OIDC token, like
+ * AWS_ROLE_ARN) to unwrap a photo's content key: kms:Decrypt on the DRM key, with the encryption context required, and
+ * nothing else. Distinct from AWS_ROLE_ARN and AWS_DOWNLOAD_ROLE_ARN, so neither of those can ever unwrap a key. Null
+ * with the local driver and for regions without photo storage. Named, never shown, when it is missing.
+ */
+export function awsDrmRoleArn(
+  region: DataRegion,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const settings = photoStorageSettings(region, env);
+  if (settings?.driver !== "s3") return null;
+  const value = required(env, "AWS_DRM_ROLE_ARN");
+  if (!IAM_ROLE.test(value)) throw new Error("AWS_DRM_ROLE_ARN must be an IAM role ARN");
+  if (value === settings.roleArn)
+    throw new Error("AWS_DRM_ROLE_ARN must be a different role from AWS_ROLE_ARN");
+  if (value === env.AWS_DOWNLOAD_ROLE_ARN?.trim())
+    throw new Error("AWS_DRM_ROLE_ARN must be a different role from AWS_DOWNLOAD_ROLE_ARN");
+  return value;
+}
+
+/**
+ * DRM_KMS_KEY_ARN_CA (ADR 0034): the KMS key (alias/daybell-{env}-ca-drm) that wraps each photo's content key, in
+ * ca-central-1 like the photos (D113). Its being set is what turns DRM packaging on in this environment: unset, nothing
+ * is packaged and the shop keeps the WebP. Null with the local driver (no packaging locally) and for regions without
+ * photo storage. A key or alias ARN in the photos' AWS region; anything else throws, naming the variable.
+ */
+export function drmKmsKeyArn(
+  region: DataRegion,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const settings = photoStorageSettings(region, env);
+  if (settings?.driver !== "s3") return null;
+  const name = `DRM_KMS_KEY_ARN_${region.toUpperCase()}`;
+  const value = env[name]?.trim() ?? "";
+  if (!value) return null;
+  const pattern = new RegExp(
+    `^arn:aws:kms:${settings.awsRegion}:\\d{12}:(key/[0-9a-f-]{36}|alias/[A-Za-z0-9/_-]{1,250})$`,
+  );
+  if (!pattern.test(value))
+    throw new Error(`${name} must be a KMS key or alias ARN in ${settings.awsRegion}`);
+  return value;
+}
