@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { check, filterValue, handle, likePattern, parseBody, parseQuery } from "@/lib/api";
 import { checklistSummary, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
 import { closingWeekEnd, monthRange } from "@/lib/job-list-filters";
+import { assertTemplateInStudio } from "@/lib/job-templates";
 import {
   assertClientInStudio,
   assertClosingDate,
@@ -96,8 +97,9 @@ export const GET = handle(async (request: Request) => {
 
 /**
  * POST /api/v1/jobs — owners and admins create a job. New jobs are drafts. Without an internal number the next free
- * one is used; if someone else takes it at the same moment, the next one is tried. Without a price list, the database
- * gives the job the studio's default (ADR 0019).
+ * one is used; if someone else takes it at the same moment, the next one is tried. The database copies the job's
+ * template (the one named, else the studio's default; D154, ADR 0029): its rules, and its price list and delivery
+ * unless the job names its own; without any price list, the studio's default (ADR 0019).
  */
 export const POST = handle(async (request: Request) => {
   const input = await parseBody(request, jobInput);
@@ -106,6 +108,7 @@ export const POST = handle(async (request: Request) => {
   assertClosingDate(input.closesAt);
   await assertClientInStudio(supabase, studio.id, input.clientId);
   await assertPriceListInStudio(supabase, studio.id, input.priceListId);
+  await assertTemplateInStudio(supabase, studio.id, input.templateId);
   for (let attempt = 0; ; attempt++) {
     const internalNumber = input.internalNumber ?? (await nextJobNumber(supabase, studio.id));
     const result = await supabase

@@ -26,10 +26,11 @@ import { JobSection } from "../job-section";
 import { LiveNote } from "../live-note";
 import { RemoveChildDialog } from "../remove-child-dialog";
 import { tabHref } from "../tabs";
-import { ChildPanel } from "./child-panel";
 import { ClassesPanel, ClassesRow, renameButtonId } from "./classes-panel";
 import { PeopleList, rowLinkId } from "./people-list";
+import { PersonRecord } from "./person-record";
 import { PrintQrCardsDialog } from "./print-qr-cards-dialog";
+import { useReturnFocus } from "./return-focus";
 import { useSubjectChips } from "./subject-chips";
 import { SubjectsActions } from "./subjects-actions";
 import { useRoster } from "./use-roster";
@@ -45,14 +46,15 @@ export default function PeoplePageRoute() {
 }
 
 /**
- * A job's Subjects (D137, D138, D144, D147; the People route, Phase 1 step 2's roster): Print QR cards and the green
- * Add subjects menu at the right end of the job's tab row; then one flat list in a white list card whose toolbar has
- * the chips (All, Not ordered for people who see orders, No photos, Possible duplicates, then the person's own: a
- * class, No class, Do not photograph, Do not publish, and grades kept in this browser) and the search (never sent or
- * put in the address, D113); a Photos and an Ordered column; the footer counts the roster. The selected child opens in
- * the floating panel (?child=<id>, an id only). Under the list, roster editors get a "Classes N ›" row that opens the
- * job's classes in the same panel, each with Rename (D147). Add and edit keep the existing child form dialog (D133);
- * Import stays its own page.
+ * A job's Subjects (D153, amending D137, D138, D144 and D147): white "Print ▾" and "Add subjects ▾" at the right end of
+ * the job's tab row; then one flat list in a white list card whose toolbar has the chips (All, Not photographed, Not
+ * ordered for people who see orders, then the person's own through "+ Add filter": a class, No class, Possible
+ * duplicates, No photos, Do not photograph, Do not publish, and grades kept in this browser) and the search (never
+ * sent or put in the address, D113); Name with small tags, Class, Photos and Ordered columns; the footer counts the
+ * roster. Opening a person (?child=<id>, an id only) folds the list to its Name column in the same card and shows their
+ * record beside it. Under the list, roster editors get a "Classes N ›" row that opens the job's classes in the floating
+ * panel, each with Rename (D147). Add and edit keep the existing child form dialog (D133); Upload a list is the Import
+ * page.
  */
 function PeoplePage() {
   const t = useTranslations("app.people");
@@ -71,6 +73,8 @@ function PeoplePage() {
   const [editing, setEditing] = useState<Child | "new" | null>(null);
   const [removing, setRemoving] = useState<Child | null>(null);
   const [printing, setPrinting] = useState(false);
+  // Counts prints of the job's cards, so an open record reads its card's Printed date again.
+  const [printedKey, setPrintedKey] = useState(0);
   // Set when the person opens a child, so focus moves to the panel; not on a refresh with ?child= in the URL.
   const [panelFocus, setPanelFocus] = useState<string | null>(null);
   const opener = useRef<string | null>(null);
@@ -91,6 +95,8 @@ function PeoplePage() {
   });
   const { chip } = chips;
   const selectedId = useSearchParams().get("child");
+  // Unfolding puts focus back on the row once the full table is back (D153, WCAG 2.4.3).
+  const returnFocusTo = useReturnFocus(selectedId, rowLinkId);
   const selected = roster.rows?.find((c) => c.id === selectedId) ?? null;
   const childHref = (childId: string) => subjectsHref(base, chip, childId);
   // The list's own address: the chip stays, the open child goes.
@@ -179,10 +185,10 @@ function PeoplePage() {
   }
 
   function closePanel() {
-    const back = opener.current ?? selectedId;
+    // Back to the row of the person who was open (↑↓ may have moved from the one first opened).
+    returnFocusTo(selectedId ?? opener.current);
     router.replace(here, { scroll: false });
     setPanelFocus(null);
-    if (back) setTimeout(() => document.getElementById(rowLinkId(back))?.focus(), 0);
   }
 
   const empty = roster.rows !== null && roster.total === 0;
@@ -251,19 +257,6 @@ function PeoplePage() {
             onClose={closeClasses}
             onRename={setRenaming}
           />
-        ) : selected ? (
-          <ChildPanel
-            key={selected.id}
-            child={selected}
-            job={job}
-            word={word}
-            canEdit={canEdit}
-            focusKey={panelFocus === selected.id ? panelFocus : null}
-            onClose={closePanel}
-            onEdit={() => setEditing(selected)}
-            onRemove={() => setRemoving(selected)}
-            onPrintCard={() => printCard(selected)}
-          />
         ) : null
       }
     >
@@ -296,6 +289,24 @@ function PeoplePage() {
             word={word}
             busy={roster.loadingMore}
             footer={footer}
+            person={
+              selected ? (
+                <PersonRecord
+                  key={selected.id}
+                  child={selected}
+                  job={job}
+                  word={word}
+                  canEdit={canEdit}
+                  seesOrders={seesOrders}
+                  focusKey={panelFocus === selected.id ? panelFocus : null}
+                  printedKey={printedKey}
+                  onUnfold={closePanel}
+                  onEdit={() => setEditing(selected)}
+                  onRemove={() => setRemoving(selected)}
+                  onPrintCard={() => printCard(selected)}
+                />
+              ) : null
+            }
           />
           {roster.loadingMore ? <p className="m-0 text-sm text-muted">{t("loadingMore")}</p> : null}
         </div>
@@ -366,7 +377,10 @@ function PeoplePage() {
           roster={roster.rows}
           groups={roster.groups}
           word={word}
-          onPrinted={refreshSummary}
+          onPrinted={() => {
+            refreshSummary();
+            setPrintedKey((k) => k + 1);
+          }}
         />
       ) : null}
 

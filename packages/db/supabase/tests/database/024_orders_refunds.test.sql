@@ -240,7 +240,7 @@ select is((select count(*) from system_fns, unnest(array['anon', 'authenticated'
   where has_function_privilege(r, f, 'execute')), 0::bigint, 'browsers and logged-out visitors run none of them');
 select ok((select bool_and(has_function_privilege('service_role', f, 'execute')) from system_fns),
   'the service role (the API) runs them all');
-select ok(has_function_privilege('authenticated', 'public.studio_orders(uuid, uuid, public.order_fulfilment[], text, integer, uuid, public.shop_shipping_method)', 'execute')
+select ok(has_function_privilege('authenticated', 'public.studio_orders(uuid, uuid, public.order_fulfilment[], text, integer, uuid, public.shop_shipping_method, uuid)', 'execute')
   and not (select prosecdef from pg_proc where proname = 'studio_orders')
   and not (select prosecdef from pg_proc where proname = 'studio_sales')
   and not (select prosecdef from pg_proc where proname = 'studio_order_todo'),

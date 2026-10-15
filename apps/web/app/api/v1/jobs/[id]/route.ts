@@ -4,13 +4,16 @@ import {
   type JobInput,
   jobPatch,
   PRICE_LIST_CONFLICTS,
+  splitJobPatch,
   studioChecklistQuery,
 } from "@daybell/api";
+import { withRules } from "@daybell/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { check, handle, parseBody, parseQuery } from "@/lib/api";
 import { checklistDetail, checklistToday, loadChecklistFacts } from "@/lib/checklist-facts";
+import { assertRulesWhole } from "@/lib/job-templates";
 import {
   assertClientInStudio,
   assertClosingDate,
@@ -19,8 +22,10 @@ import {
   JOB_COLUMNS,
   type JobRow,
   jobColumns,
+  jobRulesOf,
   jobWriteError,
   NUMBER_TAKEN,
+  rulesToDb,
   toJob,
   validJob,
 } from "@/lib/jobs";
@@ -65,17 +70,24 @@ export const GET = handle(async (request: Request, ctx: Ctx) => {
 });
 
 /**
- * PATCH /api/v1/jobs/:id — owners and admins change a job's details. The status changes only through start-selling,
- * close and reopen (ADR 0021). A draft or selling job may switch price list or school delivery (new orders only) and
- * set or remove its closing date (in the future, at most 400 days away); a closed job's don't change (Claude's call 4;
- * ADR 0021; the database refuses it too).
+ * PATCH /api/v1/jobs/:id — owners and admins change a job's details and its own rules (D152: they show as "Changed
+ * for this job"). The status changes only through start-selling, close and reopen (ADR 0021). A draft or selling job
+ * may switch price list or school delivery (new orders only) and set or remove its closing date (in the future, at
+ * most 400 days away); a closed job's don't change (Claude's call 4; ADR 0021; the database refuses it too). The rules
+ * must make a whole (days after picture day exactly when the shop opens then).
  */
 export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   const id = await jobId(ctx);
-  const patch = await parseBody(request, jobPatch);
+  const { details: patch, rules: rulePatch } = splitJobPatch(await parseBody(request, jobPatch));
   const { supabase, studio } = await studioScope();
   assertCanManage(studio);
   const current = await loadJob(supabase, studio.id, id);
+  const rules = withRules(jobRulesOf(current), rulePatch);
+  assertRulesWhole(rules);
+  const ruleColumns =
+    Object.keys(rulePatch).length > 0
+      ? rulesToDb({ ...rulePatch, shopOpensDays: rules.shopOpensDays })
+      : {};
   // The job as it will be, checked as a whole.
   const next = validJob({
     name: current.name,
@@ -104,7 +116,7 @@ export const PATCH = handle(async (request: Request, ctx: Ctx) => {
   await assertPriceListInStudio(supabase, studio.id, patch.priceListId);
   const result = await supabase
     .from("jobs")
-    .update(jobColumns(next, Object.keys(patch) as (keyof JobInput)[]))
+    .update({ ...jobColumns(next, Object.keys(patch) as (keyof JobInput)[]), ...ruleColumns })
     .eq("studio_id", studio.id)
     .eq("id", id)
     .select(JOB_COLUMNS)

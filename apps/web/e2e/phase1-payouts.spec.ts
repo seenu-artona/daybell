@@ -5,7 +5,7 @@ import { joinAs, signUpOwner } from "./helpers";
 // D143, D96, D113; Seenu's answers 1–4 and Q1–Q6, Claude's calls of Oct 12 2026; ADR 0020), against the fake Stripe
 // (STRIPE_DRIVER=fake: no real Stripe call in CI, Claude's call Q12): the owner goes from Not started through Stripe's
 // (fake) hosted onboarding, leaving it unfinished (Needs info) then finishing it (Active, by the signed webhook and the
-// return check); "Set up payouts" and the Start selling dialog's "Payouts connected" tick; an expired Stripe link asks
+// return check); "Set up payouts" and the Publish shop dialog's "Payouts connected" tick; an expired Stripe link asks
 // the owner to continue; the schedule changes to monthly, and a failed save's problem goes once a save works; the fees
 // are stated, the next and recent payouts wait for Analytics; a paid payout is recorded in CAD; an admin sees it
 // read-only; a photographer has no Stripe link and is refused; another studio sees nothing; and it all works from the
@@ -112,14 +112,14 @@ test("settings › stripe: onboarding on (fake) Stripe, status, schedule, fees, 
   await page.goto("/app");
   await expect(setup.getByRole("link", { name: "Set up payouts Done", exact: true })).toBeVisible();
   await expect(setup.getByText("2 of 4 done", { exact: true })).toBeVisible();
-  // ...and so does the Start selling dialog's "Payouts connected".
+  // ...and so does the Publish shop dialog's "Payouts connected" (D152 renamed the button).
   const created = await page.request.post("/api/v1/jobs", {
     data: { name: `Payout Job ${tag}`, type: "school", pictureDay: "2030-05-01" },
   });
   expect(created.status()).toBe(201);
   const jobId = (await created.json()).job.id as string;
   await page.goto(`/app/jobs/${jobId}`);
-  await main.getByRole("button", { name: "Start selling", exact: true }).click();
+  await main.getByRole("button", { name: "Publish shop", exact: true }).click();
   const sell = page.getByRole("dialog", { name: "Before you can sell", exact: true });
   const payoutsItem = sell
     .getByRole("listitem")

@@ -6,7 +6,7 @@ import { signUpOwner } from "./helpers";
 // task that ticks itself, the API's
 // PDF (four cards per double-sided sheet: a front page and a back page; no card for Do not photograph, blank cards, the
 // same card on every reprint, never cached),
-// People's Print QR cards dialog, one card from the child panel, the job's activity, and that another studio can't
+// People's Print QR cards dialog, one card from the person's record (D153), the job's History (D151), and that another studio can't
 // print or count the job's cards. Desktop only (D136). PDFs are checked by their page objects; the cards' text is
 // embedded-font glyphs, so names and codes can't be read from the bytes.
 const run = `${Date.now()}`;
@@ -64,12 +64,11 @@ test("QR cards: print from the API and from People, with the checklist task", as
     doNotPhotograph: true,
   });
 
-  // 1. Overview: Print QR cards is next, and its row links to People's print dialog.
+  // 1. Overview (D152): Print QR cards is the step to do now, and its action opens Subjects' print dialog.
   await page.goto(`/app/jobs/${job.id}`);
-  const checklist = main.getByRole("region", { name: "Checklist", exact: true });
-  const qrTodo = checklist.getByRole("listitem").filter({ hasText: "Print QR cards" });
-  await expect(qrTodo).toContainText("Next");
-  await expect(qrTodo.getByRole("link")).toHaveAttribute(
+  const progress = main.getByRole("region", { name: "Progress", exact: true });
+  const qrTodo = progress.getByRole("listitem").filter({ hasText: /^Now: Print QR cards/ });
+  await expect(qrTodo.getByRole("link", { name: "Print QR cards", exact: true })).toHaveAttribute(
     "href",
     `/app/jobs/${job.id}/people?print=qr`,
   );
@@ -103,25 +102,32 @@ test("QR cards: print from the API and from People, with the checklist task", as
   const status = await page.request.get(cardsPath);
   expect(await status.json()).toEqual({ qrCards: { eligible: 4, withCard: 4, blankCards: 1 } });
 
-  // 3. Overview: the task ticked itself; Set up is done and picture day is far, so the list is collapsed to the next
-  // task (on track), and the print is in the job's Recent activity.
+  // 3. Overview: the step is done, so Prepare is finished and folds to one line; opened, it says when and who printed
+  // them, with a quiet Print again. The print is in More › History.
   await page.reload();
-  await expect(checklist.getByText("3 of 7 done", { exact: true })).toBeVisible();
-  await expect(checklist.getByText("Next: Picture day", { exact: true })).toBeVisible();
-  await checklist.getByRole("button", { name: "Show all tasks", exact: true }).click();
-  await expect(qrTodo).toContainText("Done");
-  const recent = main.getByRole("region", { name: "Recent activity" });
+  // The header line, not the step to do now (whose screen-reader word also reads "Now:").
+  await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Picture day");
+  await progress.getByRole("button", { name: /^Prepare\s*Done/ }).click();
+  const qrDone = progress.getByRole("listitem").filter({ hasText: /^Done: QR cards printed/ });
+  await expect(qrDone).toContainText(owner);
+  await expect(qrDone.getByRole("link", { name: "Print again", exact: true })).toHaveAttribute(
+    "href",
+    `/app/jobs/${job.id}/people?print=qr`,
+  );
+  await main.getByRole("button", { name: "More actions", exact: true }).click();
+  await main.getByRole("button", { name: "History", exact: true }).click();
+  const history = page.getByRole("dialog", { name: "History", exact: true });
   await expect(
-    recent.getByText(`${owner} printed QR cards for ${jobName}`, { exact: true }).first(),
+    history.getByText(`${owner} printed QR cards for ${jobName}`, { exact: true }).first(),
   ).toBeVisible();
+  await history.getByRole("button", { name: "Close", exact: true }).first().click();
 
-  // 4. A child added later reopens the task (the list opens again: back in Set up); its row opens People's print
-  // dialog.
+  // 4. A subject added later reopens the step (back to Prepare); its action opens Subjects' print dialog.
   await addChild({ firstName: "Late", lastName: "Comer", groupId: g5a });
   await page.reload();
-  await expect(qrTodo).toContainText("Next");
-  await expect(qrTodo).toContainText("1 child without a card");
-  await qrTodo.getByRole("link").click();
+  // The header line, not the step to do now (whose screen-reader word also reads "Now:").
+  await expect(progress.locator("[data-progress-now]")).toHaveText("Now: Prepare");
+  await qrTodo.getByRole("link", { name: "Print QR cards", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/app/jobs/${job.id}/people$`));
   const dialog = page.getByRole("dialog", { name: "Print QR cards" });
   await expect(dialog).toBeVisible();
@@ -156,23 +162,25 @@ test("QR cards: print from the API and from People, with the checklist task", as
   await dialog.locator("form").getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
 
-  // 6. One child's card from the panel; a child marked Do not photograph has none.
+  // 6. One person's card from their record (D153: the list folds beside it); someone marked Do not photograph has none.
   await main.getByRole("link", { name: "Maya Johnson", exact: true }).click();
-  const maya = page.getByRole("complementary", { name: "Maya Johnson" });
+  await expect(main.getByRole("heading", { name: "Maya Johnson", level: 2 })).toBeFocused();
+  const mayaCard = main.getByRole("region", { name: "QR card", exact: true });
   const [one] = await Promise.all([
     page.waitForEvent("download"),
-    maya.getByRole("button", { name: "Print QR card", exact: true }).click(),
+    mayaCard.getByRole("button", { name: "Print again", exact: true }).click(),
   ]);
   expect(one.suggestedFilename()).toBe(`qr-cards-${job.internalNumber}.pdf`);
   // One card: its front and its back.
   expect(pagesIn(readFileSync(await one.path()))).toBe(2);
   await expect(main.getByText("Downloaded the QR card.", { exact: true })).toBeVisible();
+  await expect(mayaCard.getByText("Printed", { exact: true })).toBeVisible();
   await main.getByRole("link", { name: "Zoe Optout", exact: true }).click();
-  const zoe = page.getByRole("complementary", { name: "Zoe Optout" });
+  const zoeCard = main.getByRole("region", { name: "QR card", exact: true });
   await expect(
-    zoe.getByText("No QR card: marked Do not photograph", { exact: true }),
+    zoeCard.getByText("No QR card: marked Do not photograph.", { exact: true }),
   ).toBeVisible();
-  await expect(zoe.getByRole("button", { name: "Print QR card", exact: true })).toHaveCount(0);
+  await expect(zoeCard.getByRole("button")).toHaveCount(0);
 
   // 7. Another studio can neither print the job's cards nor count them.
   const outsiderTab = await (await browser.newContext()).newPage();

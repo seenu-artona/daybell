@@ -6,11 +6,12 @@ import { cardCodes, joinAs, photo, signUpOwner } from "./helpers";
 
 // Phase 1 step 8 "Going live" (D75, D127, D143, D96; Claude's calls 1–8; ADR 0021), with STORAGE_DRIVER=local and
 // STRIPE_DRIVER=fake: a job gets ready (a child, a card photo and a photo, tagging reviewed, payouts Active on the fake
-// Stripe); every "Before you can sell" item reads Done; Start selling makes it Selling, says so, moves focus to the job's
-// name and bursts no confetti with reduced motion; the checklist's Start selling ticks; Home lists it under Jobs selling
-// now; an admin hears about it on the bell and a row opens the job; Mark all as read empties the owner's bell; staff
-// see no Close shop and the API refuses them; a closing date shows; Close shop and Reopen shop work; a job that isn't
-// ready is refused by the server, naming what is missing; another studio can do nothing. Desktop only (D136).
+// Stripe); every "Before you can sell" item reads Done; the green Publish shop (D152) makes it Selling, says so, moves
+// focus to the job's name and bursts no confetti with reduced motion; Progress's Shop published is done; Home lists it
+// under Jobs selling now; an admin hears about it on the bell and a row opens the job; Mark all as read empties the
+// owner's bell; staff see no More menu (so no Close shop) and the API refuses them; a closing date is set on Progress's
+// Shop closes step; Close shop and Reopen shop work from More; a job that isn't ready is refused by the server, naming
+// what is missing; another studio can do nothing. Desktop only (D136).
 // Scheduled closing isn't run here (no CRON_SECRET in CI): pgTAP 018 and the route tests cover it.
 test.use({ reducedMotion: "reduce" });
 
@@ -84,11 +85,11 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   const admin = await joinAs(page, browser, `live-admin-${tag}@example.test`, "admin");
   const staff = await joinAs(page, browser, `live-staff-${tag}@example.test`, "staff");
 
-  // 2. Every item in "Before you can sell" reads Done, and the footer offers Start selling.
+  // 2. Every item in "Before you can sell" reads Done, and the footer offers Publish shop (D152).
   await page.goto(`/app/jobs/${jobId}`);
   const heading = main.getByRole("heading", { name: jobName, level: 1, exact: true });
   await expect(heading.locator("..").getByText("Draft", { exact: true })).toBeVisible();
-  await main.getByRole("button", { name: "Start selling", exact: true }).click();
+  await main.getByRole("button", { name: "Publish shop", exact: true }).click();
   const sell = page.getByRole("dialog", { name: "Before you can sell", exact: true });
   for (const item of [
     "Roster added",
@@ -122,7 +123,7 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
       data: { photoIds: [loose], target },
     });
   expect((await move({ kind: "leftovers" })).status()).toBe(200);
-  await sell.getByRole("button", { name: "Start selling", exact: true }).click();
+  await sell.getByRole("button", { name: "Publish shop", exact: true }).click();
   await expect(
     sell
       .getByRole("status")
@@ -140,15 +141,16 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   await expect(sell).toBeHidden();
   expect((await move({ kind: "child", childId })).status()).toBe(200);
   expect((await page.request.post(`/api/v1/jobs/${jobId}/tagging/review`)).status()).toBe(200);
-  await main.getByRole("button", { name: "Start selling", exact: true }).click();
+  await main.getByRole("button", { name: "Publish shop", exact: true }).click();
   await expect(
     sell.getByText("Everything’s ready. Once you start selling, parents can order.", {
       exact: true,
     }),
   ).toBeVisible();
 
-  // 3. Start selling: Selling, said in words, focus on the job's name, no confetti with reduced motion.
-  await sell.getByRole("button", { name: "Start selling", exact: true }).click();
+  // 3. Publish shop: Selling, said in words, focus on the job's name, no confetti with reduced motion; the green action
+  // is now View shop (the parent shop, in a new tab) and Close shop is in More.
+  await sell.getByRole("button", { name: "Publish shop", exact: true }).click();
   await expect(sell).toBeHidden();
   await expect(heading.locator("..").getByText("Selling", { exact: true })).toBeVisible();
   await expect(
@@ -158,15 +160,16 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   ).toBeVisible();
   await expect(heading).toBeFocused();
   await expect(page.locator("[data-confetti]")).toHaveCount(0);
+  await expect(main.getByRole("link", { name: "View shop (opens in a new tab)" })).toHaveAttribute(
+    "target",
+    "_blank",
+  );
+  await main.getByRole("button", { name: "More actions", exact: true }).click();
   await expect(main.getByRole("button", { name: "Close shop", exact: true })).toBeVisible();
-  const checklist = main.getByRole("region", { name: "Checklist", exact: true });
-  const showAll = checklist.getByRole("button", { name: "Show all tasks", exact: true });
-  if (await showAll.isVisible()) await showAll.click();
+  await page.keyboard.press("Escape");
+  const progress = main.getByRole("region", { name: "Progress", exact: true });
   await expect(
-    checklist
-      .getByRole("listitem")
-      .filter({ has: page.getByText("Start selling", { exact: true }) })
-      .getByText("Done", { exact: true }),
+    progress.getByRole("listitem").filter({ hasText: /^Done: Shop published/ }),
   ).toBeVisible();
 
   // 4. Home's Selling now links to it (D146).
@@ -199,7 +202,7 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   await expect(menu.getByRole("button", { name: "Notifications", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
 
-  // 6. Staff see the state but no Close shop, and the API refuses them.
+  // 6. Staff see the state but no More menu (so no Close shop), and the API refuses them.
   await staff.goto(`/app/jobs/${jobId}`);
   const staffMain = staff.getByRole("main");
   await expect(
@@ -208,13 +211,15 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
       .locator("..")
       .getByText("Selling", { exact: true }),
   ).toBeVisible();
+  await expect(staffMain.getByRole("button", { name: "More actions", exact: true })).toHaveCount(0);
   await expect(staffMain.getByRole("button", { name: "Close shop", exact: true })).toHaveCount(0);
   expect((await staff.request.post(`/api/v1/jobs/${jobId}/close`)).status()).toBe(403);
 
-  // 7. A closing date: the last day to order, shown under the name in the viewer's own time.
+  // 7. A closing date, changed on its own step (D152): Progress's Shop closes, now while selling, has Change date.
   await page.goto(`/app/jobs/${jobId}`);
-  await main.getByRole("button", { name: "More actions", exact: true }).click();
-  await main.getByRole("button", { name: "Set closing date", exact: true }).click();
+  const shopCloses = progress.getByRole("listitem").filter({ hasText: /^Now: Shop closes/ });
+  await expect(shopCloses).toContainText("No closing date");
+  await shopCloses.getByRole("button", { name: "Change date", exact: true }).click();
   const closing = page.getByRole("dialog", { name: "Closing date", exact: true });
   const inTenDays = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
   await closing.getByLabel("Last day to order", { exact: true }).fill(inTenDays);
@@ -226,9 +231,12 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   await expect(
     main.getByRole("status").filter({ hasText: whole("Closing date saved.") }),
   ).toBeVisible();
-  await expect(main.getByText(/ · Closes .+$/)).toBeVisible();
+  await expect(shopCloses).toContainText(/in (9|10) days/);
+  // This job was made from the studio's default template, which closes by hand: a date is a change for this job.
+  await expect(shopCloses).toContainText("Changed for this job");
 
-  // 8. Close shop, after a confirm; then Reopen shop with the same checks.
+  // 8. Close shop from More, after a confirm; then Reopen shop (More) with the same checks.
+  await main.getByRole("button", { name: "More actions", exact: true }).click();
   await main.getByRole("button", { name: "Close shop", exact: true }).click();
   const confirm = page.getByRole("dialog", { name: "Close the shop?", exact: true });
   await confirm.getByRole("button", { name: "Close shop", exact: true }).click();
@@ -237,7 +245,12 @@ test("going live: ready, start selling, the bell, closing date, close and reopen
   await expect(
     main.getByRole("status").filter({ hasText: whole(`${jobName} is closed.`) }),
   ).toBeVisible();
-  await expect(main.getByText(/ · Closes .+$/)).toHaveCount(0);
+  // Selling is finished now: it folds to one line, which opens to show its steps.
+  await progress.getByRole("button", { name: /^Selling\s*Done/ }).click();
+  await expect(
+    progress.getByRole("listitem").filter({ hasText: /^Done: Shop closed/ }),
+  ).toBeVisible();
+  await main.getByRole("button", { name: "More actions", exact: true }).click();
   await main.getByRole("button", { name: "Reopen shop", exact: true }).click();
   const reopen = page.getByRole("dialog", { name: "Reopen shop", exact: true });
   await expect(

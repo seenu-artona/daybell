@@ -145,3 +145,9 @@ The only log line is a count when Up next's 1,000-job limit cuts jobs off (`up_n
 - Buttons in rows, or an opened "current" box with buttons: Seenu simplified the design to plain links.
 - Computing the Jobs list's progress in the browser: the public API and MCP server must see the same numbers (D92).
 - Ticking tasks by hand.
+
+## Amendment (Oct 14, 2026, Seenu; D152, ADR 0029)
+
+The Overview's Checklist card (and its collapse rule) is replaced by Progress: six stages whose built steps are done by
+this ADR's rules, from the same facts (`GET /jobs/:id/progress`). The checklist itself, `GET /jobs/:id`'s `checklist`,
+`/studio/checklist` and Home's Up next are unchanged.

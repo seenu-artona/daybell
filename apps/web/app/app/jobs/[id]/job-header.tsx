@@ -2,28 +2,29 @@
 
 import type { Job, PriceListResponse, StudioPayoutsResponse } from "@daybell/api";
 import { payoutsConnected, type SellChecklistKey } from "@daybell/core";
-import { Button, ConfettiBurst, IconButton, iconButtonVariants, PageHeader } from "@daybell/ui";
-import { ArrowLeft, CalendarClock, Ellipsis, Pencil } from "lucide-react";
+import {
+  Button,
+  buttonVariants,
+  ConfettiBurst,
+  IconButton,
+  iconButtonVariants,
+  PageHeader,
+} from "@daybell/ui";
+import { ArrowLeft, Camera, Ellipsis, Eye, History, Lock, Pencil, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useApiText } from "@/components/use-messages";
 import { api } from "@/lib/client-api";
+import { ActivityCard } from "../../activity-card";
 import { Dialog } from "../../dialog";
 import { useStudio } from "../../me-context";
 import { MENU_ROW, Popover } from "../../popover";
-import {
-  ClosingDateField,
-  closesAtFor,
-  closingFieldValue,
-  useFormatClosing,
-} from "../closing-date";
 import { JobForm } from "../job-form";
-import { StatusBadge, useFormatDay } from "../status-badge";
+import { StatusBadge } from "../status-badge";
 import {
   blockersFromFields,
-  closingDatePassed,
   jobConflictKey,
   readyToSell,
   sellItems,
@@ -33,22 +34,21 @@ import {
 import { useJob } from "./job-context";
 import { SellChecklist } from "./sell-checklist";
 
-type Open = "edit" | "sell" | "closeShop" | "closingDate" | null;
+type Open = "edit" | "sell" | "closeShop" | "history" | null;
 
 /**
- * The job's title row (D137, D144), on the canvas with no white block: a round back button, the job's name and its shop
- * state (Draft, Selling or Closed; not clickable) with its details under the name, then the shop's white pill and a
- * round More (⋯) for owners and admins (ADR 0021): "Start selling" on a draft (the "Before you can sell" dialog; the server
- * checks everything again), "Close shop" while selling (after a confirm), "Reopen shop" once closed (the same checks).
- * Going live bursts confetti (D75; none with reduced motion) and is announced in words. Photographers and staff see the
- * state only.
+ * The job's title row in the D151 blueprint (D152; ADR 0029, amending ADR 0021 and 0025): back, the job's name and its
+ * shop state (Draft, Selling or Closed: the only place status shows), no details line, then ⋯ More and at most one
+ * green action. A draft's green action is "Publish shop" (owners and admins: the "Before you can sell" dialog; the
+ * server checks everything again); a selling job's is "View shop" (the parent shop, in a new tab, for everyone); a
+ * closed job has none. ⋯ More (owners and admins): Preview as a parent and View as photographer (Soon), Edit job,
+ * Close shop or Reopen shop, and History (the job's activity). Going live bursts confetti (D75; none with reduced
+ * motion) and is announced in words.
  */
 export function JobHeader({ stuck = false }: { stuck?: boolean }) {
   const t = useTranslations("app.job");
   const tj = useTranslations("app.jobs");
   const text = useApiText();
-  const formatDay = useFormatDay();
-  const formatClosing = useFormatClosing();
   const router = useRouter();
   const pathname = usePathname();
   const { changed } = useStudio();
@@ -179,18 +179,6 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
     changed();
   }
 
-  const details = [
-    tj(`types.${job.type}`),
-    job.client?.name ?? null,
-    formatDay(job.pictureDay),
-    job.internalNumber,
-    job.closesAt
-      ? t(closingDatePassed(job, Date.now()) ? "closing.linePassed" : "closing.line", {
-          when: formatClosing(job.closesAt),
-        })
-      : null,
-  ].filter(Boolean);
-
   // Until the job's summary has loaded, the roster and photos rows say "Checking…" (code review S4).
   const items = sellItems(
     {
@@ -205,27 +193,43 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
   const ready = readyToSell(items);
   const reopening = action === "reopen";
 
-  const shopButton =
-    action === "start" ? (
-      <Button variant="white" shape="pill" onClick={openSelling}>
-        {t("startSelling")}
+  const menuOpen = (next: Open) => {
+    setAnnouncement("");
+    if (next === "closeShop") setDialogStatus("");
+    setOpen(next);
+  };
+  // Sections not built yet are listed, marked Soon, and can't be chosen (D152; Seenu).
+  const soonRow = (label: string, icon: ReactNode) => (
+    // aria-disabled, not disabled: it stays in the tab order so people hear that it is coming (D91).
+    <button
+      type="button"
+      aria-disabled="true"
+      className={`${MENU_ROW} cursor-default text-muted hover:bg-transparent`}
+    >
+      {icon}
+      <span className="flex-1">{label}</span>{" "}
+      <span className="rounded-full border border-line-strong px-2 text-micro text-muted">
+        {t("soon")}
+      </span>
+    </button>
+  );
+
+  const primary =
+    action === "start" && canManage ? (
+      <Button shape="pill" onClick={openSelling}>
+        {t("publishShop")}
       </Button>
-    ) : action === "close" ? (
-      <Button
-        variant="white"
-        shape="pill"
-        onClick={() => {
-          setDialogStatus("");
-          setOpen("closeShop");
-        }}
+    ) : job.status === "selling" ? (
+      <a
+        href="/shop"
+        target="_blank"
+        rel="noopener"
+        className={`${buttonVariants({ shape: "pill" })} no-underline`}
       >
-        {t("closeShop")}
-      </Button>
-    ) : (
-      <Button variant="white" shape="pill" onClick={openSelling}>
-        {t("reopenShop")}
-      </Button>
-    );
+        {t("viewShop")}
+        <span className="sr-only"> {t("newTab")}</span>
+      </a>
+    ) : null;
 
   return (
     <>
@@ -246,50 +250,73 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
           </IconButton>
         }
         status={<StatusBadge status={job.status} />}
-        details={details.join(" · ")}
         actions={
-          canManage ? (
-            <>
-              {shopButton}
+          <>
+            {canManage ? (
               <Popover
                 label={t("moreActions")}
                 trigger={<Ellipsis aria-hidden="true" />}
                 triggerClassName={iconButtonVariants()}
-                panelClassName="w-60"
+                panelClassName="w-64"
               >
                 {(close) => (
                   <>
+                    {soonRow(t("more.previewParent"), <Eye aria-hidden="true" />)}
+                    {soonRow(t("more.viewPhotographer"), <Camera aria-hidden="true" />)}
                     <button
                       type="button"
                       className={MENU_ROW}
                       onClick={() => {
                         close();
-                        setAnnouncement("");
-                        setOpen("edit");
+                        menuOpen("edit");
                       }}
                     >
                       <Pencil aria-hidden="true" />
                       {tj("detail.edit")}
                     </button>
-                    {job.status === "closed" ? null : (
+                    {action === "close" ? (
+                      <button
+                        type="button"
+                        className={MENU_ROW}
+                        onClick={() => {
+                          close();
+                          menuOpen("closeShop");
+                        }}
+                      >
+                        <Lock aria-hidden="true" />
+                        {t("closeShop")}
+                      </button>
+                    ) : action === "reopen" ? (
                       <button
                         type="button"
                         className={MENU_ROW}
                         onClick={() => {
                           close();
                           setAnnouncement("");
-                          setOpen("closingDate");
+                          openSelling();
                         }}
                       >
-                        <CalendarClock aria-hidden="true" />
-                        {t("closing.menu")}
+                        <RotateCcw aria-hidden="true" />
+                        {t("reopenShop")}
                       </button>
-                    )}
+                    ) : null}
+                    <button
+                      type="button"
+                      className={MENU_ROW}
+                      onClick={() => {
+                        close();
+                        menuOpen("history");
+                      }}
+                    >
+                      <History aria-hidden="true" />
+                      {t("more.history")}
+                    </button>
                   </>
                 )}
               </Popover>
-            </>
-          ) : null
+            ) : null}
+            {primary}
+          </>
         }
       >
         {/* Always rendered so screen readers announce the text when it appears (WCAG 4.1.3). */}
@@ -297,6 +324,13 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
           {announcement}
         </p>
       </PageHeader>
+
+      <Dialog open={open === "history"} onClose={closeDialog} title={t("more.history")}>
+        <div className="flex flex-col gap-3">
+          <ActivityCard refreshKey={0} jobId={job.id} />
+          <p className="m-0 text-sm text-muted">{t("more.commentsSoon")}</p>
+        </div>
+      </Dialog>
 
       <Dialog open={open === "edit"} onClose={closeDialog} title={tj("form.editTitle")}>
         <JobForm
@@ -333,7 +367,7 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
                   {t("cancel")}
                 </Button>
                 <Button onClick={() => void goLive()}>
-                  {reopening ? t("reopenShop") : t("startSelling")}
+                  {reopening ? t("reopenShop") : t("publishShop")}
                 </Button>
               </>
             ) : (
@@ -360,77 +394,7 @@ export function JobHeader({ stuck = false }: { stuck?: boolean }) {
         </div>
       </Dialog>
 
-      <Dialog open={open === "closingDate"} onClose={closeDialog} title={t("closing.title")}>
-        <ClosingDateForm
-          job={job}
-          onCancel={closeDialog}
-          onSaved={(next, removed) => {
-            setJob(next);
-            closeDialog();
-            setAnnouncement(t(removed ? "closing.removed" : "closing.saved"));
-            changed();
-          }}
-        />
-      </Dialog>
-
       {confetti ? <ConfettiBurst onDone={() => setConfetti(false)} /> : null}
     </>
-  );
-}
-
-/** The ⋯ menu's "Set closing date": the last day to order, or remove it (ADR 0021). */
-function ClosingDateForm({
-  job,
-  onCancel,
-  onSaved,
-}: {
-  job: Job;
-  onCancel: () => void;
-  onSaved: (job: Job, removed: boolean) => void;
-}) {
-  const t = useTranslations("app.job");
-  const text = useApiText();
-  const [day, setDay] = useState(closingFieldValue(job.closesAt));
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [problem, setProblem] = useState("");
-  const saving = useRef(false);
-
-  async function save(closesAt: string | null) {
-    if (saving.current) return;
-    saving.current = true;
-    setError(undefined);
-    setProblem("");
-    const res = await api<{ job: Job }>(`/jobs/${job.id}`, { method: "PATCH", body: { closesAt } });
-    saving.current = false;
-    if (res.ok) return onSaved(res.data.job, closesAt === null);
-    if (res.fields.closesAt) return setError(text.field(res.fields.closesAt));
-    const conflict = jobConflictKey(res.fields.form);
-    setProblem(conflict ? t(`conflicts.${conflict}`) : text.error(res.code));
-  }
-
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!day) return setError(text.field("validation.closesAt"));
-    void save(closesAtFor(day));
-  }
-
-  return (
-    <form onSubmit={submit} noValidate className="flex flex-col gap-4">
-      <ClosingDateField value={day} onChange={setDay} error={error} />
-      <p role="status" className="m-0 text-sm font-semibold text-ink empty:sr-only">
-        {problem}
-      </p>
-      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-        {job.closesAt ? (
-          <Button variant="secondary" onClick={() => void save(null)}>
-            {t("closing.remove")}
-          </Button>
-        ) : null}
-        <Button variant="secondary" onClick={onCancel}>
-          {t("cancel")}
-        </Button>
-        <Button type="submit">{t("closing.save")}</Button>
-      </div>
-    </form>
   );
 }

@@ -13,14 +13,22 @@ import {
   SELL_BLOCKER_FIELDS,
 } from "@daybell/api";
 import type { DataRegion } from "@daybell/config";
-import { closingDateAllowed, sellBlockersFromDb } from "@daybell/core";
+import {
+  changedRules,
+  closingDateAllowed,
+  DEFAULT_RULES,
+  type JobRules,
+  type RulesPatch,
+  type ShopOpens,
+  sellBlockersFromDb,
+} from "@daybell/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { check } from "./api";
 import { type JobStatusRpc, jobStatusRpc } from "./supabase/service";
 
 /** Columns the API reads; the client is embedded through the composite studio FK (ADR 0008). */
 export const JOB_COLUMNS =
-  "id, name, type, status, picture_day, internal_number, subjects_expected, price_list_id, deliver_to_school, closes_at, created_at, updated_at, client:clients (id, name, city)";
+  "id, name, type, status, picture_day, internal_number, subjects_expected, price_list_id, deliver_to_school, closes_at, opened_at, qr_cards_days_before, shop_opens, shop_opens_days, shop_closes_days, template_rules, created_at, updated_at, client:clients (id, name, city), template:job_templates (id, name)";
 export const CLIENT_COLUMNS =
   "id, name, address_line1, address_line2, postal_code, city, region_code, country, contact_first_name, contact_last_name, contact_phone, contact_email, notes, created_at, updated_at";
 
@@ -35,9 +43,56 @@ export interface JobRow {
   price_list_id: string;
   deliver_to_school: boolean;
   closes_at: string | null;
+  /** Job templates (ADR 0029); absent in rows read before them. */
+  opened_at?: string | null;
+  qr_cards_days_before?: number | null;
+  shop_opens?: DbShopOpens;
+  shop_opens_days?: number | null;
+  shop_closes_days?: number | null;
+  template_rules?: DbRules | null;
+  template?: { id: string; name: string } | null;
   created_at: string;
   updated_at: string;
   client: { id: string; name: string; city: string | null } | null;
+}
+
+// ── Rules (D152, D154; ADR 0029): the database's words and the API's ─────────────────────────────────────────────
+export type DbShopOpens = "photos_checked" | "after_picture_day";
+export const SHOP_OPENS_TO_DB: Record<ShopOpens, DbShopOpens> = {
+  photosChecked: "photos_checked",
+  afterPictureDay: "after_picture_day",
+};
+const SHOP_OPENS_FROM_DB: Record<DbShopOpens, ShopOpens> = {
+  photos_checked: "photosChecked",
+  after_picture_day: "afterPictureDay",
+};
+
+/** A job's or template's rule columns (and a job's snapshot of what its template gave it). */
+export interface DbRules {
+  qr_cards_days_before?: number | null;
+  shop_opens?: DbShopOpens;
+  shop_opens_days?: number | null;
+  shop_closes_days?: number | null;
+}
+
+/** Rules from the database's columns; anything missing is today's default. */
+export function rulesFromDb(row: DbRules): JobRules {
+  return {
+    qrCardsDaysBefore: row.qr_cards_days_before ?? DEFAULT_RULES.qrCardsDaysBefore,
+    shopOpens: row.shop_opens ? SHOP_OPENS_FROM_DB[row.shop_opens] : DEFAULT_RULES.shopOpens,
+    shopOpensDays: row.shop_opens_days ?? DEFAULT_RULES.shopOpensDays,
+    shopClosesDays: row.shop_closes_days ?? DEFAULT_RULES.shopClosesDays,
+  };
+}
+
+/** The database's columns for some rules (only those present). */
+export function rulesToDb(rules: RulesPatch): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (rules.qrCardsDaysBefore !== undefined) out.qr_cards_days_before = rules.qrCardsDaysBefore;
+  if (rules.shopOpens !== undefined) out.shop_opens = SHOP_OPENS_TO_DB[rules.shopOpens];
+  if (rules.shopOpensDays !== undefined) out.shop_opens_days = rules.shopOpensDays;
+  if (rules.shopClosesDays !== undefined) out.shop_closes_days = rules.shopClosesDays;
+  return out;
 }
 
 export interface ClientRow {
@@ -71,9 +126,27 @@ export function toJob(row: JobRow): Job {
     priceListId: row.price_list_id,
     deliverToSchool: row.deliver_to_school,
     closesAt: row.closes_at ?? null,
+    openedAt: row.opened_at ?? null,
+    template: row.template ?? null,
+    rules: jobRulesOf(row),
+    changedRules: changedRules(jobRulesOf(row), givenRulesOf(row), {
+      status: row.status,
+      openedAt: row.opened_at ?? null,
+      closesAt: row.closes_at ?? null,
+    }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** A job's own rules. */
+export function jobRulesOf(row: JobRow): JobRules {
+  return rulesFromDb(row);
+}
+
+/** What the job's template gave it; null for jobs made before templates (ADR 0029, call 1). */
+export function givenRulesOf(row: JobRow): JobRules | null {
+  return row.template_rules ? rulesFromDb(row.template_rules) : null;
 }
 
 export function toClient(row: ClientRow): Client {
@@ -121,6 +194,7 @@ const JOB_COLUMN_FOR: Record<keyof JobInput, string> = {
   priceListId: "price_list_id",
   deliverToSchool: "deliver_to_school",
   closesAt: "closes_at",
+  templateId: "template_id",
 };
 
 /** Database columns for the given API fields (only those present), from an already validated input. */
@@ -237,7 +311,7 @@ export async function loadJobRow(
   return row;
 }
 
-const CLOSES_AT_INVALID = () =>
+export const CLOSES_AT_INVALID = () =>
   new ApiError("invalid_input", "Please check the highlighted fields.", {
     closesAt: "validation.closesAt",
   });

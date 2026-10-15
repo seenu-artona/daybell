@@ -71,6 +71,15 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await expect(dialog.getByLabel("Internal job number")).toHaveValue("JOB00001");
   await dialog.getByLabel("Job name").fill(job);
   await dialog.getByLabel("Picture day").fill("2026-10-14");
+  // The New job dialog (D154): the studio's default template is chosen, with one sentence on what it will do.
+  await expect(dialog.getByLabel("Template", { exact: true })).toHaveValue(/.+/);
+  await expect(
+    dialog.getByText(
+      "Standard opens the shop when photos are checked and you close it when you’re ready. You can change anything on the job.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  // The job type is under More options now.
   await dialog.getByLabel("Job type").selectOption("school");
   let combobox = dialog.getByRole("combobox", { name: "Client (optional)" });
   // The combobox's own listbox, not the Job type <select> options.
@@ -81,29 +90,27 @@ test("owner adds a client, then creates jobs in the job dialog", async ({
   await dialog.getByLabel(/^Subjects expected/).fill("120");
   await dialog.getByRole("button", { name: "Create job", exact: true }).click();
 
-  // The job page (D137, D140, D143): title row with name, status and details; Overview with the checklist at Set up.
+  // The job page (D151, D152): title row with the name and its status only; Overview with Progress at Prepare.
   await expect(page).toHaveURL(/\/app\/jobs\/[0-9a-f-]{36}$/);
   await expect(main.getByRole("heading", { name: job, level: 1 })).toBeVisible();
   await expect(main.getByText("Draft", { exact: true })).toBeVisible();
-  await expect(
-    main.getByText(`School · ${client} · Oct 14, 2026 · JOB00001`, { exact: true }),
-  ).toBeVisible();
+  await expect(main.getByText(/· JOB00001$/)).toHaveCount(0);
   await expect(main.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );
   await expect(
     main
-      .getByRole("region", { name: "Checklist", exact: true })
+      .getByRole("region", { name: "Progress", exact: true })
       .getByRole("listitem")
-      .filter({ hasText: "Add the roster" }),
-  ).toContainText("Next");
-  // The shop's one pill: Start selling (owners and admins, while a draft), white since D144.
-  await expect(main.getByRole("button", { name: "Start selling" })).toBeVisible();
+      .filter({ hasText: /^Now: Add subjects/ }),
+  ).toBeVisible();
+  // The one green action on a draft: Publish shop (owners and admins, D152).
+  await expect(main.getByRole("button", { name: "Publish shop", exact: true })).toBeVisible();
 
   // Editing uses the same form, from More actions.
-  await main.getByRole("button", { name: "More actions" }).click();
-  await main.getByRole("button", { name: "Edit job" }).click();
+  await main.getByRole("button", { name: "More actions", exact: true }).click();
+  await main.getByRole("button", { name: "Edit job", exact: true }).click();
   const edit = page.getByRole("dialog", { name: "Edit job" });
   await edit.getByLabel("Job name").fill(`${job} (edited)`);
   await edit.getByRole("button", { name: "Save changes" }).click();

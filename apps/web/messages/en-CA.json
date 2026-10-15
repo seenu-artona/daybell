@@ -217,7 +217,11 @@
     "timeZone": "Your time zone wasn’t recognized.",
     "filterChips": "Those filters can't be saved. Reload the page and try again.",
     "contactEmpty": "Enter a name, an email or a phone number.",
-    "mainContactStays": "To change the main contact, make someone else main."
+    "mainContactStays": "To change the main contact, make someone else main.",
+    "ruleDays": "Enter a whole number of days in the allowed range.",
+    "shopOpensDays": "Enter the days after picture day, or choose “When photos are checked”.",
+    "templateName": "Give the template a name.",
+    "template": "Choose one of your templates."
   },
   "errors": {
     "network": "We couldn't reach Daybell. Check your connection and try again.",
@@ -460,7 +464,8 @@
         "label": "Settings sections",
         "team": "Team",
         "payouts": "Stripe",
-        "taxes": "Taxes"
+        "taxes": "Taxes",
+        "templates": "Templates"
       }
     },
     "home": {
@@ -580,7 +585,13 @@
         "create": "Create job",
         "save": "Save changes",
         "saving": "Saving…",
-        "clientOptions": "Clients"
+        "clientOptions": "Clients",
+        "template": "Template",
+        "templateSentence": "{name} opens the shop {opens, select, days {{openDays, plural, =0 {on picture day} one {# day after picture day} other {# days after picture day}}} other {when photos are checked}} {closes, select, days {and closes it {closeDays, plural, one {# day} other {# days}} later} other {and you close it when you’re ready}}. You can change anything on the job.",
+        "noTemplate": "None",
+        "templateFixed": "A job’s template is chosen when it’s made. Change its steps on the Overview.",
+        "templatesLoading": "Loading templates…",
+        "templatesFailed": "Templates couldn’t be loaded: the job gets your default template."
       },
       "detail": {
         "back": "All jobs",
@@ -1078,7 +1089,8 @@
         "notSelling": "This shop isn’t selling, so it can’t be closed.",
         "notClosed": "This shop isn’t closed, so it can’t be reopened.",
         "closed": "This shop is closed. Reopen it first.",
-        "closesAtPassed": "The closing date has passed. Change or remove it first."
+        "closesAtPassed": "The closing date has passed. Change or remove it first.",
+        "noTemplate": "This job wasn’t made from a template, so there’s nothing to go back to."
       },
       "closeDialog": {
         "title": "Close the shop?",
@@ -1145,6 +1157,16 @@
         "toSchoolHelp": "Parents choose free delivery to the school or paid home shipping.",
         "toSchoolOn": "Free delivery to school is on.",
         "toSchoolOff": "Free delivery to school is off."
+      },
+      "publishShop": "Publish shop",
+      "viewShop": "View shop",
+      "newTab": "(opens in a new tab)",
+      "soon": "Soon",
+      "more": {
+        "previewParent": "Preview as a parent",
+        "viewPhotographer": "View as photographer",
+        "history": "History",
+        "commentsSoon": "Team comments are coming soon."
       }
     },
     "people": {
@@ -1182,7 +1204,8 @@
         "grade": "Grade",
         "gradeChip": "Grade {grade}",
         "gradePlaceholder": "Search grades…",
-        "gradeList": "Grades"
+        "gradeList": "Grades",
+        "notPhotographed": "Not photographed"
       },
       "columns": {
         "photos": "Photos",
@@ -1190,7 +1213,8 @@
       },
       "ordered": {
         "yes": "Ordered",
-        "no": "Not yet"
+        "no": "Not yet",
+        "notOrdered": "Not ordered"
       },
       "rename": "Rename",
       "renameLabel": "{group, select, class {Rename class} team {Rename team} other {Rename group}} {name}",
@@ -1200,6 +1224,36 @@
         "title": "{group, select, class {This job's classes} team {This job's teams} other {This job's groups}}",
         "meta": "Rename one; its children stay in it.",
         "children": "{count, plural, one {# child} other {# children}}"
+      },
+      "print": "Print",
+      "printQrCards": "QR cards",
+      "uploadList": "Upload a list",
+      "addOneByOne": "Add one by one",
+      "listLabel": "Subjects",
+      "record": {
+        "edit": "Edit {name}",
+        "moreActions": "More actions for {name}",
+        "unfold": "Back to the full list",
+        "possibleDuplicate": "Possible duplicate",
+        "photos": "Photos",
+        "addPhotos": "Add photos",
+        "photoAlt": "Photo {number} of {name}",
+        "noPhotos": "No photos yet.",
+        "photosUnavailable": "Photos can’t be shown here right now.",
+        "orders": "Orders",
+        "noOrders": "No orders yet.",
+        "noOrdersCloses": "No orders yet. The shop closes {date}.",
+        "ordersUnavailable": "Orders can’t be shown here right now.",
+        "details": "Details",
+        "parentEmail": "Parent email",
+        "photographed": "Photographed",
+        "qrCard": "QR card",
+        "printed": "Printed",
+        "printAgain": "Print again",
+        "printCard": "Print QR card",
+        "noCard": "No QR card: marked Do not photograph.",
+        "none": "–",
+        "loading": "Loading…"
       }
     },
     "qrCards": {
@@ -1941,6 +1995,260 @@
       "loadFailed": "We couldn’t load your saved filters.",
       "retry": "Try again",
       "loadingName": "…"
+    },
+    "templates": {
+      "new": "New template",
+      "newTitle": "New template",
+      "name": "Name",
+      "namePlaceholder": "e.g. School Fall",
+      "nameRequired": "Give the template a name.",
+      "create": "Create template",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saved": "Saved.",
+      "loading": "Loading templates…",
+      "loadFailed": "Templates couldn’t be loaded. Reload the page to try again.",
+      "notFound": "We couldn’t find that template.",
+      "limit": "A studio can have at most 50 templates.",
+      "groups": {
+        "jobs": "Jobs",
+        "messages": "Messages",
+        "print": "Print"
+      },
+      "messagesSoon": "Message templates are coming soon.",
+      "printSoon": "Print templates are coming soon.",
+      "default": "Default",
+      "usedBy": "{count, plural, =0 {Not used yet} one {Used by # job} other {Used by # jobs}}",
+      "back": "Back to Templates",
+      "moreActions": "More actions",
+      "rename": "Rename template",
+      "renameLabel": "Template name",
+      "makeDefault": "Make default",
+      "madeDefault": "{name} is now the default.",
+      "duplicate": "Duplicate",
+      "copyName": "{name} copy",
+      "delete": "Delete",
+      "deleteTitle": "Delete template?",
+      "deleteBody": "Jobs made from {name} keep their own steps and shop settings.",
+      "deleteConfirm": "Delete template",
+      "isDefault": "The default template can’t be deleted. Make another the default first.",
+      "readOnly": "Only owners and admins change templates.",
+      "ruleNote": "Changes apply to jobs made from now on. Existing jobs keep theirs.",
+      "sections": {
+        "label": "Template sections",
+        "steps": "Steps",
+        "shop": "Shop",
+        "messages": "Messages",
+        "subjects": "Subjects and photos"
+      },
+      "stages": {
+        "prepare": "Prepare",
+        "pictureDay": "Picture day",
+        "selling": "Selling",
+        "wrapUp": "Wrap-up"
+      },
+      "steps": {
+        "qrCards": "QR cards ready",
+        "makeupDay": "Makeup day",
+        "shopOpens": "Shop opens",
+        "shopCloses": "Shop closes",
+        "archive": "Archive"
+      },
+      "soon": "Soon",
+      "makeupDaySoon": "Days after picture day",
+      "archiveSoon": "Days after the shop closes",
+      "shop": {
+        "priceList": "Price list",
+        "studioDefault": "The studio’s default price list",
+        "delivery": "Delivery",
+        "toSchool": "Offer free delivery to school",
+        "toSchoolHelp": "Parents can also choose paid home shipping.",
+        "toSchoolOn": "Free delivery to school, and home shipping",
+        "toSchoolOff": "Home shipping",
+        "save": "Save shop settings"
+      },
+      "messages": {
+        "soon": "Reminders and emails to parents are coming soon."
+      },
+      "subjects": {
+        "accessCodes": "Access codes",
+        "accessCodesValue": "One per person, printed on their QR card",
+        "watermark": "Watermark",
+        "watermarkValue": "Always on parents’ previews"
+      }
+    },
+    "rules": {
+      "qrCards": {
+        "none": "No day planned",
+        "days": "{days, plural, =0 {On picture day} one {# day before picture day} other {# days before picture day}}"
+      },
+      "shopOpens": {
+        "photosChecked": "When photos are checked",
+        "days": "{days, plural, =0 {On picture day} one {# day after picture day} other {# days after picture day}}"
+      },
+      "shopCloses": {
+        "byHand": "When you close it",
+        "days": "{days, plural, one {# day after opening} other {# days after opening}}"
+      },
+      "dialog": {
+        "qrCards": {
+          "legend": "When should the QR cards be ready?",
+          "none": "No day planned",
+          "days": "Days before picture day"
+        },
+        "shopOpens": {
+          "legend": "When does the shop open?",
+          "none": "When photos are checked",
+          "days": "Days after picture day"
+        },
+        "shopCloses": {
+          "legend": "When does the shop close?",
+          "none": "When you close it",
+          "days": "Days after the shop opens"
+        },
+        "daysLabel": "Days",
+        "daysPlaceholder": "{min}–{max}",
+        "daysError": "Enter a whole number from {min} to {max}.",
+        "save": "Save",
+        "cancel": "Cancel"
+      }
+    },
+    "jobOverview": {
+      "loading": "Loading progress…",
+      "progressFailed": "Progress couldn’t be loaded.",
+      "numbers": {
+        "sales": "Sales",
+        "ordersSince": "{count, plural, one {# order} other {# orders}} since {date}",
+        "noOrders": "No orders yet",
+        "subjectsOrdered": "Subjects ordered",
+        "percent": "{percent}%",
+        "ofSubjects": "{ordered, number} of {count, plural, one {# subject} other {# subjects}}"
+      },
+      "details": {
+        "title": "Details",
+        "edit": "Edit job details",
+        "client": "Client",
+        "pictureDay": "Picture day",
+        "template": "Template",
+        "none": "None",
+        "noTemplate": "None",
+        "changes": "{count, plural, one {# change for this job} other {# changes for this job}}"
+      },
+      "retry": "Try again",
+      "numbersFailed": "This job’s numbers couldn’t be loaded right now."
+    },
+    "progress": {
+      "title": "Progress",
+      "now": "Now: {stage}",
+      "allDone": "All done",
+      "stageDone": "Done",
+      "stageDoneOn": "Done {date}",
+      "fold": "Fold",
+      "soon": "Soon",
+      "changed": "Changed for this job",
+      "undo": "Undo",
+      "undoWhat": "the change to {step}",
+      "change": "Change",
+      "saved": "Saved for this job.",
+      "undone": "Back to the template’s rule.",
+      "undoPassed": "The template’s closing date has already passed. Change the date instead.",
+      "noTemplate": "This job wasn’t made from a template, so there’s nothing to go back to.",
+      "ruleNote": "Changes this job only. Its template stays as it is.",
+      "closingDateTitle": "Closing date",
+      "closingSaved": "Closing date saved.",
+      "closingRemoved": "Closing date removed.",
+      "ruleTitles": {
+        "qrCards": "QR cards ready",
+        "shopOpens": "Shop opens",
+        "shopCloses": "Shop closes"
+      },
+      "stages": {
+        "prepare": "Prepare",
+        "pictureDay": "Picture day",
+        "photos": "Photos",
+        "selling": "Selling",
+        "fulfilment": "Fulfilment",
+        "wrapUp": "Wrap-up"
+      },
+      "states": {
+        "done": "Done",
+        "now": "Now",
+        "next": "Next",
+        "automatic": "Automatic",
+        "soon": "Soon"
+      },
+      "steps": {
+        "createJob": {
+          "todo": "Create the job",
+          "done": "Job created"
+        },
+        "addRoster": {
+          "todo": "Add subjects",
+          "done": "Subjects added"
+        },
+        "printQrCards": {
+          "todo": "Print QR cards",
+          "done": "QR cards printed"
+        },
+        "pictureDay": {
+          "todo": "Picture day",
+          "done": "Picture day"
+        },
+        "uploadPhotos": {
+          "todo": "Upload photos",
+          "done": "Photos uploaded"
+        },
+        "reviewTagging": {
+          "todo": "Check photos",
+          "done": "Photos checked"
+        },
+        "startSelling": {
+          "todo": "Publish shop",
+          "done": "Shop published"
+        },
+        "reminders": {
+          "todo": "Reminders to parents",
+          "done": "Reminders to parents"
+        },
+        "shopCloses": {
+          "todo": "Shop closes",
+          "done": "Shop closed"
+        },
+        "sendToLab": {
+          "todo": "Send to lab",
+          "done": "Sent to lab"
+        },
+        "delivery": {
+          "todo": "Delivery",
+          "done": "Delivered"
+        },
+        "yearbookExport": {
+          "todo": "Yearbook export",
+          "done": "Yearbook exported"
+        },
+        "archive": {
+          "todo": "Archive",
+          "done": "Archived"
+        }
+      },
+      "detail": {
+        "pictureDay": "{date} · {days, plural, =0 {today} =1 {tomorrow} other {in # days}}",
+        "planned": "Planned {date}",
+        "whenPhotosChecked": "When photos are checked",
+        "closes": "{date} · {days, plural, =0 {today} =1 {tomorrow} other {in # days}}",
+        "noClosingDate": "No closing date",
+        "afterOpening": "{days, plural, one {# day} other {# days}} after the shop opens · from the job’s rules",
+        "byHand": "When you close it"
+      },
+      "actions": {
+        "addRoster": "Add subjects",
+        "printQrCards": "Print QR cards",
+        "uploadPhotos": "Upload photos",
+        "reviewTagging": "Check photos",
+        "publish": "Publish shop",
+        "printAgain": "Print again",
+        "changeDate": "Change date"
+      }
     }
   },
   "invite": {

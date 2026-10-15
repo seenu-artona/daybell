@@ -19,10 +19,15 @@ import {
   PHOTO_PLACES,
   PRICE_ITEM_KINDS,
   PRINT_SIZES,
+  PROGRESS_STAGES,
+  PROGRESS_STEP_STATES,
+  PROGRESS_STEPS,
   PST_PROVINCES,
   REFUND_KINDS,
   REFUND_REASONS,
   REFUND_STATUSES,
+  RULE_KEYS,
+  SHOP_OPENS,
   SHOP_SHIPPING_METHODS,
   TASK_KEYS,
   TAX_REGISTRATION_KINDS,
@@ -172,6 +177,30 @@ export const clientRef = z
   .object({ id: z.uuid(), name: z.string(), city: z.string().nullable() })
   .meta({ id: "ClientRef" });
 
+/** A job's or a template's rules (D152, D154; ADR 0029), counted from picture day. */
+export const jobRules = z
+  .object({
+    qrCardsDaysBefore: z.number().int().nullable().meta({
+      description: "QR cards ready this many days before picture day; null: no day planned.",
+    }),
+    shopOpens: z.enum(SHOP_OPENS).meta({
+      description:
+        "photosChecked: once the photos are checked; afterPictureDay: shopOpensDays after picture day.",
+    }),
+    shopOpensDays: z.number().int().nullable(),
+    shopClosesDays: z.number().int().nullable().meta({
+      description:
+        "The shop closes this many days after it first opens; null: when someone closes it.",
+    }),
+  })
+  .meta({ id: "JobRules" });
+export type JobRulesView = z.infer<typeof jobRules>;
+export const ruleKey = z.enum(RULE_KEYS).meta({
+  id: "RuleKey",
+  description:
+    "qrCards (QR cards ready), shopOpens or shopCloses: a rule a job can change for itself.",
+});
+
 export const job = z
   .object({
     id: z.uuid(),
@@ -192,6 +221,21 @@ export const job = z
     closesAt: z.iso.datetime({ offset: true }).nullable().meta({
       description:
         "When the shop closes by itself (ADR 0021); null for no closing date. Cleared when the shop closes.",
+    }),
+    openedAt: z.iso.datetime({ offset: true }).nullable().meta({
+      description:
+        "When the shop first opened; null while a draft and for shops opened before templates.",
+    }),
+    template: z.object({ id: z.uuid(), name: z.string() }).nullable().meta({
+      description:
+        "The template the job was made from (D154); null for jobs made before templates, or when it was deleted.",
+    }),
+    rules: jobRules.meta({
+      description: "The job's own rules, copied from its template when it was made.",
+    }),
+    changedRules: z.array(ruleKey).meta({
+      description:
+        "The rules that differ from what the template gave the job (D152: 'Changed for this job'); while the shop sells, a closing date other than the template rule's counts as a shopCloses change. Empty for jobs made before templates.",
     }),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
@@ -247,6 +291,126 @@ export type JobDetailResponse = z.infer<typeof jobDetailResponse>;
 export type JobsResponse = z.infer<typeof jobsResponse>;
 export const jobResponse = z.object({ job });
 export type JobResponse = z.infer<typeof jobResponse>;
+// ── Job templates (D154) and a job's Progress and numbers (D152; ADR 0029) ──────────────────────────────────────
+export const jobTemplate = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    isDefault: z.boolean().meta({ description: "New jobs get it unless another is chosen." }),
+    usedBy: z.number().int().meta({ description: "Jobs made from it." }),
+    rules: jobRules,
+    priceListId: z
+      .uuid()
+      .nullable()
+      .meta({ description: "The price list new jobs get; null: the studio's default." }),
+    deliverToSchool: z.boolean(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({ id: "JobTemplate", description: "The rules a new job starts with (D154)." });
+export type JobTemplate = z.infer<typeof jobTemplate>;
+export const jobTemplatesResponse = z.object({
+  templates: z.array(jobTemplate).meta({ description: "The default first, then by name." }),
+});
+export type JobTemplatesResponse = z.infer<typeof jobTemplatesResponse>;
+export const jobTemplateResponse = z.object({ template: jobTemplate });
+export type JobTemplateResponse = z.infer<typeof jobTemplateResponse>;
+
+/** Why a template request was refused with 409, in the error's `fields.form`. */
+export const JOB_TEMPLATE_CONFLICTS = {
+  /** The default template can't be deleted; make another the default first. */
+  isDefault: "templates.isDefault",
+  /** At most 50 templates per studio. */
+  limit: "templates.limit",
+} as const;
+
+export const progressStep = z
+  .object({
+    key: z.enum(PROGRESS_STEPS),
+    state: z.enum(PROGRESS_STEP_STATES).meta({
+      description:
+        "done; now (the one to do now); next; automatic (the system does it from the job's rules); soon (not built yet).",
+    }),
+    at: z.iso
+      .datetime({ offset: true })
+      .nullable()
+      .meta({ description: "When a done step happened." }),
+    by: z.email().nullable().meta({
+      description:
+        "Who did it: a team member's email, for owners and admins only (null for everyone else).",
+    }),
+    planned: z.iso.date().nullable().meta({ description: "The day the job's rules plan it for." }),
+    closesAt: z.iso
+      .datetime({ offset: true })
+      .nullable()
+      .meta({ description: "Shop closes, while selling: the closing moment, or null for none." }),
+    afterOpeningDays: z.number().int().nullable().meta({
+      description:
+        "Shop closes, before the shop opens: days after opening (null: when someone closes it).",
+    }),
+    whenPhotosChecked: z
+      .boolean()
+      .meta({ description: "Publish shop: once the photos are checked." }),
+    changed: z
+      .boolean()
+      .meta({ description: "Its rule was changed for this job (D152); steps ahead only." }),
+  })
+  .meta({ id: "ProgressStep" });
+export type ProgressStepView = z.infer<typeof progressStep>;
+export const jobProgressResponse = z.object({
+  progress: z
+    .object({
+      current: z.enum(PROGRESS_STAGES).nullable(),
+      stages: z.array(
+        z.object({
+          key: z.enum(PROGRESS_STAGES),
+          done: z.boolean().meta({ description: "Every built step in it is done." }),
+          steps: z.array(progressStep),
+        }),
+      ),
+    })
+    .meta({
+      id: "JobProgress",
+      description:
+        "Six stages, Prepare, Picture day, Photos, Selling, Fulfilment and Wrap-up, from the job's checklist (D143), its rules and the event log (D152).",
+    }),
+});
+export type JobProgressResponse = z.infer<typeof jobProgressResponse>;
+export type JobProgressView = JobProgressResponse["progress"];
+
+export const jobSalesResponse = z.object({
+  sales: z
+    .object({
+      currency: z.enum(CURRENCIES),
+      salesCents: z.number().int().meta({
+        description:
+          "What parents paid less refunds, from the ledger (Home's rule), in whole cents.",
+      }),
+      orders: z.number().int().meta({ description: "Paid orders with a line in this job." }),
+      firstPaidAt: z.iso.datetime({ offset: true }).nullable(),
+      subjects: z.number().int().meta({ description: "Everyone on the job's roster." }),
+      subjectsOrdered: z.number().int().meta({ description: "Of those, who has ordered (D148)." }),
+    })
+    .meta({ id: "JobSales", description: "A job's numbers (D152): owners and admins." }),
+});
+export type JobSalesResponse = z.infer<typeof jobSalesResponse>;
+
+export const childFactsResponse = z.object({
+  facts: z
+    .object({
+      cardPrintedAt: z.iso
+        .datetime({ offset: true })
+        .nullable()
+        .meta({ description: "When their QR card was first printed." }),
+      photographedAt: z.iso.datetime({ local: true }).nullable().meta({
+        description:
+          "The camera's clock at their first photo, as the camera wrote it (no time zone): show its day as it stands.",
+      }),
+    })
+    .meta({ id: "ChildFacts" }),
+});
+export type ChildFactsResponse = z.infer<typeof childFactsResponse>;
+
 export const nextJobNumberResponse = z.object({
   internalNumber: z.string().meta({ description: "The next free JOBnnnnn number." }),
 });
@@ -1220,6 +1384,8 @@ export const JOB_CONFLICTS = {
   closed: "jobs.closed",
   /** The job's closing date has already passed: change or remove it before the shop opens. */
   closesAtPassed: "jobs.closesAtPassed",
+  /** A job made before templates has no template rule to go back to (ADR 0029). */
+  noTemplate: "jobs.noTemplate",
 } as const;
 export type JobConflict = (typeof JOB_CONFLICTS)[keyof typeof JOB_CONFLICTS];
 
