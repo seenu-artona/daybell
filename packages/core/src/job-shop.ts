@@ -61,7 +61,7 @@ export function countJobChanges(rows: readonly JobShopRowFacts[]): number {
   return rows.filter(isJobChange).length;
 }
 
-/** Whether the job sells anything at all (N3: Start selling's "Price list chosen"). */
+/** Whether the job sells anything at all (N3: Start selling's "Something to sell", once "Price list chosen"). */
 export function sellsSomething(rows: readonly Pick<JobShopRowFacts, "sold">[]): boolean {
   return rows.some((row) => row.sold);
 }

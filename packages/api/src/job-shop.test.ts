@@ -55,8 +55,12 @@ describe("Job › Shop contracts (D157; ADR 0033)", () => {
       jobItemInput.safeParse({ kind: "package", name: "Empty", priceCents: 100 }).success,
     ).toBe(false);
     expect(
-      jobItemInput.safeParse({ kind: "print", name: "Ev‮il", priceCents: 100, printSize: "5x7" })
-        .error?.issues[0]?.message,
+      jobItemInput.safeParse({
+        kind: "print",
+        name: "Ev\u202Eil",
+        priceCents: 100,
+        printSize: "5x7",
+      }).error?.issues[0]?.message,
     ).toBe("validation.itemName");
     expect(
       jobItemInput.safeParse({ kind: "print", name: "Half", priceCents: 1.5, printSize: "5x7" })

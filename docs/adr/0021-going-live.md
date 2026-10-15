@@ -279,4 +279,4 @@ every route filters by `studio_id`.
 ## Amendment (Oct 14, 2026; D157, ADR 0033)
 
 "Price list chosen" (A2) now means the job sells at least one item: the list's items not switched off for the job, or
-the job's own products.
+the job's own products. The row reads "Something to sell" (ADR 0033 call 17).

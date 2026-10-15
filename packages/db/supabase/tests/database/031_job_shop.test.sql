@@ -7,7 +7,7 @@
 -- sold (N3, in 018); events carry ids and field names, never amounts; another studio sees and changes nothing.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(105);
+select plan(122);
 
 insert into app.config (key, value) values ('data_region', 'us') on conflict (key) do nothing;
 insert into auth.users (id, email) values
@@ -194,6 +194,29 @@ select is(pg_temp.try(format($$ select public.set_job_price('a0000000-0000-4000-
 select is(pg_temp.try(format($$ select public.set_job_price('a0000000-0000-4000-8000-000000000001', %L, 1000001, null) $$,
   pg_temp.item('a0000000-0000-4000-8000-000000000001', '4×6 print'))) like '23514%', true,
   'more than $10,000 is refused');
+-- A price and a Sold switch to the same item never undo each other (code review H1): each change reads the row under
+-- a per-item lock, and keeps the field it doesn't send.
+select ok((select bool_and(p.prosrc like '%pg_advisory_xact_lock(hashtextextended(''job_price:''%')
+           from pg_proc p where p.proname in ('set_job_price', 'reset_job_price')),
+  'price changes to one item take turns on a per-item lock');
+select lives_ok(format($$ select public.set_job_price('a0000000-0000-4000-8000-000000000001', %L, 7200, null) $$,
+  pg_temp.item('a0000000-0000-4000-8000-000000000001', 'Package C')), 'a price for Package C');
+select lives_ok(format($$ select public.set_job_price('a0000000-0000-4000-8000-000000000001', %L, null, false) $$,
+  pg_temp.item('a0000000-0000-4000-8000-000000000001', 'Package C')), 'then Sold alone');
+select is((select (price_cents, sold)::text from public.job_price_overrides
+           where price_list_item_id = pg_temp.item('a0000000-0000-4000-8000-000000000001', 'Package C')),
+  '(7200,f)', 'keeps the price');
+select lives_ok(format($$ select public.set_job_price('a0000000-0000-4000-8000-000000000001', %L, null, false) $$,
+  pg_temp.item('a0000000-0000-4000-8000-000000000001', '11×14 print')), 'Sold off for the 11×14');
+select lives_ok(format($$ select public.set_job_price('a0000000-0000-4000-8000-000000000001', %L, 3500, null) $$,
+  pg_temp.item('a0000000-0000-4000-8000-000000000001', '11×14 print')), 'then a price alone');
+select is((select (price_cents, sold)::text from public.job_price_overrides
+           where price_list_item_id = pg_temp.item('a0000000-0000-4000-8000-000000000001', '11×14 print')),
+  '(3500,f)', 'keeps it off');
+-- Undone again (two job_price.reset events).
+delete from public.job_price_overrides
+where price_list_item_id in (pg_temp.item('a0000000-0000-4000-8000-000000000001', 'Package C'),
+                             pg_temp.item('a0000000-0000-4000-8000-000000000001', '11×14 print'));
 -- An admin may too.
 select pg_temp.as_user('55555555-5555-4555-8555-555555555555') as admin_a;
 select lives_ok(format($$ select public.set_job_price('a0000000-0000-4000-8000-000000000001', %L, 1800, null) $$,
@@ -308,6 +331,31 @@ select is(pg_temp.try($$ insert into public.job_shop_package_lines (studio_id, j
   (select id from ids where k = 'print'), 'print', '4x6', 1) $$), '23514 not_package', 'only packages have lines');
 select is(pg_temp.try($$ update public.job_shop_items set kind = 'package' where name = 'Panorama' $$) like '42501%',
   true, 'a product never changes kind');
+-- Another studio sees and changes none of A's products or their contents (security review M1).
+select pg_temp.as_user('22222222-2222-4222-8222-222222222222') as owner_b;
+select is((select count(*) from public.job_shop_items), 0::bigint, 'another studio reads none of A''s products');
+select is((select count(*) from public.job_shop_package_lines), 0::bigint, 'nor their contents');
+select is(pg_temp.try($$ update public.job_shop_items set price_cents = 1 $$), 'ok', 'an update of them');
+select is(pg_temp.try($$ delete from public.job_shop_items $$), 'ok', 'and a delete');
+select is(pg_temp.try($$ delete from public.job_shop_package_lines $$), 'ok', 'and of their contents');
+select is(pg_temp.try($$ insert into public.job_shop_items (studio_id, job_id, kind, name, print_size, price_cents)
+  values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', 'print', 'Sneaky', '4x6', 1) $$),
+  '42501 Owners and admins only', 'a product added to A''s job is refused before anything is read');
+select is(pg_temp.try(format($$ insert into public.job_shop_package_lines (studio_id, job_id, job_item_id, line_kind,
+    print_size, quantity) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a0000000-0000-4000-8000-000000000001', %L,
+    'print', '4x6', 1) $$, (select id from ids where k = 'pkg'))), '42501 Owners and admins only',
+  'and so are contents for A''s package');
+select isnt(pg_temp.try(format($$ insert into public.job_shop_package_lines (studio_id, job_id, job_item_id, line_kind,
+    print_size, quantity) values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'b0000000-0000-4000-8000-000000000001', %L,
+    'print', '4x6', 1) $$, (select id from ids where k = 'pkg'))), 'ok',
+  'a line of B''s own pointing at A''s package is refused');
+reset role;
+select is((select (price_cents, sold)::text from public.job_shop_items where name = 'Sibling package'), '(9500,t)',
+  'A''s package is untouched');
+select is((select count(*) from public.job_shop_package_lines where job_item_id = (select id from ids where k = 'pkg')),
+  1::bigint, 'with its contents');
+set local role authenticated;
+select pg_temp.as_user('11111111-1111-4111-8111-111111111111') as owner_a;
 select is(pg_temp.try($$ select public.delete_job_item('a0000000-0000-4000-8000-000000000001',
   (select id from ids where k = 'print')) $$), 'ok', 'an owner removes a product');
 select is(pg_temp.event_data('job_item.deleted'), jsonb_build_object('job_id', 'a0000000-0000-4000-8000-000000000001',
@@ -339,7 +387,7 @@ select is((select count(*) from public.job_price_overrides where job_id = 'a0000
   0::bigint, 'the old list''s changes are gone');
 select is((select count(*) from public.job_shop_items where job_id = 'a0000000-0000-4000-8000-000000000001'),
   1::bigint, 'the job''s own package stays');
-select is(pg_temp.events('job_price.reset'), 3::bigint, 'dropping them writes no job_price.reset events');
+select is(pg_temp.events('job_price.reset'), 5::bigint, 'dropping them writes no job_price.reset events');
 select is((select e.data -> 'fields' from public.events e where e.type = 'job.updated' order by e.occurred_at desc,
            e.id desc limit 1), '["price_list_id"]'::jsonb, 'job.updated says the list changed');
 select is(pg_temp.try(format($$ insert into public.job_price_overrides (studio_id, job_id, price_list_id,
@@ -357,7 +405,7 @@ select lives_ok($$ delete from public.price_list_items where id = 'e1000000-0000
   'the print is deleted from Spring');
 select is((select count(*) from public.job_price_overrides where job_id = 'a0000000-0000-4000-8000-000000000001'),
   0::bigint, 'its change for job 1 went with it');
-select is(pg_temp.events('job_price.reset'), 3::bigint, 'with no job_price.reset event');
+select is(pg_temp.events('job_price.reset'), 5::bigint, 'with no job_price.reset event');
 
 select lives_ok(format($$ delete from public.price_list_items where id = %L $$,
   pg_temp.item('a0000000-0000-4000-8000-000000000003', 'Wallets (sheet of 8)')),

@@ -138,6 +138,56 @@ describe("the price cell (D157, N4)", () => {
   });
 });
 
+describe("the price cell while saving (review fixes M1, M2; tester 2, 3)", () => {
+  it("saves text typed during a save after it, never replacing it with the older answer", async () => {
+    let finish: (problem: string | null) => void = () => {};
+    const onSave = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<string | null>((resolve) => (finish = resolve)))
+      .mockResolvedValue(null);
+    const cell = (cents: number) => (
+      <PriceCell name="Package A" cents={cents} currency="USD" onSave={onSave} />
+    );
+    await render(cell(6400));
+    const input = field();
+    await act(async () => input.focus());
+    await type(input, "70");
+    await key(input, "Enter");
+    await type(input, "75");
+    await render(cell(7000));
+    expect(input.value).toBe("75");
+    await act(async () => finish(null));
+    expect(onSave).toHaveBeenNthCalledWith(1, 7000);
+    expect(onSave).toHaveBeenNthCalledWith(2, 7500);
+    expect(input.value).toBe("75.00");
+  });
+
+  it("Enter retries a refused price; leaving the field doesn't send it again", async () => {
+    const onSave = vi.fn().mockResolvedValue("We couldn't save that. Try again.");
+    await render(<PriceCell name="Package A" cents={6400} currency="USD" onSave={onSave} />);
+    const input = field();
+    await act(async () => input.focus());
+    await type(input, "70");
+    await key(input, "Enter");
+    await key(input, "Enter");
+    expect(onSave).toHaveBeenCalledTimes(2);
+    await act(async () => input.blur());
+    expect(onSave).toHaveBeenCalledTimes(2);
+  });
+
+  it("announces a refusal where it happens (role alert)", async () => {
+    const onSave = vi.fn().mockResolvedValue("This job is closed, so its shop can't change.");
+    await render(<PriceCell name="Package A" cents={6400} currency="USD" onSave={onSave} />);
+    const input = field();
+    await act(async () => input.focus());
+    await type(input, "1");
+    await act(async () => input.blur());
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "This job is closed, so its shop can't change.",
+    );
+  });
+});
+
 const SHOP: JobShop = {
   jobId: "j1",
   priceList: { id: "l1", name: "Starter", homeShipping: { cents: 895, currency: "USD" } },
