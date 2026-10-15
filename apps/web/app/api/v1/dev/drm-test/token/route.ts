@@ -1,8 +1,9 @@
 import { ApiError, type DrmTestTokenResponse } from "@daybell/api";
 import { type DrmTestSettings, drmTestPageEnabled, drmTestSettings } from "@daybell/config/server";
 import { NextResponse } from "next/server";
-import { handle } from "@/lib/api";
+import { ApiErrorLater, handle } from "@/lib/api";
 import { licenseToken, licenseUrls } from "@/lib/drm-test";
+import { drmTokenBudget } from "@/lib/drm-test-throttle";
 import { assertCanManage, studioScope } from "@/lib/studio";
 
 // Signing runs in Montréal like the rest of Canada's work (D113). No studio data is read or sent: the token carries
@@ -30,12 +31,23 @@ function settings(): DrmTestSettings {
 /**
  * POST /api/v1/dev/drm-test/token: a license token for /dev/drm-test (spike; D158; ADR 0032). Off unless
  * DRM_TEST_PAGE_ENABLED is true, and then for owners and admins only. The flag is read before anything else, so a
- * disabled environment answers like a route that doesn't exist. The token and keys are never logged.
+ * disabled environment answers like a route that doesn't exist. At most 30 tokens a minute per person (429 with
+ * Retry-After). The token and keys are never logged.
  */
 export const POST = handle(async (_request: Request) => {
   if (!drmTestPageEnabled()) throw new ApiError("not_found", "Not found.");
-  const { studio } = await studioScope();
+  const { studio, userId } = await studioScope();
   assertCanManage(studio);
+  const take = drmTokenBudget.take(userId);
+  if (!take.ok) {
+    // A fixed name only: never the person or the studio.
+    console.warn("drm_test_rate_limited");
+    throw new ApiErrorLater(
+      "rate_limited",
+      take.retryAfterSeconds,
+      "Too many token requests. Please wait a minute.",
+    );
+  }
   const config = settings();
   const { token, expiresAt } = licenseToken(config);
   const body: DrmTestTokenResponse = {

@@ -1967,7 +1967,7 @@ export const ROUTES: RouteSpec[] = [
     group: "Internal",
     summary: "A license token for the DRM test page",
     description:
-      "Not for integrations; a spike (D158; ADR 0032). Only when DRM_TEST_PAGE_ENABLED is true in this environment (otherwise not_found), for owners and admins. A JWT for Axinom's license servers, good for at most 60 seconds, carrying the test clip's wrapped content key and a hardware-only policy; plus the license and FairPlay certificate addresses. No studio data and nothing about the person is in it. Never cached. 409 with setup: drmTest.notConfigured when a setting is missing.",
+      "Not for integrations; a spike (D158; ADR 0032). Only when DRM_TEST_PAGE_ENABLED is true in this environment (otherwise not_found), for owners and admins. A JWT for Axinom's license servers, good for at most 60 seconds, carrying the test clip's wrapped content key and a hardware-only policy; plus the license and FairPlay certificate addresses. No studio data and nothing about the person is in it. Never cached. 409 with setup: drmTest.notConfigured when a setting is missing. At most 30 a minute per person; more get rate_limited with Retry-After.",
     access: "owner-admin",
     success: { status: 200, schema: drmTestTokenResponse, description: "A token." },
     errors: [
@@ -1976,6 +1976,7 @@ export const ROUTES: RouteSpec[] = [
       "not_found",
       "conflict",
       "region_unavailable",
+      "rate_limited",
       "internal",
     ],
   },

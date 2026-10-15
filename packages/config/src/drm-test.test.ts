@@ -22,6 +22,16 @@ describe("drmTestPageEnabled", () => {
     for (const value of [undefined, "", "1", "yes", "TRUE", "false"])
       expect(drmTestPageEnabled({ DRM_TEST_PAGE_ENABLED: value })).toBe(false);
   });
+
+  it("is never on in Vercel Production (staging): the test runs on Preview deployments only", () => {
+    expect(drmTestPageEnabled({ DRM_TEST_PAGE_ENABLED: "true", VERCEL_ENV: "production" })).toBe(
+      false,
+    );
+    expect(drmTestPageEnabled({ DRM_TEST_PAGE_ENABLED: "true", VERCEL_ENV: "preview" })).toBe(true);
+    expect(drmTestPageEnabled({ DRM_TEST_PAGE_ENABLED: "true", VERCEL_ENV: "development" })).toBe(
+      true,
+    );
+  });
 });
 
 describe("drmTestSettings", () => {

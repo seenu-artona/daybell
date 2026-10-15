@@ -158,13 +158,16 @@ export function useBlackout() {
       if (e.target === e.currentTarget) dispatch({ type: "focusOut" });
     }, []),
     onContextMenu: useCallback((e: MouseEvent) => e.preventDefault(), []),
+    // A mouse press never focuses the photo: only keyboard focus may keep it shown once the pointer has left.
+    onMouseDown: useCallback((e: MouseEvent) => e.preventDefault(), []),
   };
   return { shown: isShown(state), seen: state.seen, regionProps };
 }
 
 /**
- * A photo in blackout mode. `label` names the photo for screen readers; the words on the dark panel are announced
- * in a status region, so the hidden state is never colour only. Not draggable, not selectable, never printed.
+ * A photo in blackout mode. `label` names the photo for screen readers. The dark panel's words are repeated in a
+ * status region that is always rendered (only the panel is toggled), so going dark is announced and never shown by
+ * color alone. A mouse press doesn't focus it. Not draggable, not selectable, never printed.
  */
 export function BlackoutPhoto({
   src,
@@ -205,16 +208,22 @@ export function BlackoutPhoto({
         className={cn("pointer-events-none block size-full object-contain", !shown && "invisible")}
       />
       <span aria-hidden="true" className="absolute inset-0" />
+      {/* The ink panel's words are for sight; the status below says the same to screen readers. */}
       <div
+        data-blackout-panel
         className={cn(
           "absolute inset-0 flex items-center justify-center bg-ink p-6 text-center",
           shown && "hidden",
         )}
       >
-        <p id={statusId} role="status" className="m-0 text-body text-on-primary">
-          {shown ? "" : words}
+        <p aria-hidden="true" className="m-0 text-body text-on-primary">
+          {words}
         </p>
       </div>
+      {/* Always rendered, so the change to hidden is announced; empty while the photo shows. */}
+      <p id={statusId} role="status" className="sr-only">
+        {shown ? "" : words}
+      </p>
     </div>
   );
 }

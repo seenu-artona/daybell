@@ -158,6 +158,34 @@ describe("BlackoutPhoto", () => {
     expect(region().dataset.blackout).toBe("hidden");
   });
 
+  it("keeps one status region rendered in both states and toggles only the ink panel", async () => {
+    const panel = () => container.querySelector("[data-blackout-panel]") as HTMLElement;
+    const statuses = () => container.querySelectorAll("[role=status]");
+    expect(statuses()).toHaveLength(1);
+    const first = statuses()[0];
+    expect(first?.className).toContain("sr-only");
+    expect(panel().className).not.toContain("hidden");
+    expect(panel().querySelector("p")?.getAttribute("aria-hidden")).toBe("true");
+    await enter();
+    expect(statuses()).toHaveLength(1);
+    expect(statuses()[0]).toBe(first);
+    expect(panel().className).toContain("hidden");
+    await leave();
+    expect(statuses()[0]).toBe(first);
+    expect(first?.textContent).toBe(messages.photoBlackout.hidden);
+    expect(region().getAttribute("aria-describedby")).toBe(first?.id);
+  });
+
+  it("never lets a mouse click focus the photo, so the pointer leaving always hides it", async () => {
+    await enter();
+    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    await fire(region(), press);
+    expect(press.defaultPrevented).toBe(true);
+    expect(document.activeElement).not.toBe(region());
+    await leave();
+    expect(region().dataset.blackout).toBe("hidden");
+  });
+
   it("blocks the context menu on the photo", async () => {
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
     await fire(region(), event);

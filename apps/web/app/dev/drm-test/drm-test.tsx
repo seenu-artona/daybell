@@ -8,14 +8,14 @@ import { BlackoutPhoto, useDesktopPointer } from "@/app/_components/blackout";
 import { ProtectedImage } from "@/app/shop/_components/protected-image";
 import { ProtectionProvider } from "@/app/shop/_components/protection";
 import { api } from "@/lib/client-api";
+import { DRM_PROBES, type DrmProbeId, type ProbeResult, probeDrm } from "@/lib/drm-capabilities";
 import {
-  DRM_PROBES,
-  type DrmProbeId,
-  type PlaybackPlan,
-  type ProbeResult,
-  playbackPlan,
-  probeDrm,
-} from "@/lib/drm-capabilities";
+  type FallbackReason,
+  licenseRequestFilter,
+  type Outcome,
+  prepare,
+  watchPlayback,
+} from "@/lib/drm-test-player";
 
 const FALLBACK_SRC = "/drm-test/fallback.jpg";
 const TOKEN_PATH = "/dev/drm-test/token";
@@ -23,11 +23,10 @@ const TOKEN_PATH = "/dev/drm-test/token";
 type Status =
   | { kind: "loading" }
   | { kind: "playing"; keySystem: string }
-  | { kind: "fallback"; reason: "noHardware" | "fairplayOff" | "notConfigured" }
+  | { kind: "fallback"; reason: FallbackReason }
   | { kind: "failed"; detail: string };
 
 type ShakaModule = typeof import("shaka-player/dist/shaka-player.compiled").default;
-type ShakaPlayer = InstanceType<ShakaModule["Player"]>;
 
 /** Which words name a key system. */
 function systemKey(keySystem: string): "widevine" | "playready" | "fairplay" | "other" {
@@ -37,11 +36,24 @@ function systemKey(keySystem: string): "widevine" | "playready" | "fairplay" | "
   return "other";
 }
 
+async function clipBuilt(manifest: string): Promise<boolean> {
+  const res = await fetch(manifest, { method: "HEAD", cache: "no-store" }).catch(() => null);
+  return res?.ok === true;
+}
+
+async function freshToken(): Promise<string> {
+  const res = await api<DrmTestTokenResponse>(TOKEN_PATH, { method: "POST" });
+  if (!res.ok) throw new Error(res.code);
+  return res.data.token;
+}
+
 /**
  * The DRM test page's screen (spike; D158; ADR 0032): what this device supports, then the test clip played with
- * hardware DRM, paused on its only picture; or, when there is no hardware DRM or playback fails, today's watermarked
- * photo (Blackout mode on a computer, the shop's blur on a phone). Every license request gets a fresh token from the
- * API (good for 60 seconds), sent only to Axinom's license server in the X-AxDRM-Message header. Nothing is logged.
+ * hardware DRM, stopped on its only picture; or, when there is no hardware DRM, the test isn't set up, or playback
+ * fails, today's watermarked photo (Blackout mode on a computer, the shop's blur on a phone). The decisions live in
+ * lib/drm-test-player.ts (tested): the order of the checks, a fresh token on license requests only, and "showing" only
+ * once a frame is decoded with a usable key; any error, a restricted key or 15 seconds without a picture is a failure,
+ * in words. Nothing is logged.
  */
 export function DrmTest() {
   const t = useTranslations("drmTest");
@@ -51,51 +63,43 @@ export function DrmTest() {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
 
+  const failure = useCallback(
+    (outcome: Extract<Outcome, { kind: "failed" }>) =>
+      t(`errors.${outcome.reason}`, { code: outcome.code || "?" }),
+    [t],
+  );
+
   const run = useCallback(
-    async (isCancelled: () => boolean, keep: (player: ShakaPlayer) => void) => {
-      const probed = await probeDrm();
-      if (isCancelled()) return;
-      setResults(probed);
-
-      const first = await api<DrmTestTokenResponse>(TOKEN_PATH, { method: "POST" });
-      if (isCancelled()) return;
-      if (!first.ok) {
-        // 409: a setting is missing in this deployment (the route names it in its log).
-        setStatus(
-          first.code === "conflict"
-            ? { kind: "fallback", reason: "notConfigured" }
-            : { kind: "failed", detail: t("errors.token", { code: first.code }) },
-        );
+    async (isCancelled: () => boolean, onCleanup: (cleanup: () => void) => void) => {
+      const prepared = await prepare({
+        probe: () => probeDrm(),
+        onProbed: setResults,
+        token: () => api<DrmTestTokenResponse>(TOKEN_PATH, { method: "POST" }),
+        clipBuilt,
+        cancelled: isCancelled,
+      });
+      if (!prepared) return;
+      if (prepared.kind === "fallback") {
+        setStatus({ kind: "fallback", reason: prepared.reason });
         return;
       }
-      const config = first.data;
-      const plan: PlaybackPlan = playbackPlan(probed, config.fairplayCertificateUrl !== null);
-      if (plan.kind === "none") {
-        const fairplayOff = probed.fairplay === "supported" && !config.fairplayCertificateUrl;
-        setStatus({ kind: "fallback", reason: fairplayOff ? "fairplayOff" : "noHardware" });
+      if (prepared.kind === "failed") {
+        setStatus({ kind: "failed", detail: t("errors.token", { code: prepared.code }) });
         return;
       }
+      const { plan, config } = prepared;
 
-      // The protected clip is made at build time only when the flag and both keys were set then (ADR 0032).
-      const built = await fetch(plan.manifest, { method: "HEAD", cache: "no-store" }).catch(
-        () => null,
-      );
-      if (isCancelled()) return;
-      if (!built?.ok) {
-        setStatus({ kind: "fallback", reason: "notConfigured" });
-        return;
-      }
-
-      const shaka = (await import("shaka-player/dist/shaka-player.compiled")).default;
-      if (isCancelled() || !video.current) return;
+      const shaka: ShakaModule = (await import("shaka-player/dist/shaka-player.compiled")).default;
+      const element = video.current;
+      if (isCancelled() || !element) return;
       shaka.polyfill.installAll();
       if (!shaka.Player.isBrowserSupported()) {
         setStatus({ kind: "failed", detail: t("errors.unsupported") });
         return;
       }
       const player = new shaka.Player();
-      keep(player);
-      await player.attach(video.current);
+      onCleanup(() => void player.destroy());
+      await player.attach(element);
       const playready = config.licenseUrls.playready;
       const mapping = player.getConfiguration().drm.keySystemsMapping;
       player.configure({
@@ -129,48 +133,56 @@ export function DrmTest() {
         },
       });
       const net = player.getNetworkingEngine();
-      net?.registerRequestFilter(async (type, request) => {
-        if (type !== shaka.net.NetworkingEngine.RequestType.LICENSE) return;
-        const fresh = await api<DrmTestTokenResponse>(TOKEN_PATH, { method: "POST" });
-        if (!fresh.ok) throw new Error(fresh.code);
-        request.headers["X-AxDRM-Message"] = fresh.data.token;
-      });
+      net?.registerRequestFilter(
+        licenseRequestFilter(shaka.net.NetworkingEngine.RequestType.LICENSE, freshToken),
+      );
       if (plan.kind === "fairplay")
         net?.registerResponseFilter(shaka.drm.FairPlay.commonFairPlayResponse);
 
+      // Listening starts before loading, so no error or decoded frame is missed.
+      onCleanup(
+        watchPlayback({
+          player,
+          video: element,
+          keyStatuses: () => player.getKeyStatuses(),
+          onOutcome: (outcome) => {
+            if (isCancelled()) return;
+            setStatus(
+              outcome.kind === "playing"
+                ? { kind: "playing", keySystem: player.drmInfo()?.keySystem ?? player.keySystem() }
+                : { kind: "failed", detail: failure(outcome) },
+            );
+          },
+        }),
+      );
+      // Some browsers only paint a frame once playing: play the muted clip and stop on its first picture.
+      element.addEventListener("playing", () => element.pause(), { once: true });
       await player.load(plan.manifest);
       if (isCancelled()) return;
-      const element = video.current;
-      if (element) {
-        // Some browsers only paint a frame once playing: play the muted clip and stop on its first picture.
-        element.addEventListener("playing", () => element.pause(), { once: true });
-        await element.play().catch(() => {});
-      }
-      const keySystem = player.drmInfo()?.keySystem ?? player.keySystem();
-      setStatus({ kind: "playing", keySystem });
+      // Not awaited: the outcome comes from watchPlayback, never from play()'s promise.
+      void element.play().catch(() => {});
     },
-    [t],
+    [t, failure],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` restarts the test (Try again).
   useEffect(() => {
     let cancelled = false;
-    let player: ShakaPlayer | null = null;
+    const cleanups: (() => void)[] = [];
     setStatus({ kind: "loading" });
+    setResults(null);
     run(
       () => cancelled,
-      (p) => {
-        player = p;
-      },
+      (cleanup) => cleanups.push(cleanup),
     ).catch((err: unknown) => {
       if (cancelled) return;
       const code =
-        typeof err === "object" && err !== null && "code" in err ? String(err.code) : "unknown";
-      setStatus({ kind: "failed", detail: t("errors.shaka", { code }) });
+        typeof err === "object" && err !== null && "code" in err ? String(err.code) : "?";
+      setStatus({ kind: "failed", detail: t("errors.player", { code }) });
     });
     return () => {
       cancelled = true;
-      void (player as ShakaPlayer | null)?.destroy();
+      for (const cleanup of cleanups.reverse()) cleanup();
     };
   }, [run, t, attempt]);
 
@@ -255,12 +267,7 @@ export function DrmTest() {
           </>
         ) : null}
         <div>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={status.kind === "loading"}
-            onClick={() => setAttempt((n) => n + 1)}
-          >
+          <Button type="button" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
             {t("player.retry")}
           </Button>
         </div>

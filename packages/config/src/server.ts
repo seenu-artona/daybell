@@ -235,10 +235,12 @@ export function shopThrottleKey(
 
 /**
  * DRM_TEST_PAGE_ENABLED: "true" turns on /dev/drm-test and its token route for owners and admins. Anything else (the
- * default, unset) and both answer as if they didn't exist. Meant for staging only.
+ * default, unset) and both answer as if they didn't exist. Never in Vercel Production (VERCEL_ENV=production), which
+ * is staging today: the test runs on the branch's Preview deployment only (Seenu, Oct 14, 2026; ADR 0032). The web
+ * app's build step refuses the same way (lib/drm-test-build.mjs).
  */
 export function drmTestPageEnabled(env: Record<string, string | undefined> = process.env): boolean {
-  return env.DRM_TEST_PAGE_ENABLED?.trim() === "true";
+  return env.DRM_TEST_PAGE_ENABLED?.trim() === "true" && env.VERCEL_ENV !== "production";
 }
 
 /**

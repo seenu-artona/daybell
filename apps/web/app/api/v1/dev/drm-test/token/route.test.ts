@@ -32,9 +32,10 @@ function configure(over: Record<string, string> = {}) {
   for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
 }
 
-const as = (role: string) => ({
+// A new person each time, so the per-person budget never carries over between tests.
+const as = (role: string, userId: string = randomUUID()) => ({
   supabase: {},
-  userId: "u1",
+  userId,
   studio: { id: randomUUID(), name: "A", slug: "a", region: "ca", role },
 });
 
@@ -46,6 +47,7 @@ async function call(headers: Record<string, string> = {}) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   scope.mockReset();
@@ -61,6 +63,32 @@ describe("POST /api/v1/dev/drm-test/token", () => {
     const res = await call();
     expect(res.status).toBe(404);
     expect(scope).not.toHaveBeenCalled();
+  });
+
+  it("is not found in Vercel Production (staging), even with the flag on", async () => {
+    configure({ VERCEL_ENV: "production" });
+    expect((await call()).status).toBe(404);
+    expect(scope).not.toHaveBeenCalled();
+  });
+
+  it("gives one person at most 30 tokens a minute, then 429 with Retry-After", async () => {
+    configure();
+    // A fixed clock, so the minute can't turn over halfway through.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-14T12:00:10Z"));
+    const person = as("owner", randomUUID());
+    scope.mockResolvedValue(person);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 30; i++) expect((await call()).status).toBe(200);
+    const res = await call();
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect((await res.json()).error.code).toBe("rate_limited");
+    expect(warn).toHaveBeenCalledWith("drm_test_rate_limited");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(person.userId);
+    // Someone else still gets one.
+    scope.mockResolvedValue(as("admin"));
+    expect((await call()).status).toBe(200);
   });
 
   it("refuses someone not signed in", async () => {

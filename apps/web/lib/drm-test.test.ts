@@ -95,12 +95,12 @@ describe("licenseToken", () => {
     expect(wrapped).toBe(encryptContentKey(s.contentKey, s.comKey, s.keyId));
   });
 
-  it("is good for at most 60 seconds", () => {
+  it("is good from 5 seconds before now (clock skew) until at most 60 seconds after", () => {
     const now = new Date("2026-10-14T12:00:00.750Z");
     const { token, expiresAt } = licenseToken(settings(), now);
     const { payload } = decode(token);
     expect(DRM_TOKEN_TTL_SECONDS).toBeLessThanOrEqual(60);
-    expect(payload.begin_date).toBe("2026-10-14T12:00:00.000Z");
+    expect(payload.begin_date).toBe("2026-10-14T11:59:55.000Z");
     expect(payload.expiration_date).toBe("2026-10-14T12:01:00.000Z");
     expect(expiresAt).toBe(payload.expiration_date);
     expect(Date.parse(expiresAt) - now.getTime()).toBeLessThanOrEqual(60_000);

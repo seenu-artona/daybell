@@ -15,6 +15,8 @@ import type { DrmTestSettings } from "@daybell/config/server";
 
 /** A token is good for at most this long; the page asks for a fresh one for each license request. */
 export const DRM_TOKEN_TTL_SECONDS = 60;
+/** begin_date is set this far back, so a license server whose clock runs a little behind ours still accepts it. */
+export const DRM_TOKEN_CLOCK_SKEW_SECONDS = 5;
 export const DRM_TEST_POLICY = "Policy A";
 
 /** A GUID's 16 bytes in the order it is written (big-endian), the way the key ID sits in the clip. */
@@ -76,14 +78,16 @@ const base64url = (data: Buffer | string) => Buffer.from(data).toString("base64u
 
 /**
  * The license token: a JWT, HS256, signed with the communication key's bytes (the portal shows it as base64; it is
- * decoded before signing). begin_date and expiration_date bound it to DRM_TOKEN_TTL_SECONDS from `now`.
+ * decoded before signing). It is good from DRM_TOKEN_CLOCK_SKEW_SECONDS before `now` (clock skew) until
+ * DRM_TOKEN_TTL_SECONDS after it (ADR 0032).
  */
 export function licenseToken(
   settings: Pick<DrmTestSettings, "comKeyId" | "comKey" | "keyId" | "contentKey">,
   now: Date = new Date(),
 ): { token: string; expiresAt: string } {
-  const begin = new Date(Math.floor(now.getTime() / 1000) * 1000);
-  const expires = new Date(begin.getTime() + DRM_TOKEN_TTL_SECONDS * 1000);
+  const second = Math.floor(now.getTime() / 1000) * 1000;
+  const begin = new Date(second - DRM_TOKEN_CLOCK_SKEW_SECONDS * 1000);
+  const expires = new Date(second + DRM_TOKEN_TTL_SECONDS * 1000);
   const payload = {
     version: 1,
     com_key_id: settings.comKeyId,
