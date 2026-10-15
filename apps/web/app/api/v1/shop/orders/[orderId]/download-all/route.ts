@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ orderId: string }> };
 
 /**
  * GET /api/v1/shop/orders/:orderId/download-all — one zip of every paid download this gallery may have from the order
- * (ADR 0024): daybell-<reference>.zip, its files named as the single downloads are (never a child's name), streamed
+ * (ADR 0024): silverback-<reference>.zip, its files named as the single downloads are (never a child's name), streamed
  * from the studio's region with the download role. 409 shop.downloadPreparing with Retry-After while a file is being
  * made (never a partial zip); at most 10 zips a gallery an hour. Never cached.
  */

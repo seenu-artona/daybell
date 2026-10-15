@@ -737,7 +737,7 @@ describe("Home (Q4, D146)", () => {
       "Sales",
       "Orders",
       "Average order",
-      "Daybell fee",
+      "Silverback fee",
     ]);
     for (const card of cards) {
       expect(card.className).toMatch(/\brounded-list\b/);

@@ -72,3 +72,24 @@ describe("locale files", () => {
     }
   });
 });
+
+// D155 (ADR 0031): users see the name Silverback. Keys may keep internal names (e.g. daybellFee); the words may not.
+function values(node: unknown, prefix = ""): [string, string][] {
+  if (typeof node === "string") return [[prefix, node]];
+  if (typeof node !== "object" || node === null) return [];
+  return Object.entries(node).flatMap(([k, v]) => values(v, prefix ? `${prefix}.${k}` : k));
+}
+
+describe("the product's name (D155)", () => {
+  it.each([
+    ["en-US", enUS],
+    ["en-CA", enCA],
+  ])("no %s string says Daybell; the brand is Silverback", (_, messages) => {
+    const all = values(messages);
+    expect(all.length).toBeGreaterThan(100);
+    expect(all.filter(([, text]) => /daybell/i.test(text)).map(([key]) => key)).toEqual([]);
+    expect(messages.meta.title).toBe("Silverback");
+    expect(messages.auth.brand).toBe("Silverback");
+    expect(messages.app.brand).toBe("Silverback");
+  });
+});

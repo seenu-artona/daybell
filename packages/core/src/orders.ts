@@ -172,7 +172,7 @@ export const DOWNLOAD_LINK_SECONDS = 300;
 export function downloadFileName(reference: string, n: number): string {
   if (!isOrderReference(reference) || !Number.isInteger(n) || n < 1)
     throw new Error("A download is named by its order and number");
-  return `daybell-${reference}-${n}.jpg`;
+  return `silverback-${reference}-${n}.jpg`;
 }
 
 /** Stripe's hosted checkout lasts 30 minutes, its shortest (Stripe's documented minimum; ADR 0023). */
@@ -186,7 +186,9 @@ export const MAX_ZIP_FILES = 500;
 /** A zip's name: the order's reference only, never a child's name. */
 export function zipFileName(reference: string, kind: "downloads" | "print-files"): string {
   if (!isOrderReference(reference)) throw new Error("A zip is named by its order");
-  return kind === "downloads" ? `daybell-${reference}.zip` : `daybell-${reference}-print-files.zip`;
+  return kind === "downloads"
+    ? `silverback-${reference}.zip`
+    : `silverback-${reference}-print-files.zip`;
 }
 
 /** An entry of "Download all": the same name the single download is saved under. */

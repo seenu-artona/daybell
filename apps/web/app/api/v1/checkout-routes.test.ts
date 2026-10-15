@@ -224,7 +224,7 @@ describe("POST /shop/checkout", () => {
         on_behalf_of: "acct_A1",
         transfer_data: { destination: "acct_A1" },
         application_fee_amount: 300,
-        description: "Payments processed by Daybell for Maple Lane Photography",
+        description: "Payments processed by Silverback for Maple Lane Photography",
       },
       automatic_tax: { enabled: true, liability: { type: "account", account: "acct_A1" } },
       expires_at: Date.parse(BEGUN.created_at) / 1000 + 32 * 60,
@@ -583,7 +583,7 @@ describe("GET /shop/orders/:orderId/downloads/:photoId (calls 10, 11)", () => {
     expect(key).toBe(`${ROW.studio_id}/${ROW.job_id}/${PHOTO}/download.jpg`);
     expect(options).toMatchObject({
       expiresIn: 300,
-      download: { filename: "daybell-7KQ2M9XA-3.jpg" },
+      download: { filename: "silverback-7KQ2M9XA-3.jpg" },
     });
     expect(presign).not.toHaveBeenCalled();
     expect(res.headers.get("cache-control")).toBe("no-store");

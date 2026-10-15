@@ -1,7 +1,7 @@
 <!-- Daybell auth email (magic_link). The link goes to our /auth/confirm with a token_hash, so it works in any browser or
      device (not only the one that asked). RedirectTo is our own /auth/confirm?next=...&region=... URL. -->
 <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#14231c">
-  <h1 style="font-size:22px;margin:0 0 12px">Your Daybell link</h1>
+  <h1 style="font-size:22px;margin:0 0 12px">Your Silverback link</h1>
   <p style="font-size:15px;line-height:22px;margin:0 0 24px;color:#5b6660">Tap the button to continue. Then choose your password.</p>
   <p style="margin:0 0 24px">
     <a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email"

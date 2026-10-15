@@ -495,9 +495,14 @@ describe("POST /studio/payouts/onboarding-link: Stripe's platform setup (ADR 002
     signIn("owner", {});
     const { StripeCallError } = await import("@/lib/stripe");
     provider.createAccount.mockRejectedValue(
-      new StripeCallError("Daybell's Stripe platform setup isn't finished.", "create", "refused", {
-        form: "payouts.platformSetup",
-      }),
+      new StripeCallError(
+        "Silverback's Stripe platform setup isn't finished.",
+        "create",
+        "refused",
+        {
+          form: "payouts.platformSetup",
+        },
+      ),
     );
     const res = await routes.onboarding();
     expect(res.status).toBe(500);
@@ -537,7 +542,7 @@ describe("POST /studio/payouts/onboarding-link: Stripe's platform setup (ADR 002
     signIn("owner", {});
     const { StripeCallError } = await import("@/lib/stripe");
     provider.createAccount.mockRejectedValueOnce(
-      new StripeCallError("Payout setup needs Daybell support to finish.", "create", "unknown", {
+      new StripeCallError("Payout setup needs Silverback support to finish.", "create", "unknown", {
         form: "payouts.createConflict",
       }),
     );

@@ -74,7 +74,7 @@ test("checkout: package, print and download paid with a test card; downloads; ca
   // Package A $85.00 + 5×7 $19.00 + download $33.00 + home delivery $11.95, before tax.
   await expect(main.getByText("Total $148.95", { exact: true })).toBeVisible();
   await expect(
-    main.getByText(`Payments processed by Daybell for ${studio.studio}.`, { exact: true }),
+    main.getByText(`Payments processed by Silverback for ${studio.studio}.`, { exact: true }),
   ).toBeVisible();
   await docked.getByRole("button", { name: "Pay securely", exact: true }).click();
 
@@ -127,9 +127,9 @@ test("checkout: package, print and download paid with a test card; downloads; ca
   const file = await page.request.get(url);
   expect(file.headers()["content-type"]).toBe("image/jpeg");
   expect(file.headers()["content-disposition"]).toMatch(
-    /^attachment; filename="daybell-[0-9A-Z]{8}-1\.jpg"$/,
+    /^attachment; filename="silverback-[0-9A-Z]{8}-1\.jpg"$/,
   );
-  expect((await downloading).suggestedFilename()).toMatch(/^daybell-[0-9A-Z]{8}-1\.jpg$/);
+  expect((await downloading).suggestedFilename()).toMatch(/^silverback-[0-9A-Z]{8}-1\.jpg$/);
 
   // 7. A checkout left without paying: back at the bag, cancelled, the bag unchanged.
   await main.getByRole("link", { name: "All your orders", exact: true }).click();

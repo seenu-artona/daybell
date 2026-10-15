@@ -33,6 +33,12 @@ export {
 export { MoneyStat, type MoneyStatProps, Stat } from "./components/money-stat";
 export { PageHeader, type PageHeaderProps } from "./components/page-header";
 export { PhotoTile, type PhotoTileProps } from "./components/photo-tile";
+export {
+  RIDGE_BOTTOM_ARC,
+  RIDGE_TOP_ARC,
+  RidgeMark,
+  type RidgeMarkProps,
+} from "./components/ridge-mark";
 export { SearchToggle, type SearchToggleProps } from "./components/search-toggle";
 export { CodeInput, OptionCard, ShopFrame } from "./components/shop";
 export { SideMenu, SideMenuItem, type SideMenuProps } from "./components/side-menu";

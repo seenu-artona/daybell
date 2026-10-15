@@ -117,7 +117,7 @@ function failed(stage: StripeStage, err: unknown): never {
     stripeError && REFUSALS.has(type) && !inUse ? "refused" : "unknown";
   if (PLATFORM_SETUP_CODES.has(code) || PLATFORM_SETUP_CODES.has(rawType))
     throw new StripeCallError(
-      "Daybell's Stripe platform setup isn't finished. Please contact Daybell support.",
+      "Silverback's Stripe platform setup isn't finished. Please contact Silverback support.",
       stage,
       outcome,
       { form: PAYOUT_PLATFORM_SETUP },
@@ -127,7 +127,7 @@ function failed(stage: StripeStage, err: unknown): never {
   // try; security review N1). Retrying won't help: support finds the account by its daybell_studio_id metadata.
   if (stage === "create" && type === "StripeIdempotencyError")
     throw new StripeCallError(
-      "Payout setup needs Daybell support to finish.",
+      "Payout setup needs Silverback support to finish.",
       stage,
       outcome,
       { form: PAYOUT_CREATE_CONFLICT },

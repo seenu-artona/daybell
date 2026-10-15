@@ -35,6 +35,7 @@ import {
   OptionCard,
   PageHeader,
   PhotoTile,
+  RidgeMark,
   RowChevron,
   RowChevronHead,
   SearchToggle,
@@ -59,7 +60,7 @@ describe("components", () => {
   it("render together with no accessibility violations", async () => {
     const { container } = render(
       <main>
-        <SideMenu label="Main" brand="Daybell">
+        <SideMenu label="Main" brand="Silverback">
           <SideMenuItem href="/jobs" current>
             Jobs
           </SideMenuItem>
@@ -741,5 +742,41 @@ describe("D147 filter chips", () => {
     const { container } = render(<ListCard toolbar={<span>Chips</span>} />);
     const toolbar = container.querySelector("[data-list-toolbar]") as HTMLElement;
     expect(toolbar.className).not.toMatch(/\bborder-b\b/);
+  });
+});
+
+describe("RidgeMark (D155, D91, D112)", () => {
+  it("is an image named by its label when it stands alone", async () => {
+    const { container } = render(
+      <main>
+        <RidgeMark label="Silverback" />
+      </main>,
+    );
+    expect(screen.getByRole("img", { name: "Silverback" })).toBeTruthy();
+    await expectNoA11yViolations(container);
+  });
+
+  it("is hidden from screen readers beside the word", () => {
+    const { container } = render(
+      <p>
+        <RidgeMark tone="dark" />
+        Silverback
+      </p>,
+    );
+    const svg = container.querySelector("svg");
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+    expect(svg?.getAttribute("role")).toBeNull();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("draws in the brand's tokens, never raw hex: primary over ink, lime over white on dark", () => {
+    const arcs = (tone: "light" | "dark") => {
+      const { container } = render(<RidgeMark tone={tone} />);
+      const paths = [...container.querySelectorAll("path")];
+      expect(container.innerHTML).not.toMatch(/#[0-9a-f]{3,6}/i);
+      return paths.map((p) => p.getAttribute("class"));
+    };
+    expect(arcs("light")).toEqual(["stroke-primary", "stroke-ink"]);
+    expect(arcs("dark")).toEqual(["stroke-lime", "stroke-on-primary"]);
   });
 });
